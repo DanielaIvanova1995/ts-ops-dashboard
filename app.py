@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 import streamlit_authenticator as stauth
@@ -31,6 +32,13 @@ LOGO_PATH = BASE / "assets" / "tso-logo.png"
 
 APP_NAME = "Trade Hub"
 TAGLINE = "We build better together"
+
+# Streamlit Cloud runs in UTC — show UK time (auto-handles BST/GMT).
+UK_TZ = ZoneInfo("Europe/London")
+
+
+def now_uk() -> datetime:
+    return datetime.now(UK_TZ)
 
 
 @lru_cache(maxsize=1)
@@ -267,7 +275,7 @@ def load_kpis() -> dict:
         live = data_sources.fetch_live_counts(data.get("monday_board_id", 18416416116))
         data["kpis"] = data_sources.merge_live(data["kpis"], live)
         data["live"] = True
-        data["updated"] = datetime.now().strftime("%d %b %Y · %H:%M")
+        data["updated"] = now_uk().strftime("%d %b %Y · %H:%M")
     except Exception as e:  # noqa: BLE001 — stay up on any data-source hiccup
         data["live_error"] = str(e)
 
@@ -348,7 +356,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-hour = datetime.now().hour
+hour = now_uk().hour
 greet = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
 my_kpis = [k for k in KPIS if username in k.get("owners", [])]
 my_open = [k for k in my_kpis if not k.get("info") and status_of(k) != "green"]
