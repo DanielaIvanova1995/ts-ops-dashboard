@@ -54,6 +54,7 @@ st.set_page_config(
 
 CSS = """
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
   :root{
     --brand:#F26A21; --brand-dark:#D9551A; --ink:#21242B; --muted:#6B7280;
     --line:#E5E7EB; --bg:#F4F5F7; --card:#FFFFFF;
@@ -105,11 +106,12 @@ CSS = """
   .yourbadge{font-size:10px; font-weight:800; color:#fff; background:var(--brand);
      padding:2px 8px; border-radius:999px; margin-left:8px; letter-spacing:.03em;}
   /* Login */
-  .ts-login {text-align:center; margin:6px 0 6px;}
-  .ts-login img {height:64px; width:auto; margin-bottom:10px;}
-  .ts-login .wm {font-size:34px; font-weight:800; letter-spacing:-.5px;}
-  .ts-login .wm b {color:var(--brand);}
-  .ts-login .tag {color:var(--muted); font-size:14px; margin-top:2px;}
+  .ts-login {display:flex; align-items:center; gap:20px; text-align:left; margin:8px 0 16px;}
+  .ts-login img {height:96px; width:auto;}
+  .ts-login .wm {font-family:'Bebas Neue',sans-serif; font-size:64px; line-height:.92;
+     letter-spacing:1.5px; text-transform:uppercase; color:var(--ink);}
+  .ts-login .wm b {color:var(--brand); font-weight:400;}
+  .ts-login .tag {color:var(--muted); font-size:14px; margin-top:2px; letter-spacing:.3px;}
   /* Sidebar */
   [data-testid="stSidebar"] {background:#FFFFFF; border-right:1px solid var(--line);}
   .ts-mod {display:block; padding:9px 12px; border-radius:10px; font-weight:600; font-size:14px;
@@ -149,8 +151,10 @@ if not st.session_state.get("authentication_status"):
     st.markdown(
         f"""<div class="ts-login">
           {_logo_img}
-          <div class="wm">Trade<b>Hub</b></div>
-          <div class="tag">{TAGLINE} · sign in to continue</div>
+          <div>
+            <div class="wm">Trade <b>Hub</b></div>
+            <div class="tag">{TAGLINE} · sign in to continue</div>
+          </div>
         </div>""",
         unsafe_allow_html=True,
     )
