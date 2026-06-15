@@ -137,3 +137,67 @@ def merge_live(kpis: list[dict], live: dict) -> list[dict]:
         if row.get("age") is not None:
             k["oldest_age_days"] = int(row["age"])
     return kpis
+
+
+# ---------------------------------------------------------------------------
+# Shopify — active chargebacks (Shopify Payments disputes), read directly.
+# Needs a Shopify Admin API token with the `read_shopify_payments_accounts`
+# scope in Secrets as SHOPIFY_ADMIN_TOKEN. Store domain defaults below but can
+# be overridden with SHOPIFY_STORE_DOMAIN.
+# ---------------------------------------------------------------------------
+SHOPIFY_DOMAIN_DEFAULT = "trade-superstore.myshopify.com"
+SHOPIFY_API_VERSION = "2024-10"
+# A chargeback is "active" while it still needs us to act / is being reviewed.
+ACTIVE_DISPUTE_STATUSES = {"NEEDS_RESPONSE", "UNDER_REVIEW"}
+
+
+def _age_days(iso_ts: str | None) -> int | None:
+    if not iso_ts:
+        return None
+    from datetime import datetime, timezone
+
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).days
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def fetch_shopify_chargebacks(token: str | None = None, domain: str | None = None) -> dict:
+    """Return {'count': int, 'age': int} for active Shopify Payments disputes.
+    Raises on missing token / no payments account / API error so the caller can
+    fall back to the Monday-mirrored number."""
+    token = token or get_secret("SHOPIFY_ADMIN_TOKEN")
+    if not token:
+        raise RuntimeError("No SHOPIFY_ADMIN_TOKEN configured")
+    domain = domain or get_secret("SHOPIFY_STORE_DOMAIN") or SHOPIFY_DOMAIN_DEFAULT
+
+    url = f"https://{domain}/admin/api/{SHOPIFY_API_VERSION}/graphql.json"
+    query = """
+    query {
+      shopifyPaymentsAccount {
+        disputes(first: 100) {
+          edges { node { status initiatedAt } }
+        }
+      }
+    }
+    """
+    resp = requests.post(
+        url,
+        json={"query": query},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify API error: {payload['errors']}")
+
+    account = (payload.get("data") or {}).get("shopifyPaymentsAccount")
+    if not account:
+        raise RuntimeError("Shopify Payments not enabled or disputes not accessible")
+
+    nodes = [e["node"] for e in account["disputes"]["edges"]]
+    active = [n for n in nodes if n.get("status") in ACTIVE_DISPUTE_STATUSES]
+    ages = [a for a in (_age_days(n.get("initiatedAt")) for n in active) if a is not None]
+    return {"count": len(active), "age": max(ages) if ages else 0}

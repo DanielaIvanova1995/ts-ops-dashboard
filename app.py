@@ -270,6 +270,18 @@ def load_kpis() -> dict:
         data["updated"] = datetime.now().strftime("%d %b %Y · %H:%M")
     except Exception as e:  # noqa: BLE001 — stay up on any data-source hiccup
         data["live_error"] = str(e)
+
+    # Chargebacks straight from Shopify (overrides the Monday-mirrored figure).
+    try:
+        cb = data_sources.fetch_shopify_chargebacks()
+        for k in data["kpis"]:
+            if k["id"] == "chargebacks":
+                k["count"] = cb["count"]
+                k["oldest_age_days"] = cb["age"]
+                k["source"] = "Shopify · Live disputes"
+        data["shopify_live"] = True
+    except Exception as e:  # noqa: BLE001 — fall back to the Monday number
+        data["shopify_error"] = str(e)
     return data
 
 
@@ -300,6 +312,10 @@ with st.sidebar:
         st.markdown("🟡 **Snapshot** — saved numbers")
         if data.get("live_error"):
             st.caption(f"({data['live_error']})")
+    if data.get("shopify_live"):
+        st.caption("💳 Chargebacks: live from Shopify")
+    elif data.get("shopify_error"):
+        st.caption("💳 Chargebacks: via Monday (Shopify token not set)")
     st.caption(f"🔄 Updated: {data.get('updated','—')}")
     if st.button("↻ Refresh now", use_container_width=True):
         load_kpis.clear()
