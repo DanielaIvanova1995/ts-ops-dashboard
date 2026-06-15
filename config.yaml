@@ -47,6 +47,9 @@ credentials:
       role: staff
       password: $2b$12$gn9.0jLANLqruO5pfygBd.Mx.gQiMST1dJDTKo6eZOstVVJqAaxYK
 cookie:
+  # Local-development placeholder only. In production the REAL signing key is
+  # read from Streamlit Secrets (COOKIE_KEY) — see app.py. Never put the real
+  # key here once the repo is public.
   name: ts_ops_dashboard
-  key: 25dcb0316c9a298d5b6862fa772b7e5a2f1888e6cc55d823fa1251b3b55224bc
+  key: local-dev-placeholder-not-the-real-key
   expiry_days: 30

@@ -47,20 +47,26 @@ def _secrets_file_exists() -> bool:
     return any(p.exists() for p in candidates)
 
 
-def get_token() -> str | None:
-    """Token from environment first, then Streamlit secrets (only if a secrets
-    file exists). Returns None if unset."""
-    env = os.environ.get("MONDAY_API_TOKEN")
+def get_secret(name: str) -> str | None:
+    """Read a secret from the environment first, then Streamlit secrets (only if
+    a secrets file exists, so we never trigger the 'No secrets found' error).
+    Returns None if unset."""
+    env = os.environ.get(name)
     if env:
         return env
     if _secrets_file_exists():
         try:
             import streamlit as st  # lazy so this module is testable standalone
 
-            return st.secrets.get("MONDAY_API_TOKEN")
+            return st.secrets.get(name)
         except Exception:  # noqa: BLE001
             return None
     return None
+
+
+def get_token() -> str | None:
+    """Monday API token (MONDAY_API_TOKEN). None if unset."""
+    return get_secret("MONDAY_API_TOKEN")
 
 
 def _to_number(raw: str | None):

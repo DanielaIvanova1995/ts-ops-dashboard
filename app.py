@@ -128,10 +128,17 @@ st.markdown(CSS, unsafe_allow_html=True)
 with open(BASE / "config.yaml") as f:
     config = yaml.load(f, Loader=SafeLoader)
 
+# The cookie signing key is a real secret — read it from Streamlit Secrets
+# (or an env var) in production so it never lives in the public repo. Falls
+# back to the placeholder in config.yaml only for local development.
+import data_sources
+
+cookie_key = data_sources.get_secret("COOKIE_KEY") or config["cookie"]["key"]
+
 authenticator = stauth.Authenticate(
     config["credentials"],
     config["cookie"]["name"],
-    config["cookie"]["key"],
+    cookie_key,
     config["cookie"]["expiry_days"],
 )
 
