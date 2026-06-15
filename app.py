@@ -106,12 +106,13 @@ CSS = """
   .yourbadge{font-size:10px; font-weight:800; color:#fff; background:var(--brand);
      padding:2px 8px; border-radius:999px; margin-left:8px; letter-spacing:.03em;}
   /* Login */
-  .ts-login {display:flex; align-items:center; gap:20px; text-align:left; margin:8px 0 16px;}
-  .ts-login img {height:96px; width:auto;}
+  .ts-login {display:flex; align-items:center; gap:22px; text-align:left; margin:8px 0 18px;}
+  .ts-login img {height:120px; width:auto;}
   .ts-login .wm {font-family:'Bebas Neue',sans-serif; font-size:64px; line-height:.92;
      letter-spacing:1.5px; text-transform:uppercase; color:var(--ink);}
   .ts-login .wm b {color:var(--brand); font-weight:400;}
-  .ts-login .tag {color:var(--muted); font-size:14px; margin-top:2px; letter-spacing:.3px;}
+  .ts-login .tag {color:var(--muted); font-size:14px; margin-top:4px; letter-spacing:.3px;
+     text-align:justify; text-align-last:justify;}
   /* Sidebar */
   [data-testid="stSidebar"] {background:#FFFFFF; border-right:1px solid var(--line);}
   .ts-mod {display:block; padding:9px 12px; border-radius:10px; font-weight:600; font-size:14px;
@@ -120,6 +121,11 @@ CSS = """
   .ts-mod.soon {color:#9CA3AF; border-style:dashed;}
   /* Streamlit buttons → brand */
   .stButton>button {border-radius:10px; border:1px solid var(--line); font-weight:600;}
+  /* Bordered text inputs (login + elsewhere) */
+  .stTextInput div[data-baseweb="input"]{border:1px solid #C3C9D4 !important;
+     border-radius:8px !important; background:#fff !important;}
+  .stTextInput div[data-baseweb="input"]:focus-within{border-color:var(--brand) !important;
+     box-shadow:0 0 0 2px rgba(242,106,33,.15) !important;}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -153,14 +159,14 @@ if not st.session_state.get("authentication_status"):
           {_logo_img}
           <div>
             <div class="wm">Trade <b>Hub</b></div>
-            <div class="tag">{TAGLINE} · sign in to continue</div>
+            <div class="tag">{TAGLINE}</div>
           </div>
         </div>""",
         unsafe_allow_html=True,
     )
 
 try:
-    authenticator.login(location="main")
+    authenticator.login(location="main", fields={"Form name": "Sign in to continue"})
 except Exception as e:  # noqa: BLE001
     st.error(f"Login error: {e}")
 
