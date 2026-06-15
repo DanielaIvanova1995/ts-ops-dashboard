@@ -315,7 +315,9 @@ with st.sidebar:
     if data.get("shopify_live"):
         st.caption("💳 Chargebacks: live from Shopify")
     elif data.get("shopify_error"):
-        st.caption("💳 Chargebacks: via Monday (Shopify token not set)")
+        st.caption("💳 Chargebacks: via Monday")
+        with st.expander("Why not Shopify?"):
+            st.caption(data["shopify_error"][:400])
     st.caption(f"🔄 Updated: {data.get('updated','—')}")
     if st.button("↻ Refresh now", use_container_width=True):
         load_kpis.clear()
