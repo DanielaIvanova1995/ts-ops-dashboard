@@ -48,5 +48,5 @@ credentials:
       password: $2b$12$gn9.0jLANLqruO5pfygBd.Mx.gQiMST1dJDTKo6eZOstVVJqAaxYK
 cookie:
   name: ts_ops_dashboard
-  key: ts-ops-please-change-this-random-signature-key-9f3a2b
+  key: 25dcb0316c9a298d5b6862fa772b7e5a2f1888e6cc55d823fa1251b3b55224bc
   expiry_days: 30
