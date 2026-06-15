@@ -111,8 +111,8 @@ CSS = """
   .ts-login .wm {font-family:'Bebas Neue',sans-serif; font-size:64px; line-height:.92;
      letter-spacing:1.5px; text-transform:uppercase; color:var(--ink);}
   .ts-login .wm b {color:var(--brand); font-weight:400;}
-  .ts-login .tag {color:var(--muted); font-size:14px; margin-top:4px; letter-spacing:.3px;
-     text-align:justify; text-align-last:justify;}
+  .ts-login .tag {color:var(--muted); font-size:20px; font-weight:600; margin-top:6px;
+     letter-spacing:.2px;}
   /* Sidebar */
   [data-testid="stSidebar"] {background:#FFFFFF; border-right:1px solid var(--line);}
   .ts-mod {display:block; padding:9px 12px; border-radius:10px; font-weight:600; font-size:14px;
