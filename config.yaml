@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# Login accounts for the Trade Superstore Ops Dashboard.
+# Passwords are bcrypt-hashed (never stored in plain text).
+# Each person has their own password (handed out by the manager).
+# They can change it any time (sidebar ▸ Change my password in the app).
+#
+# To add / remove a person: copy a block under "usernames", give them a
+# username, name, email and role, then run  python set_password.py  to set
+# their password hash.  Roles: "admin" sees everything, "staff" sees the
+# whole board but their own tasks are highlighted first.
+# ---------------------------------------------------------------------------
+credentials:
+  usernames:
+    admin:
+      name: Daniel (Manager)
+      email: hello@tradesuperstoreonline.co.uk
+      role: admin
+      password: $2b$12$YEW1RZ1BodQaVVGw28G7S.gO49fQYo9sGgEpioPtwnXgoziK6GiKW
+    natasha:
+      name: Natasha Stewart
+      email: natasha@tradesuperstoreonline.co.uk
+      role: staff
+      password: $2b$12$QKlUmY3M74cXDGAPcJaGE.OJPhwVI5viCrVlOF3f5WgZWDtIi6/QK
+    megan:
+      name: Megan Steer
+      email: megan@tradesuperstoreonline.co.uk
+      role: staff
+      password: $2b$12$gmdhypfptrcrVOJ2Ibwa4OF0/inAWIv6DID3HeNm1J5BYfULDD9u.
+    melissa:
+      name: Mel Duffy
+      email: mel@tradesuperstoreonline.co.uk
+      role: staff
+      password: $2b$12$yIYEcdLELFfKR2VJU3My7.Bxx.QT8wMWBZ9g983vrDjbpXFrNLBTe
+    malyeka:
+      name: Malyeka Najib
+      email: malyeka@tradesuperstoreonline.co.uk
+      role: staff
+      password: $2b$12$Vq3vGp/.AhFjeEYQlEtpIuAVJ7X.usZYnbujKB8r9ZriLjpOfENoq
+    daniela:
+      name: Daniela
+      email: daniela@tradesuperstoreonline.co.uk
+      role: staff
+      password: $2b$12$HYdPSJydxodf3zLBdp9GW.JoBuO8773KWoTrWrxey9wHUE8McrEw2
+    lorena:
+      name: Lorena
+      email: lorena@tradesuperstoreonline.co.uk
+      role: staff
+      password: $2b$12$gn9.0jLANLqruO5pfygBd.Mx.gQiMST1dJDTKo6eZOstVVJqAaxYK
+cookie:
+  name: ts_ops_dashboard
+  key: ts-ops-please-change-this-random-signature-key-9f3a2b
+  expiry_days: 30
