@@ -4,17 +4,17 @@
   "monday_board_id": 18416416116,
   "kpis": [
     {"id":"new_orders","name":"New orders to process","cat":"Orders & Fulfilment","owners":["natasha"],
-     "monday_item_id":12197531993,"source":"Monday · New orders to send to suppliers","count":29,"oldest_age_days":7,
+     "monday_item_id":12197531993,"orders_group_id":"new_group66719","source":"Monday · Orders board (live)","count":29,"oldest_age_days":7,
      "target":10,"amber_max":25,"age_amber":2,"age_red":3,"mood_impact":false,
      "action":"Send the outstanding POs to suppliers — work oldest first."},
 
     {"id":"to_post","name":"To post","cat":"Orders & Fulfilment","owners":["natasha"],
-     "monday_item_id":12197572459,"source":"Monday · To post","count":16,"oldest_age_days":10,
+     "monday_item_id":12197572459,"orders_group_id":"new_group84744","source":"Monday · Orders board (live)","count":16,"oldest_age_days":10,
      "target":15,"amber_max":35,"age_amber":2,"age_red":3,"mood_impact":false,
      "action":"Print labels and hand to the courier before the 3pm collection."},
 
     {"id":"unconfirmed","name":"ETAs to chase (unconfirmed)","cat":"Orders & Fulfilment","owners":["melissa"],
-     "monday_item_id":12197581369,"source":"Monday · Unconfirmed orders – call for ETA","count":125,"oldest_age_days":23,
+     "monday_item_id":12197581369,"orders_group_id":"group_mkv7fz2b","source":"Monday · Orders board (live)","count":125,"oldest_age_days":23,
      "target":40,"amber_max":120,"age_amber":3,"age_red":5,"mood_impact":true,
      "action":"Chase suppliers for delivery dates; update customers still waiting."},
 
@@ -34,7 +34,7 @@
      "action":"Resolve the oldest escalation first — these carry the highest customer-frustration risk."},
 
     {"id":"difficult","name":"Difficult orders (awaiting customer)","cat":"Customer Care","owners":["melissa","natasha"],
-     "monday_item_id":12197543065,"source":"Monday · Awaiting customer response","count":57,"oldest_age_days":78,
+     "monday_item_id":12197543065,"orders_group_id":"new_group4381__1","source":"Monday · Orders board (live)","count":57,"oldest_age_days":78,
      "target":15,"amber_max":45,"age_amber":4,"age_red":7,"mood_impact":true,
      "action":"Follow up the oldest case today before it escalates further."},
 
@@ -44,7 +44,7 @@
      "action":"Answer queries before dispatch to avoid cancellations."},
 
     {"id":"returns","name":"Accepted returns","cat":"Customer Care","owners":["megan"],
-     "monday_item_id":12197570318,"source":"Monday · Accepted returns","count":8,"oldest_age_days":94,
+     "monday_item_id":12197570318,"orders_group_id":"group_mkpt9qpe","source":"Monday · Orders board (live)","count":8,"oldest_age_days":94,
      "target":20,"amber_max":45,"age_amber":3,"age_red":6,"mood_impact":false,
      "action":"Process refunds / replacements; the oldest return is badly overdue."},
 

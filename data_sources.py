@@ -201,3 +201,63 @@ def fetch_shopify_chargebacks(token: str | None = None, domain: str | None = Non
     active = [n for n in nodes if n.get("status") in ACTIVE_DISPUTE_STATUSES]
     ages = [a for a in (_age_days(n.get("initiatedAt")) for n in active) if a is not None]
     return {"count": len(active), "age": max(ages) if ages else 0}
+
+
+# ---------------------------------------------------------------------------
+# Live counts straight from the real Orders board (id 1786542990), counting
+# items per stage group. This is genuinely live (unlike the summary "Daily KPI
+# Tracker" board, which only refreshes when its script runs).
+# ---------------------------------------------------------------------------
+ORDERS_BOARD_ID = 1786542990
+
+
+def fetch_orders_group_counts(group_map: dict, token: str | None = None,
+                              board_id: int = ORDERS_BOARD_ID) -> dict:
+    """group_map = {kpi_id: orders_group_id}. Returns {kpi_id: {count, age}}
+    where count is the live number of items in that stage group and age is the
+    oldest item's age in days. Raises on token/API failure (caller falls back)."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+
+    group_ids = sorted(set(group_map.values()))
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    query = """
+    query ($board: [ID!], $groups: [String!]) {
+      boards(ids: $board) {
+        groups(ids: $groups) {
+          id
+          items_page(limit: 500) { cursor items { created_at } }
+        }
+      }
+    }
+    """
+    resp = requests.post(
+        MONDAY_API,
+        json={"query": query, "variables": {"board": [str(board_id)], "groups": group_ids}},
+        headers=headers, timeout=30,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    boards = payload.get("data", {}).get("boards", [])
+    if not boards:
+        raise RuntimeError("Orders board not found or not accessible")
+
+    by_group: dict[str, dict] = {}
+    for g in boards[0]["groups"]:
+        items = list(g["items_page"]["items"])
+        cursor = g["items_page"]["cursor"]
+        while cursor:  # paginate groups larger than 500 (rare for action stages)
+            nq = "query ($c: String!) { next_items_page(cursor: $c, limit: 500) { cursor items { created_at } } }"
+            r2 = requests.post(MONDAY_API, json={"query": nq, "variables": {"c": cursor}},
+                               headers=headers, timeout=30)
+            r2.raise_for_status()
+            page = r2.json()["data"]["next_items_page"]
+            items += page["items"]
+            cursor = page["cursor"]
+        ages = [a for a in (_age_days(i.get("created_at")) for i in items) if a is not None]
+        by_group[g["id"]] = {"count": len(items), "age": max(ages) if ages else 0}
+
+    return {kpi_id: by_group[gid] for kpi_id, gid in group_map.items() if gid in by_group}

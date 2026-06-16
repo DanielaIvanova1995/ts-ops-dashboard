@@ -288,6 +288,20 @@ def load_kpis() -> dict:
     except Exception as e:  # noqa: BLE001 — stay up on any data-source hiccup
         data["live_error"] = str(e)
 
+    # Live counts straight from the real Orders board (overrides the stale
+    # summary-board figures for the stage-group KPIs).
+    group_map = {k["id"]: k["orders_group_id"] for k in data["kpis"] if k.get("orders_group_id")}
+    if group_map:
+        try:
+            gc = data_sources.fetch_orders_group_counts(group_map)
+            for k in data["kpis"]:
+                if k["id"] in gc:
+                    k["count"] = gc[k["id"]]["count"]
+                    k["oldest_age_days"] = gc[k["id"]]["age"]
+            data["orders_live"] = True
+        except Exception as e:  # noqa: BLE001 — fall back to summary board figures
+            data["orders_error"] = str(e)
+
     # Chargebacks straight from Shopify (overrides the Monday-mirrored figure).
     try:
         cb = data_sources.fetch_shopify_chargebacks()
@@ -329,6 +343,10 @@ with st.sidebar:
         st.markdown("🟡 **Snapshot** — saved numbers")
         if data.get("live_error"):
             st.caption(f"({data['live_error']})")
+    if data.get("orders_live"):
+        st.caption("📦 Order KPIs: live from Orders board")
+    elif data.get("orders_error"):
+        st.caption("📦 Order KPIs: summary board (live fetch failed)")
     if data.get("shopify_live"):
         st.caption("💳 Chargebacks: live from Shopify")
     elif data.get("shopify_error"):
@@ -367,10 +385,29 @@ st.markdown(
 
 hour = now_uk().hour
 greet = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
+is_manager = role in ("admin", "manager")
 my_kpis = [k for k in KPIS if username in k.get("owners", [])]
 my_open = [k for k in my_kpis if not k.get("info") and status_of(k) != "green"]
 st.markdown(f"### {greet}, {name.split()[0]} 👋")
-if role == "staff":
+
+if is_manager:
+    # Manager view — team overview rather than a personal task list.
+    team_open = [k for k in KPIS if not k.get("info") and status_of(k) != "green"]
+    n_red = len([k for k in team_open if status_of(k) == "red"])
+    n_amb = len([k for k in team_open if status_of(k) == "amber"])
+    load_now = workload(KPIS)
+    busiest_u = max(load_now, key=load_now.get) if load_now else None
+    busiest_nm = (config["credentials"]["usernames"].get(busiest_u, {}).get("name", busiest_u)
+                  if busiest_u else "—")
+    st.markdown(
+        f"**Manager view** — across the team right now: "
+        f"<span class='ts-pill red'>{n_red} red</span> "
+        f"<span class='ts-pill amber'>{n_amb} amber</span> "
+        f"&nbsp; busiest: <b>{busiest_nm}</b>. "
+        f"You’re out of the helper rota — this is the whole floor at a glance.",
+        unsafe_allow_html=True,
+    )
+elif role == "staff":
     if my_open:
         st.markdown(
             f"You have **{len(my_open)}** item{'s' if len(my_open)!=1 else ''} needing attention today — "
