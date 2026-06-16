@@ -49,7 +49,7 @@
      "action":"Process refunds / replacements; the oldest return is badly overdue."},
 
     {"id":"chargebacks","name":"Active chargebacks","cat":"Finance & Risk","owners":["megan","daniela"],
-     "monday_item_id":12197493235,"source":"Monday / Shopify · Live chargebacks","count":23,"oldest_age_days":150,
+     "source":"Shopify · Live disputes","count":0,"oldest_age_days":0,
      "target":0,"amber_max":5,"age_amber":1,"age_red":3,"mood_impact":false,
      "action":"Submit evidence before the bank deadline — each one is real money."},
 
