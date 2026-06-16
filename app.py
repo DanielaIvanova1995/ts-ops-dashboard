@@ -222,14 +222,23 @@ def display_owners(k: dict) -> str:
     return " / ".join(names) if names else "— unassigned —"
 
 
+# Managers/admins are left out of the busiest/quietest ranking and pairing.
+EXCLUDED_PAIRING_ROLES = {"admin", "manager"}
+
+
 def workload(kpis: list) -> dict:
+    users = config["credentials"]["usernames"]
+    excluded = {u for u, info in users.items()
+                if info.get("role") in EXCLUDED_PAIRING_ROLES}
     load: dict = {}
     for k in kpis:
-        if k.get("info") or not k.get("owners"):
+        if k.get("info"):
             continue
-        share = len(k["owners"])
-        weight = (k["count"] + k["oldest_age_days"] * 0.4) / share
-        for o in k["owners"]:
+        owners = [o for o in k.get("owners", []) if o not in excluded]
+        if not owners:
+            continue
+        weight = (k["count"] + k["oldest_age_days"] * 0.4) / len(owners)
+        for o in owners:
             load[o] = load.get(o, 0) + weight
     return load
 

@@ -39,7 +39,7 @@ credentials:
     daniela:
       name: Daniela
       email: daniela@tradesuperstoreonline.co.uk
-      role: staff
+      role: manager
       password: $2b$12$HYdPSJydxodf3zLBdp9GW.JoBuO8773KWoTrWrxey9wHUE8McrEw2
     lorena:
       name: Lorena
