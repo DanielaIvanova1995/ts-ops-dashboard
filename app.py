@@ -347,6 +347,8 @@ with st.sidebar:
         st.caption("📦 Order KPIs: live from Orders board")
     elif data.get("orders_error"):
         st.caption("📦 Order KPIs: summary board (live fetch failed)")
+        with st.expander("Why not the Orders board?"):
+            st.caption(data["orders_error"][:400])
     if data.get("shopify_live"):
         st.caption("💳 Chargebacks: live from Shopify")
     elif data.get("shopify_error"):
