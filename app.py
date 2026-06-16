@@ -459,8 +459,8 @@ with c2:
                 &nbsp;←&nbsp;
                 <span class="ts-pill green">🟢 Quietest · {quiet_name}</span>
               </div>
-              <div style="background:rgba(59,130,246,.12);border-left:4px solid #3b82f6;
-                   border-radius:8px;padding:11px 13px;font-size:13px;line-height:1.5;color:#dbe3ff">
+              <div style="background:rgba(59,130,246,.10);border-left:4px solid #3b82f6;
+                   border-radius:8px;padding:11px 13px;font-size:13px;line-height:1.5;color:#1f2430">
                 Suggest <b>{quiet_name}</b> takes <b>“{handover}”</b> ({handover_n} open) off
                 <b>{busy_name}</b> today. When it’s cleared, {busy_name.split()[0]} returns the favour
                 on the next spike.
