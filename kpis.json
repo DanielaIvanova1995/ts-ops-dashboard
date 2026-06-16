@@ -55,8 +55,8 @@
 
     {"id":"invoices","name":"Invoices to approve","cat":"Finance & Risk","owners":["malyeka"],
      "monday_item_id":12197541725,"source":"Monday · Subitems ‘Needs Review’","count":655,"oldest_age_days":0,
-     "target":50,"amber_max":200,"age_amber":3,"age_red":5,"mood_impact":false,
-     "action":"Large backlog — work through approvals so suppliers stay paid."},
+     "target":350,"amber_max":9999,"age_amber":9999,"age_red":9999,"mood_impact":false,
+     "action":"Comfortable up to 350; above that Malyeka is over and could use a hand on approvals."},
 
     {"id":"discrepancies","name":"Invoice discrepancies","cat":"Finance & Risk","owners":["malyeka"],
      "monday_item_id":12197537624,"source":"Monday · Subitems ‘Discrepancy’","count":53,"oldest_age_days":0,
