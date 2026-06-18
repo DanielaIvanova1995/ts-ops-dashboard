@@ -27,7 +27,7 @@ credentials:
       role: staff
       password: $2b$12$gmdhypfptrcrVOJ2Ibwa4OF0/inAWIv6DID3HeNm1J5BYfULDD9u.
     melissa:
-      name: Mel Duffy
+      name: Melissa Duffy
       email: mel@tradesuperstoreonline.co.uk
       role: staff
       password: $2b$12$yIYEcdLELFfKR2VJU3My7.Bxx.QT8wMWBZ9g983vrDjbpXFrNLBTe

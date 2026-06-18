@@ -222,6 +222,18 @@ def display_owners(k: dict) -> str:
     return " / ".join(names) if names else "— unassigned —"
 
 
+def source_icon(src: str) -> str:
+    """A small icon making each KPI's data source obvious at a glance."""
+    s = (src or "").lower()
+    if "outlook" in s:
+        return "📧"  # email folder
+    if "shopify" in s:
+        return "🛒"  # Shopify
+    if "monday" in s:
+        return "📋"  # Monday board
+    return "•"
+
+
 # Managers/admins are left out of the busiest/quietest ranking and pairing.
 EXCLUDED_PAIRING_ROLES = {"admin", "manager"}
 
@@ -519,7 +531,7 @@ for k in queue:
         f"""<div class="ts-action stripe-{s} {'mine' if mine else ''}">
           <div>
             <div class="ts-name">{k['name']}{yb}</div>
-            <div class="ts-meta">Owner: <b style="color:#cbd2f5">{display_owners(k)}</b> · {k['source']}</div>
+            <div class="ts-meta">Owner: <b style="color:#334155">{display_owners(k)}</b> · {source_icon(k['source'])} {k['source']}</div>
             <div class="ts-prompt" style="border:none;padding:0;margin-top:6px">→ {k['action']}</div>
           </div>
           <div style="text-align:right;white-space:nowrap">
@@ -554,10 +566,10 @@ for cat in dict.fromkeys(k["cat"] for k in KPIS):
                     <div class="ts-num" style="color:{COL[s]}">{k['count']}</div>
                   </div>
                   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
-                    <span class="ts-meta">Owner: <b style="color:#cbd2f5">{display_owners(k)}</b></span>
+                    <span class="ts-meta">Owner: <b style="color:#334155">{display_owners(k)}</b></span>
                     <span class="ts-pill {s}">{LABEL[s]}</span>
                   </div>
-                  <div class="ts-meta">{k['source']}{age}</div>
+                  <div class="ts-meta">{source_icon(k['source'])} {k['source']}{age}</div>
                   <div class="ts-prompt">{k['action']}</div>
                 </div>""",
                 unsafe_allow_html=True,
