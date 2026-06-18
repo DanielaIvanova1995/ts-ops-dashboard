@@ -234,6 +234,14 @@ def source_icon(src: str) -> str:
     return "•"
 
 
+def target_text(k: dict) -> str:
+    """Where this KPI should sit — the healthy target staff are aiming for."""
+    if k.get("info"):
+        return ""
+    t = k["target"]
+    return f"🎯 Healthy at {t} or below" if t > 0 else "🎯 Target: 0 (none should be open)"
+
+
 # Managers/admins are left out of the busiest/quietest ranking and pairing.
 EXCLUDED_PAIRING_ROLES = {"admin", "manager"}
 
@@ -531,7 +539,7 @@ for k in queue:
         f"""<div class="ts-action stripe-{s} {'mine' if mine else ''}">
           <div>
             <div class="ts-name">{k['name']}{yb}</div>
-            <div class="ts-meta">Owner: <b style="color:#334155">{display_owners(k)}</b> · {source_icon(k['source'])} {k['source']}</div>
+            <div class="ts-meta">Owner: <b style="color:#334155">{display_owners(k)}</b> · {source_icon(k['source'])} {k['source']} · {target_text(k)}</div>
             <div class="ts-prompt" style="border:none;padding:0;margin-top:6px">→ {k['action']}</div>
           </div>
           <div style="text-align:right;white-space:nowrap">
@@ -570,6 +578,7 @@ for cat in dict.fromkeys(k["cat"] for k in KPIS):
                     <span class="ts-pill {s}">{LABEL[s]}</span>
                   </div>
                   <div class="ts-meta">{source_icon(k['source'])} {k['source']}{age}</div>
+                  {f'<div class="ts-meta" style="color:#15803d;font-weight:600">{target_text(k)}</div>' if target_text(k) else ''}
                   <div class="ts-prompt">{k['action']}</div>
                 </div>""",
                 unsafe_allow_html=True,
