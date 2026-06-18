@@ -261,3 +261,91 @@ def fetch_orders_group_counts(group_map: dict, token: str | None = None,
         by_group[g["id"]] = {"count": len(items), "age": max(ages) if ages else 0}
 
     return {kpi_id: by_group[gid] for kpi_id, gid in group_map.items() if gid in by_group}
+
+
+def _monday_headers(token: str | None):
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    return {"Authorization": token, "API-Version": "2024-10"}
+
+
+def fetch_filtered_count(board_id: int, column_id: str, compare_values: list,
+                         token: str | None = None) -> dict:
+    """Count items on a board where a status column matches compare_values
+    (any_of). Paginates. Returns {count, age}. Works for main-board items and
+    subitem boards alike (e.g. invoices/discrepancies on the subitems board)."""
+    headers = _monday_headers(token)
+    cv = "[" + ",".join(str(int(v)) for v in compare_values) + "]"
+    items: list = []
+    cursor = None
+    first = True
+    while first or cursor:
+        if cursor:
+            q = "query ($c: String!) { next_items_page(cursor: $c, limit: 500) { cursor items { created_at } } }"
+            body = {"query": q, "variables": {"c": cursor}}
+        else:
+            q = ('query { boards(ids: [%d]) { items_page(limit: 500, query_params: '
+                 '{rules: [{column_id: "%s", compare_value: %s, operator: any_of}]}) '
+                 '{ cursor items { created_at } } } }' % (int(board_id), column_id, cv))
+            body = {"query": q, "variables": {}}
+        resp = requests.post(MONDAY_API, json=body, headers=headers, timeout=30)
+        resp.raise_for_status()
+        d = resp.json()
+        if "errors" in d:
+            raise RuntimeError(f"Monday API error: {d['errors']}")
+        page = d["data"]["next_items_page"] if cursor else d["data"]["boards"][0]["items_page"]
+        items += page["items"]
+        cursor = page["cursor"]
+        first = False
+    ages = [a for a in (_age_days(i.get("created_at")) for i in items) if a is not None]
+    return {"count": len(items), "age": max(ages) if ages else 0}
+
+
+def fetch_booked_split(board_id: int, group_id: str, date_col: str, today,
+                       token: str | None = None) -> dict:
+    """Split a booked group by a customer-ETA date column into overdue (ETA in
+    the past) and future (today or later / no date). Returns
+    {overdue: {count, age}, future: {count, age}}."""
+    from datetime import date as _date
+
+    headers = _monday_headers(token)
+    items: list = []
+    cursor = None
+    first = True
+    while first or cursor:
+        if cursor:
+            q = ('query ($c: String!) { next_items_page(cursor: $c, limit: 500) '
+                 '{ cursor items { column_values(ids: ["%s"]) { text } } } }' % date_col)
+            body = {"query": q, "variables": {"c": cursor}}
+        else:
+            q = ('query { boards(ids: [%d]) { groups(ids: ["%s"]) { items_page(limit: 500) '
+                 '{ cursor items { column_values(ids: ["%s"]) { text } } } } } }'
+                 % (int(board_id), group_id, date_col))
+            body = {"query": q, "variables": {}}
+        resp = requests.post(MONDAY_API, json=body, headers=headers, timeout=30)
+        resp.raise_for_status()
+        d = resp.json()
+        if "errors" in d:
+            raise RuntimeError(f"Monday API error: {d['errors']}")
+        page = d["data"]["next_items_page"] if cursor else d["data"]["boards"][0]["groups"][0]["items_page"]
+        items += page["items"]
+        cursor = page["cursor"]
+        first = False
+
+    overdue = future = 0
+    overdue_ages: list = []
+    for it in items:
+        cvs = it.get("column_values") or []
+        txt = (cvs[0].get("text") if cvs else "") or ""
+        try:
+            eta = _date.fromisoformat(txt[:10]) if txt else None
+        except ValueError:
+            eta = None
+        if eta and eta < today:
+            overdue += 1
+            overdue_ages.append((today - eta).days)
+        else:
+            future += 1  # today, future, or no ETA set
+    return {"overdue": {"count": overdue, "age": max(overdue_ages) if overdue_ages else 0},
+            "future": {"count": future, "age": 0}}

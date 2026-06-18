@@ -322,6 +322,40 @@ def load_kpis() -> dict:
         except Exception as e:  # noqa: BLE001 — fall back to summary board figures
             data["orders_error"] = str(e)
 
+    # Booked overdue/future — split the booked group by Customer ETA date.
+    try:
+        bs = data_sources.fetch_booked_split(1786542990, "group_mkv7t11j", "date", now_uk().date())
+        for k in data["kpis"]:
+            if k["id"] == "booked_overdue":
+                k["count"], k["oldest_age_days"] = bs["overdue"]["count"], bs["overdue"]["age"]
+                k["source"] = "Monday · Orders board (live)"
+            elif k["id"] == "booked_future":
+                k["count"], k["oldest_age_days"] = bs["future"]["count"], 0
+                k["source"] = "Monday · Orders board (live)"
+    except Exception as e:  # noqa: BLE001
+        data["booked_error"] = str(e)
+
+    # Invoices & discrepancies — live subitem Payment Status counts.
+    for kid, label_id in (("invoices", 3), ("discrepancies", 4)):
+        try:
+            r = data_sources.fetch_filtered_count(3547638043, "status7__1", [label_id])
+            for k in data["kpis"]:
+                if k["id"] == kid:
+                    k["count"], k["oldest_age_days"] = r["count"], r["age"]
+                    k["source"] = "Monday · subitems (live)"
+        except Exception as e:  # noqa: BLE001
+            data[f"{kid}_error"] = str(e)
+
+    # Complaints — live count of Orders with Customer Stage = Complaint.
+    try:
+        r = data_sources.fetch_filtered_count(1786542990, "color_mktyyf7w", [8])
+        for k in data["kpis"]:
+            if k["id"] == "complaints":
+                k["count"], k["oldest_age_days"] = r["count"], r["age"]
+                k["source"] = "Monday · Customer Stage = Complaint (live)"
+    except Exception as e:  # noqa: BLE001
+        data["complaints_error"] = str(e)
+
     # Chargebacks straight from Shopify (overrides the Monday-mirrored figure).
     try:
         cb = data_sources.fetch_shopify_chargebacks()
