@@ -419,6 +419,54 @@ def load_pricing():
         return json.load(f)
 
 
+@st.cache_data(ttl=600)
+def load_lookup():
+    path = BASE / "pricing_lookup.json"
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def render_product_search():
+    """Search any product by SKU/name → show every supplier with the cheapest
+    highlighted, plus sell price, margin and the saving from switching."""
+    lk = load_lookup()
+    st.markdown("##### 🔍 Find a product &amp; its cheapest supplier")
+    q = st.text_input("search", key="pricing_search", label_visibility="collapsed",
+                      placeholder="Type a SKU or product name…")
+    if not q:
+        return
+    if not lk:
+        st.info("Product lookup data not loaded yet.")
+        return
+    ql = q.strip().lower()
+    matches = [it for it in lk["items"]
+               if ql in (it.get("sku") or "").lower() or ql in (it.get("name") or "").lower()]
+    st.caption(f"{len(matches)} match{'es' if len(matches)!=1 else ''}"
+               + (" — showing first 25" if len(matches) > 25 else ""))
+    for it in matches[:25]:
+        offers = sorted(it.get("offers", []), key=lambda o: o["c"])
+        sup_rows = "".join(
+            f'<tr><td style="padding:3px 10px">{o["s"]}'
+            f'{" 🏆" if i == 0 and len(offers) > 1 else ""}</td>'
+            f'<td style="padding:3px 10px;text-align:right;font-weight:{800 if i == 0 else 400};'
+            f'color:{"#15803d" if i == 0 and len(offers) > 1 else "#21242B"}">£{o["c"]}</td></tr>'
+            for i, o in enumerate(offers))
+        sell, margin = it.get("sell"), it.get("margin")
+        sell_line = (f'Sells £{sell} · margin <b style="color:{_mcol(margin)}">{margin}%</b>'
+                     if sell else 'Not matched to a Shopify sell price')
+        saving = it.get("saving") or 0
+        save_line = (f' · <b style="color:#15803d">save £{saving}/unit</b> buying from {offers[0]["s"]}'
+                     if len(offers) > 1 and saving > 0 else '')
+        st.markdown(
+            f'<div class="ts-card" style="margin-bottom:10px">'
+            f'<div><b>{it["sku"]}</b> <span style="color:var(--muted)">{(it.get("name") or "")[:65]}</span></div>'
+            f'<div class="ts-meta">{sell_line}{save_line}</div>'
+            f'<table style="margin-top:6px;font-size:13px;border-collapse:collapse">{sup_rows}</table></div>',
+            unsafe_allow_html=True)
+
+
 def _mcol(m) -> str:
     if m is None or m <= 0:
         return "#dc2626"   # loss
@@ -445,8 +493,11 @@ def render_pricing():
                    "`pricing_summary.json`, push it, and it'll appear here.")
         return
 
-    k = p["kpis"]
     st.markdown("### 💷 Supplier pricing")
+    render_product_search()
+    st.write("")
+
+    k = p["kpis"]
     cards = [("Loss-making", k["losses"], k["losses"] > 0),
              ("Below target", f"{k['below_target']:,}", False),
              ("Multi-supplier", k["multi"], False),
