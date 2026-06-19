@@ -536,6 +536,116 @@ ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 SENTIMENT_MODEL = "claude-haiku-4-5-20251001"
 
 
+def find_kind_words(emails: list) -> dict | None:
+    """Find the single most positive / appreciative customer message among
+    `emails`. Returns {"quote", "about"} or None if nothing genuinely kind.
+    Raises if ANTHROPIC_API_KEY isn't set or the call fails."""
+    import json as _json
+    import re
+
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    if not emails:
+        return None
+
+    block = "\n".join(
+        f"{i}. SUBJECT: {e['subject']}\n   PREVIEW: {e['preview']}"
+        for i, e in enumerate(emails[:60], 1))
+    prompt = (
+        "Below are recent customer emails (subject + first line) to a UK building-supplies "
+        "retailer. Find the SINGLE most positive, appreciative or kind message — a thank-you, "
+        "praise, or genuinely happy comment. Reply with ONLY a JSON object, no other text:\n"
+        '{"found": true|false, '
+        '"quote": "a short warm lightly-tidied version of what the customer said '
+        '(max ~140 chars, keep their voice, no personal names)", '
+        '"about": "2-4 word summary of what they were happy about"}\n'
+        'If NONE of the emails are genuinely positive, return {"found": false}. '
+        "Never invent praise that isn't there.\n\n"
+        f"EMAILS:\n{block}"
+    )
+    r = requests.post(
+        ANTHROPIC_API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": SENTIMENT_MODEL, "max_tokens": 300,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=45,
+    )
+    r.raise_for_status()
+    txt = r.json()["content"][0]["text"].strip()
+    match = re.search(r"\{.*\}", txt, re.S)
+    if not match:
+        return None
+    data = _json.loads(match.group(0))
+    if not data.get("found") or not data.get("quote"):
+        return None
+    return {"quote": data["quote"].strip(), "about": (data.get("about") or "").strip()}
+
+
+def fetch_sales_pulse(token: str | None = None) -> dict:
+    """Today's Shopify takings vs the same clock-time yesterday (Europe/London).
+    Returns {today, yesterday, count_today, ahead_pct, currency}. Raises if
+    Shopify isn't configured or the orders read scope isn't granted."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    tz = ZoneInfo("Europe/London")
+    now = datetime.now(tz)
+    today0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yest0 = today0 - timedelta(days=1)
+    yest_cutoff = yest0 + (now - today0)         # same time-of-day, yesterday
+    since_utc = yest0.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    query = """
+    query ($q: String!, $cursor: String) {
+      orders(first: 250, query: $q, after: $cursor, sortKey: CREATED_AT) {
+        edges { cursor node { createdAt test cancelledAt
+          currentTotalPriceSet { shopMoney { amount currencyCode } } } }
+        pageInfo { hasNextPage }
+      }
+    }"""
+    qfilter = f"created_at:>={since_utc}"
+    today_sum = yest_sum = 0.0
+    today_n = 0
+    currency = "GBP"
+    cursor = None
+    for _ in range(20):                          # safety cap ~5000 orders
+        r = requests.post(
+            f"https://{store}/admin/api/2024-10/graphql.json",
+            json={"query": query, "variables": {"q": qfilter, "cursor": cursor}},
+            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+            timeout=25,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("errors"):
+            raise RuntimeError(f"Shopify error: {payload['errors']}")
+        conn = payload["data"]["orders"]
+        for e in conn["edges"]:
+            n = e["node"]
+            cursor = e["cursor"]
+            if n.get("test") or n.get("cancelledAt"):
+                continue
+            money = (n.get("currentTotalPriceSet") or {}).get("shopMoney") or {}
+            amt = float(money.get("amount") or 0)
+            currency = money.get("currencyCode") or currency
+            created = datetime.fromisoformat(
+                n["createdAt"].replace("Z", "+00:00")).astimezone(tz)
+            if created >= today0:
+                today_sum += amt
+                today_n += 1
+            elif yest0 <= created <= yest_cutoff:
+                yest_sum += amt
+        if not conn["pageInfo"]["hasNextPage"]:
+            break
+    ahead = round((today_sum - yest_sum) / yest_sum * 100) if yest_sum > 0 else None
+    return {"today": round(today_sum), "yesterday": round(yest_sum),
+            "count_today": today_n, "ahead_pct": ahead, "currency": currency}
+
+
 def analyze_customer_mood(emails: list) -> dict:
     """Judge overall customer mood + top themes from outstanding emails.
     Returns {mood, score, summary, themes:[{theme,count}]}. Raises if the

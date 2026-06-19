@@ -788,39 +788,80 @@ elif role == "staff":
 # ---------------------------------------------------------------------------
 # Today at a glance: Mood / Pairing / Workload
 # ---------------------------------------------------------------------------
-AI_MOOD_FACE = {"Happy": "😊", "Calm": "🙂", "Mixed": "😐", "Tense": "😟", "Stressed": "😠"}
-AI_MOOD_COL = {"Happy": "#10b981", "Calm": "#65a30d", "Mixed": "#f59e0b",
-               "Tense": "#ea580c", "Stressed": "#ef4444"}
-CUSTOMER_FOLDERS = [("hello@tradesuperstoreonline.co.uk", n)
-                    for n in ("Pre-Delivery", "Aftersales", "Cancellation", "ETA Chasers")]
+# --- Team lift: a daily morale card (joke + kind words from a real customer +
+# today's takings vs yesterday). Each layer degrades gracefully if a data
+# source isn't configured, so the card always shows at least the joke. ---
+TEAM_JOKES = [
+    "Why did the scaffolder bring a pencil to work? In case he needed to draw up some plans.",
+    "I told my mate the timber joke was on the house. He said the roof one was better.",
+    "Why don't bricklayers ever get lost? They always follow the mortar board.",
+    "I used to be a banker, but I lost interest. Now I sell cement — business is concrete.",
+    "Our cheapest screws are a real steal. Don't worry, they're fully bolted down.",
+    "Why did the spirit level go to therapy? It couldn't find any balance in life.",
+    "I asked the joiner for advice. He said, 'Don't take it personally, but you're a bit edgy.'",
+    "What do you call a builder who's lost his van? A contractor without a leg to stand on.",
+    "The tape measure quit its job. It said the work just didn't measure up.",
+    "Why was the cement mixer so calm? Nothing ever rattled it.",
+    "I bought a boomerang made of plywood. Spent all week trying to throw the old one away.",
+    "Why did the electrician keep getting promoted? He was a real live wire.",
+    "The plasterer's jokes are a bit rough, but they smooth over eventually.",
+    "What's a plumber's favourite kind of music? Anything with a good flow.",
+    "I told the hammer to take it easy. It just couldn't stop hitting the nail on the head.",
+    "Why did the ladder get an award? It really stepped up this year.",
+    "Our delivery driver is so reliable, even the sat-nav asks him for directions.",
+    "What do you call a tidy building site? A clean break.",
+    "The drill and the screwdriver had an argument. It got a bit heated, then they bonded.",
+    "Why are roofers great at parties? They always raise the bar.",
+    "I tried to catch some fog at the yard this morning. Mist.",
+    "Why did the paint blush? It saw the wall undressing… of its old coat.",
+    "Our forklift driver lifts everyone's spirits — and a fair few pallets too.",
+    "What did the nut say to the bolt? 'You complete me.'",
+    "Why don't bricks ever lie? They're always on the level.",
+    "The saw told a joke at break. It absolutely cut everyone up.",
+    "Why was the wheelbarrow so good at its job? It was easily pushed in the right direction.",
+    "I knocked over the toolbox and the spanners all argued. Total wrench in the works.",
+    "Why did the customer love our quotes? They were always upfront and never wooden.",
+    "Monday motivation: be like a tape measure — always pulling your weight.",
+]
+
+
+def joke_of_the_day():
+    return TEAM_JOKES[now_uk().timetuple().tm_yday % len(TEAM_JOKES)]
+
+
+KIND_FOLDERS = [("hello@tradesuperstoreonline.co.uk", n) for n in ("Inbox", "Aftersales")]
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def customer_mood_ai():
-    """AI-read mood + themes from outstanding customer emails. Returns the dict,
-    {'error': ...} on failure, or None if Microsoft 365 isn't configured."""
+def kind_words_cached():
+    """Nicest real customer message right now, or None. Cached 30 min."""
     try:
         token = data_sources.ms_token()
-    except Exception:  # noqa: BLE001 — M365 not configured → fall back to backlog mood
+    except Exception:  # noqa: BLE001 — M365 not configured
         return None
     try:
         emails = []
-        for mb, fname in CUSTOMER_FOLDERS:
+        for mb, fname in KIND_FOLDERS:
             try:
-                emails += data_sources.fetch_folder_messages(mb, fname, limit=12, token=token)
+                emails += data_sources.fetch_folder_messages(mb, fname, limit=15, token=token)
             except Exception:  # noqa: BLE001 — skip a folder that errors
                 continue
         if not emails:
             return None
-        res = data_sources.analyze_customer_mood(emails)
-        res["n_emails"] = len(emails)
-        return res
-    except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return data_sources.find_kind_words(emails)
+    except Exception:  # noqa: BLE001 — no AI key / API error → hide the line
+        return None
 
 
-m = mood(KPIS)            # fallback (backlog-based) mood
-am = customer_mood_ai()   # AI email-sentiment mood (None / {'error'} / valid)
+@st.cache_data(ttl=900, show_spinner=False)
+def sales_pulse_cached():
+    """Today's takings vs yesterday, or None if Shopify orders aren't readable."""
+    try:
+        return data_sources.fetch_sales_pulse()
+    except Exception:  # noqa: BLE001 — not configured / no orders scope → hide
+        return None
+
+
 load = workload(KPIS)  # workload bars — everyone (incl. Malyeka), excl. managers
 ranked = sorted(load.items(), key=lambda x: x[1], reverse=True)
 pair_ranked = sorted(workload(KPIS, pairing=True).items(), key=lambda x: x[1], reverse=True)
@@ -830,43 +871,48 @@ _glance = st.expander("📊  Today at a glance", expanded=True)
 c1, c2, c3 = _glance.columns([1.15, 1, 1])
 
 with c1:
-    if am and am.get("mood"):
-        face = AI_MOOD_FACE.get(am["mood"], "🙂")
-        col = AI_MOOD_COL.get(am["mood"], "#65a30d")
-        pct = max(0, min(100, int(am.get("score", 50))))
-        themes_html = "".join(
-            f'<div style="display:flex;justify-content:space-between;font-size:12.5px;'
-            f'padding:4px 0;border-top:1px solid var(--line)"><span>{t.get("theme","")}</span>'
-            f'<b style="color:var(--muted)">{t.get("count","")}</b></div>'
-            for t in (am.get("themes") or [])[:5]) or '<p class="ts-meta">—</p>'
-        st.markdown(
-            f"""<div class="ts-card">
-              <p class="ts-eyebrow">Customer mood — read from {am.get('n_emails','')} live emails (AI)</p>
-              <div style="display:flex;align-items:center;gap:16px">
-                <div class="mood-face">{face}</div>
-                <div><p class="mood-label" style="color:{col}">{am['mood']}</p></div>
-              </div>
-              <div class="bar" style="margin-top:12px"><span style="width:{pct}%;background:{col}"></span></div>
-              <p class="ts-meta">{am.get('summary','')}</p>
-              <p class="ts-eyebrow" style="margin-top:12px">What customers want right now</p>
-              {themes_html}
-            </div>""",
-            unsafe_allow_html=True,
+    joke = joke_of_the_day()
+    kw = kind_words_cached()
+    sp = sales_pulse_cached()
+    blocks = []
+
+    if sp:
+        sym = {"GBP": "£", "EUR": "€", "USD": "$"}.get(sp.get("currency"), "£")
+        ap = sp.get("ahead_pct")
+        if ap is None:
+            trend = '<span class="ts-meta">first orders of the day</span>'
+        elif ap >= 0:
+            trend = f'<span style="color:#10b981;font-weight:700">▲ {ap}% ahead of yesterday</span>'
+        else:
+            trend = f'<span style="color:#ef4444;font-weight:700">▼ {abs(ap)}% vs yesterday</span>'
+        n = sp.get("count_today", 0)
+        blocks.append(
+            f'<p class="ts-eyebrow">Today\'s takings</p>'
+            f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
+            f'<span style="font-size:30px;font-weight:800;line-height:1">{sym}{sp["today"]:,}</span>{trend}</div>'
+            f'<p class="ts-meta">{n} order{"s" if n != 1 else ""} so far today</p>'
         )
-    else:
-        note = " · AI unavailable, using backlog estimate" if (am and am.get("error")) else ""
-        st.markdown(
-            f"""<div class="ts-card">
-              <p class="ts-eyebrow">Customer mood{note}</p>
-              <div style="display:flex;align-items:center;gap:16px">
-                <div class="mood-face">{m['face']}</div>
-                <div><p class="mood-label" style="color:{m['col']}">{m['label']}</p></div>
-              </div>
-              <div class="bar" style="margin-top:12px"><span style="width:{m['pct']}%;background:{m['col']}"></span></div>
-              <p class="ts-meta">{m['desc']} ({m['open']} customer-facing issue{'s' if m['open']!=1 else ''} open)</p>
-            </div>""",
-            unsafe_allow_html=True,
+
+    if kw and kw.get("quote"):
+        about = f' · {kw["about"]}' if kw.get("about") else ""
+        blocks.append(
+            f'<p class="ts-eyebrow" style="margin-top:14px">💚 Kind words from a customer{about}</p>'
+            f'<p style="font-size:13.5px;font-style:italic;line-height:1.45;margin:2px 0 0">'
+            f'“{kw["quote"]}”</p>'
         )
+
+    blocks.append(
+        f'<p class="ts-eyebrow" style="margin-top:14px">😄 Joke of the day</p>'
+        f'<p style="font-size:13.5px;line-height:1.45;margin:2px 0 0">{joke}</p>'
+    )
+
+    st.markdown(
+        '<div class="ts-card">'
+        '<p style="font-family:\'Bebas Neue\',sans-serif;letter-spacing:.06em;'
+        'font-size:20px;color:var(--brand);margin:0 0 6px">TEAM LIFT</p>'
+        + "".join(blocks) + "</div>",
+        unsafe_allow_html=True,
+    )
 
 with c2:
     if len(pair_ranked) >= 2:
