@@ -484,3 +484,96 @@ def fetch_outlook_folder_count(mailbox: str, folder_name: str, token: str | None
         return {"count": contains_match.get("totalItemCount", 0),
                 "unread": contains_match.get("unreadItemCount", 0)}
     raise RuntimeError(f"Folder matching '{folder_name}' not found in {mailbox}")
+
+
+# ---------------------------------------------------------------------------
+# Customer mood from real email sentiment (Outlook content + Anthropic AI).
+# Reads the subject + first line of outstanding emails in the customer folders
+# and asks a fast model to judge the overall mood and the top themes.
+# ---------------------------------------------------------------------------
+def _find_folder(mailbox: str, folder_name: str, token: str):
+    """Return the folder object (with id) matching folder_name, or None."""
+    target = _norm(folder_name)
+    queue = _graph_children(mailbox, None, token)
+    contains = None
+    visited = 0
+    while queue and visited < 800:
+        visited += 1
+        f = queue.pop(0)
+        nm = _norm(f.get("displayName"))
+        if nm == target:
+            return f
+        if contains is None and target and target in nm:
+            contains = f
+        if f.get("childFolderCount", 0) > 0:
+            queue += _graph_children(mailbox, f["id"], token)
+    return contains
+
+
+def fetch_folder_messages(mailbox: str, folder_name: str, limit: int = 12,
+                          token: str | None = None) -> list:
+    """Most-recent messages in a folder as [{subject, preview}]. [] if not found."""
+    token = token or ms_token()
+    f = _find_folder(mailbox, folder_name, token)
+    if not f:
+        return []
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/mailFolders/{f['id']}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$top": str(limit), "$select": "subject,bodyPreview,receivedDateTime",
+                "$orderby": "receivedDateTime desc"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("value", []):
+        out.append({"subject": (m.get("subject") or "").strip(),
+                    "preview": (m.get("bodyPreview") or "").strip()[:280]})
+    return out
+
+
+ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
+SENTIMENT_MODEL = "claude-haiku-4-5-20251001"
+
+
+def analyze_customer_mood(emails: list) -> dict:
+    """Judge overall customer mood + top themes from outstanding emails.
+    Returns {mood, score, summary, themes:[{theme,count}]}. Raises if the
+    ANTHROPIC_API_KEY isn't set or the call fails."""
+    import json as _json
+    import re
+
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    if not emails:
+        raise RuntimeError("No emails to analyse")
+
+    block = "\n".join(
+        f"{i}. SUBJECT: {e['subject']}\n   PREVIEW: {e['preview']}"
+        for i, e in enumerate(emails[:60], 1))
+    prompt = (
+        "You are reading the outstanding customer-support emails (subject + first line) of a UK "
+        "building-supplies retailer. Judge the OVERALL customer mood from the tone of what they wrote "
+        "and what they are asking for. Reply with ONLY a JSON object, no other text:\n"
+        '{"mood":"Happy|Calm|Mixed|Tense|Stressed","score":<0-100>,'
+        '"summary":"one short sentence on how customers feel right now",'
+        '"themes":[{"theme":"short phrase","count":<int>}]}\n'
+        "score = how frustrated/stressed customers are (0 = happy/calm, 100 = very angry). "
+        "themes = the top 3-5 things customers want or are frustrated about, each with how many emails relate to it.\n\n"
+        f"EMAILS ({len(emails)} shown):\n{block}"
+    )
+    r = requests.post(
+        ANTHROPIC_API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": SENTIMENT_MODEL, "max_tokens": 700,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=45,
+    )
+    r.raise_for_status()
+    txt = r.json()["content"][0]["text"].strip()
+    match = re.search(r"\{.*\}", txt, re.S)
+    if not match:
+        raise RuntimeError("AI returned no JSON")
+    return _json.loads(match.group(0))

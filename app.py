@@ -788,7 +788,39 @@ elif role == "staff":
 # ---------------------------------------------------------------------------
 # Today at a glance: Mood / Pairing / Workload
 # ---------------------------------------------------------------------------
-m = mood(KPIS)
+AI_MOOD_FACE = {"Happy": "😊", "Calm": "🙂", "Mixed": "😐", "Tense": "😟", "Stressed": "😠"}
+AI_MOOD_COL = {"Happy": "#10b981", "Calm": "#65a30d", "Mixed": "#f59e0b",
+               "Tense": "#ea580c", "Stressed": "#ef4444"}
+CUSTOMER_FOLDERS = [("hello@tradesuperstoreonline.co.uk", n)
+                    for n in ("Pre-Delivery", "Aftersales", "Cancellation", "ETA Chasers")]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def customer_mood_ai():
+    """AI-read mood + themes from outstanding customer emails. Returns the dict,
+    {'error': ...} on failure, or None if Microsoft 365 isn't configured."""
+    try:
+        token = data_sources.ms_token()
+    except Exception:  # noqa: BLE001 — M365 not configured → fall back to backlog mood
+        return None
+    try:
+        emails = []
+        for mb, fname in CUSTOMER_FOLDERS:
+            try:
+                emails += data_sources.fetch_folder_messages(mb, fname, limit=12, token=token)
+            except Exception:  # noqa: BLE001 — skip a folder that errors
+                continue
+        if not emails:
+            return None
+        res = data_sources.analyze_customer_mood(emails)
+        res["n_emails"] = len(emails)
+        return res
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+m = mood(KPIS)            # fallback (backlog-based) mood
+am = customer_mood_ai()   # AI email-sentiment mood (None / {'error'} / valid)
 load = workload(KPIS)  # workload bars — everyone (incl. Malyeka), excl. managers
 ranked = sorted(load.items(), key=lambda x: x[1], reverse=True)
 pair_ranked = sorted(workload(KPIS, pairing=True).items(), key=lambda x: x[1], reverse=True)
@@ -798,18 +830,43 @@ _glance = st.expander("📊  Today at a glance", expanded=True)
 c1, c2, c3 = _glance.columns([1.15, 1, 1])
 
 with c1:
-    st.markdown(
-        f"""<div class="ts-card">
-          <p class="ts-eyebrow">Today at a glance — Customer mood</p>
-          <div style="display:flex;align-items:center;gap:16px">
-            <div class="mood-face">{m['face']}</div>
-            <div><p class="mood-label" style="color:{m['col']}">{m['label']}</p></div>
-          </div>
-          <div class="bar" style="margin-top:12px"><span style="width:{m['pct']}%;background:{m['col']}"></span></div>
-          <p class="ts-meta">{m['desc']} ({m['open']} customer-facing issue{'s' if m['open']!=1 else ''} open)</p>
-        </div>""",
-        unsafe_allow_html=True,
-    )
+    if am and am.get("mood"):
+        face = AI_MOOD_FACE.get(am["mood"], "🙂")
+        col = AI_MOOD_COL.get(am["mood"], "#65a30d")
+        pct = max(0, min(100, int(am.get("score", 50))))
+        themes_html = "".join(
+            f'<div style="display:flex;justify-content:space-between;font-size:12.5px;'
+            f'padding:4px 0;border-top:1px solid var(--line)"><span>{t.get("theme","")}</span>'
+            f'<b style="color:var(--muted)">{t.get("count","")}</b></div>'
+            for t in (am.get("themes") or [])[:5]) or '<p class="ts-meta">—</p>'
+        st.markdown(
+            f"""<div class="ts-card">
+              <p class="ts-eyebrow">Customer mood — read from {am.get('n_emails','')} live emails (AI)</p>
+              <div style="display:flex;align-items:center;gap:16px">
+                <div class="mood-face">{face}</div>
+                <div><p class="mood-label" style="color:{col}">{am['mood']}</p></div>
+              </div>
+              <div class="bar" style="margin-top:12px"><span style="width:{pct}%;background:{col}"></span></div>
+              <p class="ts-meta">{am.get('summary','')}</p>
+              <p class="ts-eyebrow" style="margin-top:12px">What customers want right now</p>
+              {themes_html}
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        note = " · AI unavailable, using backlog estimate" if (am and am.get("error")) else ""
+        st.markdown(
+            f"""<div class="ts-card">
+              <p class="ts-eyebrow">Customer mood{note}</p>
+              <div style="display:flex;align-items:center;gap:16px">
+                <div class="mood-face">{m['face']}</div>
+                <div><p class="mood-label" style="color:{m['col']}">{m['label']}</p></div>
+              </div>
+              <div class="bar" style="margin-top:12px"><span style="width:{m['pct']}%;background:{m['col']}"></span></div>
+              <p class="ts-meta">{m['desc']} ({m['open']} customer-facing issue{'s' if m['open']!=1 else ''} open)</p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
 with c2:
     if len(pair_ranked) >= 2:
