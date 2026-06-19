@@ -481,8 +481,8 @@ _SEARCH_WIDGET = """
   .L{flex:1;min-width:0;}.R{text-align:right;min-width:120px;}
   .sku{font-weight:700;color:#21242B;font-size:14px;}.nm{color:#6B7280;font-weight:400;font-size:13px;}
   table{margin-top:6px;border-collapse:collapse;font-size:13px;}td{padding:3px 10px 3px 0;}
-  .big{font-size:28px;font-weight:800;line-height:1;}.mg{font-size:14px;font-weight:700;}
-  .badge{display:inline-block;margin-top:6px;font-size:10px;font-weight:800;padding:3px 8px;border-radius:3px;}
+  .big{font-size:28px;font-weight:500;line-height:1;}.mg{font-size:14px;font-weight:700;}
+  .badge{display:inline-block;margin-top:6px;font-size:10px;font-weight:500;padding:3px 8px;border-radius:3px;}
   .sell{color:#15803d;background:#dcfce7;}.no{color:#dc2626;background:#fee2e2;}
   .save{font-size:12px;color:#374151;margin-top:4px;}
   mark{background:#ffe0c7;color:#b3460f;border-radius:3px;padding:0 1px;}
