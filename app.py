@@ -538,52 +538,16 @@ def _hl(text, ql):
 
 
 def render_product_search():
-    """Native product search (no iframe → no wasted space): substring match on
-    SKU/name with the typed text highlighted, every supplier (cheapest flagged),
-    the sell price / margin and whether we sell it. Searches as you type."""
-    lk = load_lookup()
+    """Instant, as-you-type product search (in-browser iframe): substring match
+    on SKU/name with the typed text highlighted, every supplier (cheapest
+    flagged), the sell price / margin and whether we sell it. The widget
+    auto-resizes — 50px when empty, growing only while showing results."""
     st.markdown("#### Find a product, its cheapest supplier &amp; price")
-    q = st.text_input("search", key="psearch", label_visibility="collapsed",
-                      placeholder="Type a SKU or product name…")
-    if not q or not q.strip():
-        return
-    if not lk:
+    payload = _search_payload()
+    if not payload:
         st.info("Product lookup data not loaded yet.")
         return
-    ql = q.strip().lower()
-    matches = [it for it in lk["items"]
-               if ql in it["sku"].lower() or ql in (it.get("name") or "").lower()]
-    st.caption(f"{len(matches):,} result{'s' if len(matches) != 1 else ''}"
-               + (" — showing first 30" if len(matches) > 30 else ""))
-    for it in matches[:30]:
-        offers = sorted(it.get("offers", []), key=lambda o: o["c"])
-        sup_rows = "".join(
-            f'<tr><td style="padding:3px 12px 3px 0">{o["s"]}'
-            f'{" <span style=\'color:#15803d;font-weight:700\'>cheapest</span>" if i == 0 and len(offers) > 1 else ""}</td>'
-            f'<td style="padding:3px 0;text-align:right;color:{"#15803d" if i == 0 and len(offers) > 1 else "#21242B"}">£{o["c"]}</td></tr>'
-            for i, o in enumerate(offers))
-        sell, m = it.get("sell"), it.get("margin")
-        matched = sell is not None and sell > 0
-        if matched:
-            price = (f'<div style="font-size:26px;font-weight:500;color:#15803d;line-height:1">£{sell}</div>'
-                     f'<div style="font-size:14px;font-weight:700;color:{_mcol(m)}">{m}% margin</div>'
-                     f'<span style="display:inline-block;margin-top:6px;font-size:10px;color:#15803d;'
-                     f'background:#dcfce7;padding:3px 8px;border-radius:3px">WE SELL</span>')
-        else:
-            price = ('<div style="font-size:18px;font-weight:500;color:#dc2626">NOT SOLD</div>'
-                     '<span style="display:inline-block;margin-top:6px;font-size:10px;color:#dc2626;'
-                     'background:#fee2e2;padding:3px 8px;border-radius:3px">not on Shopify</span>')
-        saving = it.get("saving") or 0
-        save = (f'<div style="font-size:12px;color:#374151;margin-top:4px">save '
-                f'<b style="color:#15803d">£{saving}/unit</b> via {offers[0]["s"]}</div>'
-                if len(offers) > 1 and saving > 0 else "")
-        st.markdown(
-            f'<div class="ts-card" style="margin-bottom:8px;display:flex;gap:16px;align-items:flex-start">'
-            f'<div style="flex:1"><div class="ts-name">{_hl(it["sku"], ql)} '
-            f'<span style="color:var(--muted);font-weight:400">{_hl((it.get("name") or "")[:55], ql)}</span></div>'
-            f'<table style="margin-top:6px;font-size:13px;border-collapse:collapse">{sup_rows}</table>{save}</div>'
-            f'<div style="text-align:right;min-width:120px">{price}</div></div>',
-            unsafe_allow_html=True)
+    components.html(_SEARCH_WIDGET.replace("__DATA__", payload), height=50, scrolling=False)
 
 
 def _mcol(m) -> str:
