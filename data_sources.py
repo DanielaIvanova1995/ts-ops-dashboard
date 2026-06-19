@@ -668,16 +668,20 @@ def research_competitors(title: str, code: str | None, vendor: str | None,
         "You are a pricing analyst for a UK building-supplies retailer (Trade Superstore "
         f"Online). Find the current price of this exact product at COMPETING UK online "
         f"retailers (not Trade Superstore itself): {ident}.\n"
-        "Search the web, open real product listings, and read the actual price shown "
-        "(in GBP, including VAT). Match the SAME product — prefer matches on the EAN/barcode "
-        "or exact manufacturer code. Reply with ONLY a JSON object, no other text:\n"
-        '{"competitors":[{"retailer":"shop name","price":<number GBP inc VAT>,'
-        '"url":"listing url","in_stock":true|false}],'
-        '"cheapest":{"retailer":"name","price":<number>},'
+        "Search the web, open real product listings, and read the actual price shown. Match the "
+        "SAME product — prefer matches on the EAN/barcode or exact manufacturer code.\n"
+        "IMPORTANT — report every price EXCLUDING VAT (ex-VAT), in GBP. UK consumer/retail sites "
+        "usually display prices INCLUDING 20% VAT: convert those to ex-VAT by dividing by 1.2. "
+        "Trade/merchant sites often already show ex-VAT prices — use those as-is. Reply with "
+        "ONLY a JSON object, no other text:\n"
+        '{"competitors":[{"retailer":"shop name","price":<number, GBP EX-VAT>,'
+        '"listed_inc_vat":true|false,"url":"listing url","in_stock":true|false}],'
+        '"cheapest":{"retailer":"name","price":<number ex-VAT>},'
         '"summary":"one sentence on where this product sits in the market"}\n'
-        "Include up to 6 genuine listings you actually found and read. If you cannot find the "
-        "exact product, return an empty competitors list and explain in summary. Never invent "
-        "prices or retailers."
+        "price MUST be the ex-VAT figure. listed_inc_vat = whether the site originally showed the "
+        "price inc VAT (so you converted it). Include up to 6 genuine listings you actually found "
+        "and read. If you cannot find the exact product, return an empty competitors list and "
+        "explain in summary. Never invent prices or retailers."
     )
     body = {
         "model": COMPETITOR_MODEL,

@@ -881,8 +881,8 @@ def competitor_research(sku, title, code, vendor, your_price):
 def _render_competitor_check(items):
     with st.expander("🔍 Competitor price check (beta)"):
         st.caption("Pull a product's code and see what other UK retailers charge for the "
-                   "same item. Uses live web search — needs your Anthropic key. Costs a few "
-                   "pence per check; results are cached.")
+                   "same item — all prices shown **ex-VAT** to match your costs. Uses live web "
+                   "search (needs your Anthropic key); a few pence per check, results cached.")
         q = st.text_input("Product SKU or name", key="comp_q",
                           placeholder="e.g. FRO607AG  or  anthracite gutter")
         if not (st.button("Check competitors", key="comp_go", type="primary") and q.strip()):
@@ -900,7 +900,7 @@ def _render_competitor_check(items):
         head = f"**{title}**  ·  SKU `{sku}`"
         head += f"  ·  EAN `{code}`" if code else "  ·  _no barcode on Shopify_"
         if sell is not None:
-            head += f"  ·  you sell at **£{sell:,.2f}**"
+            head += f"  ·  you sell at **£{sell:,.2f} ex VAT**"
         st.markdown(head)
 
         with st.spinner("Searching competitor sites…"):
@@ -931,16 +931,18 @@ def _render_competitor_check(items):
             prs = f"£{pr:,.2f}" if isinstance(pr, (int, float)) else "—"
             oos = "" if c.get("in_stock", True) else (' <span style="color:#ef4444;'
                                                       'font-size:11px">out of stock</span>')
+            conv = (' <span style="color:#94a3b8;font-size:10px" title="site showed inc-VAT; '
+                    'converted to ex-VAT">↓ from inc-VAT</span>' if c.get("listed_inc_vat") else "")
             name = c.get("retailer") or "Unknown"
             url = c.get("url") or ""
             cell = f'<a href="{url}" target="_blank">{name}</a>' if url else name
             rows += (f'<tr style="border-top:1px solid var(--line)">'
                      f'<td style="padding:7px 12px">{cell}{oos}</td>'
-                     f'<td style="padding:7px 12px;text-align:right">{prs}</td></tr>')
+                     f'<td style="padding:7px 12px;text-align:right">{prs}{conv}</td></tr>')
         st.markdown('<table style="width:100%;border-collapse:collapse;font-size:13px">'
                     '<tr style="text-align:left;color:var(--muted)">'
                     '<th style="padding:7px 12px">Retailer</th>'
-                    '<th style="padding:7px 12px;text-align:right">Price (inc VAT)</th></tr>'
+                    '<th style="padding:7px 12px;text-align:right">Price (ex VAT)</th></tr>'
                     + rows + "</table>", unsafe_allow_html=True)
 
         if sell is not None and cheapest is not None:
