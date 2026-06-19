@@ -50,7 +50,7 @@
 
     {"id":"invoices","name":"Invoices to approve","cat":"Finance & Risk","owners":["malyeka"],
      "monday_item_id":12197541725,"source":"Monday · Subitems ‘Needs Review’","count":655,"oldest_age_days":0,
-     "target":350,"amber_max":9999,"age_amber":9999,"age_red":9999,"mood_impact":false,"no_help":true,
+     "target":350,"amber_max":9999,"age_amber":9999,"age_red":9999,"mood_impact":false,
      "action":"Comfortable up to 350; above that Malyeka is over and could use a hand on approvals."},
 
     {"id":"discrepancies","name":"Invoice discrepancies","cat":"Finance & Risk","owners":["malyeka"],
@@ -83,7 +83,7 @@
      "action":"Work aftersales cases so customers aren’t left waiting."},
 
     {"id":"return_requests","name":"Return requests","cat":"Email folders","owners":["megan"],
-     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Return Request"},
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Returns"},
      "source":"Outlook · Return Requests","count":0,"oldest_age_days":0,
      "target":10,"amber_max":40,"age_amber":9999,"age_red":9999,"mood_impact":false,
      "action":"Process incoming return requests."},

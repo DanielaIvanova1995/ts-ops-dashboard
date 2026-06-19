@@ -249,7 +249,7 @@ EXCLUDED_PAIRING_ROLES = {"admin", "manager"}
 def workload(kpis: list) -> dict:
     users = config["credentials"]["usernames"]
     excluded = {u for u, info in users.items()
-                if info.get("role") in EXCLUDED_PAIRING_ROLES}
+                if info.get("role") in EXCLUDED_PAIRING_ROLES or info.get("exclude_from_pairing")}
     load: dict = {}
     for k in kpis:
         if k.get("info"):

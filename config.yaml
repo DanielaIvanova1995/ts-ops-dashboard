@@ -35,6 +35,7 @@ credentials:
       name: Malyeka Najib
       email: malyeka@tradesuperstoreonline.co.uk
       role: staff
+      exclude_from_pairing: true
       password: $2b$12$Vq3vGp/.AhFjeEYQlEtpIuAVJ7X.usZYnbujKB8r9ZriLjpOfENoq
     daniela:
       name: Daniela
