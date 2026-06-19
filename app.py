@@ -246,10 +246,23 @@ def target_text(k: dict) -> str:
 EXCLUDED_PAIRING_ROLES = {"admin", "manager"}
 
 
-def workload(kpis: list) -> dict:
+def _excluded(pairing: bool) -> set:
+    """Managers/admins are always out of the staff-workload view. Additionally,
+    when computing the pairing (busiest/quietest), people flagged
+    exclude_from_pairing (e.g. Malyeka — works solo) are left out too, while
+    still appearing in the workload bars."""
     users = config["credentials"]["usernames"]
-    excluded = {u for u, info in users.items()
-                if info.get("role") in EXCLUDED_PAIRING_ROLES or info.get("exclude_from_pairing")}
+    out = set()
+    for u, info in users.items():
+        if info.get("role") in EXCLUDED_PAIRING_ROLES:
+            out.add(u)
+        elif pairing and info.get("exclude_from_pairing"):
+            out.add(u)
+    return out
+
+
+def workload(kpis: list, pairing: bool = False) -> dict:
+    excluded = _excluded(pairing)
     load: dict = {}
     for k in kpis:
         if k.get("info"):
@@ -500,8 +513,9 @@ elif role == "staff":
 # Today at a glance: Mood / Pairing / Workload
 # ---------------------------------------------------------------------------
 m = mood(KPIS)
-load = workload(KPIS)
+load = workload(KPIS)  # workload bars — everyone (incl. Malyeka), excl. managers
 ranked = sorted(load.items(), key=lambda x: x[1], reverse=True)
+pair_ranked = sorted(workload(KPIS, pairing=True).items(), key=lambda x: x[1], reverse=True)
 users_cfg = config["credentials"]["usernames"]
 
 _glance = st.expander("📊  Today at a glance", expanded=True)
@@ -522,9 +536,9 @@ with c1:
     )
 
 with c2:
-    if len(ranked) >= 2:
-        busy_u, busy_v = ranked[0]
-        quiet_u, quiet_v = ranked[-1]
+    if len(pair_ranked) >= 2:
+        busy_u, busy_v = pair_ranked[0]
+        quiet_u, quiet_v = pair_ranked[-1]
         busy_name = users_cfg.get(busy_u, {}).get("name", busy_u)
         quiet_name = users_cfg.get(quiet_u, {}).get("name", quiet_u)
         # Skip tasks nobody can help with (e.g. invoice approval = Malyeka only)
