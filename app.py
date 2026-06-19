@@ -590,23 +590,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+_arows = ""
 for k in queue:
     s = status_of(k)
     mine = role == "staff" and username in k.get("owners", [])
-    yb = "<span class='yourbadge'>YOUR TASK</span>" if mine else ""
+    yb = " <span class='yourbadge'>YOU</span>" if mine else ""
+    age = f" · {k['oldest_age_days']}d" if k.get("oldest_age_days") else ""
+    _arows += (
+        f'<tr style="border-top:1px solid var(--line)">'
+        f'<td style="padding:7px 10px;border-left:4px solid {COL[s]}">'
+        f'<b>{k["name"]}</b>{yb}'
+        f'<div style="color:#475569;font-size:11.5px">→ {k["action"]}</div></td>'
+        f'<td style="padding:7px 10px;color:var(--muted);font-size:12px;white-space:nowrap">'
+        f'{source_icon(k["source"])} {display_owners(k)}</td>'
+        f'<td style="padding:7px 10px;text-align:right;white-space:nowrap;font-weight:800;font-size:18px;color:{COL[s]}">{k["count"]}'
+        f'<div style="color:var(--muted);font-size:11px;font-weight:400">aim ≤{k["target"]}{age}</div></td>'
+        f'<td style="padding:7px 10px;text-align:right"><span class="ts-pill {s}">{LABEL[s]}</span></td>'
+        f'</tr>'
+    )
+if _arows:
     st.markdown(
-        f"""<div class="ts-action stripe-{s} {'mine' if mine else ''}">
-          <div>
-            <div class="ts-name">{k['name']}{yb}</div>
-            <div class="ts-meta">Owner: <b style="color:#334155">{display_owners(k)}</b> · {source_icon(k['source'])} {k['source']} · {target_text(k)}</div>
-            <div class="ts-prompt" style="border:none;padding:0;margin-top:6px">→ {k['action']}</div>
-          </div>
-          <div style="text-align:right;white-space:nowrap">
-            <div class="big" style="color:{COL[s]}">{k['count']}</div>
-            <div class="ts-meta">oldest {k['oldest_age_days']}d</div>
-            <span class="ts-pill {s}" style="margin-top:6px;display:inline-block">{LABEL[s]}</span>
-          </div>
-        </div>""",
+        f'<div class="ts-card" style="padding:4px 6px"><table style="width:100%;border-collapse:collapse">{_arows}</table></div>',
         unsafe_allow_html=True,
     )
 if not queue:
