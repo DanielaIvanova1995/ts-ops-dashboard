@@ -504,7 +504,8 @@ load = workload(KPIS)
 ranked = sorted(load.items(), key=lambda x: x[1], reverse=True)
 users_cfg = config["credentials"]["usernames"]
 
-c1, c2, c3 = st.columns([1.15, 1, 1])
+_glance = st.expander("📊  Today at a glance", expanded=True)
+c1, c2, c3 = _glance.columns([1.15, 1, 1])
 
 with c1:
     st.markdown(
@@ -583,12 +584,7 @@ if role == "staff":
 
 reds = len([k for k in queue if status_of(k) == "red"])
 ambers = len([k for k in queue if status_of(k) == "amber"])
-st.markdown(
-    f"### ⚡ Act now — outstanding items "
-    f"<span class='ts-pill red'>{reds} red</span> "
-    f"<span class='ts-pill amber'>{ambers} amber</span>",
-    unsafe_allow_html=True,
-)
+_act_exp = st.expander(f"⚡  Act now — {reds} red · {ambers} amber outstanding", expanded=True)
 
 _arows = ""
 for k in queue:
@@ -609,12 +605,12 @@ for k in queue:
         f'</tr>'
     )
 if _arows:
-    st.markdown(
+    _act_exp.markdown(
         f'<div class="ts-card" style="padding:4px 6px"><table style="width:100%;border-collapse:collapse">{_arows}</table></div>',
         unsafe_allow_html=True,
     )
 if not queue:
-    st.success("🎉 Nothing outstanding — every KPI is under control.")
+    _act_exp.success("🎉 Nothing outstanding — every KPI is under control.")
 
 # ---------------------------------------------------------------------------
 # All KPIs by category
@@ -624,8 +620,8 @@ st.markdown("### 📊 All KPIs")
 ICONS = {"Orders & Fulfilment": "📦", "Customer Care": "💬", "Finance & Risk": "💷",
          "Email folders": "📧"}
 for cat in dict.fromkeys(k["cat"] for k in KPIS):
-    st.markdown(f"#### {ICONS.get(cat,'📊')} {cat}")
     cards = [k for k in KPIS if k["cat"] == cat]
+    _exp = st.expander(f"{ICONS.get(cat,'📊')}  {cat}", expanded=True)
 
     # Email folders render as one compact table (concise, fits on screen).
     if cat == "Email folders":
@@ -642,13 +638,13 @@ for cat in dict.fromkeys(k["cat"] for k in KPIS):
                 f'<td style="padding:7px 10px;text-align:right"><span class="ts-pill {s}">{LABEL[s]}</span></td>'
                 f'</tr>'
             )
-        st.markdown(
+        _exp.markdown(
             f'<div class="ts-card" style="padding:6px 8px"><table style="width:100%;border-collapse:collapse">{rows}</table></div>',
             unsafe_allow_html=True,
         )
         continue
 
-    cols = st.columns(3)
+    cols = _exp.columns(3)
     for i, k in enumerate(cards):
         s = status_of(k)
         with cols[i % 3]:
