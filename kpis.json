@@ -1,6 +1,6 @@
 {
-  "_comment": "Each KPI keeps its display policy here (category, thresholds, mood flag, action prompt, owner usernames). The LIVE count + oldest_age_days are pulled from the Monday 'Daily KPI Tracker' board (id 18416416116) by matching monday_item_id — see data_sources.py. If the Monday token isn't set, these saved numbers are used as a fallback. Status: green if count<=target; amber if count<=amber_max; red above. Age escalates status past age_amber / age_red. mood_impact=true feeds the customer-mood score.",
-  "updated": "2026-06-11 (Monday board snapshot)",
+  "_comment": "Live sources: Orders-board group counts + date split + subitem/status filters (Monday), Shopify disputes, and Outlook folder counts (Microsoft Graph, read+unread via folder totalItemCount). 'outlook' spec = {mailbox, folder} searched in the shared hello@ inbox. Thresholds drive the red/amber/green status; tell Claude any targets to change.",
+  "updated": "2026-06-19",
   "monday_board_id": 18416416116,
   "kpis": [
     {"id":"new_orders","name":"New orders to process","cat":"Orders & Fulfilment","owners":["natasha"],
@@ -19,12 +19,12 @@
      "action":"Chase suppliers for delivery dates; update customers still waiting."},
 
     {"id":"booked_overdue","name":"Booked — ETA in the past","cat":"Orders & Fulfilment","owners":["megan"],
-     "monday_item_id":12197543634,"source":"Monday · Booked, customer ETA in past","count":184,"oldest_age_days":14,
+     "monday_item_id":12197543634,"source":"Monday · Orders board (live)","count":184,"oldest_age_days":14,
      "target":0,"amber_max":3,"age_amber":2,"age_red":4,"mood_impact":true,
      "action":"These should have arrived — confirm delivery or re-book urgently."},
 
     {"id":"booked_future","name":"Booked — ETA today / future","cat":"Orders & Fulfilment","owners":["melissa"],
-     "monday_item_id":12197537697,"source":"Monday · Booked, ETA today or future","count":167,"oldest_age_days":0,
+     "monday_item_id":12197537697,"source":"Monday · Orders board (live)","count":167,"oldest_age_days":0,
      "target":9999,"amber_max":9999,"age_amber":99,"age_red":99,"mood_impact":false,"info":true,
      "action":"On track — monitor for any slipping into the overdue list."},
 
@@ -37,11 +37,6 @@
      "monday_item_id":12197543065,"orders_group_id":"new_group4381__1","source":"Monday · Orders board (live)","count":57,"oldest_age_days":78,
      "target":15,"amber_max":45,"age_amber":4,"age_red":7,"mood_impact":true,
      "action":"Follow up the oldest case today before it escalates further."},
-
-    {"id":"pre_delivery","name":"Pre-delivery queries","cat":"Customer Care","owners":["melissa"],
-     "monday_item_id":12197540926,"source":"Outlook · Pre-delivery order questions","count":11,"oldest_age_days":2,
-     "target":5,"amber_max":12,"age_amber":2,"age_red":4,"mood_impact":true,
-     "action":"Answer queries before dispatch to avoid cancellations."},
 
     {"id":"returns","name":"Accepted returns","cat":"Customer Care","owners":["megan"],
      "monday_item_id":12197570318,"orders_group_id":"group_mkpt9qpe","source":"Monday · Orders board (live)","count":8,"oldest_age_days":94,
@@ -63,9 +58,52 @@
      "target":10,"amber_max":30,"age_amber":4,"age_red":7,"mood_impact":false,
      "action":"Query the leading suppliers; this backlog is tying up cash."},
 
-    {"id":"quotes","name":"Outstanding quotes & new orders","cat":"Finance & Risk","owners":["malyeka"],
-     "monday_item_id":12197537782,"source":"Outlook · Quotes & new orders","count":10,"oldest_age_days":1,
-     "target":4,"amber_max":10,"age_amber":2,"age_red":4,"mood_impact":false,
-     "action":"Follow up quotes — these are sales waiting to be won."}
+    {"id":"quotes","name":"New orders & quotes","cat":"Email folders","owners":["malyeka"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"New Orders & Quotes"},
+     "source":"Outlook · New Orders & Quotes","count":10,"oldest_age_days":0,
+     "target":10,"amber_max":30,"age_amber":9999,"age_red":9999,"mood_impact":false,
+     "action":"Quote and reply to new enquiries."},
+
+    {"id":"supplier_etas","name":"Supplier ETAs","cat":"Email folders","owners":["malyeka"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Supplier ETAs"},
+     "source":"Outlook · Supplier ETAs","count":3,"oldest_age_days":0,
+     "target":15,"amber_max":50,"age_amber":9999,"age_red":9999,"mood_impact":false,
+     "action":"Log supplier ETAs against orders."},
+
+    {"id":"supplier_no_eta","name":"Supplier – No ETA","cat":"Email folders","owners":["natasha"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"No ETA"},
+     "source":"Outlook · Supplier – No ETA","count":0,"oldest_age_days":0,
+     "target":15,"amber_max":50,"age_amber":9999,"age_red":9999,"mood_impact":false,
+     "action":"Chase suppliers who haven’t given an ETA."},
+
+    {"id":"aftersales","name":"Aftersales","cat":"Email folders","owners":["megan"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Aftersales"},
+     "source":"Outlook · Aftersales","count":0,"oldest_age_days":0,
+     "target":10,"amber_max":40,"age_amber":9999,"age_red":9999,"mood_impact":true,
+     "action":"Work aftersales cases so customers aren’t left waiting."},
+
+    {"id":"return_requests","name":"Return requests","cat":"Email folders","owners":["megan"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Return Requests"},
+     "source":"Outlook · Return Requests","count":0,"oldest_age_days":0,
+     "target":10,"amber_max":40,"age_amber":9999,"age_red":9999,"mood_impact":false,
+     "action":"Process incoming return requests."},
+
+    {"id":"eta_chasers","name":"ETA chasers","cat":"Email folders","owners":["melissa"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"ETA Chasers"},
+     "source":"Outlook · ETA Chasers","count":0,"oldest_age_days":0,
+     "target":10,"amber_max":40,"age_amber":9999,"age_red":9999,"mood_impact":true,
+     "action":"Chase the ETAs customers are waiting on."},
+
+    {"id":"pre_delivery","name":"Pre-delivery questions","cat":"Email folders","owners":["melissa"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Pre-Delivery"},
+     "source":"Outlook · Pre-Delivery Order Questions","count":11,"oldest_age_days":0,
+     "target":5,"amber_max":20,"age_amber":9999,"age_red":9999,"mood_impact":true,
+     "action":"Answer pre-delivery questions before dispatch to avoid cancellations."},
+
+    {"id":"cancellations","name":"Cancellation requests","cat":"Email folders","owners":["natasha","melissa"],
+     "outlook":{"mailbox":"hello@tradesuperstoreonline.co.uk","folder":"Cancellation"},
+     "source":"Outlook · Cancellation Requests","count":0,"oldest_age_days":0,
+     "target":0,"amber_max":10,"age_amber":9999,"age_red":9999,"mood_impact":true,
+     "action":"Action cancellation requests quickly to limit refunds/chargebacks."}
   ]
 }

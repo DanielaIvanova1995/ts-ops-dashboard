@@ -349,3 +349,67 @@ def fetch_booked_split(board_id: int, group_id: str, date_col: str, today,
             future += 1  # today, future, or no ETA set
     return {"overdue": {"count": overdue, "age": max(overdue_ages) if overdue_ages else 0},
             "future": {"count": future, "age": 0}}
+
+
+# ---------------------------------------------------------------------------
+# Microsoft 365 / Outlook — count items in a mail folder (read + unread) via
+# Microsoft Graph, app-only client credentials. Needs MS_TENANT_ID /
+# MS_CLIENT_ID / MS_CLIENT_SECRET in Secrets, with Mail.Read (admin-consented).
+# ---------------------------------------------------------------------------
+GRAPH = "https://graph.microsoft.com/v1.0"
+
+
+def ms_token() -> str:
+    tenant = get_secret("MS_TENANT_ID")
+    client = get_secret("MS_CLIENT_ID")
+    secret = get_secret("MS_CLIENT_SECRET")
+    if not (tenant and client and secret):
+        raise RuntimeError("Microsoft 365 not configured (MS_TENANT_ID / MS_CLIENT_ID / MS_CLIENT_SECRET)")
+    r = requests.post(
+        f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        data={"grant_type": "client_credentials", "client_id": client,
+              "client_secret": secret, "scope": "https://graph.microsoft.com/.default"},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def _graph_children(mailbox: str, folder_id: str | None, token: str) -> list:
+    url = (f"{GRAPH}/users/{mailbox}/mailFolders/{folder_id}/childFolders" if folder_id
+           else f"{GRAPH}/users/{mailbox}/mailFolders")
+    params = {"$top": "100", "$select": "id,displayName,childFolderCount,totalItemCount,unreadItemCount"}
+    out: list = []
+    while url:
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=20)
+        r.raise_for_status()
+        j = r.json()
+        out += j.get("value", [])
+        url = j.get("@odata.nextLink")
+        params = None
+    return out
+
+
+def fetch_outlook_folder_count(mailbox: str, folder_name: str, token: str | None = None) -> dict:
+    """Recursively search a mailbox's folders for one whose name matches
+    folder_name (exact preferred, else contains) and return its total item
+    count (read + unread) plus unread. Raises if not found / not configured."""
+    token = token or ms_token()
+    target = folder_name.strip().lower()
+    queue = _graph_children(mailbox, None, token)
+    contains_match = None
+    visited = 0
+    while queue and visited < 800:
+        visited += 1
+        f = queue.pop(0)
+        nm = (f.get("displayName") or "").strip().lower()
+        if nm == target:
+            return {"count": f.get("totalItemCount", 0), "unread": f.get("unreadItemCount", 0)}
+        if contains_match is None and target in nm:
+            contains_match = f
+        if f.get("childFolderCount", 0) > 0:
+            queue += _graph_children(mailbox, f["id"], token)
+    if contains_match:
+        return {"count": contains_match.get("totalItemCount", 0),
+                "unread": contains_match.get("unreadItemCount", 0)}
+    raise RuntimeError(f"Folder matching '{folder_name}' not found in {mailbox}")

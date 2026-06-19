@@ -356,6 +356,25 @@ def load_kpis() -> dict:
     except Exception as e:  # noqa: BLE001
         data["complaints_error"] = str(e)
 
+    # Outlook folders (read + unread) via Microsoft Graph.
+    outlook_kpis = [k for k in data["kpis"] if k.get("outlook")]
+    if outlook_kpis:
+        try:
+            tok = data_sources.ms_token()
+            data["outlook_live"] = True
+        except Exception as e:  # noqa: BLE001 — M365 not configured / unreachable
+            tok = None
+            data["outlook_error"] = str(e)
+        if tok:
+            for k in outlook_kpis:
+                try:
+                    spec = k["outlook"]
+                    res = data_sources.fetch_outlook_folder_count(spec["mailbox"], spec["folder"], token=tok)
+                    k["count"], k["oldest_age_days"] = res["count"], 0
+                    k["unread"] = res["unread"]
+                except Exception as e:  # noqa: BLE001 — folder not found etc.
+                    k["folder_error"] = str(e)
+
     # Chargebacks straight from Shopify (overrides the Monday-mirrored figure).
     try:
         cb = data_sources.fetch_shopify_chargebacks()
@@ -407,6 +426,12 @@ with st.sidebar:
         st.caption("💳 Chargebacks: live from Shopify")
     elif data.get("shopify_error"):
         st.caption("💳 Chargebacks: via Monday")
+    if data.get("outlook_live"):
+        st.caption("📧 Email folders: live from Outlook")
+    elif data.get("outlook_error"):
+        st.caption("📧 Email folders: not connected")
+        with st.expander("Why not Outlook?"):
+            st.caption(data["outlook_error"][:400])
         with st.expander("Why not Shopify?"):
             st.caption(data["shopify_error"][:400])
     st.caption(f"🔄 Updated: {data.get('updated','—')}")
@@ -592,10 +617,33 @@ if not queue:
 # ---------------------------------------------------------------------------
 st.write("")
 st.markdown("### 📊 All KPIs")
-ICONS = {"Orders & Fulfilment": "📦", "Customer Care": "💬", "Finance & Risk": "💷"}
+ICONS = {"Orders & Fulfilment": "📦", "Customer Care": "💬", "Finance & Risk": "💷",
+         "Email folders": "📧"}
 for cat in dict.fromkeys(k["cat"] for k in KPIS):
     st.markdown(f"#### {ICONS.get(cat,'📊')} {cat}")
     cards = [k for k in KPIS if k["cat"] == cat]
+
+    # Email folders render as one compact table (concise, fits on screen).
+    if cat == "Email folders":
+        rows = ""
+        for k in sorted(cards, key=lambda x: SEV[status_of(x)]):
+            s = status_of(k)
+            unread = f" · {k['unread']} unread" if k.get("unread") else ""
+            err = " ⚠️ folder not found" if k.get("folder_error") else ""
+            rows += (
+                f'<tr style="border-top:1px solid var(--line)">'
+                f'<td style="padding:7px 10px"><b>{k["name"]}</b><div style="color:var(--muted);font-size:11px">{display_owners(k)}{err}</div></td>'
+                f'<td style="padding:7px 10px;text-align:right;font-weight:800;font-size:18px;color:{COL[s]}">{k["count"]}'
+                f'<div style="color:var(--muted);font-size:11px;font-weight:400">aim ≤ {k["target"]}{unread}</div></td>'
+                f'<td style="padding:7px 10px;text-align:right"><span class="ts-pill {s}">{LABEL[s]}</span></td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<div class="ts-card" style="padding:6px 8px"><table style="width:100%;border-collapse:collapse">{rows}</table></div>',
+            unsafe_allow_html=True,
+        )
+        continue
+
     cols = st.columns(3)
     for i, k in enumerate(cards):
         s = status_of(k)
