@@ -313,6 +313,47 @@ def fetch_board_activity(board_id: int, from_iso: str, to_iso: str,
     return out
 
 
+def fetch_group_names(board_id: int, token: str | None = None) -> dict:
+    """{group_id: title} for a board's groups. {} on failure."""
+    token = token or get_token()
+    if not token:
+        return {}
+    try:
+        r = requests.post(
+            MONDAY_API,
+            json={"query": "query($b:[ID!]){boards(ids:$b){groups{id title}}}",
+                  "variables": {"b": [str(board_id)]}},
+            headers={"Authorization": token, "API-Version": "2024-10"}, timeout=20,
+        )
+        r.raise_for_status()
+        boards = r.json().get("data", {}).get("boards", [])
+        return {g["id"]: g["title"] for g in (boards[0]["groups"] if boards else [])}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def fetch_user_names(ids: list, token: str | None = None) -> dict:
+    """{user_id(str): name} for the given Monday user ids. {} on failure."""
+    ids = [str(i) for i in ids if str(i).isdigit()]
+    if not ids:
+        return {}
+    token = token or get_token()
+    if not token:
+        return {}
+    try:
+        r = requests.post(
+            MONDAY_API,
+            json={"query": "query($ids:[ID!]){users(ids:$ids){id name}}",
+                  "variables": {"ids": ids}},
+            headers={"Authorization": token, "API-Version": "2024-10"}, timeout=20,
+        )
+        r.raise_for_status()
+        users = r.json().get("data", {}).get("users", []) or []
+        return {str(u["id"]): u["name"] for u in users}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def fetch_orders_group_counts(group_map: dict, token: str | None = None,
                               board_id: int = ORDERS_BOARD_ID) -> dict:
     """group_map = {kpi_id: orders_group_id}. Returns {kpi_id: {count, age}}

@@ -17,7 +17,7 @@ Deploy free:   push this folder to GitHub → share.streamlit.io → New app.
 
 import base64
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -537,6 +537,164 @@ def _hl(text, ql):
         + _h.escape(t[i:i + len(ql)]) + "</mark>" + _h.escape(t[i + len(ql):])
 
 
+# ---------------------------------------------------------------------------
+# Monday boards + the people behind each account id. Shared by the live
+# leaderboard and the Daily Activity page.
+# ---------------------------------------------------------------------------
+ORDERS_BOARD = 1786542990
+SUBITEMS_BOARD = 3547638043
+MONDAY_USERS = {  # Monday account id → dashboard username
+    "39640612": "natasha", "25324062": "megan", "72043860": "melissa",
+    "100183278": "malyeka", "25296593": "daniela",
+}
+
+
+def _activity_change(event: str, dd: dict, group_names: dict) -> str:
+    """Human-readable summary of one Monday activity entry."""
+    if event == "create_pulse":
+        return "created"
+    if event == "delete_pulse":
+        return "deleted"
+    if event == "move_pulse_from_group":
+        dest = dd.get("dest_group")
+        title = dest.get("title") if isinstance(dest, dict) else group_names.get(dest)
+        title = (title or "another group").split(" (")[0].strip()  # drop long notes
+        return f"moved → {title}"
+    ct = dd.get("column_title") or dd.get("column_id") or "a field"
+    val = dd.get("value")
+    if isinstance(val, dict):
+        lv = val.get("label")
+        if isinstance(lv, dict) and lv.get("text"):
+            return f"{ct} → {lv['text']}"
+        if isinstance(lv, str) and lv:
+            return f"{ct} → {lv}"
+        if val.get("files"):
+            return f"{ct} added"
+        if val.get("date"):
+            return f"{ct}: {val['date']}"
+        v = val.get("value")
+        if isinstance(v, (int, float)):
+            return f"{ct}: {v}"
+        if val.get("text"):
+            return f"{ct}: {str(val['text'])[:40]}"
+        if "linkedPulseIds" in val:
+            return f"{ct} linked"
+    return ct
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def daily_activity(day_iso: str):
+    """Per-person 'who did what' on the given YYYY-MM-DD (UK day), across the
+    Orders board and its subitems. Returns {people, auto_changes, error}.
+    Cached 30 min."""
+    try:
+        y, mo, d = (int(x) for x in day_iso.split("-"))
+        start = datetime(y, mo, d, tzinfo=UK_TZ)
+        f_iso = start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+        t_iso = (start + timedelta(days=1)).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+        logs = []
+        for bid, is_sub in ((ORDERS_BOARD, False), (SUBITEMS_BOARD, True)):
+            for ev in data_sources.fetch_board_activity(bid, f_iso, t_iso):
+                ev["_sub"] = is_sub
+                logs.append(ev)
+    except Exception as e:  # noqa: BLE001
+        return {"people": [], "auto_changes": 0, "error": str(e)}
+
+    group_names = {}  # dest_group already carries its title in the activity data
+    cfg = config["credentials"]["usernames"]
+    ids = {str(ev.get("user_id")) for ev in logs}
+    unknown = [i for i in ids if i.isdigit() and i not in MONDAY_USERS]
+    extra = data_sources.fetch_user_names(unknown) if unknown else {}
+
+    def who(uid):
+        uid = str(uid)
+        un = MONDAY_USERS.get(uid)
+        if un:
+            return cfg.get(un, {}).get("name", un)
+        return extra.get(uid)
+
+    people: dict = {}
+    auto = 0
+    for ev in logs:
+        nm = who(ev.get("user_id"))
+        if not nm:  # automation / system actor
+            auto += 1
+            continue
+        try:
+            dd = json.loads(ev.get("data") or "{}")
+        except Exception:  # noqa: BLE001
+            continue
+        pid = dd.get("pulse_id")
+        pname = dd.get("pulse_name")
+        if not pname and isinstance(dd.get("pulse"), dict):
+            pname = dd["pulse"].get("name")  # move events carry the order no. here
+        pname = str(pname or pid or "?")
+        change = _activity_change(ev.get("event"), dd, group_names)
+        it = people.setdefault(nm, {}).setdefault(
+            pid, {"name": pname, "sub": ev.get("_sub", False), "changes": []})
+        if change not in it["changes"]:
+            it["changes"].append(change)
+
+    out = []
+    for nm, items in people.items():
+        ilist = list(items.values())
+        ilist.sort(key=lambda i: (i["sub"], i["name"]))
+        out.append({"name": nm, "n_items": len(ilist),
+                    "n_changes": sum(len(i["changes"]) for i in ilist), "items": ilist})
+    out.sort(key=lambda p: p["n_changes"], reverse=True)
+    return {"people": out, "auto_changes": auto, "error": None}
+
+
+def render_daily_activity():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Daily Activity</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    sel = st.date_input("Day", value=now_uk().date(), max_value=now_uk().date(),
+                        format="DD/MM/YYYY")
+    res = daily_activity(sel.isoformat())
+    if res.get("error"):
+        st.warning("Couldn't read Monday activity: " + str(res["error"])[:200])
+        return
+    people = res["people"]
+    label = "today" if sel == now_uk().date() else sel.strftime("%d %b %Y")
+    if not people:
+        st.info(f"No team activity recorded {label}.")
+        return
+
+    total_items = sum(p["n_items"] for p in people)
+    st.caption(f"{len(people)} people active {label} · {total_items} items touched")
+    CAP = 80
+    for idx, p in enumerate(people):
+        with st.expander(f'{p["name"]} — {p["n_items"]} items · {p["n_changes"]} changes',
+                         expanded=(idx == 0)):
+            rows = []
+            for it in p["items"][:CAP]:
+                tag = ('<span style="background:#eef2f7;color:#64748b;border-radius:3px;'
+                       'padding:0 5px;font-size:10px;margin-left:5px">subitem</span>'
+                       if it["sub"] else "")
+                label_i = ("Inv " if it["sub"] else "#") + it["name"]
+                rows.append(
+                    f'<tr style="border-top:1px solid var(--line)">'
+                    f'<td style="padding:6px 10px;white-space:nowrap;vertical-align:top">'
+                    f'<b>{label_i}</b>{tag}</td>'
+                    f'<td style="padding:6px 10px;color:#334155">{"; ".join(it["changes"])}</td></tr>')
+            more = len(p["items"]) - CAP
+            more_row = (f'<tr><td colspan="2" style="padding:6px 10px;color:var(--muted)">'
+                        f'+{more} more items…</td></tr>' if more > 0 else "")
+            st.markdown(
+                '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+                '<tr style="text-align:left;color:var(--muted)">'
+                '<th style="padding:6px 10px">Item</th>'
+                '<th style="padding:6px 10px">What changed</th></tr>'
+                + "".join(rows) + more_row + "</table>",
+                unsafe_allow_html=True,
+            )
+    if res["auto_changes"]:
+        st.caption(f'+ {res["auto_changes"]} automated / system changes (not shown)')
+
+
 def render_product_search():
     """Instant, as-you-type product search (in-browser iframe): substring match
     on SKU/name with the typed text highlighted, every supplier (cheapest
@@ -698,7 +856,7 @@ with st.sidebar:
     # --- Menu ---
     if "module" not in st.session_state:
         st.session_state.module = "Daily Ops"
-    for _m in ("Daily Ops", "Pricing"):
+    for _m in ("Daily Ops", "Daily Activity", "Pricing"):
         if st.button(_m, key=f"nav_{_m}", use_container_width=True,
                      type=("primary" if st.session_state.module == _m else "secondary")):
             st.session_state.module = _m
@@ -739,6 +897,10 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 if module == "Pricing":
     render_pricing()
+    st.stop()
+
+if module == "Daily Activity":
+    render_daily_activity()
     st.stop()
 
 # ---------------------------------------------------------------------------
@@ -857,11 +1019,6 @@ def kind_words_cached():
 # throughput: each lane goes to whoever did the most of that work TODAY (status
 # changes attributed to the person who made them). Distinct people, busiest
 # first. Falls back to the workload board if Monday is unreachable.
-LEADERBOARD_BOARD = 1786542990  # Orders board
-MONDAY_USERS = {  # Monday account id → dashboard username
-    "39640612": "natasha", "25324062": "megan", "72043860": "melissa",
-    "100183278": "malyeka", "25296593": "daniela",
-}
 # (badge, column_id(s), allowed target labels or None = any change to the column)
 LEADERBOARD_LANES = [
     ("📦 Delivery Dynamo", "color_mktyhmf3",
@@ -886,7 +1043,7 @@ def leaderboard_today():
         start = now_uk().replace(hour=0, minute=0, second=0, microsecond=0)
         f_iso = start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
         t_iso = now_uk().astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
-        logs = data_sources.fetch_board_activity(LEADERBOARD_BOARD, f_iso, t_iso)
+        logs = data_sources.fetch_board_activity(ORDERS_BOARD, f_iso, t_iso)
     except Exception:  # noqa: BLE001 — Monday down / not configured → caller falls back
         return None
 
