@@ -75,8 +75,8 @@ CSS = """
   h1,h2,h3,h4 {color:var(--ink);}
   /* Brand header bar */
   .ts-brandbar {display:flex; align-items:center; gap:16px; background:var(--card);
-     border:1px solid var(--line); border-radius:16px; padding:14px 20px; margin-bottom:18px;
-     box-shadow:0 1px 3px rgba(16,24,40,.06); border-top:4px solid var(--brand);}
+     border:1px solid var(--line); border-radius:4px; padding:14px 20px; margin-bottom:16px;
+     border-top:3px solid var(--brand);}
   .ts-brandbar img {height:42px; width:auto;}
   .ts-brandbar .wm {font-family:'Bebas Neue',sans-serif; font-size:42px; line-height:1;
      letter-spacing:1px; text-transform:uppercase; color:var(--ink);}
@@ -84,18 +84,21 @@ CSS = """
   .ts-brandbar .sct {margin-left:auto; font-size:12px; color:var(--muted); text-align:right;}
   .ts-brandbar .sct b {color:var(--ink);}
   /* Cards */
-  .ts-card {background:var(--card); border:1px solid var(--line); border-radius:16px;
-     padding:16px 18px; box-shadow:0 1px 3px rgba(16,24,40,.06); height:100%;}
-  .ts-card.kpi {border-left:5px solid var(--muted);}
+  .ts-card {background:var(--card); border:1px solid var(--line); border-radius:4px;
+     padding:16px 18px; height:100%;}
+  .ts-card.kpi {border-left:3px solid var(--muted);}
+  /* Table cards: table sits flush to the edges, corners clipped → slick + uniform */
+  .ts-tbl {padding:0 !important; overflow:hidden;}
+  .ts-tbl table {width:100%; border-collapse:collapse;}
   .ts-eyebrow {font-size:11px; letter-spacing:.1em; text-transform:uppercase;
      color:var(--muted); margin:0 0 8px; font-weight:700;}
   .ts-num {font-size:30px; font-weight:800; line-height:1;}
   .ts-name {font-weight:700; font-size:14px; line-height:1.25; color:var(--ink);}
   .ts-meta {color:var(--muted); font-size:12px; margin-top:6px;}
   .ts-prompt {font-size:12.5px; color:#374151; margin-top:9px; padding-top:9px;
-     border-top:1px dashed var(--line);}
-  .ts-pill {display:inline-block; font-size:11px; font-weight:700; padding:3px 9px;
-     border-radius:999px; letter-spacing:.03em;}
+     border-top:1px solid var(--line);}
+  .ts-pill {display:inline-block; font-size:11px; font-weight:700; padding:3px 8px;
+     border-radius:3px; letter-spacing:.03em;}
   .red  {color:var(--red);   background:var(--red-bg);}
   .amber{color:var(--gold);  background:var(--gold-bg);}
   .green{color:var(--green); background:var(--green-bg);}
@@ -106,15 +109,15 @@ CSS = """
   .stripe-blue{border-left-color:var(--blue) !important;}
   .mood-face {font-size:52px; line-height:1;}
   .mood-label{font-size:26px; font-weight:800; margin:0;}
-  .bar {height:12px; background:#EEF0F3; border-radius:7px; overflow:hidden;}
-  .bar > span {display:block; height:100%; border-radius:7px;}
+  .bar {height:10px; background:#EEF0F3; border-radius:2px; overflow:hidden;}
+  .bar > span {display:block; height:100%; border-radius:2px;}
   .ts-action {display:flex; justify-content:space-between; align-items:center; gap:14px;
-     background:var(--card); border:1px solid var(--line); border-left-width:6px;
-     border-radius:12px; padding:12px 16px; margin-bottom:10px; box-shadow:0 1px 2px rgba(16,24,40,.05);}
+     background:var(--card); border:1px solid var(--line); border-left-width:4px;
+     border-radius:4px; padding:12px 16px; margin-bottom:8px;}
   .ts-action .big {font-size:24px; font-weight:800; line-height:1; text-align:right;}
   .mine {box-shadow:0 0 0 2px rgba(242,106,33,.45);}
   .yourbadge{font-size:10px; font-weight:800; color:#fff; background:var(--brand);
-     padding:2px 8px; border-radius:999px; margin-left:8px; letter-spacing:.03em;}
+     padding:2px 7px; border-radius:3px; margin-left:8px; letter-spacing:.03em;}
   /* Login */
   .ts-login {display:flex; align-items:center; gap:22px; text-align:left; margin:8px 0 18px;}
   .ts-login img {height:120px; width:auto;}
@@ -130,7 +133,7 @@ CSS = """
   .ts-mod.active {background:rgba(242,106,33,.10); border-color:rgba(242,106,33,.35); color:var(--brand-dark);}
   .ts-mod.soon {color:#9CA3AF; border-style:dashed;}
   /* Streamlit buttons → brand */
-  .stButton>button {border-radius:10px; border:1px solid var(--line); font-weight:600;}
+  .stButton>button {border-radius:4px; border:1px solid var(--line); font-weight:600;}
   /* Sidebar menu: left-aligned, menu-like */
   [data-testid="stSidebar"] .stButton>button {justify-content:flex-start; text-align:left;}
   /* Collapsible section titles → look like real titles */
@@ -139,7 +142,7 @@ CSS = """
   [data-testid="stExpander"] summary {font-weight:700;}
   /* Bordered text inputs (login + elsewhere) */
   .stTextInput div[data-baseweb="input"]{border:1px solid #C3C9D4 !important;
-     border-radius:8px !important; background:#fff !important;}
+     border-radius:4px !important; background:#fff !important;}
   .stTextInput div[data-baseweb="input"]:focus-within{border-color:var(--brand) !important;
      box-shadow:0 0 0 2px rgba(242,106,33,.15) !important;}
 </style>
@@ -470,15 +473,15 @@ def _search_payload():
 _SEARCH_WIDGET = """
 <style>
   *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
-  #q{width:100%;padding:11px 14px;font-size:15px;border:1px solid #C3C9D4;border-radius:10px;outline:none;}
+  #q{width:100%;padding:11px 14px;font-size:15px;border:1px solid #C3C9D4;border-radius:4px;outline:none;}
   #q:focus{border-color:#F26A21;box-shadow:0 0 0 2px rgba(242,106,33,.15);}
   #cnt{color:#6B7280;font-size:12px;margin:8px 2px;}
-  .card{display:flex;gap:16px;align-items:flex-start;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:12px 16px;margin-bottom:10px;}
+  .card{display:flex;gap:16px;align-items:flex-start;background:#fff;border:1px solid #E5E7EB;border-radius:4px;padding:12px 16px;margin-bottom:8px;}
   .L{flex:1;min-width:0;}.R{text-align:right;min-width:120px;}
   .sku{font-weight:700;color:#21242B;font-size:14px;}.nm{color:#6B7280;font-weight:400;font-size:13px;}
   table{margin-top:6px;border-collapse:collapse;font-size:13px;}td{padding:3px 10px 3px 0;}
   .big{font-size:28px;font-weight:800;line-height:1;}.mg{font-size:14px;font-weight:700;}
-  .badge{display:inline-block;margin-top:6px;font-size:10px;font-weight:800;padding:3px 9px;border-radius:999px;}
+  .badge{display:inline-block;margin-top:6px;font-size:10px;font-weight:800;padding:3px 8px;border-radius:3px;}
   .sell{color:#15803d;background:#dcfce7;}.no{color:#dc2626;background:#fee2e2;}
   .save{font-size:12px;color:#374151;margin-top:4px;}
   mark{background:#ffe0c7;color:#b3460f;border-radius:3px;padding:0 1px;}
@@ -491,9 +494,10 @@ const q=document.getElementById('q'),out=document.getElementById('out'),cnt=docu
 function esc(s){return (s==null?'':(''+s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function hl(t,ql){t=t==null?'':''+t;const i=t.toLowerCase().indexOf(ql);if(i<0)return esc(t);return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+ql.length))+'</mark>'+esc(t.slice(i+ql.length));}
 function mcol(m){return (m==null||m<=0)?'#dc2626':(m<20?'#c9870a':'#15803d');}
+function fit(){try{var h=document.documentElement.scrollHeight;var f=window.frameElement;if(f){f.style.height=h+'px';if(f.parentElement&&f.parentElement.style)f.parentElement.style.height=h+'px';}}catch(e){}}
 function render(){
   const ql=q.value.trim().toLowerCase();
-  if(!ql){out.innerHTML='';cnt.textContent='';return;}
+  if(!ql){out.innerHTML='';cnt.textContent='';fit();return;}
   const res=[];
   for(let k=0;k<ITEMS.length;k++){const it=ITEMS[k];if(it[0].toLowerCase().indexOf(ql)>=0||(it[1]||'').toLowerCase().indexOf(ql)>=0){res.push(it);if(res.length>=60)break;}}
   cnt.textContent=res.length?(res.length+(res.length>=60?'+':'')+' result'+(res.length===1?'':'s')):'No matches';
@@ -505,9 +509,11 @@ function render(){
     const price=matched?('<div class="big" style="color:#15803d">\\u00A3'+sell+'</div><div class="mg" style="color:'+mcol(margin)+'">'+margin+'% margin</div><span class="badge sell">WE SELL</span>'):('<div class="big" style="color:#dc2626;font-size:18px">NOT SOLD</div><span class="badge no">not on Shopify</span>');
     return '<div class="card"><div class="L"><div class="sku">'+hl(sku,ql)+' <span class="nm">'+hl(name,ql)+'</span></div><table>'+sup+'</table>'+save+'</div><div class="R">'+price+'</div></div>';
   }).join('');
+  fit();
 }
 q.addEventListener('input',render);
-setTimeout(function(){q.focus();},150);
+window.addEventListener('resize',fit);
+setTimeout(function(){q.focus();fit();},150);
 </script>
 """
 
@@ -521,7 +527,7 @@ def render_product_search():
     if not payload:
         st.info("Product lookup data not loaded yet.")
         return
-    components.html(_SEARCH_WIDGET.replace("__DATA__", payload), height=560, scrolling=True)
+    components.html(_SEARCH_WIDGET.replace("__DATA__", payload), height=92, scrolling=False)
     st.caption("Type any part of a SKU or name — results appear instantly. "
                "Prices from the latest daily refresh.")
 
@@ -535,7 +541,7 @@ def _mcol(m) -> str:
 
 
 def _ptable(header_cells: str, body_rows: str, note: str = "") -> str:
-    return (f'<div class="ts-card" style="padding:4px 6px"><table style="width:100%;border-collapse:collapse">'
+    return (f'<div class="ts-card ts-tbl"><table style="width:100%;border-collapse:collapse">'
             f'<tr style="text-align:left;color:var(--muted);font-size:11px">{header_cells}</tr>'
             f'{body_rows}</table>{note}</div>')
 
@@ -844,7 +850,7 @@ for k in queue:
     )
 if _arows:
     _act_exp.markdown(
-        f'<div class="ts-card" style="padding:4px 6px"><table style="width:100%;border-collapse:collapse">{_arows}</table></div>',
+        f'<div class="ts-card ts-tbl"><table style="width:100%;border-collapse:collapse">{_arows}</table></div>',
         unsafe_allow_html=True,
     )
 if not queue:
@@ -877,7 +883,7 @@ for cat in dict.fromkeys(k["cat"] for k in KPIS):
                 f'</tr>'
             )
         _exp.markdown(
-            f'<div class="ts-card" style="padding:6px 8px"><table style="width:100%;border-collapse:collapse">{rows}</table></div>',
+            f'<div class="ts-card ts-tbl"><table style="width:100%;border-collapse:collapse">{rows}</table></div>',
             unsafe_allow_html=True,
         )
         continue
