@@ -474,6 +474,7 @@ def _search_payload():
 _SEARCH_WIDGET = """
 <style>
   *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  html,body{margin:0;padding:0;}
   #q{width:100%;padding:11px 14px;font-size:15px;border:1px solid #C3C9D4;border-radius:4px;outline:none;}
   #q:focus{border-color:#F26A21;box-shadow:0 0 0 2px rgba(242,106,33,.15);}
   #cnt{color:#6B7280;font-size:12px;margin:8px 2px;}
@@ -495,10 +496,11 @@ const q=document.getElementById('q'),out=document.getElementById('out'),cnt=docu
 function esc(s){return (s==null?'':(''+s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function hl(t,ql){t=t==null?'':''+t;const i=t.toLowerCase().indexOf(ql);if(i<0)return esc(t);return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+ql.length))+'</mark>'+esc(t.slice(i+ql.length));}
 function mcol(m){return (m==null||m<=0)?'#dc2626':(m<20?'#c9870a':'#15803d');}
-function fit(){try{var h=document.documentElement.scrollHeight;var f=window.frameElement;if(f){f.style.height=h+'px';if(f.parentElement&&f.parentElement.style)f.parentElement.style.height=h+'px';}}catch(e){}}
+function setH(h){try{var f=window.frameElement;if(f){f.style.height=h+'px';if(f.parentElement&&f.parentElement.style)f.parentElement.style.height=h+'px';}}catch(e){}}
+function fit(){setH(document.documentElement.scrollHeight);}
 function render(){
   const ql=q.value.trim().toLowerCase();
-  if(!ql){out.innerHTML='';cnt.textContent='';fit();return;}
+  if(!ql){out.innerHTML='';cnt.textContent='';setH(50);return;}
   const res=[];
   for(let k=0;k<ITEMS.length;k++){const it=ITEMS[k];if(it[0].toLowerCase().indexOf(ql)>=0||(it[1]||'').toLowerCase().indexOf(ql)>=0){res.push(it);if(res.length>=60)break;}}
   cnt.textContent=res.length?(res.length+(res.length>=60?'+':'')+' result'+(res.length===1?'':'s')):'No matches';
@@ -514,7 +516,7 @@ function render(){
 }
 q.addEventListener('input',render);
 window.addEventListener('resize',fit);
-setTimeout(function(){q.focus();fit();},150);
+setTimeout(function(){q.focus();render();},150);
 </script>
 """
 
@@ -528,7 +530,7 @@ def render_product_search():
     if not payload:
         st.info("Product lookup data not loaded yet.")
         return
-    components.html(_SEARCH_WIDGET.replace("__DATA__", payload), height=92, scrolling=False)
+    components.html(_SEARCH_WIDGET.replace("__DATA__", payload), height=50, scrolling=False)
     st.caption("Type any part of a SKU or name — results appear instantly. "
                "Prices from the latest daily refresh.")
 
