@@ -390,22 +390,28 @@ def _graph_children(mailbox: str, folder_id: str | None, token: str) -> list:
     return out
 
 
+def _norm(s: str) -> str:
+    """Lowercase, keep only letters/digits — so 'Megan - After Sales' and
+    'Aftersales' match regardless of spaces, dashes or punctuation."""
+    return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+
+
 def fetch_outlook_folder_count(mailbox: str, folder_name: str, token: str | None = None) -> dict:
-    """Recursively search a mailbox's folders for one whose name matches
-    folder_name (exact preferred, else contains) and return its total item
-    count (read + unread) plus unread. Raises if not found / not configured."""
+    """Recursively search a mailbox's folders for one whose (normalised) name
+    matches folder_name (exact preferred, else contains) and return its total
+    item count (read + unread) plus unread. Raises if not found / not configured."""
     token = token or ms_token()
-    target = folder_name.strip().lower()
+    target = _norm(folder_name)
     queue = _graph_children(mailbox, None, token)
     contains_match = None
     visited = 0
     while queue and visited < 800:
         visited += 1
         f = queue.pop(0)
-        nm = (f.get("displayName") or "").strip().lower()
+        nm = _norm(f.get("displayName"))
         if nm == target:
             return {"count": f.get("totalItemCount", 0), "unread": f.get("unreadItemCount", 0)}
-        if contains_match is None and target in nm:
+        if contains_match is None and target and target in nm:
             contains_match = f
         if f.get("childFolderCount", 0) > 0:
             queue += _graph_children(mailbox, f["id"], token)
