@@ -405,6 +405,114 @@ def load_kpis() -> dict:
 data = load_kpis()
 KPIS = data["kpis"]
 
+
+# ---------------------------------------------------------------------------
+# Pricing module — reads the compact pricing_summary.json produced by the
+# daily supplier-pricing refresh (loss warnings, supplier margins, multi-supplier).
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=600)
+def load_pricing():
+    path = BASE / "pricing_summary.json"
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _mcol(m) -> str:
+    if m is None or m <= 0:
+        return "#dc2626"   # loss
+    if m < 20:
+        return "#c9870a"   # below target
+    return "#15803d"       # healthy
+
+
+def _ptable(header_cells: str, body_rows: str, note: str = "") -> str:
+    return (f'<div class="ts-card" style="padding:4px 6px"><table style="width:100%;border-collapse:collapse">'
+            f'<tr style="text-align:left;color:var(--muted);font-size:11px">{header_cells}</tr>'
+            f'{body_rows}</table>{note}</div>')
+
+
+def render_pricing():
+    p = load_pricing()
+    st.markdown(
+        f"""<div class="ts-brandbar">{_logo_img}<span class="wm">Trade<b>Hub</b></span>
+        <span class="sct"><b>Pricing</b> · supplier margins<br>{('updated '+p['generated_at']) if p else 'no data yet'}</span></div>""",
+        unsafe_allow_html=True,
+    )
+    if not p:
+        st.warning("No pricing data yet. Run the supplier-pricing refresh to create "
+                   "`pricing_summary.json`, push it, and it'll appear here.")
+        return
+
+    k = p["kpis"]
+    st.markdown("### 💷 Supplier pricing")
+    cards = [("Loss-making", k["losses"], k["losses"] > 0),
+             ("Below target", f"{k['below_target']:,}", False),
+             ("Multi-supplier", k["multi"], False),
+             ("SKUs matched", f"{k['matched']:,}", False),
+             ("Total SKUs", f"{k['total']:,}", False)]
+    for col, (label, val, bad) in zip(st.columns(5), cards):
+        col.markdown(
+            f'<div class="ts-card" style="text-align:center;padding:12px 8px">'
+            f'<div class="ts-eyebrow">{label}</div>'
+            f'<div style="font-size:26px;font-weight:800;color:{"#dc2626" if bad else "#21242B"}">{val}</div></div>',
+            unsafe_allow_html=True)
+    st.write("")
+
+    # Loss warnings
+    lr = "".join(
+        f'<tr style="border-top:1px solid var(--line)">'
+        f'<td style="padding:6px 10px"><b>{r["sku"]}</b>'
+        f'<div style="color:var(--muted);font-size:11px">{(r.get("name") or "")[:55]}</div></td>'
+        f'<td style="padding:6px 10px;font-size:12px">{r.get("cheapest_supplier") or ""}</td>'
+        f'<td style="padding:6px 10px;text-align:right">£{r.get("cheapest_cost")}</td>'
+        f'<td style="padding:6px 10px;text-align:right">£{r.get("sell")}</td>'
+        f'<td style="padding:6px 10px;text-align:right;font-weight:800;color:{_mcol(r.get("margin_pct"))}">'
+        f'{r.get("margin_pct") if r.get("margin_pct") is not None else "—"}%</td></tr>'
+        for r in p["losses"])
+    with st.expander(f"🔴  Loss warnings — {len(p['losses'])} SKUs at/below cost", expanded=True):
+        st.markdown(_ptable(
+            '<th style="padding:4px 10px">SKU / product</th><th style="padding:4px 10px">Cheapest supplier</th>'
+            '<th style="padding:4px 10px;text-align:right">Cost</th><th style="padding:4px 10px;text-align:right">Sell</th>'
+            '<th style="padding:4px 10px;text-align:right">Margin</th>', lr), unsafe_allow_html=True)
+
+    # Supplier margins
+    sr = "".join(
+        f'<tr style="border-top:1px solid var(--line)">'
+        f'<td style="padding:6px 10px"><b>{s["supplier"]}</b>'
+        f'<div style="color:var(--muted);font-size:11px">{s.get("pricelist_date") or "no date"}</div></td>'
+        f'<td style="padding:6px 10px;text-align:right">{s.get("skus_sold"):,}</td>'
+        f'<td style="padding:6px 10px;text-align:right;font-weight:800;color:{_mcol(s.get("avg_margin"))}">{s.get("avg_margin")}%</td>'
+        f'<td style="padding:6px 10px;text-align:right">{s.get("below_target")}</td>'
+        f'<td style="padding:6px 10px;text-align:right;color:{"#dc2626" if s.get("loss") else "var(--muted)"}">{s.get("loss")}</td></tr>'
+        for s in p["supplier_summary"])
+    with st.expander(f"🏭  Supplier margins — {len(p['supplier_summary'])} suppliers", expanded=True):
+        st.markdown(_ptable(
+            '<th style="padding:4px 10px">Supplier / pricelist date</th><th style="padding:4px 10px;text-align:right">SKUs sold</th>'
+            '<th style="padding:4px 10px;text-align:right">Avg margin</th><th style="padding:4px 10px;text-align:right">Below target</th>'
+            '<th style="padding:4px 10px;text-align:right">Loss</th>', sr), unsafe_allow_html=True)
+
+    # Multi-supplier (capped for display)
+    cap = 150
+    mr = "".join(
+        f'<tr style="border-top:1px solid var(--line)">'
+        f'<td style="padding:6px 10px"><b>{r["sku"]}</b>'
+        f'<div style="color:var(--muted);font-size:11px">{(", ".join(r.get("suppliers") or []))[:60]}</div></td>'
+        f'<td style="padding:6px 10px;font-size:12px">{r.get("cheapest_supplier") or ""} · £{r.get("cheapest_cost")}</td>'
+        f'<td style="padding:6px 10px;text-align:right;font-weight:700;color:#15803d">£{r.get("potential_saving")}</td></tr>'
+        for r in p["multi"][:cap])
+    note = (f'<div style="color:var(--muted);font-size:12px;padding:6px 10px">Showing top {cap} by saving — '
+            f'full list in the desktop dashboard.</div>' if len(p["multi"]) > cap else "")
+    with st.expander(f"🔀  Multi-supplier SKUs — {len(p['multi'])} (cheapest vs dearest)", expanded=False):
+        st.markdown(_ptable(
+            '<th style="padding:4px 10px">SKU / suppliers</th><th style="padding:4px 10px">Cheapest</th>'
+            '<th style="padding:4px 10px;text-align:right">Saving / unit</th>', mr, note), unsafe_allow_html=True)
+
+    st.caption(f"Snapshot generated {p['generated_at']} by the daily supplier-pricing refresh. "
+               "Full 21k-SKU detail (All margins, Unmatched) lives in the desktop dashboard.")
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -420,8 +528,8 @@ with st.sidebar:
     authenticator.logout("Log out", location="sidebar")
 
     st.markdown("###### Modules")
-    st.markdown('<div class="ts-mod active">📊 Daily Ops</div>', unsafe_allow_html=True)
-    st.markdown('<div class="ts-mod soon">➕ More coming soon</div>', unsafe_allow_html=True)
+    module = st.radio("Modules", ["📊 Daily Ops", "💷 Pricing"],
+                      label_visibility="collapsed")
     st.divider()
     if data.get("live"):
         st.markdown("🟢 **Live** — connected to Monday")
@@ -462,6 +570,13 @@ with st.sidebar:
             st.warning(str(e))
     st.divider()
     st.caption("Sources: Monday.com · Shopify · Outlook")
+
+# ---------------------------------------------------------------------------
+# Module dispatch — Pricing renders here and stops before the Daily Ops view.
+# ---------------------------------------------------------------------------
+if "Pricing" in module:
+    render_pricing()
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Greeting
