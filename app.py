@@ -129,6 +129,8 @@ CSS = """
   .ts-mod.soon {color:#9CA3AF; border-style:dashed;}
   /* Streamlit buttons → brand */
   .stButton>button {border-radius:10px; border:1px solid var(--line); font-weight:600;}
+  /* Sidebar menu: left-aligned, menu-like */
+  [data-testid="stSidebar"] .stButton>button {justify-content:flex-start; text-align:left;}
   /* Bordered text inputs (login + elsewhere) */
   .stTextInput div[data-baseweb="input"]{border:1px solid #C3C9D4 !important;
      border-radius:8px !important; background:#fff !important;}
@@ -620,48 +622,47 @@ def render_pricing():
 with st.sidebar:
     if _logo:
         st.markdown(
-            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:4px'>"
+            f"<div style='display:flex;align-items:center;gap:10px;margin:2px 0 16px'>"
             f"<img src='{_logo}' style='height:34px'><span style='font-weight:800;font-size:18px'>"
             f"Trade<span style='color:#F26A21'>Hub</span></span></div>",
             unsafe_allow_html=True,
         )
-    st.caption(f"👤 {name} · {role}")
-    authenticator.logout("Log out", location="sidebar")
 
-    st.markdown("###### Modules")
-    module = st.radio("Modules", ["📊 Daily Ops", "💷 Pricing"],
-                      label_visibility="collapsed")
-    st.divider()
-    if data.get("live"):
-        st.markdown("🟢 **Live** — connected to Monday")
-    else:
-        st.markdown("🟡 **Snapshot** — saved numbers")
-        if data.get("live_error"):
-            st.caption(f"({data['live_error']})")
-    if data.get("orders_live"):
-        st.caption("📦 Order KPIs: live from Orders board")
-    elif data.get("orders_error"):
-        st.caption("📦 Order KPIs: summary board (live fetch failed)")
-        with st.expander("Why not the Orders board?"):
-            st.caption(data["orders_error"][:400])
-    if data.get("shopify_live"):
-        st.caption("💳 Chargebacks: live from Shopify")
-    elif data.get("shopify_error"):
-        st.caption("💳 Chargebacks: via Monday")
-    if data.get("outlook_live"):
-        st.caption("📧 Email folders: live from Outlook")
-    elif data.get("outlook_error"):
-        st.caption("📧 Email folders: not connected")
-        with st.expander("Why not Outlook?"):
-            st.caption(data["outlook_error"][:400])
-        with st.expander("Why not Shopify?"):
-            st.caption(data["shopify_error"][:400])
-    st.caption(f"🔄 Updated: {data.get('updated','—')}")
-    if st.button("↻ Refresh now", use_container_width=True):
-        load_kpis.clear()
-        st.rerun()
-    st.divider()
-    with st.expander("🔑 Change my password"):
+    # --- Menu ---
+    if "module" not in st.session_state:
+        st.session_state.module = "Daily Ops"
+    for _m in ("Daily Ops", "Pricing"):
+        if st.button(_m, key=f"nav_{_m}", use_container_width=True,
+                     type=("primary" if st.session_state.module == _m else "secondary")):
+            st.session_state.module = _m
+            st.rerun()
+    module = st.session_state.module
+
+    st.write("")
+
+    # --- Data & connections (one collapsible) ---
+    with st.expander("Data & connections"):
+        st.markdown("**Monday** — " + ("🟢 live" if data.get("live") else "🟡 snapshot"))
+        if not data.get("live") and data.get("live_error"):
+            st.caption(data["live_error"][:200])
+        st.caption("Order KPIs — " + ("live from Orders board" if data.get("orders_live")
+                                      else "summary fallback"))
+        if data.get("orders_error"):
+            st.caption(data["orders_error"][:160])
+        st.caption("Chargebacks — " + ("live from Shopify" if data.get("shopify_live") else "via Monday"))
+        st.caption("Email folders — " + ("live from Outlook" if data.get("outlook_live")
+                                         else "not connected"))
+        if data.get("outlook_error"):
+            st.caption(data["outlook_error"][:160])
+        st.caption(f"Updated: {data.get('updated','—')}")
+        if st.button("Refresh data", use_container_width=True):
+            load_kpis.clear()
+            st.rerun()
+
+    # --- Settings (one collapsible) ---
+    with st.expander("Settings"):
+        st.caption(f"Signed in as {name} · {role}")
+        st.markdown("**Change password**")
         try:
             if authenticator.reset_password(username, location="sidebar"):
                 with open(BASE / "config.yaml", "w") as f:
@@ -669,13 +670,14 @@ with st.sidebar:
                 st.success("Password changed ✅")
         except Exception as e:  # noqa: BLE001
             st.warning(str(e))
+
     st.divider()
-    st.caption("Sources: Monday.com · Shopify · Outlook")
+    authenticator.logout("Sign out", location="sidebar")
 
 # ---------------------------------------------------------------------------
 # Module dispatch — Pricing renders here and stops before the Daily Ops view.
 # ---------------------------------------------------------------------------
-if "Pricing" in module:
+if module == "Pricing":
     render_pricing()
     st.stop()
 
