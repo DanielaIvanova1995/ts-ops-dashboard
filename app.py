@@ -715,8 +715,7 @@ if is_manager:
         f"**Manager view** — across the team right now: "
         f"<span class='ts-pill red'>{n_red} red</span> "
         f"<span class='ts-pill amber'>{n_amb} amber</span> "
-        f"&nbsp; busiest: <b>{busiest_nm}</b>. "
-        f"You’re out of the helper rota — this is the whole floor at a glance.",
+        f"&nbsp; busiest: <b>{busiest_nm}</b>.",
         unsafe_allow_html=True,
     )
 elif role == "staff":
