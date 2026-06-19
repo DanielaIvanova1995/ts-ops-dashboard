@@ -268,6 +268,38 @@ def shopify_variant_price(sku: str) -> dict | None:
     return None
 
 
+def shopify_variant_barcode(sku: str) -> str | None:
+    """The product's barcode/EAN on Shopify (tries bare SKU then 'TSO' prefix),
+    used to match the exact product at competitors. None if not found."""
+    store = get_secret("SHOPIFY_STORE")
+    token = shopify_products_token()
+    forms = [sku, f"TSO{sku}"]
+    qstr = " OR ".join(f"sku:{s}" for s in forms)
+    query = ("query ($q: String!) { productVariants(first: 10, query: $q) "
+             "{ edges { node { sku barcode } } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"q": qstr}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    edges = payload.get("data", {}).get("productVariants", {}).get("edges", [])
+    nodes = {(e["node"].get("sku") or ""): e["node"] for e in edges}
+    for want in forms:
+        n = nodes.get(want)
+        if n and n.get("barcode"):
+            return n["barcode"].strip()
+    for e in edges:                          # fallback: any barcode in the match set
+        bc = e["node"].get("barcode")
+        if bc:
+            return bc.strip()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Live counts straight from the real Orders board (id 1786542990), counting
 # items per stage group. This is genuinely live (unlike the summary "Daily KPI
@@ -612,6 +644,63 @@ def fetch_folder_messages(mailbox: str, folder_name: str, limit: int = 12,
 
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 SENTIMENT_MODEL = "claude-haiku-4-5-20251001"
+COMPETITOR_MODEL = "claude-sonnet-4-6"  # stronger model for live web-search research
+
+
+def research_competitors(title: str, code: str | None, vendor: str | None,
+                         your_price) -> dict:
+    """Use Claude with live web search to find current UK competitor prices for a
+    product. Returns {competitors:[{retailer,price,url,in_stock}], cheapest,
+    summary, your_price}. Raises if ANTHROPIC_API_KEY isn't set or the call fails."""
+    import json as _json
+    import re
+
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+
+    ident = f'"{title}"'
+    if vendor:
+        ident += f" by {vendor}"
+    if code:
+        ident += f" (EAN/barcode {code})"
+    prompt = (
+        "You are a pricing analyst for a UK building-supplies retailer (Trade Superstore "
+        f"Online). Find the current price of this exact product at COMPETING UK online "
+        f"retailers (not Trade Superstore itself): {ident}.\n"
+        "Search the web, open real product listings, and read the actual price shown "
+        "(in GBP, including VAT). Match the SAME product — prefer matches on the EAN/barcode "
+        "or exact manufacturer code. Reply with ONLY a JSON object, no other text:\n"
+        '{"competitors":[{"retailer":"shop name","price":<number GBP inc VAT>,'
+        '"url":"listing url","in_stock":true|false}],'
+        '"cheapest":{"retailer":"name","price":<number>},'
+        '"summary":"one sentence on where this product sits in the market"}\n'
+        "Include up to 6 genuine listings you actually found and read. If you cannot find the "
+        "exact product, return an empty competitors list and explain in summary. Never invent "
+        "prices or retailers."
+    )
+    body = {
+        "model": COMPETITOR_MODEL,
+        "max_tokens": 1800,
+        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    r = requests.post(
+        ANTHROPIC_API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json=body, timeout=120,
+    )
+    r.raise_for_status()
+    blocks = r.json().get("content", [])
+    txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    match = re.search(r"\{.*\}", txt, re.S)
+    if not match:
+        raise RuntimeError("No result returned from competitor search")
+    data = _json.loads(match.group(0))
+    data["your_price"] = your_price
+    data["code"] = code
+    return data
 
 
 def find_kind_words(emails: list) -> dict | None:

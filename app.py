@@ -855,6 +855,105 @@ def _sku_rows(items, supplier=None):
     return "".join(out)
 
 
+def _find_product(items, q):
+    """Best lookup match for a typed SKU or product name."""
+    q = (q or "").strip().lower()
+    if not q:
+        return None
+    for it in items:                                    # exact SKU first
+        if (it.get("sku") or "").lower() == q:
+            return it
+    for it in items:                                    # substring on SKU or title
+        if q in (it.get("sku") or "").lower() or q in (it.get("name") or "").lower():
+            return it
+    return None
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def competitor_research(sku, title, code, vendor, your_price):
+    """Cached AI competitor lookup (6 h) keyed on the product, to avoid re-billing."""
+    try:
+        return data_sources.research_competitors(title, code, vendor, your_price)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def _render_competitor_check(items):
+    with st.expander("🔍 Competitor price check (beta)"):
+        st.caption("Pull a product's code and see what other UK retailers charge for the "
+                   "same item. Uses live web search — needs your Anthropic key. Costs a few "
+                   "pence per check; results are cached.")
+        q = st.text_input("Product SKU or name", key="comp_q",
+                          placeholder="e.g. FRO607AG  or  anthracite gutter")
+        if not (st.button("Check competitors", key="comp_go", type="primary") and q.strip()):
+            return
+        prod = _find_product(items, q)
+        if not prod:
+            st.warning("No matching product found in the pricing data.")
+            return
+        sku, sell = prod.get("sku"), prod.get("sell")
+        title = prod.get("name") or sku
+        try:
+            code = data_sources.shopify_variant_barcode(sku)
+        except Exception:  # noqa: BLE001
+            code = None
+        head = f"**{title}**  ·  SKU `{sku}`"
+        head += f"  ·  EAN `{code}`" if code else "  ·  _no barcode on Shopify_"
+        if sell is not None:
+            head += f"  ·  you sell at **£{sell:,.2f}**"
+        st.markdown(head)
+
+        with st.spinner("Searching competitor sites…"):
+            res = competitor_research(sku, title, code, prod.get("vendor"), sell)
+        if res.get("error"):
+            if "ANTHROPIC_API_KEY" in res["error"]:
+                st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to enable "
+                        "competitor search.")
+            else:
+                st.error("Couldn't run competitor search: " + res["error"][:200])
+            return
+        comps = [c for c in (res.get("competitors") or []) if c.get("retailer")]
+        if not comps:
+            st.warning("No competitor listings found for this exact product. "
+                       + (res.get("summary") or ""))
+            return
+
+        prices = [c["price"] for c in comps if isinstance(c.get("price"), (int, float))]
+        cheapest = min(prices) if prices else None
+        rows = ""
+        if sell is not None:
+            rows += ('<tr style="background:#fff7f2"><td style="padding:7px 12px">'
+                     '<b>Trade Superstore (you)</b></td>'
+                     f'<td style="padding:7px 12px;text-align:right"><b>£{sell:,.2f}</b></td></tr>')
+        for c in sorted(comps, key=lambda c: c["price"] if isinstance(c.get("price"),
+                                                                      (int, float)) else 9e9):
+            pr = c.get("price")
+            prs = f"£{pr:,.2f}" if isinstance(pr, (int, float)) else "—"
+            oos = "" if c.get("in_stock", True) else (' <span style="color:#ef4444;'
+                                                      'font-size:11px">out of stock</span>')
+            name = c.get("retailer") or "Unknown"
+            url = c.get("url") or ""
+            cell = f'<a href="{url}" target="_blank">{name}</a>' if url else name
+            rows += (f'<tr style="border-top:1px solid var(--line)">'
+                     f'<td style="padding:7px 12px">{cell}{oos}</td>'
+                     f'<td style="padding:7px 12px;text-align:right">{prs}</td></tr>')
+        st.markdown('<table style="width:100%;border-collapse:collapse;font-size:13px">'
+                    '<tr style="text-align:left;color:var(--muted)">'
+                    '<th style="padding:7px 12px">Retailer</th>'
+                    '<th style="padding:7px 12px;text-align:right">Price (inc VAT)</th></tr>'
+                    + rows + "</table>", unsafe_allow_html=True)
+
+        if sell is not None and cheapest is not None:
+            if sell <= cheapest:
+                st.success(f"You're the cheapest — £{sell:,.2f} vs cheapest competitor "
+                           f"£{cheapest:,.2f}. Possible headroom to raise the price.")
+            else:
+                st.warning(f"A competitor is cheaper by £{sell - cheapest:,.2f} "
+                           f"(you £{sell:,.2f} vs £{cheapest:,.2f}).")
+        if res.get("summary"):
+            st.caption(res["summary"])
+
+
 def render_pricing():
     p = load_pricing()
     st.markdown(
@@ -868,6 +967,9 @@ def render_pricing():
         return
 
     render_product_search()
+
+    _lk = load_lookup()
+    _render_competitor_check(_lk["items"] if _lk else [])
 
     # Clickable tiles → pick which list to view.
     k = p["kpis"]
