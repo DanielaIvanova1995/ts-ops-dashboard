@@ -428,14 +428,33 @@ def load_lookup():
         return json.load(f)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _live_price(sku):
+    """Current Shopify price for a SKU. dict=sold, 'notsold'=confirmed not on
+    Shopify, 'unavailable'=Shopify not configured / error (use daily fallback)."""
+    try:
+        res = data_sources.shopify_variant_price(sku)
+        return res if res is not None else "notsold"
+    except Exception:  # noqa: BLE001
+        return "unavailable"
+
+
 def render_product_search():
-    """Search any product by SKU/name → show every supplier with the cheapest
-    highlighted, plus sell price, margin and the saving from switching."""
+    """Search any product by SKU/name → every supplier (cheapest highlighted),
+    the LIVE Shopify sell price + margin, and whether we sell it."""
     lk = load_lookup()
-    st.markdown("##### 🔍 Find a product &amp; its cheapest supplier")
+    try:
+        live_on = data_sources.shopify_configured()
+    except Exception:  # noqa: BLE001
+        live_on = False
+
+    st.markdown("##### 🔍 Find a product, its cheapest supplier &amp; price")
     q = st.text_input("search", key="pricing_search", label_visibility="collapsed",
                       placeholder="Type a SKU or product name…")
-    if not q:
+    st.caption("🟢 Sell prices live from Shopify" if live_on else
+               "Sell prices as of the last refresh — add the Shopify keys to Secrets for live prices")
+
+    if not q or not q.strip():        # empty box → reset to the default view
         return
     if not lk:
         st.info("Product lookup data not loaded yet.")
@@ -443,27 +462,58 @@ def render_product_search():
     ql = q.strip().lower()
     matches = [it for it in lk["items"]
                if ql in (it.get("sku") or "").lower() or ql in (it.get("name") or "").lower()]
-    st.caption(f"{len(matches)} match{'es' if len(matches)!=1 else ''}"
-               + (" — showing first 25" if len(matches) > 25 else ""))
-    for it in matches[:25]:
+    if not matches:
+        st.info("No products match that.")
+        return
+    st.caption(f"{len(matches)} match{'es' if len(matches) != 1 else ''}"
+               + (" — showing first 12" if len(matches) > 12 else ""))
+
+    for it in matches[:12]:
+        sku = it["sku"]
+        cheapest_cost = it.get("cheapest_cost")
+        sell = it.get("sell")          # daily fallback
+        live = False
+        if live_on:
+            lp = _live_price(sku)
+            if lp == "notsold":
+                sell, live = None, True
+            elif lp != "unavailable":
+                sell, live = lp["price"], True
+        matched = sell is not None and sell > 0
+        margin = (round((sell - cheapest_cost) / sell * 100, 1)
+                  if matched and cheapest_cost is not None else None)
+
         offers = sorted(it.get("offers", []), key=lambda o: o["c"])
         sup_rows = "".join(
-            f'<tr><td style="padding:3px 10px">{o["s"]}'
-            f'{" 🏆" if i == 0 and len(offers) > 1 else ""}</td>'
+            f'<tr><td style="padding:3px 10px">{o["s"]}{" 🏆" if i == 0 and len(offers) > 1 else ""}</td>'
             f'<td style="padding:3px 10px;text-align:right;font-weight:{800 if i == 0 else 400};'
             f'color:{"#15803d" if i == 0 and len(offers) > 1 else "#21242B"}">£{o["c"]}</td></tr>'
             for i, o in enumerate(offers))
-        sell, margin = it.get("sell"), it.get("margin")
-        sell_line = (f'Sells £{sell} · margin <b style="color:{_mcol(margin)}">{margin}%</b>'
-                     if sell else 'Not matched to a Shopify sell price')
         saving = it.get("saving") or 0
-        save_line = (f' · <b style="color:#15803d">save £{saving}/unit</b> buying from {offers[0]["s"]}'
-                     if len(offers) > 1 and saving > 0 else '')
+        save_line = (f'<div class="ts-meta" style="margin-top:4px">💡 save '
+                     f'<b style="color:#15803d">£{saving}/unit</b> buying from {offers[0]["s"]}</div>'
+                     if len(offers) > 1 and saving > 0 else "")
+        live_tag = ' · live' if live else ''
+
+        if matched:
+            price_block = (
+                f'<div style="font-size:30px;font-weight:800;color:#15803d;line-height:1">£{sell}</div>'
+                f'<div style="font-size:15px;font-weight:700;color:{_mcol(margin)}">{margin}% margin</div>'
+                f'<span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:800;color:#15803d;'
+                f'background:#dcfce7;padding:3px 9px;border-radius:999px">WE SELL THIS{live_tag}</span>')
+        else:
+            price_block = (
+                '<div style="font-size:22px;font-weight:800;color:#dc2626;line-height:1.1">NOT SOLD</div>'
+                f'<span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:800;color:#dc2626;'
+                f'background:#fee2e2;padding:3px 9px;border-radius:999px">not on Shopify{live_tag}</span>')
+
         st.markdown(
-            f'<div class="ts-card" style="margin-bottom:10px">'
-            f'<div><b>{it["sku"]}</b> <span style="color:var(--muted)">{(it.get("name") or "")[:65]}</span></div>'
-            f'<div class="ts-meta">{sell_line}{save_line}</div>'
-            f'<table style="margin-top:6px;font-size:13px;border-collapse:collapse">{sup_rows}</table></div>',
+            f'<div class="ts-card" style="margin-bottom:10px;display:flex;gap:16px;align-items:flex-start">'
+            f'<div style="flex:1"><div><b>{sku}</b> '
+            f'<span style="color:var(--muted)">{(it.get("name") or "")[:60]}</span></div>'
+            f'<table style="margin-top:6px;font-size:13px;border-collapse:collapse">{sup_rows}</table>'
+            f'{save_line}</div>'
+            f'<div style="text-align:right;min-width:130px">{price_block}</div></div>',
             unsafe_allow_html=True)
 
 

@@ -204,6 +204,71 @@ def fetch_shopify_chargebacks(token: str | None = None, domain: str | None = Non
 
 
 # ---------------------------------------------------------------------------
+# Shopify live product price (read_products) — used by the Pricing module's
+# product search to show the *current* sell price per SKU. Auth via the pricing
+# app's client-credentials grant: SHOPIFY_STORE / SHOPIFY_CLIENT_ID /
+# SHOPIFY_CLIENT_SECRET in Secrets.
+# ---------------------------------------------------------------------------
+_SHOP_TOK = {"token": None}
+
+
+def shopify_configured() -> bool:
+    return all(get_secret(s) for s in ("SHOPIFY_STORE", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"))
+
+
+def shopify_products_token() -> str:
+    if _SHOP_TOK["token"]:
+        return _SHOP_TOK["token"]
+    store = get_secret("SHOPIFY_STORE")
+    cid = get_secret("SHOPIFY_CLIENT_ID")
+    csec = get_secret("SHOPIFY_CLIENT_SECRET")
+    if not (store and cid and csec):
+        raise RuntimeError("Shopify products auth not configured")
+    r = requests.post(
+        f"https://{store}/admin/oauth/access_token",
+        data={"grant_type": "client_credentials", "client_id": cid, "client_secret": csec},
+        timeout=20,
+    )
+    r.raise_for_status()
+    tok = r.json().get("access_token")
+    if not tok:
+        raise RuntimeError("Shopify client-credentials returned no access_token")
+    _SHOP_TOK["token"] = tok
+    return tok
+
+
+def shopify_variant_price(sku: str) -> dict | None:
+    """Live current Shopify price for a SKU (tries the bare SKU and a leading
+    'TSO' prefix). Returns {price, vendor, url} if sold, or None if not on
+    Shopify. Raises RuntimeError if Shopify isn't configured / errors."""
+    store = get_secret("SHOPIFY_STORE")
+    token = shopify_products_token()
+    forms = [sku, f"TSO{sku}"]
+    qstr = " OR ".join(f"sku:{s}" for s in forms)
+    query = ("query ($q: String!) { productVariants(first: 10, query: $q) "
+             "{ edges { node { sku price product { vendor onlineStoreUrl } } } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"q": qstr}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    edges = payload.get("data", {}).get("productVariants", {}).get("edges", [])
+    nodes = {(e["node"].get("sku") or ""): e["node"] for e in edges}
+    for want in forms:                      # prefer exact, then TSO-prefixed
+        n = nodes.get(want)
+        if n and n.get("price") is not None:
+            prod = n.get("product") or {}
+            return {"price": float(n["price"]), "vendor": prod.get("vendor"),
+                    "url": prod.get("onlineStoreUrl")}
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Live counts straight from the real Orders board (id 1786542990), counting
 # items per stage group. This is genuinely live (unlike the summary "Daily KPI
 # Tracker" board, which only refreshes when its script runs).
