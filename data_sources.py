@@ -276,6 +276,43 @@ def shopify_variant_price(sku: str) -> dict | None:
 ORDERS_BOARD_ID = 1786542990
 
 
+def fetch_board_activity(board_id: int, from_iso: str, to_iso: str,
+                         token: str | None = None, page_limit: int = 500,
+                         max_pages: int = 20) -> list:
+    """Raw Monday activity_logs for a board within [from_iso, to_iso]. Returns a
+    list of {event, user_id, data} (data is a JSON string). Paginates until a
+    short page. Raises on token/API failure (caller falls back)."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    query = """
+    query ($b: [ID!], $f: ISO8601DateTime, $t: ISO8601DateTime, $p: Int, $l: Int) {
+      boards(ids: $b) {
+        activity_logs(from: $f, to: $t, page: $p, limit: $l) { event user_id data }
+      }
+    }
+    """
+    out: list = []
+    for page in range(1, max_pages + 1):
+        r = requests.post(
+            MONDAY_API,
+            json={"query": query, "variables": {"b": [str(board_id)], "f": from_iso,
+                                                "t": to_iso, "p": page, "l": page_limit}},
+            headers=headers, timeout=30,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if "errors" in payload:
+            raise RuntimeError(f"Monday API error: {payload['errors']}")
+        boards = payload.get("data", {}).get("boards", [])
+        logs = boards[0].get("activity_logs", []) if boards else []
+        out += logs
+        if len(logs) < page_limit:
+            break
+    return out
+
+
 def fetch_orders_group_counts(group_map: dict, token: str | None = None,
                               board_id: int = ORDERS_BOARD_ID) -> dict:
     """group_map = {kpi_id: orders_group_id}. Returns {kpi_id: {count, age}}

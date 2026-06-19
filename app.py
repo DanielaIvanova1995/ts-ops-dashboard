@@ -853,11 +853,91 @@ def kind_words_cached():
         return None
 
 
-# Fun leaderboard — playful titles awarded from the real workload data: each
-# badge goes to whoever is carrying the most in that area right now. Distinct
-# people only, biggest workloads first.
-TITLE_AWARDS = [
-    ("💬 Quote Machine", {"new_orders", "to_post", "quotes"}),
+# Live "done today" leaderboard — playful badges awarded from real Monday
+# throughput: each lane goes to whoever did the most of that work TODAY (status
+# changes attributed to the person who made them). Distinct people, busiest
+# first. Falls back to the workload board if Monday is unreachable.
+LEADERBOARD_BOARD = 1786542990  # Orders board
+MONDAY_USERS = {  # Monday account id → dashboard username
+    "39640612": "natasha", "25324062": "megan", "72043860": "melissa",
+    "100183278": "malyeka", "25296593": "daniela",
+}
+# (badge, column_id(s), allowed target labels or None = any change to the column)
+LEADERBOARD_LANES = [
+    ("📦 Delivery Dynamo", "color_mktyhmf3",
+     {"Delivered", "Posted", "Out For Delivery", "AM Out For Delivery",
+      "PM Out For Delivery", "Midday Delivery", "Customer Collection",
+      "With Courier", "Route Planned"}),
+    ("💬 Order Processor", "color_mktyje8e",
+     {"Processed", "PO Sent", "Signed Off", "Place Order", "Sent for Quote"}),
+    ("🔎 ETA Chaser-in-Chief", "color_mm06spvx", None),
+    ("🤝 Customer Whisperer", "color_mktyyf7w", None),
+    ("🕵️ Detail Detective",
+     {"color_mktydktf", "numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+      "numeric_mm3d9t22", "numeric_mm3d31gp", "text_mm22k2j7", "date6"}, None),
+]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def leaderboard_today():
+    """[(badge, first_name, count)] from today's real Monday throughput, or None
+    if Monday can't be reached. Cached 30 min."""
+    try:
+        start = now_uk().replace(hour=0, minute=0, second=0, microsecond=0)
+        f_iso = start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+        t_iso = now_uk().astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+        logs = data_sources.fetch_board_activity(LEADERBOARD_BOARD, f_iso, t_iso)
+    except Exception:  # noqa: BLE001 — Monday down / not configured → caller falls back
+        return None
+
+    tallies = {badge: {} for badge, _, _ in LEADERBOARD_LANES}
+    for ev in logs:
+        if ev.get("event") != "update_column_value":
+            continue
+        u = MONDAY_USERS.get(str(ev.get("user_id")))
+        if not u or u == "daniela":  # skip automation & the manager
+            continue
+        try:
+            dd = json.loads(ev.get("data") or "{}")
+        except Exception:  # noqa: BLE001
+            continue
+        cid = dd.get("column_id")
+        val = dd.get("value")
+        lab = None
+        if isinstance(val, dict):
+            lv = val.get("label")
+            lab = lv.get("text") if isinstance(lv, dict) else lv
+        for badge, cols, labels in LEADERBOARD_LANES:
+            cset = cols if isinstance(cols, set) else {cols}
+            if cid in cset and (labels is None or lab in labels):
+                tallies[badge][u] = tallies[badge].get(u, 0) + 1
+
+    winners = {}
+    for badge, _, _ in LEADERBOARD_LANES:
+        t = tallies[badge]
+        if t:
+            u = max(t, key=t.get)
+            winners[badge] = (u, t[u])
+    return winners or None
+
+
+def _distinct_winners(winners, users_cfg, top=4):
+    """winners = {badge: (username, count)} → [(badge, first_name, count)],
+    one badge per person, biggest first."""
+    out, used = [], set()
+    for badge, (u, n) in sorted(winners.items(), key=lambda kv: kv[1][1], reverse=True):
+        if u in used:
+            continue
+        used.add(u)
+        out.append((badge, users_cfg.get(u, {}).get("name", u).split()[0], n))
+        if len(out) >= top:
+            break
+    return out
+
+
+# Fallback when Monday is unreachable — "carrying the most" from open workload.
+WORKLOAD_AWARDS = [
+    ("💬 Order Processor", {"new_orders", "to_post", "quotes"}),
     ("🔎 ETA Chaser-in-Chief", {"unconfirmed", "eta_chasers", "supplier_etas", "supplier_no_eta"}),
     ("📦 Delivery Dynamo", {"booked_overdue", "booked_future", "difficult"}),
     ("🤝 Customer Whisperer",
@@ -866,13 +946,11 @@ TITLE_AWARDS = [
 ]
 
 
-def fun_titles(kpis, users_cfg, top=4):
-    """[(title, first_name)] — each playful badge to the staff member carrying
-    the most in that area (count + age weighting, same as workload). Managers
-    excluded; one badge per person; busiest areas first."""
+def workload_titles(kpis, users_cfg, top=4):
+    """Fallback badges from open workload (carrying the most, not done today)."""
     mgrs = {u for u, i in users_cfg.items() if i.get("role") in ("admin", "manager")}
     winners = {}
-    for title, ids in TITLE_AWARDS:
+    for badge, ids in WORKLOAD_AWARDS:
         s: dict = {}
         for k in kpis:
             if k.get("info") or k.get("id") not in ids:
@@ -886,16 +964,8 @@ def fun_titles(kpis, users_cfg, top=4):
         if s:
             u = max(s, key=s.get)
             if s[u] > 0:
-                winners[title] = (u, s[u])
-    out, used = [], set()
-    for title, (u, sc) in sorted(winners.items(), key=lambda kv: kv[1][1], reverse=True):
-        if u in used:
-            continue
-        used.add(u)
-        out.append((title, users_cfg.get(u, {}).get("name", u).split()[0]))
-        if len(out) >= top:
-            break
-    return out
+                winners[badge] = (u, round(s[u]))
+    return _distinct_winners(winners, users_cfg, top)
 
 
 load = workload(KPIS)  # workload bars — everyone (incl. Malyeka), excl. managers
@@ -909,18 +979,24 @@ c1, c2, c3 = _glance.columns([1.15, 1, 1])
 with c1:
     joke = joke_of_the_day()
     kw = kind_words_cached()
-    titles = fun_titles(KPIS, users_cfg)
+    live = leaderboard_today()
+    if live:
+        titles = _distinct_winners(live, users_cfg)
+        lead_label = "🏆 Today\'s leaderboard"
+    else:
+        titles = workload_titles(KPIS, users_cfg)
+        lead_label = "🏆 Carrying the most today"
     blocks = []
 
     if titles:
         rows = "".join(
             f'<div style="display:flex;justify-content:space-between;align-items:center;'
             f'font-size:13px;padding:4px 0;border-top:1px solid var(--line)">'
-            f'<span>{t}</span><b style="color:#334155">{nm}</b></div>'
-            for t, nm in titles)
-        blocks.append(
-            f'<p class="ts-eyebrow">🏆 Today\'s leaderboard</p>{rows}'
-        )
+            f'<span>{badge}</span><span><b style="color:#334155">{nm}</b>'
+            f'<span style="color:var(--muted);font-size:11px">&nbsp;·&nbsp;{cnt}</span>'
+            f'</span></div>'
+            for badge, nm, cnt in titles)
+        blocks.append(f'<p class="ts-eyebrow">{lead_label}</p>{rows}')
 
     if kw and kw.get("quote"):
         about = f' · {kw["about"]}' if kw.get("about") else ""
