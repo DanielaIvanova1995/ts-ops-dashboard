@@ -81,6 +81,7 @@ CSS = """
   .ts-brandbar .wm {font-family:'Bebas Neue',sans-serif; font-size:42px; line-height:1;
      letter-spacing:1px; text-transform:uppercase; color:var(--ink);}
   .ts-brandbar .wm b {color:var(--brand); font-weight:400;}
+  .ts-brandbar .wm .sec {color:var(--muted);}
   .ts-brandbar .sct {margin-left:auto; font-size:12px; color:var(--muted); text-align:right;}
   .ts-brandbar .sct b {color:var(--ink);}
   /* Cards */
@@ -549,8 +550,8 @@ def _ptable(header_cells: str, body_rows: str, note: str = "") -> str:
 def render_pricing():
     p = load_pricing()
     st.markdown(
-        f"""<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b></span>
-        <span class="sct"><b>Pricing</b> · supplier margins<br>{('updated '+p['generated_at']) if p else 'no data yet'}</span></div>""",
+        f"""<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b> <span class="sec">Pricing</span></span>
+        <span class="sct">supplier margins<br>{('updated '+p['generated_at']) if p else 'no data yet'}</span></div>""",
         unsafe_allow_html=True,
     )
     if not p:
@@ -699,8 +700,8 @@ if module == "Pricing":
 live_chip = ("🟢 Live" if data.get("live") else "🟡 Snapshot")
 st.markdown(
     f"""<div class="ts-brandbar">
-      <span class="wm">Trade<b>Hub</b></span>
-      <span class="sct"><b>Daily Ops</b> · {live_chip}<br>updated {data.get('updated','—')}</span>
+      <span class="wm">Trade<b>Hub</b> <span class="sec">Daily Ops</span></span>
+      <span class="sct">{live_chip}<br>updated {data.get('updated','—')}</span>
     </div>""",
     unsafe_allow_html=True,
 )
