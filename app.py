@@ -675,6 +675,19 @@ def render_pricing():
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
+@st.dialog("Change password")
+def _change_password_dialog():
+    try:
+        if authenticator.reset_password(
+                username, location="main",
+                fields={"Form name": "", "Reset": "Update password"}):
+            with open(BASE / "config.yaml", "w") as f:
+                yaml.dump(config, f, default_flow_style=False)
+            st.success("Password changed ✅ — you can close this.")
+    except Exception as e:  # noqa: BLE001
+        st.warning(str(e))
+
+
 with st.sidebar:
     if _logo:
         st.markdown(
@@ -713,20 +726,12 @@ with st.sidebar:
             load_kpis.clear()
             st.rerun()
 
-    # --- Settings (one collapsible) ---
+    st.divider()
+    # --- Settings (bottom) ---
     with st.expander("Settings"):
         st.caption(f"Signed in as {name} · {role}")
-        try:
-            if authenticator.reset_password(
-                    username, location="sidebar",
-                    fields={"Form name": "Change password", "Reset": "Update password"}):
-                with open(BASE / "config.yaml", "w") as f:
-                    yaml.dump(config, f, default_flow_style=False)
-                st.success("Password changed ✅")
-        except Exception as e:  # noqa: BLE001
-            st.warning(str(e))
-
-    st.divider()
+        if st.button("Change password", use_container_width=True):
+            _change_password_dialog()
     authenticator.logout("Sign out", location="sidebar")
 
 # ---------------------------------------------------------------------------
