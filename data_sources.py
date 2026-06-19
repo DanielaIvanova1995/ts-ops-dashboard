@@ -663,13 +663,14 @@ def research_competitors(title: str, code: str | None, vendor: str | None,
     if vendor:
         ident += f" by {vendor}"
     if code:
-        ident += f" (EAN/barcode {code})"
+        ident += f" (product code / SKU {code})"
     prompt = (
         "You are a pricing analyst for a UK building-supplies retailer (Trade Superstore "
         f"Online). Find the current price of this exact product at COMPETING UK online "
         f"retailers (not Trade Superstore itself): {ident}.\n"
-        "Search the web, open real product listings, and read the actual price shown. Match the "
-        "SAME product — prefer matches on the EAN/barcode or exact manufacturer code.\n"
+        "Search the web by the product code / SKU and product name, open real product listings, "
+        "and read the actual price shown. Match the SAME product — prefer an exact match on the "
+        "manufacturer product code / SKU.\n"
         "IMPORTANT — report every price EXCLUDING VAT (ex-VAT), in GBP. UK consumer/retail sites "
         "usually display prices INCLUDING 20% VAT: convert those to ex-VAT by dividing by 1.2. "
         "Trade/merchant sites often already show ex-VAT prices — use those as-is. Reply with "

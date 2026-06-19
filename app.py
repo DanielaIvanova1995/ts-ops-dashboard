@@ -893,18 +893,13 @@ def _render_competitor_check(items):
             return
         sku, sell = prod.get("sku"), prod.get("sell")
         title = prod.get("name") or sku
-        try:
-            code = data_sources.shopify_variant_barcode(sku)
-        except Exception:  # noqa: BLE001
-            code = None
         head = f"**{title}**  ·  SKU `{sku}`"
-        head += f"  ·  EAN `{code}`" if code else "  ·  _no barcode on Shopify_"
         if sell is not None:
             head += f"  ·  you sell at **£{sell:,.2f} ex VAT**"
         st.markdown(head)
 
         with st.spinner("Searching competitor sites…"):
-            res = competitor_research(sku, title, code, prod.get("vendor"), sell)
+            res = competitor_research(sku, title, sku, prod.get("vendor"), sell)
         if res.get("error"):
             if "ANTHROPIC_API_KEY" in res["error"]:
                 st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to enable "
