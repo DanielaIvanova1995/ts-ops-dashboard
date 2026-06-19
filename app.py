@@ -547,6 +547,34 @@ def _ptable(header_cells: str, body_rows: str, note: str = "") -> str:
             f'{body_rows}</table>{note}</div>')
 
 
+_SKU_HEAD = ('<th style="padding:7px 12px">SKU / product</th><th style="padding:7px 12px">Supplier</th>'
+             '<th style="padding:7px 12px;text-align:right">Cost</th>'
+             '<th style="padding:7px 12px;text-align:right">Sell</th>'
+             '<th style="padding:7px 12px;text-align:right">Margin</th>')
+
+
+def _sku_rows(items, supplier=None):
+    out = []
+    for it in items:
+        if supplier:
+            cost = next((o["c"] for o in it.get("offers", []) if o["s"] == supplier), None)
+            sup = supplier
+        else:
+            cost = it.get("cheapest_cost")
+            sup = it.get("cheapest")
+        sell, m, nm = it.get("sell"), it.get("margin"), (it.get("name") or "")[:55]
+        out.append(
+            f'<tr style="border-top:1px solid var(--line)">'
+            f'<td style="padding:7px 12px"><b>{it["sku"]}</b>'
+            f'<div style="color:var(--muted);font-size:11px">{nm}</div></td>'
+            f'<td style="padding:7px 12px;font-size:12px">{sup or "—"}</td>'
+            f'<td style="padding:7px 12px;text-align:right">{"£"+format(cost, ".2f") if cost is not None else "—"}</td>'
+            f'<td style="padding:7px 12px;text-align:right">{"£"+format(sell, ".2f") if sell else "—"}</td>'
+            f'<td style="padding:7px 12px;text-align:right;font-weight:700;color:{_mcol(m)}">'
+            f'{format(m, ".1f")+"%" if m is not None else "—"}</td></tr>')
+    return "".join(out)
+
+
 def render_pricing():
     p = load_pricing()
     st.markdown(
@@ -559,75 +587,73 @@ def render_pricing():
                    "`pricing_summary.json`, push it, and it'll appear here.")
         return
 
-    st.markdown("### Supplier pricing")
     render_product_search()
     st.write("")
 
+    # Clickable tiles → pick which list to view.
     k = p["kpis"]
-    cards = [("Loss-making", k["losses"], k["losses"] > 0),
-             ("Below target", f"{k['below_target']:,}", False),
-             ("Multi-supplier", k["multi"], False),
-             ("SKUs matched", f"{k['matched']:,}", False),
-             ("Total SKUs", f"{k['total']:,}", False)]
-    for col, (label, val, bad) in zip(st.columns(5), cards):
-        col.markdown(
-            f'<div class="ts-card" style="text-align:center;padding:12px 8px">'
-            f'<div class="ts-eyebrow">{label}</div>'
-            f'<div style="font-size:26px;font-weight:800;color:{"#dc2626" if bad else "#21242B"}">{val}</div></div>',
-            unsafe_allow_html=True)
+    tiles = [("Loss-making", k["losses"]), ("Below target", k["below_target"]),
+             ("Multi-supplier", k["multi"]), ("Unmatched", k["unmatched"]),
+             ("Supplier margins", len(p["supplier_summary"])), ("Pricelists", None)]
+    if "pview" not in st.session_state:
+        st.session_state.pview = "Loss-making"
+    for col, (label, cnt) in zip(st.columns(len(tiles)), tiles):
+        lbl = f"{label}\n\n{cnt:,}" if cnt is not None else f"{label}\n\n—"
+        if col.button(lbl, key=f"pv_{label}", use_container_width=True,
+                      type="primary" if st.session_state.pview == label else "secondary"):
+            st.session_state.pview = label
+            st.rerun()
     st.write("")
 
-    # Loss warnings
-    lr = "".join(
-        f'<tr style="border-top:1px solid var(--line)">'
-        f'<td style="padding:6px 10px"><b>{r["sku"]}</b>'
-        f'<div style="color:var(--muted);font-size:11px">{(r.get("name") or "")[:55]}</div></td>'
-        f'<td style="padding:6px 10px;font-size:12px">{r.get("cheapest_supplier") or ""}</td>'
-        f'<td style="padding:6px 10px;text-align:right">£{r.get("cheapest_cost")}</td>'
-        f'<td style="padding:6px 10px;text-align:right">£{r.get("sell")}</td>'
-        f'<td style="padding:6px 10px;text-align:right;font-weight:800;color:{_mcol(r.get("margin_pct"))}">'
-        f'{r.get("margin_pct") if r.get("margin_pct") is not None else "—"}%</td></tr>'
-        for r in p["losses"])
-    with st.expander(f"Loss warnings — {len(p['losses'])} SKUs at/below cost", expanded=True):
-        st.markdown(_ptable(
-            '<th style="padding:4px 10px">SKU / product</th><th style="padding:4px 10px">Cheapest supplier</th>'
-            '<th style="padding:4px 10px;text-align:right">Cost</th><th style="padding:4px 10px;text-align:right">Sell</th>'
-            '<th style="padding:4px 10px;text-align:right">Margin</th>', lr), unsafe_allow_html=True)
+    view = st.session_state.pview
+    lk = load_lookup()
+    items = lk["items"] if lk else []
+    CAP = 300
 
-    # Supplier margins
-    sr = "".join(
-        f'<tr style="border-top:1px solid var(--line)">'
-        f'<td style="padding:6px 10px"><b>{s["supplier"]}</b>'
-        f'<div style="color:var(--muted);font-size:11px">{s.get("pricelist_date") or "no date"}</div></td>'
-        f'<td style="padding:6px 10px;text-align:right">{s.get("skus_sold"):,}</td>'
-        f'<td style="padding:6px 10px;text-align:right;font-weight:800;color:{_mcol(s.get("avg_margin"))}">{s.get("avg_margin")}%</td>'
-        f'<td style="padding:6px 10px;text-align:right">{s.get("below_target")}</td>'
-        f'<td style="padding:6px 10px;text-align:right;color:{"#dc2626" if s.get("loss") else "var(--muted)"}">{s.get("loss")}</td></tr>'
-        for s in p["supplier_summary"])
-    with st.expander(f"Supplier margins — {len(p['supplier_summary'])} suppliers", expanded=True):
+    if view == "Supplier margins":
+        sr = "".join(
+            f'<tr style="border-top:1px solid var(--line)">'
+            f'<td style="padding:7px 12px"><b>{s["supplier"]}</b>'
+            f'<div style="color:var(--muted);font-size:11px">{s.get("pricelist_date") or "no date"}</div></td>'
+            f'<td style="padding:7px 12px;text-align:right">{s.get("skus_sold"):,}</td>'
+            f'<td style="padding:7px 12px;text-align:right;font-weight:800;color:{_mcol(s.get("avg_margin"))}">{s.get("avg_margin")}%</td>'
+            f'<td style="padding:7px 12px;text-align:right">{s.get("below_target")}</td>'
+            f'<td style="padding:7px 12px;text-align:right;color:{"#dc2626" if s.get("loss") else "var(--muted)"}">{s.get("loss")}</td></tr>'
+            for s in p["supplier_summary"])
         st.markdown(_ptable(
-            '<th style="padding:4px 10px">Supplier / pricelist date</th><th style="padding:4px 10px;text-align:right">SKUs sold</th>'
-            '<th style="padding:4px 10px;text-align:right">Avg margin</th><th style="padding:4px 10px;text-align:right">Below target</th>'
-            '<th style="padding:4px 10px;text-align:right">Loss</th>', sr), unsafe_allow_html=True)
+            '<th style="padding:7px 12px">Supplier / pricelist date</th><th style="padding:7px 12px;text-align:right">SKUs sold</th>'
+            '<th style="padding:7px 12px;text-align:right">Avg margin</th><th style="padding:7px 12px;text-align:right">Below target</th>'
+            '<th style="padding:7px 12px;text-align:right">Loss</th>', sr), unsafe_allow_html=True)
 
-    # Multi-supplier (capped for display)
-    cap = 150
-    mr = "".join(
-        f'<tr style="border-top:1px solid var(--line)">'
-        f'<td style="padding:6px 10px"><b>{r["sku"]}</b>'
-        f'<div style="color:var(--muted);font-size:11px">{(", ".join(r.get("suppliers") or []))[:60]}</div></td>'
-        f'<td style="padding:6px 10px;font-size:12px">{r.get("cheapest_supplier") or ""} · £{r.get("cheapest_cost")}</td>'
-        f'<td style="padding:6px 10px;text-align:right;font-weight:700;color:#15803d">£{r.get("potential_saving")}</td></tr>'
-        for r in p["multi"][:cap])
-    note = (f'<div style="color:var(--muted);font-size:12px;padding:6px 10px">Showing top {cap} by saving — '
-            f'full list in the desktop dashboard.</div>' if len(p["multi"]) > cap else "")
-    with st.expander(f"Multi-supplier SKUs — {len(p['multi'])} (cheapest vs dearest)", expanded=False):
-        st.markdown(_ptable(
-            '<th style="padding:4px 10px">SKU / suppliers</th><th style="padding:4px 10px">Cheapest</th>'
-            '<th style="padding:4px 10px;text-align:right">Saving / unit</th>', mr, note), unsafe_allow_html=True)
+    elif view == "Pricelists":
+        suppliers = [s["supplier"] for s in p["supplier_summary"]]
+        sup = st.selectbox("Supplier", suppliers, key="pl_sup")
+        rows = sorted((it for it in items if any(o["s"] == sup for o in it.get("offers", []))),
+                      key=lambda it: it["sku"])
+        st.caption(f"{len(rows):,} SKUs from {sup}"
+                   + (f" — showing first {CAP}, use the search above to find a specific one" if len(rows) > CAP else ""))
+        st.markdown(_ptable(_SKU_HEAD, _sku_rows(rows[:CAP], supplier=sup)), unsafe_allow_html=True)
 
-    st.caption(f"Snapshot generated {p['generated_at']} by the daily supplier-pricing refresh. "
-               "Full 21k-SKU detail (All margins, Unmatched) lives in the desktop dashboard.")
+    else:
+        if view == "Loss-making":
+            rows = sorted((it for it in items if it.get("status") == "loss"),
+                          key=lambda it: (it.get("margin") if it.get("margin") is not None else 0))
+        elif view == "Below target":
+            rows = sorted((it for it in items if it.get("status") == "below-target"),
+                          key=lambda it: (it.get("margin") if it.get("margin") is not None else 999))
+        elif view == "Multi-supplier":
+            rows = sorted((it for it in items if len(it.get("offers", [])) > 1),
+                          key=lambda it: -(it.get("saving") or 0))
+        elif view == "Unmatched":
+            rows = sorted((it for it in items if not it.get("sell")), key=lambda it: it["sku"])
+        else:
+            rows = []
+        st.caption(f"{len(rows):,} SKUs"
+                   + (f" — showing first {CAP}, use the search above to find a specific one" if len(rows) > CAP else ""))
+        st.markdown(_ptable(_SKU_HEAD, _sku_rows(rows[:CAP])), unsafe_allow_html=True)
+
+    st.caption(f"Snapshot from the daily refresh ({p['generated_at']}). "
+               "Click a tile above to switch lists; use the search to find any SKU.")
 
 
 # ---------------------------------------------------------------------------
