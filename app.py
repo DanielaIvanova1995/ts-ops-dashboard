@@ -549,46 +549,80 @@ MONDAY_USERS = {  # Monday account id → dashboard username
 }
 
 
+# Work categories — group each person's changes so a long list reads at a glance.
+ACTIVITY_CATS = [  # (name, emoji, column ids that belong to this category)
+    ("Deliveries", "📦", {"color_mktyhmf3", "color_mm06fnhe", "date_mkny3amy"}),
+    ("ETAs", "🔎", {"color_mm06spvx", "date_mkzd2jyv", "date", "date__1",
+                    "date1__1", "date10__1"}),
+    ("Invoices", "🧾", {"color_mktydktf", "numeric_mm3dc5fs", "numeric_mm3dn836",
+                        "numeric_mm3d6jn5", "numeric_mm3d9t22", "numeric_mm3d31gp",
+                        "text_mm22k2j7", "date6", "status7__1", "numbers4", "date_mm3d1ear"}),
+    ("Customer care", "🤝", {"color_mktyyf7w", "status_1__1", "status_18", "color_mkpesmf3"}),
+    ("Orders", "💬", {"color_mktyje8e", "color_mkzs8q63", "text_mkv6z0nt", "date1",
+                      "hour_mkzvayd7"}),
+]
+_CAT_BY_COL = {c: name for name, _, cols in ACTIVITY_CATS for c in cols}
+CAT_EMOJI = {name: emoji for name, emoji, _ in ACTIVITY_CATS}
+CAT_EMOJI["Other"] = "✏️"
+CAT_ORDER = [name for name, _, _ in ACTIVITY_CATS] + ["Other"]
+
+
+def _activity_category(event: str, dd: dict) -> str:
+    """Which work category a change belongs to."""
+    if event == "move_pulse_from_group":
+        dest = dd.get("dest_group")
+        tl = ((dest.get("title") if isinstance(dest, dict) else "") or "").lower()
+        if any(w in tl for w in ("aftersales", "refund", "return", "cancel", "chargeback")):
+            return "Customer care"
+        if any(w in tl for w in ("paid", "posted", "deliver")):
+            return "Deliveries"
+        return "Orders"
+    if event in ("create_pulse", "delete_pulse"):
+        return "Invoices" if (dd.get("board_id") == SUBITEMS_BOARD
+                              or dd.get("is_subtasks_action")) else "Orders"
+    return _CAT_BY_COL.get(dd.get("column_id"), "Other")
+
+
 def _activity_change(event: str, dd: dict, group_names: dict):
-    """Human-readable summary of one Monday activity entry, or None if it's a
-    low-signal change (file upload, link edit, subitem auto-linking)."""
+    """(label, low_signal) for one Monday activity entry. low_signal flags noise
+    (file upload, link edit, subitem auto-linking) so it can be filtered."""
     if event == "create_pulse":
-        return "created"
+        return "created", False
     if event == "delete_pulse":
-        return "deleted"
+        return "deleted", False
     if event == "move_pulse_from_group":
         dest = dd.get("dest_group")
         title = dest.get("title") if isinstance(dest, dict) else group_names.get(dest)
         title = (title or "another group").split(" (")[0].strip()  # drop long notes
-        return f"moved → {title}"
-    # Hide noise: file uploads, link edits, and subitem-linking events.
-    if dd.get("column_type") in ("file", "link", "subtasks"):
-        return None
+        return f"moved → {title}", False
     ct = dd.get("column_title") or dd.get("column_id") or "a field"
+    low = dd.get("column_type") in ("file", "link", "subtasks")
     val = dd.get("value")
     if isinstance(val, dict):
+        if val.get("files"):
+            return f"{ct} added", True
         if "linkedPulseIds" in val:
-            return None
+            return f"{ct} linked", True
         lv = val.get("label")
         if isinstance(lv, dict) and lv.get("text"):
-            return f"{ct} → {lv['text']}"
+            return f"{ct} → {lv['text']}", low
         if isinstance(lv, str) and lv:
-            return f"{ct} → {lv}"
+            return f"{ct} → {lv}", low
         if val.get("date"):
-            return f"{ct}: {val['date']}"
+            return f"{ct}: {val['date']}", low
         v = val.get("value")
         if isinstance(v, (int, float)):
-            return f"{ct}: {v}"
+            return f"{ct}: {v}", low
         if val.get("text"):
-            return f"{ct}: {str(val['text'])[:40]}"
-    return ct
+            return f"{ct}: {str(val['text'])[:40]}", low
+    return ct, low
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def daily_activity(day_iso: str):
+def daily_activity(day_iso: str, meaningful: bool = True):
     """Per-person 'who did what' on the given YYYY-MM-DD (UK day), across the
-    Orders board and its subitems. Returns {people, auto_changes, error}.
-    Cached 30 min."""
+    Orders board and its subitems. Each person's items are grouped by work
+    category. With meaningful=True, low-signal noise is filtered. Cached 30 min."""
     try:
         y, mo, d = (int(x) for x in day_iso.split("-"))
         start = datetime(y, mo, d, tzinfo=UK_TZ)
@@ -600,7 +634,7 @@ def daily_activity(day_iso: str):
                 ev["_sub"] = is_sub
                 logs.append(ev)
     except Exception as e:  # noqa: BLE001
-        return {"people": [], "auto_changes": 0, "error": str(e)}
+        return {"people": [], "auto_changes": 0, "hidden": 0, "error": str(e)}
 
     group_names = {}  # dest_group already carries its title in the activity data
     cfg = config["credentials"]["usernames"]
@@ -626,8 +660,8 @@ def daily_activity(day_iso: str):
             dd = json.loads(ev.get("data") or "{}")
         except Exception:  # noqa: BLE001
             continue
-        change = _activity_change(ev.get("event"), dd, group_names)
-        if not change:  # low-signal change (file upload, link, subitem link) → skip
+        change, low = _activity_change(ev.get("event"), dd, group_names)
+        if meaningful and low:  # low-signal noise → skip
             hidden += 1
             continue
         pid = dd.get("pulse_id")
@@ -635,17 +669,26 @@ def daily_activity(day_iso: str):
         if not pname and isinstance(dd.get("pulse"), dict):
             pname = dd["pulse"].get("name")  # move events carry the order no. here
         pname = str(pname or pid or "?")
+        cat = _activity_category(ev.get("event"), dd)
         it = people.setdefault(nm, {}).setdefault(
-            pid, {"name": pname, "sub": ev.get("_sub", False), "changes": []})
+            pid, {"name": pname, "sub": ev.get("_sub", False), "changes": [], "cats": set()})
+        it["cats"].add(cat)
         if change not in it["changes"]:
             it["changes"].append(change)
 
     out = []
     for nm, items in people.items():
         ilist = list(items.values())
-        ilist.sort(key=lambda i: (i["sub"], i["name"]))
+        # primary category = highest-priority category the item touched
+        for it in ilist:
+            it["cat"] = next((c for c in CAT_ORDER if c in it["cats"]), "Other")
+        ilist.sort(key=lambda i: (CAT_ORDER.index(i["cat"]), i["sub"], i["name"]))
+        cat_counts = {}
+        for it in ilist:
+            cat_counts[it["cat"]] = cat_counts.get(it["cat"], 0) + 1
         out.append({"name": nm, "n_items": len(ilist),
-                    "n_changes": sum(len(i["changes"]) for i in ilist), "items": ilist})
+                    "n_changes": sum(len(i["changes"]) for i in ilist),
+                    "cat_counts": cat_counts, "items": ilist})
     out.sort(key=lambda p: p["n_changes"], reverse=True)
     return {"people": out, "auto_changes": auto, "hidden": hidden, "error": None}
 
@@ -656,9 +699,15 @@ def render_daily_activity():
         <span class="sec">Daily Activity</span></span></div>""",
         unsafe_allow_html=True,
     )
-    sel = st.date_input("Day", value=now_uk().date(), max_value=now_uk().date(),
-                        format="DD/MM/YYYY")
-    res = daily_activity(sel.isoformat())
+    c_date, c_tog = st.columns([1, 1.4])
+    with c_date:
+        sel = st.date_input("Day", value=now_uk().date(), max_value=now_uk().date(),
+                            format="DD/MM/YYYY")
+    with c_tog:
+        st.write("")
+        meaningful = st.toggle("Meaningful changes only", value=True,
+                               help="Hide file uploads, link edits and subitem auto-linking.")
+    res = daily_activity(sel.isoformat(), meaningful)
     if res.get("error"):
         st.warning("Couldn't read Monday activity: " + str(res["error"])[:200])
         return
@@ -691,41 +740,54 @@ def render_daily_activity():
     )
 
     # --- CSV export of the full detail ---
-    csv_lines = ["Date,Person,Item,Type,Changes"]
+    csv_lines = ["Date,Person,Item,Type,Category,Changes"]
     for p in people:
         for it in p["items"]:
             ch = " | ".join(it["changes"]).replace('"', "'")
             csv_lines.append(f'{sel.isoformat()},"{p["name"]}","{it["name"]}",'
-                             f'{"subitem" if it["sub"] else "order"},"{ch}"')
+                             f'{"subitem" if it["sub"] else "order"},{it["cat"]},"{ch}"')
     st.download_button("⬇ Download CSV", "\n".join(csv_lines),
                        file_name=f"daily-activity-{sel.isoformat()}.csv", mime="text/csv")
     st.write("")
-    CAP = 80
+    CAP = 100
     for idx, p in enumerate(people):
+        chips = " · ".join(f'{CAT_EMOJI.get(c, "")} {c} {p["cat_counts"][c]}'
+                           for c in CAT_ORDER if p["cat_counts"].get(c))
         with st.expander(f'{p["name"]} — {p["n_items"]} items · {p["n_changes"]} changes',
                          expanded=(idx == 0)):
-            rows = []
-            for it in p["items"][:CAP]:
-                tag = ('<span style="background:#eef2f7;color:#64748b;border-radius:3px;'
-                       'padding:0 5px;font-size:10px;margin-left:5px">subitem</span>'
-                       if it["sub"] else "")
-                label_i = ("Inv " if it["sub"] else "#") + it["name"]
-                rows.append(
-                    f'<tr style="border-top:1px solid var(--line)">'
-                    f'<td style="padding:6px 10px;white-space:nowrap;vertical-align:top">'
-                    f'<b>{label_i}</b>{tag}</td>'
-                    f'<td style="padding:6px 10px;color:#334155">{"; ".join(it["changes"])}</td></tr>')
-            more = len(p["items"]) - CAP
-            more_row = (f'<tr><td colspan="2" style="padding:6px 10px;color:var(--muted)">'
-                        f'+{more} more items…</td></tr>' if more > 0 else "")
             st.markdown(
-                '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
-                '<tr style="text-align:left;color:var(--muted)">'
-                '<th style="padding:6px 10px">Item</th>'
-                '<th style="padding:6px 10px">What changed</th></tr>'
-                + "".join(rows) + more_row + "</table>",
-                unsafe_allow_html=True,
-            )
+                f'<p style="color:var(--muted);font-size:12px;margin:0 0 6px">{chips}</p>',
+                unsafe_allow_html=True)
+            html = ['<table style="width:100%;border-collapse:collapse;font-size:12.5px">']
+            shown = 0
+            for c in CAT_ORDER:
+                cat_items = [it for it in p["items"] if it["cat"] == c]
+                if not cat_items or shown >= CAP:
+                    continue
+                html.append(
+                    f'<tr><td colspan="2" style="padding:9px 10px 3px;color:#0f172a;'
+                    f'font-weight:700">{CAT_EMOJI.get(c, "")} {c} '
+                    f'<span style="color:var(--muted);font-weight:400">({len(cat_items)})</span>'
+                    f'</td></tr>')
+                for it in cat_items:
+                    if shown >= CAP:
+                        break
+                    tag = ('<span style="background:#eef2f7;color:#64748b;border-radius:3px;'
+                           'padding:0 5px;font-size:10px;margin-left:5px">subitem</span>'
+                           if it["sub"] else "")
+                    label_i = ("Inv " if it["sub"] else "#") + it["name"]
+                    html.append(
+                        f'<tr style="border-top:1px solid var(--line)">'
+                        f'<td style="padding:5px 10px;white-space:nowrap;vertical-align:top;'
+                        f'width:1%"><b>{label_i}</b>{tag}</td>'
+                        f'<td style="padding:5px 10px;color:#334155">'
+                        f'{"; ".join(it["changes"])}</td></tr>')
+                    shown += 1
+            if p["n_items"] > shown:
+                html.append(f'<tr><td colspan="2" style="padding:6px 10px;color:var(--muted)">'
+                            f'+{p["n_items"] - shown} more items…</td></tr>')
+            html.append("</table>")
+            st.markdown("".join(html), unsafe_allow_html=True)
     notes = []
     if res.get("hidden"):
         notes.append(f'{res["hidden"]} low-signal changes hidden (file uploads, links)')
