@@ -716,9 +716,10 @@ with st.sidebar:
     # --- Settings (one collapsible) ---
     with st.expander("Settings"):
         st.caption(f"Signed in as {name} · {role}")
-        st.markdown("**Change password**")
         try:
-            if authenticator.reset_password(username, location="sidebar"):
+            if authenticator.reset_password(
+                    username, location="sidebar",
+                    fields={"Form name": "Change password", "Reset": "Update password"}):
                 with open(BASE / "config.yaml", "w") as f:
                     yaml.dump(config, f, default_flow_style=False)
                 st.success("Password changed ✅")
