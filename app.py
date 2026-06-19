@@ -549,8 +549,9 @@ MONDAY_USERS = {  # Monday account id → dashboard username
 }
 
 
-def _activity_change(event: str, dd: dict, group_names: dict) -> str:
-    """Human-readable summary of one Monday activity entry."""
+def _activity_change(event: str, dd: dict, group_names: dict):
+    """Human-readable summary of one Monday activity entry, or None if it's a
+    low-signal change (file upload, link edit, subitem auto-linking)."""
     if event == "create_pulse":
         return "created"
     if event == "delete_pulse":
@@ -560,16 +561,19 @@ def _activity_change(event: str, dd: dict, group_names: dict) -> str:
         title = dest.get("title") if isinstance(dest, dict) else group_names.get(dest)
         title = (title or "another group").split(" (")[0].strip()  # drop long notes
         return f"moved → {title}"
+    # Hide noise: file uploads, link edits, and subitem-linking events.
+    if dd.get("column_type") in ("file", "link", "subtasks"):
+        return None
     ct = dd.get("column_title") or dd.get("column_id") or "a field"
     val = dd.get("value")
     if isinstance(val, dict):
+        if "linkedPulseIds" in val:
+            return None
         lv = val.get("label")
         if isinstance(lv, dict) and lv.get("text"):
             return f"{ct} → {lv['text']}"
         if isinstance(lv, str) and lv:
             return f"{ct} → {lv}"
-        if val.get("files"):
-            return f"{ct} added"
         if val.get("date"):
             return f"{ct}: {val['date']}"
         v = val.get("value")
@@ -577,8 +581,6 @@ def _activity_change(event: str, dd: dict, group_names: dict) -> str:
             return f"{ct}: {v}"
         if val.get("text"):
             return f"{ct}: {str(val['text'])[:40]}"
-        if "linkedPulseIds" in val:
-            return f"{ct} linked"
     return ct
 
 
@@ -614,7 +616,7 @@ def daily_activity(day_iso: str):
         return extra.get(uid)
 
     people: dict = {}
-    auto = 0
+    auto = hidden = 0
     for ev in logs:
         nm = who(ev.get("user_id"))
         if not nm:  # automation / system actor
@@ -624,12 +626,15 @@ def daily_activity(day_iso: str):
             dd = json.loads(ev.get("data") or "{}")
         except Exception:  # noqa: BLE001
             continue
+        change = _activity_change(ev.get("event"), dd, group_names)
+        if not change:  # low-signal change (file upload, link, subitem link) → skip
+            hidden += 1
+            continue
         pid = dd.get("pulse_id")
         pname = dd.get("pulse_name")
         if not pname and isinstance(dd.get("pulse"), dict):
             pname = dd["pulse"].get("name")  # move events carry the order no. here
         pname = str(pname or pid or "?")
-        change = _activity_change(ev.get("event"), dd, group_names)
         it = people.setdefault(nm, {}).setdefault(
             pid, {"name": pname, "sub": ev.get("_sub", False), "changes": []})
         if change not in it["changes"]:
@@ -642,7 +647,7 @@ def daily_activity(day_iso: str):
         out.append({"name": nm, "n_items": len(ilist),
                     "n_changes": sum(len(i["changes"]) for i in ilist), "items": ilist})
     out.sort(key=lambda p: p["n_changes"], reverse=True)
-    return {"people": out, "auto_changes": auto, "error": None}
+    return {"people": out, "auto_changes": auto, "hidden": hidden, "error": None}
 
 
 def render_daily_activity():
@@ -664,7 +669,37 @@ def render_daily_activity():
         return
 
     total_items = sum(p["n_items"] for p in people)
-    st.caption(f"{len(people)} people active {label} · {total_items} items touched")
+    total_changes = sum(p["n_changes"] for p in people)
+    st.caption(f"{len(people)} people active {label} · {total_items} items touched "
+               f"· {total_changes} changes")
+
+    # --- Per-person daily totals (summary) ---
+    trows = "".join(
+        f'<tr style="border-top:1px solid var(--line)">'
+        f'<td style="padding:6px 12px"><b>{p["name"]}</b></td>'
+        f'<td style="padding:6px 12px;text-align:right">{p["n_items"]}</td>'
+        f'<td style="padding:6px 12px;text-align:right">{p["n_changes"]}</td></tr>'
+        for p in people)
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:6px">'
+        '<tr style="text-align:left;color:var(--muted)">'
+        '<th style="padding:6px 12px">Person</th>'
+        '<th style="padding:6px 12px;text-align:right">Items</th>'
+        '<th style="padding:6px 12px;text-align:right">Changes</th></tr>'
+        f'{trows}</table>',
+        unsafe_allow_html=True,
+    )
+
+    # --- CSV export of the full detail ---
+    csv_lines = ["Date,Person,Item,Type,Changes"]
+    for p in people:
+        for it in p["items"]:
+            ch = " | ".join(it["changes"]).replace('"', "'")
+            csv_lines.append(f'{sel.isoformat()},"{p["name"]}","{it["name"]}",'
+                             f'{"subitem" if it["sub"] else "order"},"{ch}"')
+    st.download_button("⬇ Download CSV", "\n".join(csv_lines),
+                       file_name=f"daily-activity-{sel.isoformat()}.csv", mime="text/csv")
+    st.write("")
     CAP = 80
     for idx, p in enumerate(people):
         with st.expander(f'{p["name"]} — {p["n_items"]} items · {p["n_changes"]} changes',
@@ -691,8 +726,13 @@ def render_daily_activity():
                 + "".join(rows) + more_row + "</table>",
                 unsafe_allow_html=True,
             )
-    if res["auto_changes"]:
-        st.caption(f'+ {res["auto_changes"]} automated / system changes (not shown)')
+    notes = []
+    if res.get("hidden"):
+        notes.append(f'{res["hidden"]} low-signal changes hidden (file uploads, links)')
+    if res.get("auto_changes"):
+        notes.append(f'{res["auto_changes"]} automated / system changes')
+    if notes:
+        st.caption("Not shown: " + " · ".join(notes) + ".")
 
 
 def render_product_search():
