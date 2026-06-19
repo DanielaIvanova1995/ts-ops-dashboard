@@ -527,8 +527,11 @@ with c2:
         quiet_u, quiet_v = ranked[-1]
         busy_name = users_cfg.get(busy_u, {}).get("name", busy_u)
         quiet_name = users_cfg.get(quiet_u, {}).get("name", quiet_u)
+        # Skip tasks nobody can help with (e.g. invoice approval = Malyeka only)
+        # and only suggest handing over something that's actually outstanding.
         busy_kpis = sorted(
-            [k for k in KPIS if not k.get("info") and busy_u in k.get("owners", [])],
+            [k for k in KPIS if not k.get("info") and not k.get("no_help")
+             and busy_u in k.get("owners", []) and status_of(k) != "green"],
             key=lambda k: SEV[status_of(k)],
         )
         handover = busy_kpis[0]["name"] if busy_kpis else "a task"
