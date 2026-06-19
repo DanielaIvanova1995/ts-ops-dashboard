@@ -133,6 +133,10 @@ CSS = """
   .stButton>button {border-radius:10px; border:1px solid var(--line); font-weight:600;}
   /* Sidebar menu: left-aligned, menu-like */
   [data-testid="stSidebar"] .stButton>button {justify-content:flex-start; text-align:left;}
+  /* Collapsible section titles → look like real titles */
+  [data-testid="stExpander"] summary p {font-size:17px !important; font-weight:700 !important;
+     color:var(--ink) !important; margin:0;}
+  [data-testid="stExpander"] summary {font-weight:700;}
   /* Bordered text inputs (login + elsewhere) */
   .stTextInput div[data-baseweb="input"]{border:1px solid #C3C9D4 !important;
      border-radius:8px !important; background:#fff !important;}
@@ -496,7 +500,7 @@ function render(){
   out.innerHTML=res.map(it=>{
     const sku=it[0],name=it[1],sell=it[2],margin=it[3],offs=it[4];
     const matched=sell!=null&&sell>0;
-    let sup='';for(let j=0;j<offs.length;j++){const ch=j===0&&offs.length>1;sup+='<tr><td>'+esc(SUP[offs[j][0]])+(ch?' \\uD83C\\uDFC6':'')+'</td><td style="text-align:right;font-weight:'+(j===0?700:400)+';color:'+(ch?'#15803d':'#21242B')+'">\\u00A3'+offs[j][1]+'</td></tr>';}
+    let sup='';for(let j=0;j<offs.length;j++){const ch=j===0&&offs.length>1;sup+='<tr><td>'+esc(SUP[offs[j][0]])+(ch?' <span style="color:#15803d;font-weight:700">cheapest</span>':'')+'</td><td style="text-align:right;font-weight:'+(j===0?700:400)+';color:'+(ch?'#15803d':'#21242B')+'">\\u00A3'+offs[j][1]+'</td></tr>';}
     let save='';if(offs.length>1){const s=Math.round((offs[offs.length-1][1]-offs[0][1])*100)/100;if(s>0)save='<div class="save">save <b style="color:#15803d">\\u00A3'+s+'/unit</b> via '+esc(SUP[offs[0][0]])+'</div>';}
     const price=matched?('<div class="big" style="color:#15803d">\\u00A3'+sell+'</div><div class="mg" style="color:'+mcol(margin)+'">'+margin+'% margin</div><span class="badge sell">WE SELL</span>'):('<div class="big" style="color:#dc2626;font-size:18px">NOT SOLD</div><span class="badge no">not on Shopify</span>');
     return '<div class="card"><div class="L"><div class="sku">'+hl(sku,ql)+' <span class="nm">'+hl(name,ql)+'</span></div><table>'+sup+'</table>'+save+'</div><div class="R">'+price+'</div></div>';
@@ -512,7 +516,7 @@ def render_product_search():
     """Instant, as-you-type product search that runs in the browser: substring
     match on SKU/name with the typed text highlighted, every supplier (cheapest
     flagged), the sell price / margin and whether we sell it."""
-    st.markdown("##### 🔍 Find a product, its cheapest supplier &amp; price")
+    st.markdown("#### Find a product, its cheapest supplier &amp; price")
     payload = _search_payload()
     if not payload:
         st.info("Product lookup data not loaded yet.")
@@ -548,7 +552,7 @@ def render_pricing():
                    "`pricing_summary.json`, push it, and it'll appear here.")
         return
 
-    st.markdown("### 💷 Supplier pricing")
+    st.markdown("### Supplier pricing")
     render_product_search()
     st.write("")
 
@@ -577,7 +581,7 @@ def render_pricing():
         f'<td style="padding:6px 10px;text-align:right;font-weight:800;color:{_mcol(r.get("margin_pct"))}">'
         f'{r.get("margin_pct") if r.get("margin_pct") is not None else "—"}%</td></tr>'
         for r in p["losses"])
-    with st.expander(f"🔴  Loss warnings — {len(p['losses'])} SKUs at/below cost", expanded=True):
+    with st.expander(f"Loss warnings — {len(p['losses'])} SKUs at/below cost", expanded=True):
         st.markdown(_ptable(
             '<th style="padding:4px 10px">SKU / product</th><th style="padding:4px 10px">Cheapest supplier</th>'
             '<th style="padding:4px 10px;text-align:right">Cost</th><th style="padding:4px 10px;text-align:right">Sell</th>'
@@ -593,7 +597,7 @@ def render_pricing():
         f'<td style="padding:6px 10px;text-align:right">{s.get("below_target")}</td>'
         f'<td style="padding:6px 10px;text-align:right;color:{"#dc2626" if s.get("loss") else "var(--muted)"}">{s.get("loss")}</td></tr>'
         for s in p["supplier_summary"])
-    with st.expander(f"🏭  Supplier margins — {len(p['supplier_summary'])} suppliers", expanded=True):
+    with st.expander(f"Supplier margins — {len(p['supplier_summary'])} suppliers", expanded=True):
         st.markdown(_ptable(
             '<th style="padding:4px 10px">Supplier / pricelist date</th><th style="padding:4px 10px;text-align:right">SKUs sold</th>'
             '<th style="padding:4px 10px;text-align:right">Avg margin</th><th style="padding:4px 10px;text-align:right">Below target</th>'
@@ -610,7 +614,7 @@ def render_pricing():
         for r in p["multi"][:cap])
     note = (f'<div style="color:var(--muted);font-size:12px;padding:6px 10px">Showing top {cap} by saving — '
             f'full list in the desktop dashboard.</div>' if len(p["multi"]) > cap else "")
-    with st.expander(f"🔀  Multi-supplier SKUs — {len(p['multi'])} (cheapest vs dearest)", expanded=False):
+    with st.expander(f"Multi-supplier SKUs — {len(p['multi'])} (cheapest vs dearest)", expanded=False):
         st.markdown(_ptable(
             '<th style="padding:4px 10px">SKU / suppliers</th><th style="padding:4px 10px">Cheapest</th>'
             '<th style="padding:4px 10px;text-align:right">Saving / unit</th>', mr, note), unsafe_allow_html=True)
