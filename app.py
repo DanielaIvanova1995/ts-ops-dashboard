@@ -853,13 +853,49 @@ def kind_words_cached():
         return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def sales_pulse_cached():
-    """Today's takings vs yesterday, or None if Shopify orders aren't readable."""
-    try:
-        return data_sources.fetch_sales_pulse()
-    except Exception:  # noqa: BLE001 — not configured / no orders scope → hide
-        return None
+# Fun leaderboard — playful titles awarded from the real workload data: each
+# badge goes to whoever is carrying the most in that area right now. Distinct
+# people only, biggest workloads first.
+TITLE_AWARDS = [
+    ("💬 Quote Machine", {"new_orders", "to_post", "quotes"}),
+    ("🔎 ETA Chaser-in-Chief", {"unconfirmed", "eta_chasers", "supplier_etas", "supplier_no_eta"}),
+    ("📦 Delivery Dynamo", {"booked_overdue", "booked_future", "difficult"}),
+    ("🤝 Customer Whisperer",
+     {"complaints", "aftersales", "return_requests", "returns", "pre_delivery", "cancellations"}),
+    ("🕵️ Detail Detective", {"invoices", "discrepancies"}),
+]
+
+
+def fun_titles(kpis, users_cfg, top=4):
+    """[(title, first_name)] — each playful badge to the staff member carrying
+    the most in that area (count + age weighting, same as workload). Managers
+    excluded; one badge per person; busiest areas first."""
+    mgrs = {u for u, i in users_cfg.items() if i.get("role") in ("admin", "manager")}
+    winners = {}
+    for title, ids in TITLE_AWARDS:
+        s: dict = {}
+        for k in kpis:
+            if k.get("info") or k.get("id") not in ids:
+                continue
+            owners = [o for o in k.get("owners", []) if o not in mgrs]
+            if not owners:
+                continue
+            w = (k.get("count", 0) + k.get("oldest_age_days", 0) * 0.4) / len(owners)
+            for o in owners:
+                s[o] = s.get(o, 0) + w
+        if s:
+            u = max(s, key=s.get)
+            if s[u] > 0:
+                winners[title] = (u, s[u])
+    out, used = [], set()
+    for title, (u, sc) in sorted(winners.items(), key=lambda kv: kv[1][1], reverse=True):
+        if u in used:
+            continue
+        used.add(u)
+        out.append((title, users_cfg.get(u, {}).get("name", u).split()[0]))
+        if len(out) >= top:
+            break
+    return out
 
 
 load = workload(KPIS)  # workload bars — everyone (incl. Malyeka), excl. managers
@@ -873,24 +909,17 @@ c1, c2, c3 = _glance.columns([1.15, 1, 1])
 with c1:
     joke = joke_of_the_day()
     kw = kind_words_cached()
-    sp = sales_pulse_cached()
+    titles = fun_titles(KPIS, users_cfg)
     blocks = []
 
-    if sp:
-        sym = {"GBP": "£", "EUR": "€", "USD": "$"}.get(sp.get("currency"), "£")
-        ap = sp.get("ahead_pct")
-        if ap is None:
-            trend = '<span class="ts-meta">first orders of the day</span>'
-        elif ap >= 0:
-            trend = f'<span style="color:#10b981;font-weight:700">▲ {ap}% ahead of yesterday</span>'
-        else:
-            trend = f'<span style="color:#ef4444;font-weight:700">▼ {abs(ap)}% vs yesterday</span>'
-        n = sp.get("count_today", 0)
+    if titles:
+        rows = "".join(
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'font-size:13px;padding:4px 0;border-top:1px solid var(--line)">'
+            f'<span>{t}</span><b style="color:#334155">{nm}</b></div>'
+            for t, nm in titles)
         blocks.append(
-            f'<p class="ts-eyebrow">Today\'s takings</p>'
-            f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
-            f'<span style="font-size:30px;font-weight:800;line-height:1">{sym}{sp["today"]:,}</span>{trend}</div>'
-            f'<p class="ts-meta">{n} order{"s" if n != 1 else ""} so far today</p>'
+            f'<p class="ts-eyebrow">🏆 Today\'s leaderboard</p>{rows}'
         )
 
     if kw and kw.get("quote"):
@@ -902,7 +931,7 @@ with c1:
         )
 
     blocks.append(
-        f'<p class="ts-eyebrow" style="margin-top:14px">😄 Joke of the day</p>'
+        f'<p class="ts-eyebrow" style="margin-top:14px">😄 Joke &amp; banter of the day</p>'
         f'<p style="font-size:13.5px;line-height:1.45;margin:2px 0 0">{joke}</p>'
     )
 
