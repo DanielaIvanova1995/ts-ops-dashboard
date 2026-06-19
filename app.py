@@ -749,45 +749,48 @@ def render_daily_activity():
     st.download_button("⬇ Download CSV", "\n".join(csv_lines),
                        file_name=f"daily-activity-{sel.isoformat()}.csv", mime="text/csv")
     st.write("")
-    CAP = 100
+    # Collapsible category sections (native <details>; Streamlit forbids nested expanders).
+    st.markdown(
+        "<style>details.cat>summary{list-style:none;outline:none}"
+        "details.cat>summary::-webkit-details-marker{display:none}"
+        'details.cat>summary::before{content:"▸";color:#94a3b8;display:inline-block;'
+        "width:1em;transition:transform .15s}"
+        "details.cat[open]>summary::before{transform:rotate(90deg)}</style>",
+        unsafe_allow_html=True,
+    )
+    PER_CAT = 60  # rows shown per category (each section is collapsible)
     for idx, p in enumerate(people):
-        chips = " · ".join(f'{CAT_EMOJI.get(c, "")} {c} {p["cat_counts"][c]}'
-                           for c in CAT_ORDER if p["cat_counts"].get(c))
         with st.expander(f'{p["name"]} — {p["n_items"]} items · {p["n_changes"]} changes',
                          expanded=(idx == 0)):
-            st.markdown(
-                f'<p style="color:var(--muted);font-size:12px;margin:0 0 6px">{chips}</p>',
-                unsafe_allow_html=True)
-            html = ['<table style="width:100%;border-collapse:collapse;font-size:12.5px">']
-            shown = 0
+            blocks = []
             for c in CAT_ORDER:
                 cat_items = [it for it in p["items"] if it["cat"] == c]
-                if not cat_items or shown >= CAP:
+                if not cat_items:
                     continue
-                html.append(
-                    f'<tr><td colspan="2" style="padding:9px 10px 3px;color:#0f172a;'
-                    f'font-weight:700">{CAT_EMOJI.get(c, "")} {c} '
-                    f'<span style="color:var(--muted);font-weight:400">({len(cat_items)})</span>'
-                    f'</td></tr>')
-                for it in cat_items:
-                    if shown >= CAP:
-                        break
+                rows = []
+                for it in cat_items[:PER_CAT]:
                     tag = ('<span style="background:#eef2f7;color:#64748b;border-radius:3px;'
                            'padding:0 5px;font-size:10px;margin-left:5px">subitem</span>'
                            if it["sub"] else "")
                     label_i = ("Inv " if it["sub"] else "#") + it["name"]
-                    html.append(
+                    rows.append(
                         f'<tr style="border-top:1px solid var(--line)">'
                         f'<td style="padding:5px 10px;white-space:nowrap;vertical-align:top;'
                         f'width:1%"><b>{label_i}</b>{tag}</td>'
                         f'<td style="padding:5px 10px;color:#334155">'
                         f'{"; ".join(it["changes"])}</td></tr>')
-                    shown += 1
-            if p["n_items"] > shown:
-                html.append(f'<tr><td colspan="2" style="padding:6px 10px;color:var(--muted)">'
-                            f'+{p["n_items"] - shown} more items…</td></tr>')
-            html.append("</table>")
-            st.markdown("".join(html), unsafe_allow_html=True)
+                extra = len(cat_items) - PER_CAT
+                more = (f'<tr><td colspan="2" style="padding:5px 10px;color:var(--muted)">'
+                        f'+{extra} more…</td></tr>' if extra > 0 else "")
+                blocks.append(
+                    f'<details class="cat" style="border-top:1px solid var(--line)">'
+                    f'<summary style="cursor:pointer;font-weight:700;color:#0f172a;padding:8px 2px">'
+                    f' {CAT_EMOJI.get(c, "")} {c} '
+                    f'<span style="color:var(--muted);font-weight:400">({len(cat_items)})</span>'
+                    f'</summary>'
+                    f'<table style="width:100%;border-collapse:collapse;font-size:12.5px;'
+                    f'margin:0 0 10px">' + "".join(rows) + more + "</table></details>")
+            st.markdown("".join(blocks), unsafe_allow_html=True)
     notes = []
     if res.get("hidden"):
         notes.append(f'{res["hidden"]} low-signal changes hidden (file uploads, links)')
