@@ -23,6 +23,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+import streamlit.components.v1 as components
 import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
@@ -77,8 +78,9 @@ CSS = """
      border:1px solid var(--line); border-radius:16px; padding:14px 20px; margin-bottom:18px;
      box-shadow:0 1px 3px rgba(16,24,40,.06); border-top:4px solid var(--brand);}
   .ts-brandbar img {height:42px; width:auto;}
-  .ts-brandbar .wm {font-size:22px; font-weight:800; letter-spacing:-.3px; color:var(--ink);}
-  .ts-brandbar .wm b {color:var(--brand);}
+  .ts-brandbar .wm {font-family:'Bebas Neue',sans-serif; font-size:32px; line-height:1;
+     letter-spacing:1.5px; text-transform:uppercase; color:var(--ink);}
+  .ts-brandbar .wm b {color:var(--brand); font-weight:400;}
   .ts-brandbar .sct {margin-left:auto; font-size:12px; color:var(--muted); text-align:right;}
   .ts-brandbar .sct b {color:var(--ink);}
   /* Cards */
@@ -441,82 +443,83 @@ def _live_price(sku):
         return "unavailable"
 
 
-def render_product_search():
-    """Search any product by SKU/name → every supplier (cheapest highlighted),
-    the LIVE Shopify sell price + margin, and whether we sell it."""
+@st.cache_data(ttl=600)
+def _search_payload():
+    """Compact, interned lookup for the in-browser instant search widget."""
     lk = load_lookup()
-    try:
-        live_on = data_sources.shopify_configured()
-    except Exception:  # noqa: BLE001
-        live_on = False
-
-    st.markdown("##### 🔍 Find a product, its cheapest supplier &amp; price")
-    q = st.text_input("search", key="pricing_search", label_visibility="collapsed",
-                      placeholder="Type a SKU or product name…")
-    st.caption("🟢 Sell prices live from Shopify" if live_on else
-               "Sell prices as of the last refresh — add the Shopify keys to Secrets for live prices")
-
-    if not q or not q.strip():        # empty box → reset to the default view
-        return
     if not lk:
+        return None
+    sup_list, sup_idx, items = [], {}, []
+    for it in lk["items"]:
+        enc = []
+        for o in sorted(it.get("offers", []), key=lambda o: o["c"]):
+            s = o["s"]
+            if s not in sup_idx:
+                sup_idx[s] = len(sup_list)
+                sup_list.append(s)
+            enc.append([sup_idx[s], o["c"]])
+        items.append([it["sku"], (it.get("name") or "")[:55],
+                      it.get("sell"), it.get("margin"), enc])
+    return json.dumps({"s": sup_list, "i": items}, separators=(",", ":")).replace("</", "<\\/")
+
+
+_SEARCH_WIDGET = """
+<style>
+  *{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;}
+  #q{width:100%;padding:11px 14px;font-size:15px;border:1px solid #C3C9D4;border-radius:10px;outline:none;}
+  #q:focus{border-color:#F26A21;box-shadow:0 0 0 2px rgba(242,106,33,.15);}
+  #cnt{color:#6B7280;font-size:12px;margin:8px 2px;}
+  .card{display:flex;gap:16px;align-items:flex-start;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:12px 16px;margin-bottom:10px;}
+  .L{flex:1;min-width:0;}.R{text-align:right;min-width:120px;}
+  .sku{font-weight:700;color:#21242B;font-size:14px;}.nm{color:#6B7280;font-weight:400;font-size:13px;}
+  table{margin-top:6px;border-collapse:collapse;font-size:13px;}td{padding:3px 10px 3px 0;}
+  .big{font-size:28px;font-weight:800;line-height:1;}.mg{font-size:14px;font-weight:700;}
+  .badge{display:inline-block;margin-top:6px;font-size:10px;font-weight:800;padding:3px 9px;border-radius:999px;}
+  .sell{color:#15803d;background:#dcfce7;}.no{color:#dc2626;background:#fee2e2;}
+  .save{font-size:12px;color:#374151;margin-top:4px;}
+  mark{background:#ffe0c7;color:#b3460f;border-radius:3px;padding:0 1px;}
+</style>
+<input id="q" placeholder="Type a SKU or product name…" autocomplete="off">
+<div id="cnt"></div><div id="out"></div>
+<script>
+const D=__DATA__, SUP=D.s, ITEMS=D.i;
+const q=document.getElementById('q'),out=document.getElementById('out'),cnt=document.getElementById('cnt');
+function esc(s){return (s==null?'':(''+s)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function hl(t,ql){t=t==null?'':''+t;const i=t.toLowerCase().indexOf(ql);if(i<0)return esc(t);return esc(t.slice(0,i))+'<mark>'+esc(t.slice(i,i+ql.length))+'</mark>'+esc(t.slice(i+ql.length));}
+function mcol(m){return (m==null||m<=0)?'#dc2626':(m<20?'#c9870a':'#15803d');}
+function render(){
+  const ql=q.value.trim().toLowerCase();
+  if(!ql){out.innerHTML='';cnt.textContent='';return;}
+  const res=[];
+  for(let k=0;k<ITEMS.length;k++){const it=ITEMS[k];if(it[0].toLowerCase().indexOf(ql)>=0||(it[1]||'').toLowerCase().indexOf(ql)>=0){res.push(it);if(res.length>=60)break;}}
+  cnt.textContent=res.length?(res.length+(res.length>=60?'+':'')+' result'+(res.length===1?'':'s')):'No matches';
+  out.innerHTML=res.map(it=>{
+    const sku=it[0],name=it[1],sell=it[2],margin=it[3],offs=it[4];
+    const matched=sell!=null&&sell>0;
+    let sup='';for(let j=0;j<offs.length;j++){const ch=j===0&&offs.length>1;sup+='<tr><td>'+esc(SUP[offs[j][0]])+(ch?' \\uD83C\\uDFC6':'')+'</td><td style="text-align:right;font-weight:'+(j===0?700:400)+';color:'+(ch?'#15803d':'#21242B')+'">\\u00A3'+offs[j][1]+'</td></tr>';}
+    let save='';if(offs.length>1){const s=Math.round((offs[offs.length-1][1]-offs[0][1])*100)/100;if(s>0)save='<div class="save">save <b style="color:#15803d">\\u00A3'+s+'/unit</b> via '+esc(SUP[offs[0][0]])+'</div>';}
+    const price=matched?('<div class="big" style="color:#15803d">\\u00A3'+sell+'</div><div class="mg" style="color:'+mcol(margin)+'">'+margin+'% margin</div><span class="badge sell">WE SELL</span>'):('<div class="big" style="color:#dc2626;font-size:18px">NOT SOLD</div><span class="badge no">not on Shopify</span>');
+    return '<div class="card"><div class="L"><div class="sku">'+hl(sku,ql)+' <span class="nm">'+hl(name,ql)+'</span></div><table>'+sup+'</table>'+save+'</div><div class="R">'+price+'</div></div>';
+  }).join('');
+}
+q.addEventListener('input',render);
+setTimeout(function(){q.focus();},150);
+</script>
+"""
+
+
+def render_product_search():
+    """Instant, as-you-type product search that runs in the browser: substring
+    match on SKU/name with the typed text highlighted, every supplier (cheapest
+    flagged), the sell price / margin and whether we sell it."""
+    st.markdown("##### 🔍 Find a product, its cheapest supplier &amp; price")
+    payload = _search_payload()
+    if not payload:
         st.info("Product lookup data not loaded yet.")
         return
-    ql = q.strip().lower()
-    matches = [it for it in lk["items"]
-               if ql in (it.get("sku") or "").lower() or ql in (it.get("name") or "").lower()]
-    if not matches:
-        st.info("No products match that.")
-        return
-    st.caption(f"{len(matches)} match{'es' if len(matches) != 1 else ''}"
-               + (" — showing first 12" if len(matches) > 12 else ""))
-
-    for it in matches[:12]:
-        sku = it["sku"]
-        cheapest_cost = it.get("cheapest_cost")
-        sell = it.get("sell")          # daily fallback
-        live = False
-        if live_on:
-            lp = _live_price(sku)
-            if lp == "notsold":
-                sell, live = None, True
-            elif lp != "unavailable":
-                sell, live = lp["price"], True
-        matched = sell is not None and sell > 0
-        margin = (round((sell - cheapest_cost) / sell * 100, 1)
-                  if matched and cheapest_cost is not None else None)
-
-        offers = sorted(it.get("offers", []), key=lambda o: o["c"])
-        sup_rows = "".join(
-            f'<tr><td style="padding:3px 10px">{o["s"]}{" 🏆" if i == 0 and len(offers) > 1 else ""}</td>'
-            f'<td style="padding:3px 10px;text-align:right;font-weight:{800 if i == 0 else 400};'
-            f'color:{"#15803d" if i == 0 and len(offers) > 1 else "#21242B"}">£{o["c"]}</td></tr>'
-            for i, o in enumerate(offers))
-        saving = it.get("saving") or 0
-        save_line = (f'<div class="ts-meta" style="margin-top:4px">💡 save '
-                     f'<b style="color:#15803d">£{saving}/unit</b> buying from {offers[0]["s"]}</div>'
-                     if len(offers) > 1 and saving > 0 else "")
-        live_tag = ' · live' if live else ''
-
-        if matched:
-            price_block = (
-                f'<div style="font-size:30px;font-weight:800;color:#15803d;line-height:1">£{sell}</div>'
-                f'<div style="font-size:15px;font-weight:700;color:{_mcol(margin)}">{margin}% margin</div>'
-                f'<span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:800;color:#15803d;'
-                f'background:#dcfce7;padding:3px 9px;border-radius:999px">WE SELL THIS{live_tag}</span>')
-        else:
-            price_block = (
-                '<div style="font-size:22px;font-weight:800;color:#dc2626;line-height:1.1">NOT SOLD</div>'
-                f'<span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:800;color:#dc2626;'
-                f'background:#fee2e2;padding:3px 9px;border-radius:999px">not on Shopify{live_tag}</span>')
-
-        st.markdown(
-            f'<div class="ts-card" style="margin-bottom:10px;display:flex;gap:16px;align-items:flex-start">'
-            f'<div style="flex:1"><div><b>{sku}</b> '
-            f'<span style="color:var(--muted)">{(it.get("name") or "")[:60]}</span></div>'
-            f'<table style="margin-top:6px;font-size:13px;border-collapse:collapse">{sup_rows}</table>'
-            f'{save_line}</div>'
-            f'<div style="text-align:right;min-width:130px">{price_block}</div></div>',
-            unsafe_allow_html=True)
+    components.html(_SEARCH_WIDGET.replace("__DATA__", payload), height=560, scrolling=True)
+    st.caption("Type any part of a SKU or name — results appear instantly. "
+               "Prices from the latest daily refresh.")
 
 
 def _mcol(m) -> str:
@@ -536,7 +539,7 @@ def _ptable(header_cells: str, body_rows: str, note: str = "") -> str:
 def render_pricing():
     p = load_pricing()
     st.markdown(
-        f"""<div class="ts-brandbar">{_logo_img}<span class="wm">Trade<b>Hub</b></span>
+        f"""<div class="ts-brandbar"><span class="wm">Trade <b>Hub</b></span>
         <span class="sct"><b>Pricing</b> · supplier margins<br>{('updated '+p['generated_at']) if p else 'no data yet'}</span></div>""",
         unsafe_allow_html=True,
     )
@@ -622,9 +625,7 @@ def render_pricing():
 with st.sidebar:
     if _logo:
         st.markdown(
-            f"<div style='display:flex;align-items:center;gap:10px;margin:2px 0 16px'>"
-            f"<img src='{_logo}' style='height:34px'><span style='font-weight:800;font-size:18px'>"
-            f"Trade<span style='color:#F26A21'>Hub</span></span></div>",
+            f"<img src='{_logo}' style='width:100%;display:block;margin:2px 0 14px'>",
             unsafe_allow_html=True,
         )
 
@@ -688,8 +689,7 @@ if module == "Pricing":
 live_chip = ("🟢 Live" if data.get("live") else "🟡 Snapshot")
 st.markdown(
     f"""<div class="ts-brandbar">
-      {_logo_img}
-      <span class="wm">Trade<b>Hub</b></span>
+      <span class="wm">Trade <b>Hub</b></span>
       <span class="sct"><b>Daily Ops</b> · {live_chip}<br>updated {data.get('updated','—')}</span>
     </div>""",
     unsafe_allow_html=True,
