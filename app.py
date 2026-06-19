@@ -202,7 +202,10 @@ if auth_status is None:
 
 # --- Authenticated from here on -------------------------------------------
 username = st.session_state.get("username")
-name = st.session_state.get("name")
+# Read the display name fresh from config (not the auth cookie) so name changes
+# take effect immediately without needing a re-login.
+name = config["credentials"]["usernames"].get(username, {}).get("name") \
+    or st.session_state.get("name")
 role = config["credentials"]["usernames"].get(username, {}).get("role", "staff")
 
 # ---------------------------------------------------------------------------
@@ -581,7 +584,7 @@ def render_pricing():
     p = load_pricing()
     st.markdown(
         f"""<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b> <span class="sec">Pricing</span></span>
-        <span class="sct">supplier margins<br>{('updated '+p['generated_at']) if p else 'no data yet'}</span></div>""",
+        <span class="sct">{('updated '+p['generated_at']) if p else 'no data yet'}</span></div>""",
         unsafe_allow_html=True,
     )
     if not p:
@@ -616,7 +619,7 @@ def render_pricing():
         sr = "".join(
             f'<tr style="border-top:1px solid var(--line)">'
             f'<td style="padding:7px 12px"><b>{s["supplier"]}</b>'
-            f'<div style="color:var(--muted);font-size:11px">{s.get("pricelist_date") or "no date"}</div></td>'
+            f'<div style="color:var(--muted);font-size:11px">{("as of " + s["pricelist_date"]) if s.get("pricelist_date") else "no date"}</div></td>'
             f'<td style="padding:7px 12px;text-align:right">{s.get("skus_sold"):,}</td>'
             f'<td style="padding:7px 12px;text-align:right;font-weight:800;color:{_mcol(s.get("avg_margin"))}">{s.get("avg_margin")}%</td>'
             f'<td style="padding:7px 12px;text-align:right">{s.get("below_target")}</td>'
