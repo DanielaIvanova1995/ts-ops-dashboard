@@ -17,6 +17,7 @@ Deploy free:   push this folder to GitHub → share.streamlit.io → New app.
 
 import base64
 import json
+import re
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -951,6 +952,186 @@ def _render_competitor_check(items):
             st.caption(res["summary"])
 
 
+def _norm_code(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _parse_order_items(text):
+    """Order line text → {norm_sku: {sku, qty}}."""
+    out = {}
+    for line in (text or "").split("\n"):
+        skum = re.search(r"SKU:\s*([^\s|]+)", line)
+        if not skum:
+            continue
+        qtym = re.search(r"Quantity:\s*(\d+)", line)
+        out[_norm_code(skum.group(1))] = {"sku": skum.group(1),
+                                          "qty": int(qtym.group(1)) if qtym else None}
+    return out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _pricelist_index():
+    """{norm_sku: {norm_supplier: cost}} from the pricing lookup offers."""
+    lk = load_lookup()
+    idx = {}
+    for it in (lk["items"] if lk else []):
+        sk = _norm_code(it.get("sku"))
+        if not sk:
+            continue
+        for o in (it.get("offers") or []):
+            sup = _norm_code(o.get("s"))
+            if sup and o.get("c") is not None:
+                idx.setdefault(sk, {})[sup] = o.get("c")
+    return idx
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def invoices_needing_review():
+    try:
+        return data_sources.fetch_invoices_needing_review()
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _read_invoice(asset_id, sub_id):
+    """Read + cache one invoice's parsed PDF (keyed per asset/sub so it's billed once)."""
+    try:
+        url = data_sources.monday_asset_url(asset_id)
+        if not url:
+            return {"error": "Couldn't get a download link for the PDF."}
+        return data_sources.read_invoice_pdf(url)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def _check_invoice(parsed, meta, pidx, tol=0.01):
+    """3-way match: each invoice line vs the supplier's pricelist cost and vs the
+    order's SKUs/quantities."""
+    supplier = _norm_code(meta.get("supplier"))
+    order = _parse_order_items(meta.get("order_items"))
+    lines, invoiced = [], set()
+    for ln in (parsed.get("lines") or []):
+        sku_raw = ln.get("sku") or ""
+        sk = _norm_code(sku_raw)
+        invoiced.add(sk)
+        qty, unit = ln.get("qty"), ln.get("unit_price")
+        issues = []
+        supcosts = pidx.get(sk) or {}
+        cost = supcosts.get(supplier)
+        if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
+            if unit > cost + tol:
+                issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                        f"(+£{unit - cost:,.2f})"))
+        elif isinstance(unit, (int, float)) and cost is None:
+            issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
+        if sk and sk not in order:
+            issues.append(("notorder", "not on the order"))
+        elif sk in order:
+            exp = order[sk]["qty"]
+            if exp is not None and qty is not None and int(qty) != exp:
+                issues.append(("qty", f"invoiced {qty} vs order {exp}"))
+        lines.append({"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
+                      "unit": unit, "cost": cost, "issues": issues})
+    missing = [order[s]["sku"] for s in order if s not in invoiced]
+    n_issues = sum(len(l["issues"]) for l in lines) + len(missing)
+    return {"lines": lines, "missing": missing, "n_issues": n_issues}
+
+
+def render_invoice_check():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Invoice Check</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Reads supplier invoices waiting in Monday's **Needs Review** queue and checks "
+               "each line's price against that supplier's pricelist and the SKUs/quantities "
+               "against the order. Uses your Anthropic key — a few pence per invoice, cached. "
+               "Read-only for now (nothing is written back to Monday).")
+
+    data = invoices_needing_review()
+    if data.get("error"):
+        msg = data["error"]
+        if "MONDAY" in msg:
+            st.warning("Monday isn't connected: " + msg[:160])
+        else:
+            st.error(msg[:200])
+        return
+    invs = data.get("invoices", [])
+    if not invs:
+        st.success("Nothing in the Needs-Review queue right now. 🎉")
+        return
+    st.caption(f"{len(invs)}{'+' if data.get('more') else ''} invoices waiting in Needs Review.")
+
+    def _label(i):
+        t = f" · £{i['total']:,.2f}" if i.get("total") is not None else ""
+        return f"{i['invoice_no']} · order {i.get('order_no') or '?'} · {i.get('supplier') or '?'}{t}"
+
+    k = st.selectbox("Pick an invoice to check", range(len(invs)), format_func=lambda k: _label(invs[k]))
+    inv = invs[k]
+    if not inv.get("asset_id"):
+        st.warning("No PDF is attached to this invoice on Monday — nothing to read.")
+        return
+    if not st.button("Check this invoice", type="primary"):
+        return
+
+    with st.spinner("Reading the invoice and matching…"):
+        parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
+    if parsed.get("error"):
+        if "ANTHROPIC_API_KEY" in parsed["error"]:
+            st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to read invoices.")
+        else:
+            st.error("Couldn't read the invoice: " + parsed["error"][:200])
+        return
+
+    res = _check_invoice(parsed, inv, _pricelist_index())
+    st.markdown(f"### Invoice {parsed.get('invoice_no') or inv['invoice_no']} — "
+                f"{inv.get('supplier') or '—'} · order {inv.get('order_no') or '—'}")
+
+    # totals
+    it_total, mt = parsed.get("total"), inv.get("total")
+    bits = []
+    if isinstance(it_total, (int, float)):
+        bits.append(f"Invoice total **£{it_total:,.2f}**")
+    if isinstance(mt, (int, float)):
+        bits.append(f"Monday total £{mt:,.2f}")
+    if bits:
+        st.caption(" · ".join(bits))
+
+    badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444",
+             "noprice": "#94a3b8"}
+    rows = ""
+    for l in res["lines"]:
+        u = f"£{l['unit']:,.2f}" if isinstance(l["unit"], (int, float)) else "—"
+        c = f"£{l['cost']:,.2f}" if isinstance(l["cost"], (int, float)) else "—"
+        flags = "".join(
+            f'<span style="background:{badge.get(t, "#94a3b8")};color:#fff;border-radius:3px;'
+            f'padding:0 5px;font-size:10px;margin-right:4px">{msg}</span>'
+            for t, msg in l["issues"]) or '<span style="color:#10b981">✓</span>'
+        rows += (f'<tr style="border-top:1px solid var(--line)">'
+                 f'<td style="padding:6px 10px"><b>{l["sku"] or "—"}</b>'
+                 f'<div style="color:var(--muted);font-size:11px">{(l.get("desc") or "")[:60]}</div></td>'
+                 f'<td style="padding:6px 10px;text-align:center">{l["qty"] if l["qty"] is not None else "—"}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{u}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{c}</td>'
+                 f'<td style="padding:6px 10px">{flags}</td></tr>')
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+                '<tr style="text-align:left;color:var(--muted)">'
+                '<th style="padding:6px 10px">SKU</th><th style="padding:6px 10px;text-align:center">Qty</th>'
+                '<th style="padding:6px 10px;text-align:right">Invoiced</th>'
+                '<th style="padding:6px 10px;text-align:right">Pricelist</th>'
+                '<th style="padding:6px 10px">Check</th></tr>' + rows + "</table>",
+                unsafe_allow_html=True)
+
+    if res["missing"]:
+        st.warning("On the order but **not invoiced**: " + ", ".join(res["missing"])
+                   + " — (could be a part-invoice).")
+    if res["n_issues"] == 0:
+        st.success("✓ Every line matches the supplier's pricelist and the order.")
+    else:
+        st.error(f"{res['n_issues']} thing(s) to check — see the flags above.")
+
+
 def render_pricing():
     p = load_pricing()
     st.markdown(
@@ -1060,7 +1241,7 @@ with st.sidebar:
     # --- Menu ---
     if "module" not in st.session_state:
         st.session_state.module = "Daily Ops"
-    for _m in ("Daily Ops", "Daily Activity", "Pricing"):
+    for _m in ("Daily Ops", "Daily Activity", "Pricing", "Invoice Check"):
         if st.button(_m, key=f"nav_{_m}", use_container_width=True,
                      type=("primary" if st.session_state.module == _m else "secondary")):
             st.session_state.module = _m
@@ -1105,6 +1286,10 @@ if module == "Pricing":
 
 if module == "Daily Activity":
     render_daily_activity()
+    st.stop()
+
+if module == "Invoice Check":
+    render_invoice_check()
     st.stop()
 
 # ---------------------------------------------------------------------------

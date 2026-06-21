@@ -708,6 +708,139 @@ def research_competitors(title: str, code: str | None, vendor: str | None,
     return data
 
 
+# ---------------------------------------------------------------------------
+# Invoice check — pull supplier invoices sitting in "Needs Review" on the Monday
+# subitems board, read the PDF with Claude, and match against the order + the
+# supplier's pricelist.
+# ---------------------------------------------------------------------------
+SUBITEMS_BOARD_ID = 3547638043
+NEEDS_REVIEW_LABEL_ID = 3            # status7__1 "Needs Review" (Monday label id)
+INVOICE_MODEL = "claude-sonnet-4-6"  # reads the PDF (documents need a capable model)
+
+
+def fetch_invoices_needing_review(limit: int = 60, token: str | None = None) -> dict:
+    """Subitems on the Subitems board with Payment Status = 'Needs Review'.
+    Returns {invoices:[{sub_id, invoice_no, total, asset_id, file_name, order_no,
+    supplier, order_items}], more: bool}. Raises on token/API failure."""
+    import json as _json
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    query = """
+    query ($board: [ID!], $limit: Int!) {
+      boards(ids: $board) {
+        items_page(limit: $limit, query_params: {rules: [
+          {column_id: "status7__1", compare_value: [%d], operator: any_of}]}) {
+          cursor
+          items {
+            id name
+            column_values(ids: ["file_mm38gx3j", "numbers4"]) { id value text }
+            parent_item { name
+              column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0"]) { id text } }
+          }
+        }
+      }
+    }""" % NEEDS_REVIEW_LABEL_ID
+    r = requests.post(MONDAY_API, json={"query": query,
+                      "variables": {"board": [str(SUBITEMS_BOARD_ID)], "limit": min(limit, 100)}},
+                      headers=headers, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    boards = payload.get("data", {}).get("boards", [])
+    page = boards[0]["items_page"] if boards else {"items": [], "cursor": None}
+    out = []
+    for it in page.get("items", []):
+        cv = {c["id"]: c for c in it.get("column_values", [])}
+        asset_id = file_name = None
+        fv = cv.get("file_mm38gx3j", {}) or {}
+        if fv.get("value"):
+            try:
+                files = _json.loads(fv["value"]).get("files", [])
+                if files:
+                    asset_id, file_name = files[0].get("assetId"), files[0].get("name")
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            total = float((cv.get("numbers4", {}) or {}).get("text") or "")
+        except Exception:  # noqa: BLE001
+            total = None
+        parent = it.get("parent_item") or {}
+        pcv = {c["id"]: c.get("text") for c in (parent.get("column_values") or [])}
+        out.append({
+            "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
+            "asset_id": asset_id, "file_name": file_name,
+            "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
+            "supplier": pcv.get("dropdown_mkyqdeqd"),
+            "order_items": pcv.get("order_items0") or "",
+        })
+    return {"invoices": out, "more": bool(page.get("cursor"))}
+
+
+def monday_asset_url(asset_id, token: str | None = None) -> str | None:
+    """Temporary signed download URL for a Monday file asset."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    r = requests.post(MONDAY_API,
+                      json={"query": "query($ids:[ID!]!){assets(ids:$ids){id public_url}}",
+                            "variables": {"ids": [str(asset_id)]}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    assets = payload.get("data", {}).get("assets", []) or []
+    return assets[0]["public_url"] if assets else None
+
+
+def read_invoice_pdf(pdf_url: str) -> dict:
+    """Read a supplier invoice PDF with Claude and return structured line items:
+    {supplier, invoice_no, invoice_date, lines:[{sku, description, qty,
+    unit_price, line_total}], subtotal_ex_vat, vat, total}. Prices ex-VAT, GBP."""
+    import base64
+    import json as _json
+    import re
+
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    pdf = requests.get(pdf_url, timeout=60)
+    pdf.raise_for_status()
+    b64 = base64.standard_b64encode(pdf.content).decode()
+    prompt = (
+        "Read this supplier invoice carefully and extract the line items and totals. "
+        "Reply with ONLY a JSON object, no other text:\n"
+        '{"supplier":"...","invoice_no":"...","invoice_date":"YYYY-MM-DD",'
+        '"lines":[{"sku":"the product/SKU code printed on the line","description":"...",'
+        '"qty":<number>,"unit_price":<ex-VAT cost per unit>,"line_total":<ex-VAT line total>}],'
+        '"subtotal_ex_vat":<number>,"vat":<number>,"total":<number>}\n'
+        "All prices are GBP. unit_price and line_total MUST be EX-VAT (the cost before VAT is "
+        "added). Use the product/SKU code exactly as printed on each line. If a value is genuinely "
+        "absent use null. Do not invent or merge lines."
+    )
+    body = {
+        "model": INVOICE_MODEL, "max_tokens": 2500,
+        "messages": [{"role": "user", "content": [
+            {"type": "document",
+             "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
+            {"type": "text", "text": prompt}]}],
+    }
+    r = requests.post(ANTHROPIC_API,
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
+                      json=body, timeout=150)
+    r.raise_for_status()
+    blocks = r.json().get("content", [])
+    txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise RuntimeError("Could not read the invoice PDF")
+    return _json.loads(m.group(0))
+
+
 def find_kind_words(emails: list) -> dict | None:
     """Find the single most positive / appreciative customer message among
     `emails`. Returns {"quote", "about"} or None if nothing genuinely kind.
