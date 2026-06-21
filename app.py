@@ -1108,9 +1108,14 @@ def _run_one_invoice(inv, lbsku):
                  if isinstance(l.get("unit_price"), (int, float))}
     om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
 
-    # Remember the verdict so the queue can mark which have been matched.
+    # Remember each check's verdict so the queue can mark both columns.
+    has_order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
+    has_price_issue = any(t == "price" for l in res["lines"] for t, _ in l["issues"])
+    order_ok = not has_order_issue and not res["missing"]
+    price_ok = not has_price_issue
     matched = res["n_issues"] == 0
-    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = "matched" if matched else "discrepancy"
+    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = {"order": order_ok,
+                                                                    "price": price_ok}
 
     if matched:
         st.markdown('<div style="background:#dcfce7;color:#166534;font-weight:700;'
@@ -1187,22 +1192,27 @@ def _run_one_invoice(inv, lbsku):
 
     # Write the decision back to Monday's Payment Status.
     st.write("")
-    st.caption("Set this invoice's status on Monday:")
-    ca, cb = st.columns(2)
-    if ca.button("✅ Mark Approved", key=f"appr_{inv['sub_id']}", use_container_width=True):
-        _apply_status(inv, "Approved (To QB)", "matched")
-    if cb.button("⚠️ Mark Discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True):
-        _apply_status(inv, "Discrepancy", "discrepancy")
+    is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+    if is_cn:
+        st.caption("This looks like a **credit note** (negative total) — use **CN Approved**.")
+    else:
+        st.caption("Set this invoice's status on Monday:")
+    ca, cb, cc = st.columns(3)
+    if ca.button("✅ Approved", key=f"appr_{inv['sub_id']}", use_container_width=True):
+        _apply_status(inv, "Approved (To QB)")
+    if cb.button("🧾 CN Approved", key=f"cn_{inv['sub_id']}", use_container_width=True):
+        _apply_status(inv, "CN Approved (To QB)")
+    if cc.button("⚠️ Discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True):
+        _apply_status(inv, "Discrepancy")
 
 
-def _apply_status(inv, label, verdict):
+def _apply_status(inv, label):
     """Write the Payment Status back to Monday, refresh the queues, and flash."""
     try:
         data_sources.set_invoice_status(inv["sub_id"], label)
     except Exception as e:  # noqa: BLE001
         st.error("Couldn't update Monday: " + str(e)[:200])
         return
-    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = verdict
     invoices_by_status.clear()                       # refetch queue + logs
     for kk in ("review", "approved", "discrepancy"):  # clear row selections
         try:
@@ -1249,7 +1259,10 @@ def _invoice_tab(key, is_queue):
         return
 
     verdicts = st.session_state.get("inv_verdict", {})
-    mark = {"matched": "✅ matched", "discrepancy": "⚠️ discrepancy"}
+
+    def _tick(b):  # True → ✅, False → ❌, None/not-checked → blank
+        return "✅" if b is True else ("❌" if b is False else "")
+
     lbsku = _lookup_by_sku()
     rows = []
     for inv in fil:
@@ -1258,7 +1271,9 @@ def _invoice_tab(key, is_queue):
                "Supplier": inv.get("supplier") or "", "Invoice £": inv.get("total"),
                "Margin %": (round(om["margin"]) if om else None)}
         if is_queue:
-            row["Result"] = mark.get(verdicts.get(inv["sub_id"]), "")
+            v = verdicts.get(inv["sub_id"]) or {}
+            row["vs Shopify"] = _tick(v.get("order"))
+            row["vs Pricelist"] = _tick(v.get("price"))
         else:
             row["Date"] = inv.get("date") or ""
         row["PDF"] = inv.get("file_url")
