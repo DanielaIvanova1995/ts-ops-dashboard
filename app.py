@@ -23,6 +23,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import streamlit_authenticator as stauth
@@ -1005,6 +1006,46 @@ def _read_invoice(asset_id, sub_id):
         return {"error": str(e)}
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _lookup_by_sku():
+    """{norm_sku: {sell, cost, name}} from the pricing lookup (your ex-VAT sell
+    price + cheapest supplier cost)."""
+    lk = load_lookup()
+    idx = {}
+    for it in (lk["items"] if lk else []):
+        sk = _norm_code(it.get("sku"))
+        if sk:
+            idx[sk] = {"sell": it.get("sell"), "cost": it.get("cheapest_cost"),
+                       "name": it.get("name")}
+    return idx
+
+
+def _order_margin(order_items_text, lbsku, cost_override=None):
+    """Margin we make on the order's items: revenue (our ex-VAT sell) vs cost.
+    cost_override = {norm_sku: actual invoice unit cost}; otherwise falls back to
+    the cheapest pricelist cost. Returns {margin, rev, cost, matched, total} or None."""
+    order = _parse_order_items(order_items_text)
+    rev = cost = 0.0
+    matched = 0
+    for sk, info in order.items():
+        rec = lbsku.get(sk)
+        if not rec or rec.get("sell") is None:
+            continue
+        qty = info["qty"] or 1
+        c = (cost_override or {}).get(sk)
+        if c is None:
+            c = rec.get("cost")
+        if c is None:
+            continue
+        rev += rec["sell"] * qty
+        cost += c * qty
+        matched += 1
+    if rev <= 0:
+        return None
+    return {"margin": (rev - cost) / rev * 100, "rev": rev, "cost": cost,
+            "matched": matched, "total": len(order)}
+
+
 def _check_invoice(parsed, meta, pidx, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
     order's SKUs/quantities."""
@@ -1038,43 +1079,12 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     return {"lines": lines, "missing": missing, "n_issues": n_issues}
 
 
-def render_invoice_check():
-    st.markdown(
-        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
-        <span class="sec">Invoice Check</span></span></div>""",
-        unsafe_allow_html=True,
-    )
-    st.caption("Reads supplier invoices waiting in Monday's **Needs Review** queue and checks "
-               "each line's price against that supplier's pricelist and the SKUs/quantities "
-               "against the order. Uses your Anthropic key — a few pence per invoice, cached. "
-               "Read-only for now (nothing is written back to Monday).")
-
-    data = invoices_needing_review()
-    if data.get("error"):
-        msg = data["error"]
-        if "MONDAY" in msg:
-            st.warning("Monday isn't connected: " + msg[:160])
-        else:
-            st.error(msg[:200])
-        return
-    invs = data.get("invoices", [])
-    if not invs:
-        st.success("Nothing in the Needs-Review queue right now. 🎉")
-        return
-    st.caption(f"{len(invs)}{'+' if data.get('more') else ''} invoices waiting in Needs Review.")
-
-    def _label(i):
-        t = f" · £{i['total']:,.2f}" if i.get("total") is not None else ""
-        return f"{i['invoice_no']} · order {i.get('order_no') or '?'} · {i.get('supplier') or '?'}{t}"
-
-    k = st.selectbox("Pick an invoice to check", range(len(invs)), format_func=lambda k: _label(invs[k]))
-    inv = invs[k]
+def _run_one_invoice(inv, lbsku):
+    """Read one invoice's PDF, run the 3-way match, and render the result with
+    the margin we make and explicit pricelist + order checks."""
     if not inv.get("asset_id"):
         st.warning("No PDF is attached to this invoice on Monday — nothing to read.")
         return
-    if not st.button("Check this invoice", type="primary"):
-        return
-
     with st.spinner("Reading the invoice and matching…"):
         parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
     if parsed.get("error"):
@@ -1085,21 +1095,31 @@ def render_invoice_check():
         return
 
     res = _check_invoice(parsed, inv, _pricelist_index())
-    st.markdown(f"### Invoice {parsed.get('invoice_no') or inv['invoice_no']} — "
-                f"{inv.get('supplier') or '—'} · order {inv.get('order_no') or '—'}")
+    inv_costs = {_norm_code(l.get("sku")): l.get("unit_price")
+                 for l in (parsed.get("lines") or [])
+                 if isinstance(l.get("unit_price"), (int, float))}
+    om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
 
-    # totals
     it_total, mt = parsed.get("total"), inv.get("total")
     bits = []
     if isinstance(it_total, (int, float)):
-        bits.append(f"Invoice total **£{it_total:,.2f}**")
+        bits.append(f"Invoice total **£{it_total:,.2f}** ex-VAT")
     if isinstance(mt, (int, float)):
         bits.append(f"Monday total £{mt:,.2f}")
     if bits:
         st.caption(" · ".join(bits))
 
-    badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444",
-             "noprice": "#94a3b8"}
+    if om:
+        cov = "" if om["matched"] == om["total"] else f" · {om['matched']}/{om['total']} lines priced"
+        col = "#10b981" if om["margin"] >= 18 else "#ea580c" if om["margin"] >= 0 else "#ef4444"
+        st.markdown(
+            f'<div style="font-size:15px;margin:2px 0 8px">Margin we make on this order: '
+            f'<b style="color:{col}">{om["margin"]:.0f}%</b> '
+            f'<span style="color:var(--muted);font-size:12px">— sell £{om["rev"]:,.2f} vs '
+            f'cost £{om["cost"]:,.2f} ex-VAT (using this invoice&#39;s costs){cov}</span></div>',
+            unsafe_allow_html=True)
+
+    badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444", "noprice": "#94a3b8"}
     rows = ""
     for l in res["lines"]:
         u = f"£{l['unit']:,.2f}" if isinstance(l["unit"], (int, float)) else "—"
@@ -1123,13 +1143,83 @@ def render_invoice_check():
                 '<th style="padding:6px 10px">Check</th></tr>' + rows + "</table>",
                 unsafe_allow_html=True)
 
-    if res["missing"]:
-        st.warning("On the order but **not invoiced**: " + ", ".join(res["missing"])
-                   + " — (could be a part-invoice).")
-    if res["n_issues"] == 0:
-        st.success("✓ Every line matches the supplier's pricelist and the order.")
+    # Two explicit checks, stated separately so it's clear both ran.
+    order = _parse_order_items(inv.get("order_items"))
+    onum = inv.get("order_no") or "?"
+    qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
+    if not qmiss and not res["missing"]:
+        st.success(f"✓ Checked against Shopify order {onum}: all {len(order)} order line(s) "
+                   f"match on SKU & quantity.")
     else:
-        st.error(f"{res['n_issues']} thing(s) to check — see the flags above.")
+        extra = (f", {len(res['missing'])} ordered but not invoiced ({', '.join(res['missing'])})"
+                 if res["missing"] else "")
+        st.warning(f"⚠ Checked against Shopify order {onum}: {len(qmiss)} line(s) don't match"
+                   f"{extra}.")
+    sup = inv.get("supplier") or "supplier"
+    pissues = [l for l in res["lines"] if any(t == "price" for t, _ in l["issues"])]
+    if pissues:
+        st.warning(f"⚠ Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
+    else:
+        st.success(f"✓ Checked against {sup} pricelist: all priced lines match.")
+
+
+def render_invoice_check():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Invoice Check</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Tick supplier invoices from Monday's **Needs Review** queue and check each one: "
+               "prices vs the supplier's pricelist, SKUs & quantities vs the Shopify order, and "
+               "the **margin you make**. Uses your Anthropic key — a few pence per invoice, "
+               "cached. Read-only for now (nothing is written back to Monday).")
+
+    data = invoices_needing_review()
+    if data.get("error"):
+        msg = data["error"]
+        if "MONDAY" in msg:
+            st.warning("Monday isn't connected: " + msg[:160])
+        else:
+            st.error(msg[:200])
+        return
+    invs = data.get("invoices", [])
+    if not invs:
+        st.success("Nothing in the Needs-Review queue right now. 🎉")
+        return
+    st.caption(f"{len(invs)}{'+' if data.get('more') else ''} invoices waiting. "
+               "Margin below is an estimate (cheapest cost) until you check the invoice.")
+
+    lbsku = _lookup_by_sku()
+    rows = []
+    for inv in invs:
+        om = _order_margin(inv.get("order_items"), lbsku)
+        rows.append({
+            "Check": False,
+            "Invoice": inv.get("invoice_no") or "",
+            "Order": inv.get("order_no") or "",
+            "Supplier": inv.get("supplier") or "",
+            "Invoice £": inv.get("total"),
+            "Margin %": (round(om["margin"]) if om else None),
+            "PDF": "yes" if inv.get("asset_id") else "—",
+        })
+    edited = st.data_editor(
+        pd.DataFrame(rows), hide_index=True, use_container_width=True, key="inv_tbl",
+        column_config={
+            "Check": st.column_config.CheckboxColumn("✓", help="Tick the invoices to check"),
+            "Invoice £": st.column_config.NumberColumn(format="£%.2f"),
+            "Margin %": st.column_config.NumberColumn(
+                format="%d%%", help="Estimated from cheapest cost; exact margin shows when checked"),
+        },
+        disabled=["Invoice", "Order", "Supplier", "Invoice £", "Margin %", "PDF"],
+    )
+    picked = [i for i, v in enumerate(list(edited["Check"])) if v]
+    if st.button(f"Check {len(picked)} selected invoice(s)", type="primary",
+                 disabled=(len(picked) == 0)):
+        for i in picked:
+            inv = invs[i]
+            with st.expander(f"{inv.get('invoice_no')} — {inv.get('supplier') or ''} · "
+                             f"order {inv.get('order_no') or '?'}", expanded=True):
+                _run_one_invoice(inv, lbsku)
 
 
 def render_pricing():
