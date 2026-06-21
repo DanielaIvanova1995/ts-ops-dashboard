@@ -718,33 +718,34 @@ NEEDS_REVIEW_LABEL_ID = 3            # status7__1 "Needs Review" (Monday label i
 INVOICE_MODEL = "claude-sonnet-4-6"  # reads the PDF (documents need a capable model)
 
 
-def fetch_invoices_needing_review(limit: int = 60, token: str | None = None) -> dict:
-    """Subitems on the Subitems board with Payment Status = 'Needs Review'.
+def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = None) -> dict:
+    """Subitems on the Subitems board whose Payment Status is any of label_ids.
     Returns {invoices:[{sub_id, invoice_no, total, asset_id, file_name, order_no,
-    supplier, order_items}], more: bool}. Raises on token/API failure."""
+    supplier, order_items, status, date}], more: bool}. Raises on token/API failure."""
     import json as _json
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
     headers = {"Authorization": token, "API-Version": "2024-10"}
+    vals = ", ".join(str(int(i)) for i in label_ids)
     query = """
     query ($board: [ID!], $limit: Int!) {
       boards(ids: $board) {
         items_page(limit: $limit, query_params: {rules: [
-          {column_id: "status7__1", compare_value: [%d], operator: any_of}]}) {
+          {column_id: "status7__1", compare_value: [%s], operator: any_of}]}) {
           cursor
           items {
             id name
-            column_values(ids: ["file_mm38gx3j", "numbers4"]) { id value text }
+            column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0"]) { id text } }
           }
         }
       }
-    }""" % NEEDS_REVIEW_LABEL_ID
+    }""" % vals
     r = requests.post(MONDAY_API, json={"query": query,
-                      "variables": {"board": [str(SUBITEMS_BOARD_ID)], "limit": min(limit, 100)}},
-                      headers=headers, timeout=30)
+                      "variables": {"board": [str(SUBITEMS_BOARD_ID)], "limit": min(limit, 500)}},
+                      headers=headers, timeout=40)
     r.raise_for_status()
     payload = r.json()
     if "errors" in payload:
@@ -767,6 +768,14 @@ def fetch_invoices_needing_review(limit: int = 60, token: str | None = None) -> 
             total = float((cv.get("numbers4", {}) or {}).get("text") or "")
         except Exception:  # noqa: BLE001
             total = None
+        date = None
+        sv = cv.get("status7__1", {}) or {}
+        if sv.get("value"):
+            try:
+                ca = _json.loads(sv["value"]).get("changed_at")
+                date = ca[:10] if ca else None
+            except Exception:  # noqa: BLE001
+                pass
         parent = it.get("parent_item") or {}
         pcv = {c["id"]: c.get("text") for c in (parent.get("column_values") or [])}
         out.append({
@@ -775,6 +784,7 @@ def fetch_invoices_needing_review(limit: int = 60, token: str | None = None) -> 
             "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
+            "status": sv.get("text"), "date": date,
         })
     return {"invoices": out, "more": bool(page.get("cursor"))}
 

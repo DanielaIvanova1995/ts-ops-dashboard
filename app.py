@@ -986,10 +986,18 @@ def _pricelist_index():
     return idx
 
 
+INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limit)
+    "review": ([3], 80),
+    "approved": ([0, 1, 2, 8], 200),
+    "discrepancy": ([4], 200),
+}
+
+
 @st.cache_data(ttl=600, show_spinner=False)
-def invoices_needing_review():
+def invoices_by_status(key):
+    label_ids, lim = INVOICE_STATUS[key]
     try:
-        return data_sources.fetch_invoices_needing_review()
+        return data_sources.fetch_invoices_by_status(label_ids, limit=lim)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 
@@ -1163,18 +1171,8 @@ def _run_one_invoice(inv, lbsku):
         st.success(f"✓ Checked against {sup} pricelist: all priced lines match.")
 
 
-def render_invoice_check():
-    st.markdown(
-        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
-        <span class="sec">Invoice Check</span></span></div>""",
-        unsafe_allow_html=True,
-    )
-    st.caption("Tick supplier invoices from Monday's **Needs Review** queue and check each one: "
-               "prices vs the supplier's pricelist, SKUs & quantities vs the Shopify order, and "
-               "the **margin you make**. Uses your Anthropic key — a few pence per invoice, "
-               "cached. Read-only for now (nothing is written back to Monday).")
-
-    data = invoices_needing_review()
+def _invoice_tab(key, checkable):
+    data = invoices_by_status(key)
     if data.get("error"):
         msg = data["error"]
         if "MONDAY" in msg:
@@ -1184,42 +1182,96 @@ def render_invoice_check():
         return
     invs = data.get("invoices", [])
     if not invs:
-        st.success("Nothing in the Needs-Review queue right now. 🎉")
+        st.caption("Nothing here right now.")
         return
-    st.caption(f"{len(invs)}{'+' if data.get('more') else ''} invoices waiting. "
-               "Margin below is an estimate (cheapest cost) until you check the invoice.")
+
+    suppliers = sorted({i.get("supplier") for i in invs if i.get("supplier")})
+    c1, c2 = st.columns([1, 1.4])
+    sup = c1.selectbox("Supplier", ["All suppliers"] + suppliers, key=f"sup_{key}")
+    q = c2.text_input("Search invoice / order / supplier", key=f"q_{key}").strip().lower()
+
+    def keep(i):
+        if sup != "All suppliers" and i.get("supplier") != sup:
+            return False
+        if q:
+            hay = " ".join(str(i.get(x) or "") for x in ("invoice_no", "order_no", "supplier")).lower()
+            if q not in hay:
+                return False
+        return True
+
+    fil = [i for i in invs if keep(i)]
+    st.caption(f"{len(fil)} of {len(invs)}{'+' if data.get('more') else ''} invoices.")
+    if not fil:
+        st.info("No invoices match that filter/search.")
+        return
 
     lbsku = _lookup_by_sku()
     rows = []
-    for inv in invs:
+    for inv in fil:
         om = _order_margin(inv.get("order_items"), lbsku)
-        rows.append({
-            "Check": False,
-            "Invoice": inv.get("invoice_no") or "",
-            "Order": inv.get("order_no") or "",
-            "Supplier": inv.get("supplier") or "",
-            "Invoice £": inv.get("total"),
-            "Margin %": (round(om["margin"]) if om else None),
-            "PDF": "yes" if inv.get("asset_id") else "—",
-        })
-    edited = st.data_editor(
-        pd.DataFrame(rows), hide_index=True, use_container_width=True, key="inv_tbl",
-        column_config={
-            "Check": st.column_config.CheckboxColumn("✓", help="Tick the invoices to check"),
-            "Invoice £": st.column_config.NumberColumn(format="£%.2f"),
-            "Margin %": st.column_config.NumberColumn(
-                format="%d%%", help="Estimated from cheapest cost; exact margin shows when checked"),
-        },
-        disabled=["Invoice", "Order", "Supplier", "Invoice £", "Margin %", "PDF"],
+        base = {"Invoice": inv.get("invoice_no") or "", "Order": inv.get("order_no") or "",
+                "Supplier": inv.get("supplier") or "", "Invoice £": inv.get("total"),
+                "Margin %": (round(om["margin"]) if om else None)}
+        if checkable:
+            rows.append({"Check": False, **base, "PDF": "yes" if inv.get("asset_id") else "—"})
+        else:
+            rows.append({**base, "Date": inv.get("date") or ""})
+    df = pd.DataFrame(rows)
+    colcfg = {
+        "Invoice £": st.column_config.NumberColumn(format="£%.2f"),
+        "Margin %": st.column_config.NumberColumn(
+            format="%d%%", help="Estimated from cheapest cost; exact margin shows when checked"),
+    }
+    if checkable:
+        colcfg["Check"] = st.column_config.CheckboxColumn("✓", help="Tick the invoices to check")
+        edited = st.data_editor(df, hide_index=True, use_container_width=True, key=f"tbl_{key}",
+                                column_config=colcfg,
+                                disabled=[c for c in df.columns if c != "Check"])
+        picked = [idx for idx, v in enumerate(list(edited["Check"])) if v]
+        if st.button(f"Check {len(picked)} selected invoice(s)", type="primary",
+                     disabled=(len(picked) == 0), key=f"go_{key}"):
+            for idx in picked:
+                inv = fil[idx]
+                with st.expander(f"{inv.get('invoice_no')} — {inv.get('supplier') or ''} · "
+                                 f"order {inv.get('order_no') or '?'}", expanded=True):
+                    _run_one_invoice(inv, lbsku)
+    else:
+        st.dataframe(df, hide_index=True, use_container_width=True, column_config=colcfg)
+
+
+def render_invoice_check():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Invoice Check</span></span></div>""",
+        unsafe_allow_html=True,
     )
-    picked = [i for i, v in enumerate(list(edited["Check"])) if v]
-    if st.button(f"Check {len(picked)} selected invoice(s)", type="primary",
-                 disabled=(len(picked) == 0)):
-        for i in picked:
-            inv = invs[i]
-            with st.expander(f"{inv.get('invoice_no')} — {inv.get('supplier') or ''} · "
-                             f"order {inv.get('order_no') or '?'}", expanded=True):
-                _run_one_invoice(inv, lbsku)
+    st.caption("Check supplier invoices from Monday: prices vs the supplier's pricelist, SKUs & "
+               "quantities vs the Shopify order, and the margin you make. Uses your Anthropic key "
+               "— a few pence per invoice, cached. Read-only for now.")
+
+    counts = {}
+    for k in ("review", "approved", "discrepancy"):
+        d = invoices_by_status(k)
+        counts[k] = (None if d.get("error") else len(d.get("invoices", [])), d.get("more"))
+
+    def _c(k):
+        n, more = counts[k]
+        return "—" if n is None else f"{n}{'+' if more else ''}"
+
+    st.markdown(
+        '<div style="display:flex;gap:20px;margin:2px 0 10px;font-size:14px">'
+        f'<span>🔎 <b>{_c("review")}</b> to check</span>'
+        f'<span>✅ <b>{_c("approved")}</b> approved</span>'
+        f'<span>⚠️ <b>{_c("discrepancy")}</b> discrepancies</span></div>',
+        unsafe_allow_html=True)
+
+    t1, t2, t3 = st.tabs(["🔎 To check", "✅ Matched & approved", "⚠️ Discrepancies"])
+    with t1:
+        _invoice_tab("review", checkable=True)
+    with t2:
+        _invoice_tab("approved", checkable=False)
+    with t3:
+        _invoice_tab("discrepancy", checkable=False)
 
 
 def render_pricing():
