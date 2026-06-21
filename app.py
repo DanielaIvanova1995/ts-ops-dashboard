@@ -1108,6 +1108,21 @@ def _run_one_invoice(inv, lbsku):
                  if isinstance(l.get("unit_price"), (int, float))}
     om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
 
+    # Remember the verdict so the queue can mark which have been matched.
+    matched = res["n_issues"] == 0
+    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = "matched" if matched else "discrepancy"
+
+    if matched:
+        st.markdown('<div style="background:#dcfce7;color:#166534;font-weight:700;'
+                    'padding:7px 12px;border-radius:4px;margin:2px 0 8px">✅ FULLY MATCHED — '
+                    'prices and order all correct</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div style="background:#fee2e2;color:#991b1b;font-weight:700;'
+                    f'padding:7px 12px;border-radius:4px;margin:2px 0 8px">⚠️ DISCREPANCY — '
+                    f'{res["n_issues"]} thing(s) to review</div>', unsafe_allow_html=True)
+    if inv.get("file_url"):
+        st.markdown(f'[📄 Open the invoice PDF]({inv["file_url"]})')
+
     it_total, mt = parsed.get("total"), inv.get("total")
     bits = []
     if isinstance(it_total, (int, float)):
@@ -1205,6 +1220,8 @@ def _invoice_tab(key, checkable):
         st.info("No invoices match that filter/search.")
         return
 
+    verdicts = st.session_state.get("inv_verdict", {})
+    mark = {"matched": "✅ matched", "discrepancy": "⚠️ discrepancy"}
     lbsku = _lookup_by_sku()
     rows = []
     for inv in fil:
@@ -1213,14 +1230,17 @@ def _invoice_tab(key, checkable):
                 "Supplier": inv.get("supplier") or "", "Invoice £": inv.get("total"),
                 "Margin %": (round(om["margin"]) if om else None)}
         if checkable:
-            rows.append({"Check": False, **base, "PDF": "yes" if inv.get("asset_id") else "—"})
+            rows.append({"Check": False, **base,
+                         "Result": mark.get(verdicts.get(inv["sub_id"]), ""),
+                         "PDF": inv.get("file_url")})
         else:
-            rows.append({**base, "Date": inv.get("date") or ""})
+            rows.append({**base, "Date": inv.get("date") or "", "PDF": inv.get("file_url")})
     df = pd.DataFrame(rows)
     colcfg = {
         "Invoice £": st.column_config.NumberColumn(format="£%.2f"),
         "Margin %": st.column_config.NumberColumn(
             format="%d%%", help="Estimated from cheapest cost; exact margin shows when checked"),
+        "PDF": st.column_config.LinkColumn("PDF", display_text="open"),
     }
     if checkable:
         colcfg["Check"] = st.column_config.CheckboxColumn("✓", help="Tick the invoices to check")

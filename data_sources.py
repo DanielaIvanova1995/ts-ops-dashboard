@@ -781,6 +781,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
         out.append({
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "asset_id": asset_id, "file_name": file_name,
+            "file_url": (cv.get("file_mm38gx3j", {}) or {}).get("text") or None,
             "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
