@@ -1186,7 +1186,7 @@ def _run_one_invoice(inv, lbsku):
         st.success(f"✓ Checked against {sup} pricelist: all priced lines match.")
 
 
-def _invoice_tab(key, checkable):
+def _invoice_tab(key, is_queue):
     data = invoices_by_status(key)
     if data.get("error"):
         msg = data["error"]
@@ -1215,7 +1215,8 @@ def _invoice_tab(key, checkable):
         return True
 
     fil = [i for i in invs if keep(i)]
-    st.caption(f"{len(fil)} of {len(invs)}{'+' if data.get('more') else ''} invoices.")
+    st.caption(f"{len(fil)} of {len(invs)}{'+' if data.get('more') else ''} invoices "
+               "— click a row to see its summary and check results.")
     if not fil:
         st.info("No invoices match that filter/search.")
         return
@@ -1226,37 +1227,31 @@ def _invoice_tab(key, checkable):
     rows = []
     for inv in fil:
         om = _order_margin(inv.get("order_items"), lbsku)
-        base = {"Invoice": inv.get("invoice_no") or "", "Order": inv.get("order_no") or "",
-                "Supplier": inv.get("supplier") or "", "Invoice £": inv.get("total"),
-                "Margin %": (round(om["margin"]) if om else None)}
-        if checkable:
-            rows.append({"Check": False, **base,
-                         "Result": mark.get(verdicts.get(inv["sub_id"]), ""),
-                         "PDF": inv.get("file_url")})
+        row = {"Invoice": inv.get("invoice_no") or "", "Order": inv.get("order_no") or "",
+               "Supplier": inv.get("supplier") or "", "Invoice £": inv.get("total"),
+               "Margin %": (round(om["margin"]) if om else None)}
+        if is_queue:
+            row["Result"] = mark.get(verdicts.get(inv["sub_id"]), "")
         else:
-            rows.append({**base, "Date": inv.get("date") or "", "PDF": inv.get("file_url")})
-    df = pd.DataFrame(rows)
+            row["Date"] = inv.get("date") or ""
+        row["PDF"] = inv.get("file_url")
+        rows.append(row)
     colcfg = {
         "Invoice £": st.column_config.NumberColumn(format="£%.2f"),
         "Margin %": st.column_config.NumberColumn(
             format="%d%%", help="Estimated from cheapest cost; exact margin shows when checked"),
         "PDF": st.column_config.LinkColumn("PDF", display_text="open"),
     }
-    if checkable:
-        colcfg["Check"] = st.column_config.CheckboxColumn("✓", help="Tick the invoices to check")
-        edited = st.data_editor(df, hide_index=True, use_container_width=True, key=f"tbl_{key}",
-                                column_config=colcfg,
-                                disabled=[c for c in df.columns if c != "Check"])
-        picked = [idx for idx, v in enumerate(list(edited["Check"])) if v]
-        if st.button(f"Check {len(picked)} selected invoice(s)", type="primary",
-                     disabled=(len(picked) == 0), key=f"go_{key}"):
-            for idx in picked:
-                inv = fil[idx]
-                with st.expander(f"{inv.get('invoice_no')} — {inv.get('supplier') or ''} · "
-                                 f"order {inv.get('order_no') or '?'}", expanded=True):
-                    _run_one_invoice(inv, lbsku)
-    else:
-        st.dataframe(df, hide_index=True, use_container_width=True, column_config=colcfg)
+    event = st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
+                         key=f"sel_{key}", on_select="rerun", selection_mode="single-row",
+                         column_config=colcfg)
+    picked = event.selection.rows if (event and event.selection) else []
+    if picked:
+        inv = fil[picked[0]]
+        st.markdown("---")
+        st.markdown(f"### Invoice {inv.get('invoice_no')} — {inv.get('supplier') or '—'} · "
+                    f"order {inv.get('order_no') or '—'}")
+        _run_one_invoice(inv, lbsku)
 
 
 def render_invoice_check():
@@ -1287,11 +1282,11 @@ def render_invoice_check():
 
     t1, t2, t3 = st.tabs(["🔎 To check", "✅ Matched & approved", "⚠️ Discrepancies"])
     with t1:
-        _invoice_tab("review", checkable=True)
+        _invoice_tab("review", is_queue=True)
     with t2:
-        _invoice_tab("approved", checkable=False)
+        _invoice_tab("approved", is_queue=False)
     with t3:
-        _invoice_tab("discrepancy", checkable=False)
+        _invoice_tab("discrepancy", is_queue=False)
 
 
 def render_pricing():
