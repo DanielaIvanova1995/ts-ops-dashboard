@@ -852,6 +852,27 @@ def read_invoice_pdf(pdf_url: str) -> dict:
     return _json.loads(m.group(0))
 
 
+def set_invoice_status(sub_id, label: str, token: str | None = None) -> bool:
+    """Set a subitem's Payment Status (status7__1) to a label, e.g.
+    'Approved (To QB)' or 'Discrepancy'. Returns True. Raises on failure."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    query = ("mutation ($board: ID!, $item: ID!, $val: String!) {"
+             " change_simple_column_value(board_id: $board, item_id: $item,"
+             " column_id: \"status7__1\", value: $val) { id } }")
+    r = requests.post(
+        MONDAY_API,
+        json={"query": query, "variables": {"board": str(SUBITEMS_BOARD_ID),
+                                            "item": str(sub_id), "val": label}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    return True
+
+
 def find_kind_words(emails: list) -> dict | None:
     """Find the single most positive / appreciative customer message among
     `emails`. Returns {"quote", "about"} or None if nothing genuinely kind.

@@ -1185,6 +1185,33 @@ def _run_one_invoice(inv, lbsku):
     else:
         st.success(f"✓ Checked against {sup} pricelist: all priced lines match.")
 
+    # Write the decision back to Monday's Payment Status.
+    st.write("")
+    st.caption("Set this invoice's status on Monday:")
+    ca, cb = st.columns(2)
+    if ca.button("✅ Mark Approved", key=f"appr_{inv['sub_id']}", use_container_width=True):
+        _apply_status(inv, "Approved (To QB)", "matched")
+    if cb.button("⚠️ Mark Discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True):
+        _apply_status(inv, "Discrepancy", "discrepancy")
+
+
+def _apply_status(inv, label, verdict):
+    """Write the Payment Status back to Monday, refresh the queues, and flash."""
+    try:
+        data_sources.set_invoice_status(inv["sub_id"], label)
+    except Exception as e:  # noqa: BLE001
+        st.error("Couldn't update Monday: " + str(e)[:200])
+        return
+    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = verdict
+    invoices_by_status.clear()                       # refetch queue + logs
+    for kk in ("review", "approved", "discrepancy"):  # clear row selections
+        try:
+            del st.session_state[f"sel_{kk}"]
+        except Exception:  # noqa: BLE001
+            pass
+    st.session_state["inv_flash"] = f"Invoice {inv.get('invoice_no')} marked “{label}” on Monday."
+    st.rerun()
+
 
 def _invoice_tab(key, is_queue):
     data = invoices_by_status(key)
@@ -1262,7 +1289,11 @@ def render_invoice_check():
     )
     st.caption("Check supplier invoices from Monday: prices vs the supplier's pricelist, SKUs & "
                "quantities vs the Shopify order, and the margin you make. Uses your Anthropic key "
-               "— a few pence per invoice, cached. Read-only for now.")
+               "— a few pence per invoice, cached.")
+
+    flash = st.session_state.pop("inv_flash", None)
+    if flash:
+        st.success(flash)
 
     counts = {}
     for k in ("review", "approved", "discrepancy"):
