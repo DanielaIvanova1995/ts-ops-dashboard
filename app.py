@@ -1005,14 +1005,18 @@ def _thresholds():
             float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX)))
 
 
-def _push_decision(matched, is_cn, live_margin):
-    """(label, action) for a checked invoice. action: 'push' | 'hold' | 'flag' | None."""
+def _push_decision(matched, is_cn, live_margin, supplier=None):
+    """(label, action) for a checked invoice. action: 'push' | 'hold' | 'flag' | None.
+    Supplier rules can override the push floor and the high-margin flag."""
     lo, hi = _thresholds()
+    rule = SUPPLIER_RULES.get(_norm_code(supplier), {}) if supplier else {}
+    lo = rule.get("push_min", lo)
+    flag_high = rule.get("flag_high", True)
     if not matched:
         return None, None
     if live_margin is None or live_margin < lo:
         return MATCHED_LABEL, "hold"          # low / unknown margin → hold for review
-    if live_margin > hi:
+    if flag_high and live_margin > hi:
         return DISCREPANCY_LABEL, "flag"      # suspiciously high → flag for review
     return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
 
@@ -1097,6 +1101,13 @@ DELIVERY_CHARGES = {
     "molan": 23.74,
 }
 
+# Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
+# don't hold one); push_min = margin % to push above (else hold); flag_high =
+# whether to flag suspiciously-high margins.
+SUPPLIER_RULES = {
+    "travisperkins": {"no_pricelist": True, "push_min": 10.0, "flag_high": False},
+}
+
 
 def _is_delivery(text):
     t = (text or "").lower()
@@ -1108,6 +1119,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
     order's SKUs/quantities. Known supplier delivery charges are recognised."""
     supplier = _norm_code(meta.get("supplier"))
+    no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     order = _parse_order_items(meta.get("order_items"))
     lines, invoiced = [], set()
     for ln in (parsed.get("lines") or []):
@@ -1134,12 +1146,13 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         issues = []
         supcosts = pidx.get(sk) or {}
         cost = supcosts.get(supplier)
-        if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
-            if unit > cost + tol:
-                issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                        f"(+£{unit - cost:,.2f})"))
-        elif isinstance(unit, (int, float)) and cost is None:
-            issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
+        if not no_pl:                                 # suppliers with no pricelist: skip price check
+            if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
+                if unit > cost + tol:
+                    issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                            f"(+£{unit - cost:,.2f})"))
+            elif isinstance(unit, (int, float)) and cost is None:
+                issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         if sk and sk not in order:
             issues.append(("notorder", "not on the order"))
         elif sk in order:
@@ -1338,6 +1351,11 @@ def _run_one_invoice(inv, lbsku):
             f'£{om["rev"]:,.2f} vs cost £{om["cost"]:,.2f} ex-VAT{cov}</div>',
             unsafe_allow_html=True)
 
+    agreed = inv.get("agreed_cost")
+    if agreed is not None:
+        extra = f" · invoice total £{it_total:,.2f}" if isinstance(it_total, (int, float)) else ""
+        st.caption(f"Agreed price at point of ordering (Monday £ to Supplier): £{agreed:,.2f}{extra}")
+
     badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444",
              "noprice": "#94a3b8", "delivery": "#ea580c"}
     rows = ""
@@ -1376,29 +1394,41 @@ def _run_one_invoice(inv, lbsku):
         st.warning(f"Checked against Shopify order {onum}: {len(qmiss)} line(s) don't match"
                    f"{extra}.")
     sup = inv.get("supplier") or "supplier"
-    pissues = [l for l in res["lines"] if any(t == "price" for t, _ in l["issues"])]
-    if pissues:
-        st.warning(f"Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
+    if SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {}).get("no_pricelist"):
+        st.info(f"No pricelist for {sup} — price not checked (Monday's agreed price is the "
+                "reference; not flagged).")
     else:
-        st.success(f"Checked against {sup} pricelist: all priced lines match.")
+        pissues = [l for l in res["lines"] if any(t == "price" for t, _ in l["issues"])]
+        if pissues:
+            st.warning(f"Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
+        else:
+            st.success(f"Checked against {sup} pricelist: all priced lines match.")
 
     # Recommendation + write-back to Monday's Payment Status.
     st.write("")
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     push_label = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
-    lo, hi = _thresholds()
-    if matched and live is not None and lo <= live <= hi:
-        st.success(f"Fully matched and order margin {live:.1f}% ({lo:.0f}–{hi:.0f}%) — ready to "
-                   "push to QuickBooks.")
+    rule = SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {})
+    lo = rule.get("push_min", _thresholds()[0])
+    hi = _thresholds()[1]
+    _label, action = _push_decision(matched, is_cn, live, inv.get("supplier"))
+    if action == "push":
+        st.success(f"Fully matched and order margin {live:.1f}% — ready to push to QuickBooks.")
         rec = "push"
-    elif matched and live is not None and live > hi:
+    elif action == "flag":
         st.warning(f"Matched, but order margin {live:.1f}% is unusually high (>{hi:.0f}%) — likely "
                    "a missing invoice or credit note. Flag it and check before pushing.")
         rec = "disc"
-    elif matched:
-        mtxt = (f"order margin {live:.1f}% is below {lo:.0f}%" if live is not None
-                else "the order margin couldn't be read")
-        st.warning(f"Matched, but {mtxt} — review before pushing. Holding as Matched is recommended.")
+    elif action == "hold":
+        if rule.get("no_pricelist"):
+            mtxt = f"order margin {live:.1f}%" if live is not None else "the order margin couldn't be read"
+            st.warning(f"Matched ({mtxt}, at/under {lo:.0f}%) — held as Matched. Consider raising "
+                       "the selling price on the website to improve the margin.")
+        else:
+            mtxt = (f"order margin {live:.1f}% is below {lo:.0f}%" if live is not None
+                    else "the order margin couldn't be read")
+            st.warning(f"Matched, but {mtxt} — review before pushing. Holding as Matched is "
+                       "recommended.")
         rec = "hold"
     else:
         st.warning("Discrepancy found (see above) — flag it, or fix it on Monday and re-check.")
@@ -1481,7 +1511,8 @@ def _bulk_check(invs, lbsku):
             res, _om = _check_and_store(inv, parsed, lbsku, pidx)
             matched = res["n_issues"] == 0
             is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
-            label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"))
+            label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
+                                           inv.get("supplier"))
             if action in ("push", "hold", "flag"):
                 try:
                     data_sources.set_invoice_status(inv["sub_id"], label)

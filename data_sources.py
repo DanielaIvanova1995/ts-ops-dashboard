@@ -765,7 +765,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
-                "text_mm04tmac", "email", "formula_mkn9918j"]) {
+                "text_mm04tmac", "email", "numbers6", "formula_mkn9918j"]) {
                 id text ... on FormulaValue { display_value } } }
     """
     first_q = ("query ($board: [ID!], $limit: Int!) { boards(ids: $board) { "
@@ -807,6 +807,10 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             else:
                 pcv[c["id"]] = c.get("text")
         sid = (pcv.get("text_mm04tmac") or "").strip() or None
+        try:
+            agreed_cost = float(pcv.get("numbers6"))
+        except (TypeError, ValueError):
+            agreed_cost = None
         return {
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "asset_id": asset_id, "file_name": file_name,
@@ -815,6 +819,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
             "order_margin_live": margin_live,
+            "agreed_cost": agreed_cost,
             "shopify_order_id": sid,
             "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
             "supplier_email": (pcv.get("email") or "").strip() or None,
