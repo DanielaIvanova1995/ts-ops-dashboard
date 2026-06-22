@@ -1335,6 +1335,87 @@ def render_invoice_check():
         _invoice_tab("discrepancy", is_queue=False)
 
 
+SUMMARY_STATUS_COL = {"green": "#10b981", "amber": "#f59e0b", "red": "#ef4444", "info": "#94a3b8"}
+SUMMARY_SECTIONS = [("Orders & deliveries", "📦"), ("Customer care", "🤝"), ("Invoices", "🧾")]
+
+
+def _summary_section(k):
+    src = (k.get("source") or "").lower()
+    if "outlook" in src:
+        return "Emails"
+    if "subitem" in src:
+        return "Invoices"
+    if "shopify" in src or "customer stage" in src:
+        return "Customer care"
+    return "Orders & deliveries"
+
+
+def render_summary_dashboard():
+    st.markdown(
+        f"""<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Daily Ops · Summary</span></span>
+        <span class="sct">updated {data.get('updated', '—')}</span></div>""",
+        unsafe_allow_html=True)
+
+    active = [k for k in KPIS if not k.get("info")]
+    reds = sum(1 for k in active if status_of(k) == "red")
+    ambers = sum(1 for k in active if status_of(k) == "amber")
+    by_sec = {}
+    for k in active:
+        by_sec.setdefault(_summary_section(k), []).append(k)
+    emails = by_sec.get("Emails", [])
+    email_total = sum(k["count"] for k in emails)
+    orders_total = sum(k["count"] for k in by_sec.get("Orders & deliveries", []))
+    inv_total = sum(k["count"] for k in by_sec.get("Invoices", []))
+
+    head = [("Needs attention", reds + ambers,
+             "#ef4444" if reds else "#f59e0b" if ambers else "#10b981"),
+            ("Emails outstanding", email_total, "#3b82f6"),
+            ("Orders to action", orders_total, "#8b5cf6"),
+            ("Invoices to approve", inv_total, "#f59e0b")]
+    cells = "".join(
+        f'<div style="flex:1;min-width:130px;background:var(--card);border:1px solid var(--line);'
+        f'border-top:3px solid {col};border-radius:5px;padding:10px 13px">'
+        f'<div style="font-size:30px;font-weight:800;line-height:1;color:var(--ink)">{val}</div>'
+        f'<div style="font-size:11.5px;color:var(--muted);margin-top:4px">{lbl}</div></div>'
+        for lbl, val, col in head)
+    st.markdown(f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">{cells}</div>',
+                unsafe_allow_html=True)
+    st.caption(f"🔴 {reds} red · 🟡 {ambers} amber · ✅ {len(active) - reds - ambers} healthy "
+               f"across {len(active)} measures.")
+
+    if emails:
+        st.markdown("#### 📧 Emails")
+        mx = max((k["count"] for k in emails), default=1) or 1
+        bars = ""
+        for k in sorted(emails, key=lambda k: -k["count"]):
+            col = SUMMARY_STATUS_COL[status_of(k)]
+            w = int(k["count"] / mx * 100)
+            bars += (f'<div style="display:flex;align-items:center;gap:10px;margin:4px 0">'
+                     f'<div style="width:200px;font-size:12.5px">{k["name"]}</div>'
+                     f'<div style="flex:1;background:#eef2f7;border-radius:3px;height:18px;overflow:hidden">'
+                     f'<div style="width:{w}%;min-width:2px;background:{col};height:18px"></div></div>'
+                     f'<div style="width:40px;text-align:right;font-weight:800">{k["count"]}</div></div>')
+        st.markdown(bars, unsafe_allow_html=True)
+
+    for title, emoji in SUMMARY_SECTIONS:
+        ks = by_sec.get(title, [])
+        if not ks:
+            continue
+        st.markdown(f"#### {emoji} {title}")
+        tiles = ""
+        for k in sorted(ks, key=lambda k: -k["count"]):
+            col = SUMMARY_STATUS_COL[status_of(k)]
+            tiles += (f'<div style="background:var(--card);border:1px solid var(--line);'
+                      f'border-left:5px solid {col};border-radius:5px;padding:10px 12px">'
+                      f'<div style="font-size:26px;font-weight:800;line-height:1;color:var(--ink)">'
+                      f'{k["count"]}</div>'
+                      f'<div style="font-size:11.5px;color:var(--muted);margin-top:3px">'
+                      f'{k["name"]}</div></div>')
+        st.markdown('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));'
+                    f'gap:8px;margin-bottom:6px">{tiles}</div>', unsafe_allow_html=True)
+
+
 def render_pricing():
     p = load_pricing()
     st.markdown(
@@ -1449,6 +1530,9 @@ with st.sidebar:
                      type=("primary" if st.session_state.module == _m else "secondary")):
             st.session_state.module = _m
             st.rerun()
+        if _m == "Daily Ops" and st.session_state.module == "Daily Ops":
+            st.radio("Daily Ops view", ["Live board", "Summary dashboard"],
+                     key="ops_view", label_visibility="collapsed")
     module = st.session_state.module
 
     st.write("")
@@ -1493,6 +1577,10 @@ if module == "Daily Activity":
 
 if module == "Invoice Check":
     render_invoice_check()
+    st.stop()
+
+if module == "Daily Ops" and st.session_state.get("ops_view") == "Summary dashboard":
+    render_summary_dashboard()
     st.stop()
 
 # ---------------------------------------------------------------------------
