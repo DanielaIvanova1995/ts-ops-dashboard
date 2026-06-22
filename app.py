@@ -1111,15 +1111,15 @@ _INV_SVG = {
     "credit": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
               'stroke="#ea580c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
               '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/><path d="M9 14h6"/></svg>',
-    "inv_badge": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 28">'
-                 '<rect x="1" y="1" width="70" height="26" rx="6" fill="#1d4ed8"/>'
-                 '<text x="36" y="20" text-anchor="middle" fill="#fff" font-size="17" '
-                 'font-weight="700" letter-spacing="2" '
+    "inv_badge": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 40">'
+                 '<rect x="13" y="10" width="46" height="20" rx="4" fill="#F26A21"/>'
+                 '<text x="36" y="24.5" text-anchor="middle" fill="#fff" font-size="13" '
+                 'font-weight="700" letter-spacing="1.5" '
                  "font-family=\"Bebas Neue,'Arial Narrow',Arial,sans-serif\">INV</text></svg>",
-    "crn_badge": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 28">'
-                 '<rect x="1" y="1" width="70" height="26" rx="6" fill="#ea580c"/>'
-                 '<text x="36" y="20" text-anchor="middle" fill="#fff" font-size="17" '
-                 'font-weight="700" letter-spacing="2" '
+    "crn_badge": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 40">'
+                 '<rect x="13" y="10" width="46" height="20" rx="4" fill="#21242B"/>'
+                 '<text x="36" y="24.5" text-anchor="middle" fill="#fff" font-size="13" '
+                 'font-weight="700" letter-spacing="1.5" '
                  "font-family=\"Bebas Neue,'Arial Narrow',Arial,sans-serif\">CRN</text></svg>",
 }
 _INV_ICON = {k: "data:image/svg+xml;base64," + base64.b64encode(v.encode()).decode()
@@ -1403,12 +1403,12 @@ def _invoice_tab(key, is_queue):
         inv = fil[picked[0]]
         st.markdown("---")
         is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
-        bcol, btxt = ("#ea580c", "CRN") if is_cn else ("#1d4ed8", "INV")
+        bcol, btxt = ("#21242B", "CRN") if is_cn else ("#F26A21", "INV")
         st.markdown(
-            f'<div style="display:flex;align-items:center;gap:11px;margin:6px 0 2px">'
+            f'<div style="display:flex;align-items:center;gap:10px;margin:6px 0 2px">'
             f'<span style="font-family:\'Bebas Neue\',sans-serif;background:{bcol};color:#fff;'
-            f'padding:2px 12px;border-radius:5px;font-size:22px;letter-spacing:2px;'
-            f'line-height:1.25">{btxt}</span>'
+            f'padding:1px 9px;border-radius:4px;font-size:17px;letter-spacing:1.5px;'
+            f'line-height:1.3">{btxt}</span>'
             f'<span style="font-size:18px;font-weight:700">{inv.get("invoice_no")}'
             f'<span style="color:var(--muted);font-weight:400"> — {inv.get("supplier") or "—"} · '
             f'order {inv.get("order_no") or "—"}</span></span></div>', unsafe_allow_html=True)
