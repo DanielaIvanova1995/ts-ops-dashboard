@@ -1421,24 +1421,45 @@ def _invoice_tab(key, is_queue):
         colcfg["vs Pricelist"] = st.column_config.ImageColumn(
             "vs Pricelist", width="small", help="Line prices match the supplier's pricelist")
 
-    event = st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
+    df = pd.DataFrame(rows)
+    for c in ("Inv £", "Invoice margin", "Order margin"):  # None → blank (not "None")
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    event = st.dataframe(df, hide_index=True, use_container_width=True,
                          key=f"sel_{key}", on_select="rerun", selection_mode="single-row",
                          column_config=colcfg)
+
+    # Expandable review sub-items: the clicked row, plus any discrepancies, each
+    # opens in place to show exactly what's wrong. (Streamlit can't expand inside a
+    # grid row, so they sit just beneath the table.)
     picked = event.selection.rows if (event and event.selection) else []
-    if picked:
-        inv = fil[picked[0]]
-        st.markdown("---")
-        is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
-        bcol, btxt = ("#21242B", "CRN") if is_cn else ("#F26A21", "INV")
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:10px;margin:6px 0 2px">'
-            f'<span style="font-family:\'Bebas Neue\',sans-serif;background:{bcol};color:#fff;'
-            f'padding:1px 9px;border-radius:4px;font-size:17px;letter-spacing:1.5px;'
-            f'line-height:1.3">{btxt}</span>'
-            f'<span style="font-size:18px;font-weight:700">{inv.get("invoice_no")}'
-            f'<span style="color:var(--muted);font-weight:400"> — {inv.get("supplier") or "—"} · '
-            f'order {inv.get("order_no") or "—"}</span></span></div>', unsafe_allow_html=True)
-        _run_one_invoice(inv, lbsku)
+    sel_id = fil[picked[0]]["sub_id"] if picked else None
+
+    def _is_disc(sid):
+        v = verdicts.get(sid)
+        return bool(v) and not (v.get("order") and v.get("price"))
+
+    review = []
+    if sel_id:
+        review.append((next(i for i in fil if i["sub_id"] == sel_id), True))
+    flagged = [i for i in fil if is_queue and _is_disc(i["sub_id"]) and i["sub_id"] != sel_id]
+    review += [(i, False) for i in flagged[:15]]
+
+    if review:
+        st.markdown("##### Review — open an invoice to see the detail")
+        for inv, expanded in review:
+            v = verdicts.get(inv["sub_id"]) or {}
+            tag = ("discrepancy" if (v and not (v.get("order") and v.get("price")))
+                   else "matched" if v else "click to check")
+            is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
+            head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
+                    f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
+                    f"   —   {tag}")
+            with st.expander(head, expanded=expanded):
+                _run_one_invoice(inv, lbsku)
+        if len(flagged) > 15:
+            st.caption(f"+{len(flagged) - 15} more discrepancies — filter by supplier to narrow.")
 
 
 def render_invoice_check():
