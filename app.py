@@ -1393,7 +1393,7 @@ def _invoice_tab(key, is_queue):
             row["vs Pricelist"] = _icon_pass((v or {}).get("price"))
         else:
             row["Date"] = inv.get("date") or ""
-        row["PDF"] = _INV_ICON["file_o"] if inv.get("file_url") else None
+        row["PDF"] = inv.get("file_url")
         rows.append(row)
 
     colcfg = {
@@ -1405,8 +1405,8 @@ def _invoice_tab(key, is_queue):
             help="OVERALL margin for this whole order from Monday — across ALL invoices and "
                  "credit notes relating to the order. Use this to be sure the order is profitable "
                  "before approving (catches duplicate/extra invoices)."),
-        "PDF": st.column_config.ImageColumn(
-            "PDF", width="small", help="Open the PDF via 'Open invoice PDF' in the row's detail below"),
+        "PDF": st.column_config.LinkColumn(
+            "PDF", display_text="open", width="small", help="Open the invoice PDF"),
     }
     if is_queue:
         colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
