@@ -1087,6 +1087,13 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     return {"lines": lines, "missing": missing, "n_issues": n_issues}
 
 
+def _verdict(res):
+    """{order, price} pass/fail booleans for a check result."""
+    order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
+    price_issue = any(t == "price" for l in res["lines"] for t, _ in l["issues"])
+    return {"order": not order_issue and not res["missing"], "price": not price_issue}
+
+
 def _run_one_invoice(inv, lbsku):
     """Read one invoice's PDF, run the 3-way match, and render the result with
     the margin we make and explicit pricelist + order checks."""
@@ -1108,14 +1115,9 @@ def _run_one_invoice(inv, lbsku):
                  if isinstance(l.get("unit_price"), (int, float))}
     om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
 
-    # Remember each check's verdict so the queue can mark both columns.
-    has_order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
-    has_price_issue = any(t == "price" for l in res["lines"] for t, _ in l["issues"])
-    order_ok = not has_order_issue and not res["missing"]
-    price_ok = not has_price_issue
+    # Remember the verdict so the queue can mark both check columns.
     matched = res["n_issues"] == 0
-    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = {"order": order_ok,
-                                                                    "price": price_ok}
+    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = _verdict(res)
 
     if matched:
         st.markdown('<div style="background:#dcfce7;color:#166534;font-weight:700;'
@@ -1223,6 +1225,28 @@ def _apply_status(inv, label):
     st.rerun()
 
 
+def _bulk_check(invs, lbsku):
+    """Read + 3-way check every invoice in `invs` (cached), storing each verdict,
+    with a progress bar. Reruns when done."""
+    pidx = _pricelist_index()
+    n = len(invs)
+    prog = st.progress(0.0, text="Reading & checking invoices…")
+    ok = fail = 0
+    for i, inv in enumerate(invs, 1):
+        parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
+        if parsed.get("error"):
+            fail += 1
+        else:
+            res = _check_invoice(parsed, inv, pidx)
+            st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = _verdict(res)
+            ok += 1
+        prog.progress(i / n, text=f"Checked {i}/{n}")
+    prog.empty()
+    st.session_state["inv_flash"] = (f"Bulk-checked {ok} invoice(s)"
+                                     + (f" — {fail} couldn't be read" if fail else "") + ".")
+    st.rerun()
+
+
 def _invoice_tab(key, is_queue):
     data = invoices_by_status(key)
     if data.get("error"):
@@ -1264,26 +1288,58 @@ def _invoice_tab(key, is_queue):
         return "✅" if b is True else ("❌" if b is False else "")
 
     lbsku = _lookup_by_sku()
+
+    # Bulk-check + live results summary (queue only).
+    if is_queue:
+        checkable = [i for i in fil if i.get("asset_id")]
+        bc1, bc2 = st.columns([1, 2])
+        if bc1.button(f"⚡ Bulk-check {len(checkable)}", key=f"bulk_{key}",
+                      disabled=not checkable, use_container_width=True,
+                      help="Reads & checks every invoice shown — a few pence each, cached."):
+            _bulk_check(checkable, lbsku)
+        done = [i for i in fil if i["sub_id"] in verdicts]
+        if done:
+            mt = sum(1 for i in done
+                     if verdicts[i["sub_id"]]["order"] and verdicts[i["sub_id"]]["price"])
+            bc2.markdown(f"<div style='padding-top:7px;font-size:13px'>Checked "
+                         f"<b>{len(done)}</b>/{len(fil)} &nbsp;·&nbsp; ✅ {mt} matched &nbsp;·&nbsp; "
+                         f"⚠️ {len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
+
     rows = []
     for inv in fil:
         om = _order_margin(inv.get("order_items"), lbsku)
-        row = {"Invoice": inv.get("invoice_no") or "", "Order": inv.get("order_no") or "",
-               "Supplier": inv.get("supplier") or "", "Invoice £": inv.get("total"),
-               "Margin %": (round(om["margin"]) if om else None)}
+        v = verdicts.get(inv["sub_id"]) if is_queue else None
+        row = {}
         if is_queue:
-            v = verdicts.get(inv["sub_id"]) or {}
-            row["vs Shopify"] = _tick(v.get("order"))
-            row["vs Pricelist"] = _tick(v.get("price"))
+            row["Status"] = ("✅ Matched" if (v and v["order"] and v["price"])
+                             else "⚠️ Discrepancy" if v else "·")
+        row["Invoice"] = inv.get("invoice_no") or ""
+        row["Order"] = inv.get("order_no") or ""
+        row["Supplier"] = inv.get("supplier") or ""
+        row["Invoice £"] = inv.get("total")
+        row["Margin %"] = (round(om["margin"]) if om else None)
+        if is_queue:
+            row["vs Shopify"] = _tick((v or {}).get("order"))
+            row["vs Pricelist"] = _tick((v or {}).get("price"))
         else:
             row["Date"] = inv.get("date") or ""
         row["PDF"] = inv.get("file_url")
         rows.append(row)
+
     colcfg = {
-        "Invoice £": st.column_config.NumberColumn(format="£%.2f"),
+        "Invoice £": st.column_config.NumberColumn(format="£%.2f", width="small"),
         "Margin %": st.column_config.NumberColumn(
-            format="%d%%", help="Estimated from cheapest cost; exact margin shows when checked"),
-        "PDF": st.column_config.LinkColumn("PDF", display_text="open"),
+            format="%d%%", width="small",
+            help="Estimated from cheapest cost; exact margin shows when checked"),
+        "PDF": st.column_config.LinkColumn("PDF", display_text="open", width="small"),
     }
+    if is_queue:
+        colcfg["Status"] = st.column_config.TextColumn("Status", width="small")
+        colcfg["vs Shopify"] = st.column_config.TextColumn(
+            "vs Shopify", width="small", help="SKUs & quantities match the order")
+        colcfg["vs Pricelist"] = st.column_config.TextColumn(
+            "vs Pricelist", width="small", help="Line prices match the supplier's pricelist")
+
     event = st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
                          key=f"sel_{key}", on_select="rerun", selection_mode="single-row",
                          column_config=colcfg)
