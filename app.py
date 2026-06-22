@@ -1392,11 +1392,15 @@ def _invoice_tab(key, is_queue):
     # Bulk-check + live results summary (queue only).
     if is_queue:
         checkable = [i for i in fil if i.get("asset_id")]
+        pend = f"bulk_pending_{key}"
         bc1, bc2 = st.columns([1, 2])
         if bc1.button(f"Bulk-check {len(checkable)}", key=f"bulk_{key}",
                       disabled=not checkable, use_container_width=True,
                       help="Reads & checks every invoice shown — a few pence each, cached."):
-            _bulk_check(checkable, lbsku)
+            if len(checkable) > 20:            # confirm before a big (costly) run
+                st.session_state[pend] = True
+            else:
+                _bulk_check(checkable, lbsku)
         done = [i for i in fil if i["sub_id"] in verdicts]
         if done:
             mt = sum(1 for i in done
@@ -1405,6 +1409,19 @@ def _invoice_tab(key, is_queue):
                          f"<b>{len(done)}</b>/{len(fil)} &nbsp;·&nbsp; {_inv_inline('check', 16)} "
                          f"{mt} matched &nbsp;·&nbsp; {_inv_inline('warn', 16)} "
                          f"{len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
+        if st.session_state.get(pend):
+            n = len(checkable)
+            st.warning(f"This will AI-check **{n}** invoices — roughly **£{n * 0.01:.2f}–"
+                       f"£{n * 0.04:.2f}**. Any already checked are free (cached). "
+                       "Tip: filter by supplier to do fewer at a time.")
+            yc, nc = st.columns([1, 1])
+            if yc.button(f"Yes — check {n}", key=f"bulkyes_{key}", type="primary",
+                         use_container_width=True):
+                st.session_state.pop(pend, None)
+                _bulk_check(checkable, lbsku)
+            if nc.button("Cancel", key=f"bulkno_{key}", use_container_width=True):
+                st.session_state.pop(pend, None)
+                st.rerun()
 
     rows = []
     for inv in fil:
