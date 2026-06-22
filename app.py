@@ -1391,11 +1391,13 @@ def render_summary_dashboard():
         for k in sorted(emails, key=lambda k: -k["count"]):
             col = SUMMARY_STATUS_COL[status_of(k)]
             w = int(k["count"] / mx * 100)
+            tgt = f"≤{k['target']}" if k.get("target", 0) > 0 else "0"
             bars += (f'<div style="display:flex;align-items:center;gap:10px;margin:4px 0">'
                      f'<div style="width:200px;font-size:12.5px">{k["name"]}</div>'
                      f'<div style="flex:1;background:#eef2f7;border-radius:3px;height:18px;overflow:hidden">'
                      f'<div style="width:{w}%;min-width:2px;background:{col};height:18px"></div></div>'
-                     f'<div style="width:40px;text-align:right;font-weight:800">{k["count"]}</div></div>')
+                     f'<div style="width:78px;text-align:right"><b>{k["count"]}</b>'
+                     f'<span style="color:var(--muted);font-size:11px"> ({tgt})</span></div></div>')
         st.markdown(bars, unsafe_allow_html=True)
 
     for title, emoji in SUMMARY_SECTIONS:
@@ -1406,11 +1408,13 @@ def render_summary_dashboard():
         tiles = ""
         for k in sorted(ks, key=lambda k: -k["count"]):
             col = SUMMARY_STATUS_COL[status_of(k)]
+            tgt = f"≤{k['target']}" if k.get("target", 0) > 0 else "0"
             tiles += (f'<div style="background:var(--card);border:1px solid var(--line);'
                       f'border-left:5px solid {col};border-radius:5px;padding:10px 12px">'
-                      f'<div style="font-size:26px;font-weight:800;line-height:1;color:var(--ink)">'
-                      f'{k["count"]}</div>'
-                      f'<div style="font-size:11.5px;color:var(--muted);margin-top:3px">'
+                      f'<div style="line-height:1;color:var(--ink)">'
+                      f'<span style="font-size:26px;font-weight:800">{k["count"]}</span>'
+                      f'<span style="font-size:12px;color:var(--muted);font-weight:600"> ({tgt})</span></div>'
+                      f'<div style="font-size:11.5px;color:var(--muted);margin-top:4px">'
                       f'{k["name"]}</div></div>')
         st.markdown('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));'
                     f'gap:8px;margin-bottom:6px">{tiles}</div>', unsafe_allow_html=True)
