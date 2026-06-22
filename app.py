@@ -1522,10 +1522,12 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
-    # --- Menu ---
-    if "module" not in st.session_state:
+    # --- Menu (the office login only sees Daily Ops) ---
+    all_modules = ("Daily Ops", "Daily Activity", "Pricing", "Invoice Check")
+    menu = ("Daily Ops",) if role == "office" else all_modules
+    if "module" not in st.session_state or st.session_state.module not in menu:
         st.session_state.module = "Daily Ops"
-    for _m in ("Daily Ops", "Daily Activity", "Pricing", "Invoice Check"):
+    for _m in menu:
         if st.button(_m, key=f"nav_{_m}", use_container_width=True,
                      type=("primary" if st.session_state.module == _m else "secondary")):
             st.session_state.module = _m
@@ -1567,6 +1569,10 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Module dispatch — Pricing renders here and stops before the Daily Ops view.
 # ---------------------------------------------------------------------------
+# Office login is locked to Daily Ops, whatever the session state says.
+if role == "office":
+    module = "Daily Ops"
+
 if module == "Pricing":
     render_pricing()
     st.stop()

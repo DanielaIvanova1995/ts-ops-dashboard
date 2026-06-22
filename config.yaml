@@ -47,6 +47,13 @@ credentials:
       email: lorena@tradesuperstoreonline.co.uk
       role: staff
       password: $2b$12$gn9.0jLANLqruO5pfygBd.Mx.gQiMST1dJDTKo6eZOstVVJqAaxYK
+    office:
+      # Shared office login — restricted to the Daily Ops module only (role: office).
+      name: Office
+      email: hello@tradesuperstoreonline.co.uk
+      role: office
+      exclude_from_pairing: true
+      password: $2b$12$VsyobIRrBzcW2aKTfxIHU.OejJXD8S5jspFNcJ3Wophgl8pX3Hyf.
 cookie:
   # Local-development placeholder only. In production the REAL signing key is
   # read from Streamlit Secrets (COOKIE_KEY) — see app.py. Never put the real
