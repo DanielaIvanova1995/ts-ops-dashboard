@@ -1094,6 +1094,20 @@ def _verdict(res):
     return {"order": not order_issue and not res["missing"], "price": not price_issue}
 
 
+def _check_and_store(inv, parsed, lbsku, pidx):
+    """Run the 3-way check + this-invoice margin, store the verdict (incl. margin)
+    in session, and return (res, om)."""
+    res = _check_invoice(parsed, inv, pidx)
+    inv_costs = {_norm_code(l.get("sku")): l.get("unit_price")
+                 for l in (parsed.get("lines") or [])
+                 if isinstance(l.get("unit_price"), (int, float))}
+    om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
+    v = _verdict(res)
+    v["margin"] = round(om["margin"]) if om else None
+    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = v
+    return res, om
+
+
 # Professional inline SVG icons (no emojis) for the Invoice Check views.
 _INV_SVG = {
     "check": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" '
@@ -1146,15 +1160,8 @@ def _run_one_invoice(inv, lbsku):
             st.error("Couldn't read the invoice: " + parsed["error"][:200])
         return
 
-    res = _check_invoice(parsed, inv, _pricelist_index())
-    inv_costs = {_norm_code(l.get("sku")): l.get("unit_price")
-                 for l in (parsed.get("lines") or [])
-                 if isinstance(l.get("unit_price"), (int, float))}
-    om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
-
-    # Remember the verdict so the queue can mark both check columns.
+    res, om = _check_and_store(inv, parsed, lbsku, _pricelist_index())
     matched = res["n_issues"] == 0
-    st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = _verdict(res)
 
     if matched:
         st.markdown(f'<div style="display:flex;align-items:center;gap:8px;background:#dcfce7;'
@@ -1196,9 +1203,10 @@ def _run_one_invoice(inv, lbsku):
         cov = "" if om["matched"] == om["total"] else f" · {om['matched']}/{om['total']} lines priced"
         col = "#16a34a" if om["margin"] >= 18 else "#ea580c" if om["margin"] >= 0 else "#dc2626"
         st.markdown(
-            f'<div style="font-size:13.5px;margin:2px 0 8px;color:var(--muted)">This invoice alone: '
-            f'<b style="color:{col}">{om["margin"]:.0f}%</b> margin — sell £{om["rev"]:,.2f} vs '
-            f'cost £{om["cost"]:,.2f} ex-VAT{cov}</div>', unsafe_allow_html=True)
+            f'<div style="font-size:13.5px;margin:2px 0 8px;color:var(--muted)">Invoice margin '
+            f'(this invoice only): <b style="color:{col}">{om["margin"]:.0f}%</b> — sell '
+            f'£{om["rev"]:,.2f} vs cost £{om["cost"]:,.2f} ex-VAT{cov}</div>',
+            unsafe_allow_html=True)
 
     badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444", "noprice": "#94a3b8"}
     rows = ""
@@ -1288,8 +1296,7 @@ def _bulk_check(invs, lbsku):
         if parsed.get("error"):
             fail += 1
         else:
-            res = _check_invoice(parsed, inv, pidx)
-            st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = _verdict(res)
+            _check_and_store(inv, parsed, lbsku, pidx)
             ok += 1
         prog.progress(i / n, text=f"Checked {i}/{n}")
     prog.empty()
@@ -1369,6 +1376,8 @@ def _invoice_tab(key, is_queue):
         row["Order"] = inv.get("order_no") or ""
         row["Supplier"] = inv.get("supplier") or ""
         row["Inv £"] = inv.get("total")
+        if is_queue:
+            row["Invoice margin"] = (v or {}).get("margin")
         row["Order margin"] = inv.get("order_margin_live")
         if is_queue:
             row["vs Shopify"] = _icon_pass((v or {}).get("order"))
@@ -1384,12 +1393,18 @@ def _invoice_tab(key, is_queue):
         "Inv £": st.column_config.NumberColumn(format="£%.2f", width="small"),
         "Order margin": st.column_config.NumberColumn(
             format="%.1f%%", width="small",
-            help="Live order margin from Monday — the whole order, across all its invoices & credits"),
+            help="OVERALL margin for this whole order from Monday — across ALL invoices and "
+                 "credit notes relating to the order. Use this to be sure the order is profitable "
+                 "before approving (catches duplicate/extra invoices)."),
         "PDF": st.column_config.LinkColumn("PDF", display_text="open", width="small"),
     }
     if is_queue:
         colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
                                                         help="Matched or discrepancy")
+        colcfg["Invoice margin"] = st.column_config.NumberColumn(
+            format="%d%%", width="small",
+            help="Margin on THIS individual invoice (its own lines vs your ex-VAT sell price). "
+                 "Shows once the invoice has been checked.")
         colcfg["vs Shopify"] = st.column_config.ImageColumn(
             "vs Shopify", width="small", help="SKUs & quantities match the order")
         colcfg["vs Pricelist"] = st.column_config.ImageColumn(
