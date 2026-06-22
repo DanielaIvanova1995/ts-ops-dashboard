@@ -1189,6 +1189,36 @@ def _inv_inline(name, size=18):
         "<svg ", f'<svg width="{size}" height="{size}" style="vertical-align:-4px" ', 1)
 
 
+SUPPLIER_DRAFT_MAILBOX = "hello@tradesuperstoreonline.co.uk"  # supplier-chase drafts land here
+
+
+def _discrepancy_email(inv, res):
+    """(subject, body) for a supplier chase email built from the discrepancy."""
+    lines = []
+    for l in res["lines"]:
+        sku = l.get("sku") or "item"
+        for t, _msg in l["issues"]:
+            if t == "price" and isinstance(l.get("unit"), (int, float)) and \
+                    isinstance(l.get("cost"), (int, float)):
+                lines.append(f"- {sku}: invoiced at £{l['unit']:.2f}, but our agreed price is "
+                             f"£{l['cost']:.2f} (overcharged £{l['unit'] - l['cost']:.2f} per unit).")
+            elif t == "qty":
+                lines.append(f"- {sku}: invoiced quantity doesn't match our order ({_msg}).")
+            elif t == "notorder":
+                lines.append(f"- {sku}: this item was not on our order.")
+            elif t == "noprice":
+                lines.append(f"- {sku}: please confirm the agreed price.")
+    for sku in res.get("missing", []):
+        lines.append(f"- {sku}: on our order but not shown on this invoice — please confirm.")
+    detail = "\n".join(lines) or "- please see the attached invoice."
+    subject = f"Invoice query – Invoice {inv.get('invoice_no')} (our order {inv.get('order_no')})"
+    body = (f"Hi,\n\nWe're reviewing invoice {inv.get('invoice_no')} relating to our order "
+            f"{inv.get('order_no')} and have the following query:\n\n{detail}\n\n"
+            "Please could you check and confirm, or issue a credit where appropriate?\n\n"
+            "Many thanks,\nTrade Superstore Online")
+    return subject, body
+
+
 def _run_one_invoice(inv, lbsku):
     """Read one invoice's PDF, run the 3-way match, and render the result with
     the margin we make and explicit pricelist + order checks."""
@@ -1343,6 +1373,32 @@ def _run_one_invoice(inv, lbsku):
     if cc.button("Flag discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True,
                  type=("primary" if rec == "disc" else "secondary")):
         _apply_status(inv, DISCREPANCY_LABEL)
+
+    # Chase the supplier by email (discrepancies only) — saves to Outlook Drafts.
+    if res["n_issues"] > 0:
+        sub = inv["sub_id"]
+        if st.toggle("Email the supplier about this", key=f"emailtog_{sub}"):
+            subj0, body0 = _discrepancy_email(inv, res)
+            st.session_state.setdefault(f"eto_{sub}", inv.get("supplier_email") or "")
+            st.session_state.setdefault(f"esub_{sub}", subj0)
+            st.session_state.setdefault(f"ebod_{sub}", body0)
+            st.text_input("To", key=f"eto_{sub}")
+            st.text_input("Subject", key=f"esub_{sub}")
+            st.text_area("Message", key=f"ebod_{sub}", height=230)
+            if not inv.get("supplier_email"):
+                st.caption("No supplier email on this order in Monday — type one in above.")
+            if st.button("Save to Outlook drafts", key=f"edraft_{sub}",
+                         disabled=not st.session_state.get(f"eto_{sub}", "").strip()):
+                try:
+                    link = data_sources.create_outlook_draft(
+                        SUPPLIER_DRAFT_MAILBOX, st.session_state[f"eto_{sub}"].strip(),
+                        st.session_state[f"esub_{sub}"], st.session_state[f"ebod_{sub}"])
+                    st.success(f"Saved to {SUPPLIER_DRAFT_MAILBOX} Drafts — review and send "
+                               "from Outlook.")
+                    if link:
+                        st.markdown(f"[Open the draft in Outlook]({link})")
+                except Exception as e:  # noqa: BLE001
+                    st.error("Couldn't create the draft: " + str(e)[:200])
 
 
 def _apply_status(inv, label):
