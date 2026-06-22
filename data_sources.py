@@ -268,6 +268,35 @@ def shopify_variant_price(sku: str) -> dict | None:
     return None
 
 
+def fetch_order_discounts(order_ids, token: str | None = None) -> dict:
+    """{shopify_order_id(str): {amount, codes}} — customer discounts applied on each
+    Shopify order. Batched. Raises if Shopify orders aren't readable (caller falls back)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gids = [f"gid://shopify/Order/{str(i).strip()}" for i in order_ids if i]
+    out = {}
+    query = ("query ($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id "
+             "totalDiscountsSet { shopMoney { amount } } discountCodes } } }")
+    for k in range(0, len(gids), 50):
+        r = requests.post(
+            f"https://{store}/admin/api/2024-10/graphql.json",
+            json={"query": query, "variables": {"ids": gids[k:k + 50]}},
+            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+            timeout=25,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("errors"):
+            raise RuntimeError(f"Shopify error: {payload['errors']}")
+        for n in payload.get("data", {}).get("nodes", []) or []:
+            if not n or not n.get("id"):
+                continue
+            money = (n.get("totalDiscountsSet") or {}).get("shopMoney") or {}
+            out[n["id"].split("/")[-1]] = {"amount": float(money.get("amount") or 0),
+                                           "codes": n.get("discountCodes") or []}
+    return out
+
+
 def shopify_variant_barcode(sku: str) -> str | None:
     """The product's barcode/EAN on Shopify (tries bare SKU then 'TSO' prefix),
     used to match the exact product at competitors. None if not found."""
@@ -741,7 +770,8 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
-                "formula_mkn9918j"]) { id text ... on FormulaValue { display_value } } }
+                "text_mm04tmac", "formula_mkn9918j"]) {
+                id text ... on FormulaValue { display_value } } }
           }
         }
       }
@@ -795,6 +825,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
             "order_margin_live": margin_live,
+            "shopify_order_id": (pcv.get("text_mm04tmac") or "").strip() or None,
             "status": sv.get("text"), "date": date,
         })
     return {"invoices": out, "more": bool(page.get("cursor"))}

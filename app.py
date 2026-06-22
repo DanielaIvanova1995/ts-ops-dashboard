@@ -1002,6 +1002,17 @@ def invoices_by_status(key):
         return {"error": str(e)}
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _order_discounts(order_ids):
+    """{shopify_order_id: {amount, codes}} — customer discounts. {} if unavailable."""
+    if not order_ids:
+        return {}
+    try:
+        return data_sources.fetch_order_discounts(list(order_ids))
+    except Exception:  # noqa: BLE001 — Shopify orders not readable → no discount column
+        return {}
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _read_invoice(asset_id, sub_id):
     """Read + cache one invoice's parsed PDF (keyed per asset/sub so it's billed once)."""
@@ -1209,6 +1220,11 @@ def _run_one_invoice(inv, lbsku):
             st.warning("Order margin on Monday is below target — check for a duplicate or extra "
                        "invoice/credit note on this order before approving.")
 
+    dval = inv.get("_discount")
+    if dval and dval > 0:
+        st.warning(f"Customer used a discount on this Shopify order: £{dval:,.2f} — this lowers "
+                   f"the order margin.")
+
     if om:
         cov = "" if om["matched"] == om["total"] else f" · {om['matched']}/{om['total']} lines priced"
         col = "#16a34a" if om["margin"] >= 18 else "#ea580c" if om["margin"] >= 0 else "#dc2626"
@@ -1350,6 +1366,12 @@ def _invoice_tab(key, is_queue):
         st.info("No invoices match that filter/search.")
         return
 
+    # Customer discounts on the Shopify orders (annotate each invoice).
+    disc = _order_discounts(tuple(sorted({i["shopify_order_id"] for i in invs
+                                          if i.get("shopify_order_id")})))
+    for i in fil:
+        i["_discount"] = (disc.get(i.get("shopify_order_id")) or {}).get("amount")
+
     verdicts = st.session_state.get("inv_verdict", {})
 
     def _icon_pass(b):  # True → check, False → cross, None → blank
@@ -1389,6 +1411,7 @@ def _invoice_tab(key, is_queue):
         if is_queue:
             row["Invoice margin"] = (v or {}).get("margin")
         row["Order margin"] = inv.get("order_margin_live")
+        row["Discount"] = inv.get("_discount") if inv.get("_discount") else None
         if is_queue:
             row["vs Shopify"] = _icon_pass((v or {}).get("order"))
             row["vs Pricelist"] = _icon_pass((v or {}).get("price"))
@@ -1406,6 +1429,10 @@ def _invoice_tab(key, is_queue):
             help="OVERALL margin for this whole order from Monday — across ALL invoices and "
                  "credit notes relating to the order. Use this to be sure the order is profitable "
                  "before approving (catches duplicate/extra invoices)."),
+        "Discount": st.column_config.NumberColumn(
+            format="£%.2f", width="small",
+            help="Customer discount used on the Shopify order (reduces margin). Blank = none. "
+                 "Check this when the margin is low."),
         "PDF": st.column_config.LinkColumn(
             "PDF", display_text="OPEN", width="small", help="Open the invoice PDF"),
     }
@@ -1422,7 +1449,7 @@ def _invoice_tab(key, is_queue):
             "vs Pricelist", width="small", help="Line prices match the supplier's pricelist")
 
     df = pd.DataFrame(rows)
-    for c in ("Inv £", "Invoice margin", "Order margin"):  # None → blank (not "None")
+    for c in ("Inv £", "Invoice margin", "Order margin", "Discount"):  # None → blank
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
