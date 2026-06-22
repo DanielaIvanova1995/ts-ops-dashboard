@@ -1038,8 +1038,9 @@ def _order_discounts(order_ids):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _read_invoice(asset_id, sub_id):
-    """Read + cache one invoice's parsed PDF (keyed per asset/sub so it's billed once)."""
+def _read_invoice(asset_id, sub_id, nonce=0):
+    """Read + cache one invoice's parsed PDF (keyed per asset/sub; nonce busts the
+    cache to force a fresh re-read)."""
     try:
         url = data_sources.monday_asset_url(asset_id)
         if not url:
@@ -1257,14 +1258,21 @@ def _run_one_invoice(inv, lbsku):
     if not inv.get("asset_id"):
         st.warning("No PDF is attached to this invoice on Monday — nothing to read.")
         return
+    sub = inv["sub_id"]
+    nonce = st.session_state.get(f"recheck_n_{sub}", 0)
     with st.spinner("Reading the invoice and matching…"):
-        parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
+        parsed = _read_invoice(inv["asset_id"], sub, nonce)
     if parsed.get("error"):
         if "ANTHROPIC_API_KEY" in parsed["error"]:
             st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to read invoices.")
         else:
             st.error("Couldn't read the invoice: " + parsed["error"][:200])
         return
+
+    if st.button("Re-run check", key=f"recheck_btn_{sub}",
+                 help="Reads the invoice PDF again and re-runs the match (a few pence)."):
+        st.session_state[f"recheck_n_{sub}"] = nonce + 1
+        st.rerun()
 
     res, om = _check_and_store(inv, parsed, lbsku, _pricelist_index())
     matched = res["n_issues"] == 0
