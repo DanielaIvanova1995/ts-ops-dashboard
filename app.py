@@ -1160,7 +1160,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             dissues = []
             if isinstance(amt, (int, float)):
                 if known is not None:
-                    if abs(amt - known) > tol:
+                    if amt > known + tol:        # only flag if charged MORE (less is fine)
                         dissues.append(("delivery", f"delivery £{amt:,.2f} vs expected £{known:,.2f}"))
                 else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
@@ -1878,6 +1878,17 @@ def render_summary_dashboard():
                     f'gap:8px;margin-bottom:6px">{tiles}</div>', unsafe_allow_html=True)
 
 
+def _rules_table(headers, rows):
+    th = "".join(f'<th style="text-align:left;padding:7px 12px;color:var(--muted);'
+                 f'font-weight:600">{h}</th>' for h in headers)
+    trs = "".join('<tr style="border-top:1px solid var(--line)">'
+                  + "".join(f'<td style="padding:7px 12px">{c}</td>' for c in row) + "</tr>"
+                  for row in rows)
+    return (f'<table style="width:100%;border-collapse:collapse;font-size:13px;'
+            f'border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:2px 0 10px">'
+            f'<tr style="background:var(--card)">{th}</tr>{trs}</table>')
+
+
 def render_supplier_rules():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -1887,31 +1898,29 @@ def render_supplier_rules():
     st.caption("How invoices are auto-checked and processed per supplier (used by Invoice Check).")
     lo, hi = _thresholds()
 
-    st.markdown("#### Margin & auto-push rules")
-    rows = [{"Supplier": "All others (default)", "Pricelist check": "Yes",
-             "Push when margin": f"{lo:.0f}–{hi:.0f}%", "Below range": "Hold as Matched",
-             "Above range": f"Flag (> {hi:.0f}%)"}]
+    st.markdown("#### Margin &amp; auto-push rules")
+    mrows = [("All others (default)", "Yes", f"{lo:.0f}–{hi:.0f}%", "Hold as Matched",
+              f"Flag (&gt; {hi:.0f}%)")]
     for k, r in SUPPLIER_RULES.items():
-        rows.append({
-            "Supplier": r.get("name", k),
-            "Pricelist check": "No — order/Shopify only" if r.get("no_pricelist") else "Yes",
-            "Push when margin": f"≥ {r.get('push_min', lo):.0f}%",
-            "Below range": ("Hold — suggest raising website price" if r.get("no_pricelist")
-                            else "Hold as Matched"),
-            "Above range": "—" if not r.get("flag_high", True) else f"Flag (> {hi:.0f}%)",
-        })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        mrows.append((
+            r.get("name", k),
+            "No — order/Shopify only" if r.get("no_pricelist") else "Yes",
+            f"&ge; {r.get('push_min', lo):.0f}%",
+            "Hold — suggest raising website price" if r.get("no_pricelist") else "Hold as Matched",
+            "—" if not r.get("flag_high", True) else f"Flag (&gt; {hi:.0f}%)",
+        ))
+    st.markdown(_rules_table(
+        ["Supplier", "Pricelist check", "Push when margin", "Below range", "Above range"], mrows),
+        unsafe_allow_html=True)
 
     st.markdown("#### Delivery charges (ex-VAT)")
     drows = []
     for k, r in DELIVERY_CHARGES.items():
-        if r.get("free_over") is not None:
-            rule = f"£{r['flat']:.2f} for orders under £{r['free_over']:.0f}, free over"
-        else:
-            rule = f"£{r['flat']:.2f} flat"
-        drows.append({"Supplier": r.get("name", k), "Delivery rule": rule})
-    st.dataframe(pd.DataFrame(drows), hide_index=True, use_container_width=True)
-    st.caption("A matching delivery line on an invoice is accepted; a different amount is flagged. "
+        rule = (f"£{r['flat']:.2f} for orders under £{r['free_over']:.0f}, free over"
+                if r.get("free_over") is not None else f"£{r['flat']:.2f} flat")
+        drows.append((r.get("name", k), rule))
+    st.markdown(_rules_table(["Supplier", "Delivery rule"], drows), unsafe_allow_html=True)
+    st.caption("A matching or lower delivery charge is accepted; only a higher amount is flagged. "
                "To add or change a rule, tell me the supplier and the rule.")
 
 
