@@ -1181,8 +1181,9 @@ def _run_one_invoice(inv, lbsku):
     if inv.get("file_url"):
         st.markdown(
             f'<a href="{inv["file_url"]}" target="_blank" style="display:inline-flex;'
-            f'align-items:center;gap:6px;color:#F26A21;font-weight:600;font-size:13px;'
-            f'text-decoration:none">{_inv_inline("file_o", 16)} Open invoice PDF</a>',
+            f'align-items:center;gap:7px;color:#F26A21;text-decoration:none;'
+            f"font-family:'Bebas Neue',sans-serif;font-size:19px;letter-spacing:1px\">"
+            f'{_inv_inline("file_o", 18)} OPEN INVOICE PDF</a>',
             unsafe_allow_html=True)
 
     it_total, mt = parsed.get("total"), inv.get("total")
@@ -1406,7 +1407,7 @@ def _invoice_tab(key, is_queue):
                  "credit notes relating to the order. Use this to be sure the order is profitable "
                  "before approving (catches duplicate/extra invoices)."),
         "PDF": st.column_config.LinkColumn(
-            "PDF", display_text="open", width="small", help="Open the invoice PDF"),
+            "PDF", display_text="OPEN", width="small", help="Open the invoice PDF"),
     }
     if is_queue:
         colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
