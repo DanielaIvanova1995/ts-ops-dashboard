@@ -1094,19 +1094,34 @@ def _order_margin(order_items_text, lbsku, cost_override=None):
             "matched": matched, "total": len(order)}
 
 
-# Known per-supplier delivery / carriage charges (ex-VAT £) so legitimate delivery
-# lines aren't flagged as discrepancies. Keys are normalised supplier names
-# (lowercase, alphanumerics only). Add more as you confirm them.
+# Per-supplier delivery / carriage charges (ex-VAT £) so legitimate delivery lines
+# aren't flagged. Each rule: {name, flat, free_over?}. free_over = free above that
+# goods value. Keys are normalised supplier names.
 DELIVERY_CHARGES = {
-    "molan": 23.74,
+    "molan": {"name": "Molan", "flat": 23.74},
+    "pjh": {"name": "PJH", "flat": 25.0},
+    "travisperkins": {"name": "Travis Perkins", "flat": 25.0, "free_over": 100.0},
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
 # don't hold one); push_min = margin % to push above (else hold); flag_high =
 # whether to flag suspiciously-high margins.
 SUPPLIER_RULES = {
-    "travisperkins": {"no_pricelist": True, "push_min": 10.0, "flag_high": False},
+    "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
+                      "push_min": 10.0, "flag_high": False},
 }
+
+
+def _expected_delivery(supplier, goods_value):
+    """Expected ex-VAT delivery charge for a supplier given the order's goods value,
+    or None if there's no rule on file."""
+    rule = DELIVERY_CHARGES.get(supplier)
+    if not rule:
+        return None
+    free_over = rule.get("free_over")
+    if free_over is not None and goods_value is not None and goods_value >= free_over:
+        return 0.0
+    return float(rule.get("flat", 0.0))
 
 
 def _is_delivery(text):
@@ -1121,21 +1136,33 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     supplier = _norm_code(meta.get("supplier"))
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     order = _parse_order_items(meta.get("order_items"))
+    parsed_lines = parsed.get("lines") or []
+
+    def _line_total(l):
+        if isinstance(l.get("line_total"), (int, float)):
+            return l["line_total"]
+        u, q = l.get("unit_price"), l.get("qty")
+        return u * q if isinstance(u, (int, float)) and isinstance(q, (int, float)) else 0
+
+    goods_value = sum(_line_total(l) for l in parsed_lines
+                      if not (_is_delivery(l.get("sku")) or _is_delivery(l.get("description"))))
+
     lines, invoiced = [], set()
-    for ln in (parsed.get("lines") or []):
+    for ln in parsed_lines:
         sku_raw = ln.get("sku") or ""
         desc = ln.get("description") or ""
         qty, unit = ln.get("qty"), ln.get("unit_price")
 
-        # Delivery / carriage line — check against the supplier's known charge.
+        # Delivery / carriage line — check against the supplier's expected charge.
         if _is_delivery(sku_raw) or _is_delivery(desc):
-            known = DELIVERY_CHARGES.get(supplier)
+            known = _expected_delivery(supplier, goods_value)
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
             if isinstance(amt, (int, float)):
-                if known is not None and abs(amt - known) > tol:
-                    dissues.append(("delivery", f"delivery £{amt:,.2f} vs agreed £{known:,.2f}"))
-                elif known is None:
+                if known is not None:
+                    if abs(amt - known) > tol:
+                        dissues.append(("delivery", f"delivery £{amt:,.2f} vs expected £{known:,.2f}"))
+                else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
                           "unit": unit, "cost": known, "issues": dissues})
@@ -1851,6 +1878,43 @@ def render_summary_dashboard():
                     f'gap:8px;margin-bottom:6px">{tiles}</div>', unsafe_allow_html=True)
 
 
+def render_supplier_rules():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Supplier rules</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("How invoices are auto-checked and processed per supplier (used by Invoice Check).")
+    lo, hi = _thresholds()
+
+    st.markdown("#### Margin & auto-push rules")
+    rows = [{"Supplier": "All others (default)", "Pricelist check": "Yes",
+             "Push when margin": f"{lo:.0f}–{hi:.0f}%", "Below range": "Hold as Matched",
+             "Above range": f"Flag (> {hi:.0f}%)"}]
+    for k, r in SUPPLIER_RULES.items():
+        rows.append({
+            "Supplier": r.get("name", k),
+            "Pricelist check": "No — order/Shopify only" if r.get("no_pricelist") else "Yes",
+            "Push when margin": f"≥ {r.get('push_min', lo):.0f}%",
+            "Below range": ("Hold — suggest raising website price" if r.get("no_pricelist")
+                            else "Hold as Matched"),
+            "Above range": "—" if not r.get("flag_high", True) else f"Flag (> {hi:.0f}%)",
+        })
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    st.markdown("#### Delivery charges (ex-VAT)")
+    drows = []
+    for k, r in DELIVERY_CHARGES.items():
+        if r.get("free_over") is not None:
+            rule = f"£{r['flat']:.2f} for orders under £{r['free_over']:.0f}, free over"
+        else:
+            rule = f"£{r['flat']:.2f} flat"
+        drows.append({"Supplier": r.get("name", k), "Delivery rule": rule})
+    st.dataframe(pd.DataFrame(drows), hide_index=True, use_container_width=True)
+    st.caption("A matching delivery line on an invoice is accepted; a different amount is flagged. "
+               "To add or change a rule, tell me the supplier and the rule.")
+
+
 def render_pricing():
     p = load_pricing()
     st.markdown(
@@ -1970,6 +2034,9 @@ with st.sidebar:
         if _m == "Daily Ops" and st.session_state.module == "Daily Ops":
             st.radio("Daily Ops view", ["Live board", "Summary dashboard"],
                      key="ops_view", label_visibility="collapsed")
+        if _m == "Pricing" and st.session_state.module == "Pricing":
+            st.radio("Pricing view", ["Pricing", "Supplier rules"],
+                     key="pricing_view", label_visibility="collapsed")
     module = st.session_state.module
 
     st.write("")
@@ -2009,7 +2076,10 @@ if role == "office":
     module = "Daily Ops"
 
 if module == "Pricing":
-    render_pricing()
+    if st.session_state.get("pricing_view") == "Supplier rules":
+        render_supplier_rules()
+    else:
+        render_pricing()
     st.stop()
 
 if module == "Daily Activity":
