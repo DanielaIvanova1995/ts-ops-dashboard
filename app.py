@@ -987,10 +987,10 @@ def _pricelist_index():
 
 
 INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limit)
-    "review": ([3], 80),            # Needs Review
-    "matched": ([9], 200),          # Matched (TradeHub) — checked, held (NOT pushed)
-    "pushed": ([0, 1, 2, 8], 200),  # Approved (To QB)/CN Approved (To QB)/etc → pushed to QB
-    "discrepancy": ([4], 200),
+    "review": ([3], 1500),          # Needs Review — pull them ALL (paginated)
+    "matched": ([9], 500),          # Matched (TradeHub) — checked, held (NOT pushed)
+    "pushed": ([0, 1, 2, 8], 500),  # Approved (To QB)/CN Approved (To QB)/etc → pushed to QB
+    "discrepancy": ([4], 500),
 }
 MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"

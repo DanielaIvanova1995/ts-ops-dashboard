@@ -760,34 +760,22 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     store = get_secret("SHOPIFY_STORE")
     headers = {"Authorization": token, "API-Version": "2024-10"}
     vals = ", ".join(str(int(i)) for i in label_ids)
-    query = """
-    query ($board: [ID!], $limit: Int!) {
-      boards(ids: $board) {
-        items_page(limit: $limit, query_params: {rules: [
-          {column_id: "status7__1", compare_value: [%s], operator: any_of}]}) {
-          cursor
-          items {
+    item_fields = """
             id name
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
                 "text_mm04tmac", "email", "formula_mkn9918j"]) {
                 id text ... on FormulaValue { display_value } } }
-          }
-        }
-      }
-    }""" % vals
-    r = requests.post(MONDAY_API, json={"query": query,
-                      "variables": {"board": [str(SUBITEMS_BOARD_ID)], "limit": min(limit, 500)}},
-                      headers=headers, timeout=40)
-    r.raise_for_status()
-    payload = r.json()
-    if "errors" in payload:
-        raise RuntimeError(f"Monday API error: {payload['errors']}")
-    boards = payload.get("data", {}).get("boards", [])
-    page = boards[0]["items_page"] if boards else {"items": [], "cursor": None}
-    out = []
-    for it in page.get("items", []):
+    """
+    first_q = ("query ($board: [ID!], $limit: Int!) { boards(ids: $board) { "
+               'items_page(limit: $limit, query_params: {rules: [{column_id: "status7__1", '
+               "compare_value: [%s], operator: any_of}]}) { cursor items { %s } } } }"
+               % (vals, item_fields))
+    next_q = ("query ($c: String!, $limit: Int!) { next_items_page(cursor: $c, limit: $limit) "
+              "{ cursor items { %s } } }" % item_fields)
+
+    def _parse(it):
         cv = {c["id"]: c for c in it.get("column_values", [])}
         asset_id = file_name = None
         fv = cv.get("file_mm38gx3j", {}) or {}
@@ -819,7 +807,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             else:
                 pcv[c["id"]] = c.get("text")
         sid = (pcv.get("text_mm04tmac") or "").strip() or None
-        out.append({
+        return {
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "asset_id": asset_id, "file_name": file_name,
             "file_url": (cv.get("file_mm38gx3j", {}) or {}).get("text") or None,
@@ -831,8 +819,33 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
             "supplier_email": (pcv.get("email") or "").strip() or None,
             "status": sv.get("text"), "date": date,
-        })
-    return {"invoices": out, "more": bool(page.get("cursor"))}
+        }
+
+    out, page_size = [], min(limit, 500)
+    r = requests.post(MONDAY_API, json={"query": first_q,
+                      "variables": {"board": [str(SUBITEMS_BOARD_ID)], "limit": page_size}},
+                      headers=headers, timeout=60)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    boards = payload.get("data", {}).get("boards", [])
+    page = boards[0]["items_page"] if boards else {"items": [], "cursor": None}
+    out.extend(_parse(it) for it in page.get("items", []))
+    cursor, pages = page.get("cursor"), 1
+    while cursor and len(out) < limit and pages < 15:    # follow pagination → ALL of them
+        r = requests.post(MONDAY_API, json={"query": next_q,
+                          "variables": {"c": cursor, "limit": page_size}},
+                          headers=headers, timeout=60)
+        r.raise_for_status()
+        payload = r.json()
+        if "errors" in payload:
+            break
+        np = (payload.get("data") or {}).get("next_items_page") or {}
+        out.extend(_parse(it) for it in np.get("items", []))
+        cursor = np.get("cursor")
+        pages += 1
+    return {"invoices": out[:limit], "more": bool(cursor)}
 
 
 def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
