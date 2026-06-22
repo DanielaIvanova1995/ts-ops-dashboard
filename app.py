@@ -996,17 +996,23 @@ MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
 CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
 DISCREPANCY_LABEL = "Discrepancy"
-MARGIN_PUSH_MIN = 5.0           # auto-push only if live order margin ≥ this %
-MARGIN_PUSH_MAX = 35.0          # …and ≤ this; above this looks wrong → flag for review
+MARGIN_PUSH_MIN = 5.0           # defaults — editable in the Invoice Check settings box
+MARGIN_PUSH_MAX = 35.0
+
+
+def _thresholds():
+    return (float(st.session_state.get("inv_margin_min", MARGIN_PUSH_MIN)),
+            float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX)))
 
 
 def _push_decision(matched, is_cn, live_margin):
     """(label, action) for a checked invoice. action: 'push' | 'hold' | 'flag' | None."""
+    lo, hi = _thresholds()
     if not matched:
         return None, None
-    if live_margin is None or live_margin < MARGIN_PUSH_MIN:
+    if live_margin is None or live_margin < lo:
         return MATCHED_LABEL, "hold"          # low / unknown margin → hold for review
-    if live_margin > MARGIN_PUSH_MAX:
+    if live_margin > hi:
         return DISCREPANCY_LABEL, "flag"      # suspiciously high → flag for review
     return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
 
@@ -1309,16 +1315,17 @@ def _run_one_invoice(inv, lbsku):
     st.write("")
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     push_label = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
-    if matched and live is not None and MARGIN_PUSH_MIN <= live <= MARGIN_PUSH_MAX:
-        st.success(f"Fully matched and order margin {live:.1f}% (5–{MARGIN_PUSH_MAX:.0f}%) — "
-                   "ready to push to QuickBooks.")
+    lo, hi = _thresholds()
+    if matched and live is not None and lo <= live <= hi:
+        st.success(f"Fully matched and order margin {live:.1f}% ({lo:.0f}–{hi:.0f}%) — ready to "
+                   "push to QuickBooks.")
         rec = "push"
-    elif matched and live is not None and live > MARGIN_PUSH_MAX:
-        st.warning(f"Matched, but order margin {live:.1f}% is unusually high (>{MARGIN_PUSH_MAX:.0f}%) "
-                   "— likely a missing invoice or credit note. Flag it and check before pushing.")
+    elif matched and live is not None and live > hi:
+        st.warning(f"Matched, but order margin {live:.1f}% is unusually high (>{hi:.0f}%) — likely "
+                   "a missing invoice or credit note. Flag it and check before pushing.")
         rec = "disc"
     elif matched:
-        mtxt = (f"order margin {live:.1f}% is below 5%" if live is not None
+        mtxt = (f"order margin {live:.1f}% is below {lo:.0f}%" if live is not None
                 else "the order margin couldn't be read")
         st.warning(f"Matched, but {mtxt} — review before pushing. Holding as Matched is recommended.")
         rec = "hold"
@@ -1361,6 +1368,7 @@ def _bulk_check(invs, lbsku):
     discrepancies left for review. Reruns when done."""
     pidx = _pricelist_index()
     n = len(invs)
+    _, hi = _thresholds()
     prog = st.progress(0.0, text="Reading, checking & processing invoices…")
     pushed = held = flagged = unmatched = fail = 0
     for i, inv in enumerate(invs, 1):
@@ -1387,7 +1395,7 @@ def _bulk_check(invs, lbsku):
     invoices_by_status.clear()
     st.session_state["inv_flash"] = (
         f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, flagged {flagged} "
-        f"(margin >{MARGIN_PUSH_MAX:.0f}%), {unmatched} left for manual review"
+        f"(margin >{hi:.0f}%), {unmatched} left for manual review"
         + (f", {fail} unreadable" if fail else "") + ".")
     st.rerun()
 
@@ -1460,11 +1468,12 @@ def _invoice_tab(key, is_queue):
                          f"{len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
         if st.session_state.get(pend):
             n = len(checkable)
+            lo, hi = _thresholds()
             st.warning(f"This will check **{n}** invoices (~£{n * 0.01:.2f}–£{n * 0.04:.2f}) and then "
-                       "automatically **push fully-matched invoices with order margin 5–35% to "
-                       "QuickBooks**, hold under-5% as Matched (TradeHub), flag over-35% as a "
-                       "discrepancy, and leave mismatches for review. Already-checked reads are "
-                       "free (cached).")
+                       f"automatically **push fully-matched invoices with order margin {lo:.0f}–"
+                       f"{hi:.0f}% to QuickBooks**, hold under-{lo:.0f}% as Matched (TradeHub), flag "
+                       f"over-{hi:.0f}% as a discrepancy, and leave mismatches for review. "
+                       "Already-checked reads are free (cached).")
             yc, nc = st.columns([1, 1])
             if yc.button(f"Yes — check & process {n}", key=f"bulkyes_{key}", type="primary",
                          use_container_width=True):
@@ -1573,10 +1582,24 @@ def render_invoice_check():
         <span class="sec">Invoice Check</span></span></div>""",
         unsafe_allow_html=True,
     )
-    st.caption("Check supplier invoices from Monday (price vs pricelist, SKUs/qty vs the Shopify "
-               "order, margins). Fully-matched with **order margin 5–35%** → pushed to QuickBooks; "
-               "**under 5%** → held as Matched; **over 35%** → flagged (likely a missing "
-               "invoice/credit). Uses your Anthropic key — a few pence per invoice, cached.")
+    st.session_state.setdefault("inv_margin_min", MARGIN_PUSH_MIN)
+    st.session_state.setdefault("inv_margin_max", MARGIN_PUSH_MAX)
+    lo, hi = _thresholds()
+    st.caption(f"Check supplier invoices from Monday (price vs pricelist, SKUs/qty vs the Shopify "
+               f"order, margins). Fully-matched with **order margin {lo:.0f}–{hi:.0f}%** → pushed "
+               f"to QuickBooks; **under {lo:.0f}%** → held as Matched; **over {hi:.0f}%** → flagged "
+               "(likely a missing invoice/credit). Uses your Anthropic key — pennies per invoice.")
+
+    with st.expander("Auto-push margin thresholds"):
+        sa, sb = st.columns(2)
+        sa.number_input("Push to QB when order margin is at least (%)", min_value=0.0,
+                        max_value=100.0, step=1.0, key="inv_margin_min",
+                        help="Below this, a matched invoice is held as Matched for review.")
+        sb.number_input("…and no more than (%)", min_value=0.0, max_value=100.0, step=1.0,
+                        key="inv_margin_max",
+                        help="Above this, a matched invoice is flagged as a discrepancy.")
+        st.caption("Applies to single and bulk processing. Resets to 5 / 35 when the app reboots — "
+                   "tell me if you'd like different permanent defaults.")
 
     flash = st.session_state.pop("inv_flash", None)
     if flash:
