@@ -835,20 +835,30 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     return {"invoices": out, "more": bool(page.get("cursor"))}
 
 
-def create_outlook_draft(mailbox: str, to_email: str, subject: str, body: str,
-                         token: str | None = None) -> str | None:
-    """Create a draft email (not sent) in the given mailbox's Drafts, addressed to
-    to_email. Returns the draft's webLink. Needs Mail.ReadWrite. Raises on failure."""
+def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
+                        pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
+                        token: str | None = None) -> bool:
+    """Send an email from `mailbox` to to_email (optionally attaching the PDF at
+    pdf_url). Sends immediately and saves to Sent Items. Needs Mail.Send. Raises."""
+    import base64
     token = token or ms_token()
+    msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
+           "toRecipients": [{"emailAddress": {"address": to_email}}]}
+    if pdf_url:
+        pdf = requests.get(pdf_url, timeout=40)
+        pdf.raise_for_status()
+        msg["attachments"] = [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": pdf_name, "contentType": "application/pdf",
+            "contentBytes": base64.b64encode(pdf.content).decode(),
+        }]
     r = requests.post(
-        f"{GRAPH}/users/{mailbox}/messages",
+        f"{GRAPH}/users/{mailbox}/sendMail",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={"subject": subject, "body": {"contentType": "Text", "content": body},
-              "toRecipients": [{"emailAddress": {"address": to_email}}]},
-        timeout=25,
+        json={"message": msg, "saveToSentItems": True}, timeout=45,
     )
     r.raise_for_status()
-    return r.json().get("webLink")
+    return True
 
 
 def monday_asset_url(asset_id, token: str | None = None) -> str | None:

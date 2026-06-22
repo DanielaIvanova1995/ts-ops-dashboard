@@ -1089,17 +1089,47 @@ def _order_margin(order_items_text, lbsku, cost_override=None):
             "matched": matched, "total": len(order)}
 
 
+# Known per-supplier delivery / carriage charges (ex-VAT £) so legitimate delivery
+# lines aren't flagged as discrepancies. Keys are normalised supplier names
+# (lowercase, alphanumerics only). Add more as you confirm them.
+DELIVERY_CHARGES = {
+    "molan": 23.74,
+}
+
+
+def _is_delivery(text):
+    t = (text or "").lower()
+    return any(w in t for w in ("deliver", "carriage", "freight", "shipping",
+                                "postage", "haulage", "transport"))
+
+
 def _check_invoice(parsed, meta, pidx, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
-    order's SKUs/quantities."""
+    order's SKUs/quantities. Known supplier delivery charges are recognised."""
     supplier = _norm_code(meta.get("supplier"))
     order = _parse_order_items(meta.get("order_items"))
     lines, invoiced = [], set()
     for ln in (parsed.get("lines") or []):
         sku_raw = ln.get("sku") or ""
+        desc = ln.get("description") or ""
+        qty, unit = ln.get("qty"), ln.get("unit_price")
+
+        # Delivery / carriage line — check against the supplier's known charge.
+        if _is_delivery(sku_raw) or _is_delivery(desc):
+            known = DELIVERY_CHARGES.get(supplier)
+            amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
+            dissues = []
+            if isinstance(amt, (int, float)):
+                if known is not None and abs(amt - known) > tol:
+                    dissues.append(("delivery", f"delivery £{amt:,.2f} vs agreed £{known:,.2f}"))
+                elif known is None:
+                    dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
+            lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
+                          "unit": unit, "cost": known, "issues": dissues})
+            continue
+
         sk = _norm_code(sku_raw)
         invoiced.add(sk)
-        qty, unit = ln.get("qty"), ln.get("unit_price")
         issues = []
         supcosts = pidx.get(sk) or {}
         cost = supcosts.get(supplier)
@@ -1125,7 +1155,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 def _verdict(res):
     """{order, price} pass/fail booleans for a check result."""
     order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
-    price_issue = any(t == "price" for l in res["lines"] for t, _ in l["issues"])
+    price_issue = any(t in ("price", "delivery") for l in res["lines"] for t, _ in l["issues"])
     return {"order": not order_issue and not res["missing"], "price": not price_issue}
 
 
@@ -1189,7 +1219,7 @@ def _inv_inline(name, size=18):
         "<svg ", f'<svg width="{size}" height="{size}" style="vertical-align:-4px" ', 1)
 
 
-SUPPLIER_DRAFT_MAILBOX = "hello@tradesuperstoreonline.co.uk"  # supplier-chase drafts land here
+SUPPLIER_FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"  # supplier chases sent from here
 
 
 def _discrepancy_email(inv, res):
@@ -1208,6 +1238,8 @@ def _discrepancy_email(inv, res):
                 lines.append(f"- {sku}: this item was not on our order.")
             elif t == "noprice":
                 lines.append(f"- {sku}: please confirm the agreed price.")
+            elif t == "delivery":
+                lines.append(f"- Delivery/carriage: {_msg}.")
     for sku in res.get("missing", []):
         lines.append(f"- {sku}: on our order but not shown on this invoice — please confirm.")
     detail = "\n".join(lines) or "- please see the attached invoice."
@@ -1298,7 +1330,8 @@ def _run_one_invoice(inv, lbsku):
             f'£{om["rev"]:,.2f} vs cost £{om["cost"]:,.2f} ex-VAT{cov}</div>',
             unsafe_allow_html=True)
 
-    badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444", "noprice": "#94a3b8"}
+    badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444",
+             "noprice": "#94a3b8", "delivery": "#ea580c"}
     rows = ""
     for l in res["lines"]:
         u = f"£{l['unit']:,.2f}" if isinstance(l["unit"], (int, float)) else "—"
@@ -1385,20 +1418,25 @@ def _run_one_invoice(inv, lbsku):
             st.text_input("To", key=f"eto_{sub}")
             st.text_input("Subject", key=f"esub_{sub}")
             st.text_area("Message", key=f"ebod_{sub}", height=230)
+            st.caption(f"Sends from {SUPPLIER_FROM_MAILBOX} with the invoice PDF attached.")
             if not inv.get("supplier_email"):
                 st.caption("No supplier email on this order in Monday — type one in above.")
-            if st.button("Save to Outlook drafts", key=f"edraft_{sub}",
+            if st.button("Send to supplier", key=f"esend_{sub}", type="primary",
                          disabled=not st.session_state.get(f"eto_{sub}", "").strip()):
                 try:
-                    link = data_sources.create_outlook_draft(
-                        SUPPLIER_DRAFT_MAILBOX, st.session_state[f"eto_{sub}"].strip(),
-                        st.session_state[f"esub_{sub}"], st.session_state[f"ebod_{sub}"])
-                    st.success(f"Saved to {SUPPLIER_DRAFT_MAILBOX} Drafts — review and send "
-                               "from Outlook.")
-                    if link:
-                        st.markdown(f"[Open the draft in Outlook]({link})")
+                    pdf_url = (data_sources.monday_asset_url(inv["asset_id"])
+                               if inv.get("asset_id") else None)
+                    pdf_name = inv.get("file_name") or f"invoice-{inv.get('invoice_no')}.pdf"
+                    data_sources.send_supplier_email(
+                        SUPPLIER_FROM_MAILBOX, st.session_state[f"eto_{sub}"].strip(),
+                        st.session_state[f"esub_{sub}"], st.session_state[f"ebod_{sub}"],
+                        pdf_url=pdf_url, pdf_name=pdf_name)
+                    st.success(f"Sent to {st.session_state[f'eto_{sub}'].strip()} from "
+                               f"{SUPPLIER_FROM_MAILBOX} (invoice attached).")
                 except Exception as e:  # noqa: BLE001
-                    st.error("Couldn't create the draft: " + str(e)[:200])
+                    st.error("Couldn't send: " + str(e)[:200]
+                             + " — if it mentions permission/scope, Mail.Send may need adding to "
+                             "the app, or accounts@ may be outside its access policy.")
 
 
 def _apply_status(inv, label):
