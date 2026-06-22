@@ -1094,6 +1094,33 @@ def _verdict(res):
     return {"order": not order_issue and not res["missing"], "price": not price_issue}
 
 
+# Professional inline SVG icons (no emojis) for the Invoice Check views.
+_INV_SVG = {
+    "check": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" '
+             'r="11" fill="#16a34a"/><path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#fff" '
+             'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    "warn": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2.5l10.5 18.5'
+            'H1.5z" fill="#dc2626"/><rect x="11" y="9" width="2" height="6" rx="1" fill="#fff"/>'
+            '<circle cx="12" cy="17.6" r="1.25" fill="#fff"/></svg>',
+    "cross": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" '
+             'r="11" fill="#dc2626"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.4" '
+             'stroke-linecap="round"/></svg>',
+    "invoice": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+               'stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+               '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/><path d="M9 13h6M9 17h6"/></svg>',
+    "credit": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+              'stroke="#ea580c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+              '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/><path d="M9 14h6"/></svg>',
+}
+_INV_ICON = {k: "data:image/svg+xml;base64," + base64.b64encode(v.encode()).decode()
+             for k, v in _INV_SVG.items()}
+
+
+def _inv_inline(name, size=18):
+    return _INV_SVG[name].replace(
+        "<svg ", f'<svg width="{size}" height="{size}" style="vertical-align:-4px" ', 1)
+
+
 def _run_one_invoice(inv, lbsku):
     """Read one invoice's PDF, run the 3-way match, and render the result with
     the margin we make and explicit pricelist + order checks."""
@@ -1120,15 +1147,17 @@ def _run_one_invoice(inv, lbsku):
     st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = _verdict(res)
 
     if matched:
-        st.markdown('<div style="background:#dcfce7;color:#166534;font-weight:700;'
-                    'padding:7px 12px;border-radius:4px;margin:2px 0 8px">✅ FULLY MATCHED — '
-                    'prices and order all correct</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex;align-items:center;gap:8px;background:#dcfce7;'
+                    f'color:#166534;font-weight:700;padding:8px 12px;border-radius:4px;margin:2px 0 8px">'
+                    f'{_inv_inline("check", 20)} FULLY MATCHED — prices and order all correct</div>',
+                    unsafe_allow_html=True)
     else:
-        st.markdown(f'<div style="background:#fee2e2;color:#991b1b;font-weight:700;'
-                    f'padding:7px 12px;border-radius:4px;margin:2px 0 8px">⚠️ DISCREPANCY — '
-                    f'{res["n_issues"]} thing(s) to review</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex;align-items:center;gap:8px;background:#fee2e2;'
+                    f'color:#991b1b;font-weight:700;padding:8px 12px;border-radius:4px;margin:2px 0 8px">'
+                    f'{_inv_inline("warn", 20)} DISCREPANCY — {res["n_issues"]} thing(s) to review</div>',
+                    unsafe_allow_html=True)
     if inv.get("file_url"):
-        st.markdown(f'[📄 Open the invoice PDF]({inv["file_url"]})')
+        st.markdown(f'[Open the invoice PDF]({inv["file_url"]})')
 
     it_total, mt = parsed.get("total"), inv.get("total")
     bits = []
@@ -1139,15 +1168,27 @@ def _run_one_invoice(inv, lbsku):
     if bits:
         st.caption(" · ".join(bits))
 
+    # Live order margin from Monday (whole order, across all its invoices/credit
+    # notes) — the safeguard against approving a duplicate or extra invoice.
+    live = inv.get("order_margin_live")
+    if live is not None:
+        lcol = "#dc2626" if live < 15.01 else "#ea580c" if live <= 18 else "#16a34a"
+        st.markdown(
+            f'<div style="font-size:15px;margin:2px 0 4px">Order margin on Monday (live): '
+            f'<b style="color:{lcol}">{live:.1f}%</b> '
+            f'<span style="color:var(--muted);font-size:12px">— the whole order on Monday, across '
+            f'all its invoices &amp; credit notes</span></div>', unsafe_allow_html=True)
+        if live < 15.01:
+            st.warning("Order margin on Monday is below target — check for a duplicate or extra "
+                       "invoice/credit note on this order before approving.")
+
     if om:
         cov = "" if om["matched"] == om["total"] else f" · {om['matched']}/{om['total']} lines priced"
-        col = "#10b981" if om["margin"] >= 18 else "#ea580c" if om["margin"] >= 0 else "#ef4444"
+        col = "#16a34a" if om["margin"] >= 18 else "#ea580c" if om["margin"] >= 0 else "#dc2626"
         st.markdown(
-            f'<div style="font-size:15px;margin:2px 0 8px">Margin we make on this order: '
-            f'<b style="color:{col}">{om["margin"]:.0f}%</b> '
-            f'<span style="color:var(--muted);font-size:12px">— sell £{om["rev"]:,.2f} vs '
-            f'cost £{om["cost"]:,.2f} ex-VAT (using this invoice&#39;s costs){cov}</span></div>',
-            unsafe_allow_html=True)
+            f'<div style="font-size:13.5px;margin:2px 0 8px;color:var(--muted)">This invoice alone: '
+            f'<b style="color:{col}">{om["margin"]:.0f}%</b> margin — sell £{om["rev"]:,.2f} vs '
+            f'cost £{om["cost"]:,.2f} ex-VAT{cov}</div>', unsafe_allow_html=True)
 
     badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444", "noprice": "#94a3b8"}
     rows = ""
@@ -1157,7 +1198,7 @@ def _run_one_invoice(inv, lbsku):
         flags = "".join(
             f'<span style="background:{badge.get(t, "#94a3b8")};color:#fff;border-radius:3px;'
             f'padding:0 5px;font-size:10px;margin-right:4px">{msg}</span>'
-            for t, msg in l["issues"]) or '<span style="color:#10b981">✓</span>'
+            for t, msg in l["issues"]) or _inv_inline("check", 15)
         rows += (f'<tr style="border-top:1px solid var(--line)">'
                  f'<td style="padding:6px 10px"><b>{l["sku"] or "—"}</b>'
                  f'<div style="color:var(--muted);font-size:11px">{(l.get("desc") or "")[:60]}</div></td>'
@@ -1178,33 +1219,33 @@ def _run_one_invoice(inv, lbsku):
     onum = inv.get("order_no") or "?"
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
     if not qmiss and not res["missing"]:
-        st.success(f"✓ Checked against Shopify order {onum}: all {len(order)} order line(s) "
+        st.success(f"Checked against Shopify order {onum}: all {len(order)} order line(s) "
                    f"match on SKU & quantity.")
     else:
         extra = (f", {len(res['missing'])} ordered but not invoiced ({', '.join(res['missing'])})"
                  if res["missing"] else "")
-        st.warning(f"⚠ Checked against Shopify order {onum}: {len(qmiss)} line(s) don't match"
+        st.warning(f"Checked against Shopify order {onum}: {len(qmiss)} line(s) don't match"
                    f"{extra}.")
     sup = inv.get("supplier") or "supplier"
     pissues = [l for l in res["lines"] if any(t == "price" for t, _ in l["issues"])]
     if pissues:
-        st.warning(f"⚠ Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
+        st.warning(f"Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
     else:
-        st.success(f"✓ Checked against {sup} pricelist: all priced lines match.")
+        st.success(f"Checked against {sup} pricelist: all priced lines match.")
 
     # Write the decision back to Monday's Payment Status.
     st.write("")
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     if is_cn:
-        st.caption("This looks like a **credit note** (negative total) — use **CN Approved**.")
+        st.caption("This looks like a credit note (negative total) — use **Approve credit note**.")
     else:
         st.caption("Set this invoice's status on Monday:")
     ca, cb, cc = st.columns(3)
-    if ca.button("✅ Approved", key=f"appr_{inv['sub_id']}", use_container_width=True):
+    if ca.button("Approve (To QB)", key=f"appr_{inv['sub_id']}", use_container_width=True):
         _apply_status(inv, "Approved (To QB)")
-    if cb.button("🧾 CN Approved", key=f"cn_{inv['sub_id']}", use_container_width=True):
+    if cb.button("Approve credit note", key=f"cn_{inv['sub_id']}", use_container_width=True):
         _apply_status(inv, "CN Approved (To QB)")
-    if cc.button("⚠️ Discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True):
+    if cc.button("Flag discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True):
         _apply_status(inv, "Discrepancy")
 
 
@@ -1284,8 +1325,8 @@ def _invoice_tab(key, is_queue):
 
     verdicts = st.session_state.get("inv_verdict", {})
 
-    def _tick(b):  # True → ✅, False → ❌, None/not-checked → blank
-        return "✅" if b is True else ("❌" if b is False else "")
+    def _icon_pass(b):  # True → check, False → cross, None → blank
+        return _INV_ICON["check"] if b is True else (_INV_ICON["cross"] if b is False else None)
 
     lbsku = _lookup_by_sku()
 
@@ -1293,7 +1334,7 @@ def _invoice_tab(key, is_queue):
     if is_queue:
         checkable = [i for i in fil if i.get("asset_id")]
         bc1, bc2 = st.columns([1, 2])
-        if bc1.button(f"⚡ Bulk-check {len(checkable)}", key=f"bulk_{key}",
+        if bc1.button(f"Bulk-check {len(checkable)}", key=f"bulk_{key}",
                       disabled=not checkable, use_container_width=True,
                       help="Reads & checks every invoice shown — a few pence each, cached."):
             _bulk_check(checkable, lbsku)
@@ -1302,42 +1343,46 @@ def _invoice_tab(key, is_queue):
             mt = sum(1 for i in done
                      if verdicts[i["sub_id"]]["order"] and verdicts[i["sub_id"]]["price"])
             bc2.markdown(f"<div style='padding-top:7px;font-size:13px'>Checked "
-                         f"<b>{len(done)}</b>/{len(fil)} &nbsp;·&nbsp; ✅ {mt} matched &nbsp;·&nbsp; "
-                         f"⚠️ {len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
+                         f"<b>{len(done)}</b>/{len(fil)} &nbsp;·&nbsp; {_inv_inline('check', 16)} "
+                         f"{mt} matched &nbsp;·&nbsp; {_inv_inline('warn', 16)} "
+                         f"{len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
 
     rows = []
     for inv in fil:
-        om = _order_margin(inv.get("order_items"), lbsku)
         v = verdicts.get(inv["sub_id"]) if is_queue else None
-        row = {}
+        is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
+        row = {"Type": _INV_ICON["credit"] if is_cn else _INV_ICON["invoice"]}
         if is_queue:
-            row["Status"] = ("✅ Matched" if (v and v["order"] and v["price"])
-                             else "⚠️ Discrepancy" if v else "·")
+            row["Status"] = (_INV_ICON["check"] if (v and v["order"] and v["price"])
+                             else _INV_ICON["warn"] if v else None)
         row["Invoice"] = inv.get("invoice_no") or ""
         row["Order"] = inv.get("order_no") or ""
         row["Supplier"] = inv.get("supplier") or ""
-        row["Invoice £"] = inv.get("total")
-        row["Margin %"] = (round(om["margin"]) if om else None)
+        row["Inv £"] = inv.get("total")
+        row["Order margin"] = inv.get("order_margin_live")
         if is_queue:
-            row["vs Shopify"] = _tick((v or {}).get("order"))
-            row["vs Pricelist"] = _tick((v or {}).get("price"))
+            row["vs Shopify"] = _icon_pass((v or {}).get("order"))
+            row["vs Pricelist"] = _icon_pass((v or {}).get("price"))
         else:
             row["Date"] = inv.get("date") or ""
         row["PDF"] = inv.get("file_url")
         rows.append(row)
 
     colcfg = {
-        "Invoice £": st.column_config.NumberColumn(format="£%.2f", width="small"),
-        "Margin %": st.column_config.NumberColumn(
-            format="%d%%", width="small",
-            help="Estimated from cheapest cost; exact margin shows when checked"),
+        "Type": st.column_config.ImageColumn("Type", width="small",
+                                             help="Invoice or credit note"),
+        "Inv £": st.column_config.NumberColumn(format="£%.2f", width="small"),
+        "Order margin": st.column_config.NumberColumn(
+            format="%.1f%%", width="small",
+            help="Live order margin from Monday — the whole order, across all its invoices & credits"),
         "PDF": st.column_config.LinkColumn("PDF", display_text="open", width="small"),
     }
     if is_queue:
-        colcfg["Status"] = st.column_config.TextColumn("Status", width="small")
-        colcfg["vs Shopify"] = st.column_config.TextColumn(
+        colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
+                                                        help="Matched or discrepancy")
+        colcfg["vs Shopify"] = st.column_config.ImageColumn(
             "vs Shopify", width="small", help="SKUs & quantities match the order")
-        colcfg["vs Pricelist"] = st.column_config.TextColumn(
+        colcfg["vs Pricelist"] = st.column_config.ImageColumn(
             "vs Pricelist", width="small", help="Line prices match the supplier's pricelist")
 
     event = st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
@@ -1376,13 +1421,13 @@ def render_invoice_check():
         return "—" if n is None else f"{n}{'+' if more else ''}"
 
     st.markdown(
-        '<div style="display:flex;gap:20px;margin:2px 0 10px;font-size:14px">'
-        f'<span>🔎 <b>{_c("review")}</b> to check</span>'
-        f'<span>✅ <b>{_c("approved")}</b> approved</span>'
-        f'<span>⚠️ <b>{_c("discrepancy")}</b> discrepancies</span></div>',
+        '<div style="display:flex;gap:22px;margin:2px 0 10px;font-size:14px">'
+        f'<span><b>{_c("review")}</b> to check</span>'
+        f'<span>{_inv_inline("check", 16)} <b>{_c("approved")}</b> approved</span>'
+        f'<span>{_inv_inline("warn", 16)} <b>{_c("discrepancy")}</b> discrepancies</span></div>',
         unsafe_allow_html=True)
 
-    t1, t2, t3 = st.tabs(["🔎 To check", "✅ Matched & approved", "⚠️ Discrepancies"])
+    t1, t2, t3 = st.tabs(["To check", "Matched & approved", "Discrepancies"])
     with t1:
         _invoice_tab("review", is_queue=True)
     with t2:

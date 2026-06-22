@@ -721,8 +721,10 @@ INVOICE_MODEL = "claude-sonnet-4-6"  # reads the PDF (documents need a capable m
 def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = None) -> dict:
     """Subitems on the Subitems board whose Payment Status is any of label_ids.
     Returns {invoices:[{sub_id, invoice_no, total, asset_id, file_name, order_no,
-    supplier, order_items, status, date}], more: bool}. Raises on token/API failure."""
+    supplier, order_items, order_margin_live, status, date}], more: bool}.
+    Raises on token/API failure."""
     import json as _json
+    import re
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
@@ -738,7 +740,8 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             id name
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name
-              column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0"]) { id text } }
+              column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
+                "formula_mkn9918j"]) { id text ... on FormulaValue { display_value } } }
           }
         }
       }
@@ -777,7 +780,13 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             except Exception:  # noqa: BLE001
                 pass
         parent = it.get("parent_item") or {}
-        pcv = {c["id"]: c.get("text") for c in (parent.get("column_values") or [])}
+        pcv, margin_live = {}, None
+        for c in (parent.get("column_values") or []):
+            if c.get("id") == "formula_mkn9918j":
+                m = re.search(r"-?\d+(?:\.\d+)?", c.get("display_value") or "")
+                margin_live = float(m.group()) if m else None
+            else:
+                pcv[c["id"]] = c.get("text")
         out.append({
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "asset_id": asset_id, "file_name": file_name,
@@ -785,6 +794,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
+            "order_margin_live": margin_live,
             "status": sv.get("text"), "date": date,
         })
     return {"invoices": out, "more": bool(page.get("cursor"))}
