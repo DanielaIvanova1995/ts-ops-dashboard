@@ -987,10 +987,25 @@ def _pricelist_index():
 
 
 INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limit)
-    "review": ([3], 80),
-    "approved": ([0, 1, 2, 8], 200),
+    "review": ([3], 80),            # Needs Review
+    "matched": ([9], 200),          # Matched (TradeHub) — checked, held (NOT pushed)
+    "pushed": ([0, 1, 2, 8], 200),  # Approved (To QB)/CN Approved (To QB)/etc → pushed to QB
     "discrepancy": ([4], 200),
 }
+MATCHED_LABEL = "Matched (TradeHub)"
+APPROVED_QB_LABEL = "Approved (To QB)"
+CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
+DISCREPANCY_LABEL = "Discrepancy"
+MARGIN_PUSH_MIN = 5.0           # auto-push to QB only if live order margin ≥ this %
+
+
+def _push_decision(matched, is_cn, live_margin):
+    """(label, action) for a checked invoice. action: 'push' | 'hold' | None."""
+    if not matched:
+        return None, None
+    if live_margin is not None and live_margin >= MARGIN_PUSH_MIN:
+        return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
+    return MATCHED_LABEL, "hold"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1287,20 +1302,32 @@ def _run_one_invoice(inv, lbsku):
     else:
         st.success(f"Checked against {sup} pricelist: all priced lines match.")
 
-    # Write the decision back to Monday's Payment Status.
+    # Recommendation + write-back to Monday's Payment Status.
     st.write("")
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
-    if is_cn:
-        st.caption("This looks like a credit note (negative total) — use **Approve credit note**.")
+    push_label = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
+    if matched and live is not None and live >= MARGIN_PUSH_MIN:
+        st.success(f"Fully matched and order margin {live:.1f}% (≥5%) — ready to push to QuickBooks.")
+        rec = "push"
+    elif matched:
+        mtxt = (f"order margin {live:.1f}% is below 5%" if live is not None
+                else "the order margin couldn't be read")
+        st.warning(f"Matched, but {mtxt} — review before pushing. Holding as Matched is recommended.")
+        rec = "hold"
     else:
-        st.caption("Set this invoice's status on Monday:")
+        st.warning("Discrepancy found (see above) — flag it, or fix it on Monday and re-check.")
+        rec = "disc"
     ca, cb, cc = st.columns(3)
-    if ca.button("Approve (To QB)", key=f"appr_{inv['sub_id']}", use_container_width=True):
-        _apply_status(inv, "Approved (To QB)")
-    if cb.button("Approve credit note", key=f"cn_{inv['sub_id']}", use_container_width=True):
-        _apply_status(inv, "CN Approved (To QB)")
-    if cc.button("Flag discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True):
-        _apply_status(inv, "Discrepancy")
+    if ca.button("Push credit note to QB" if is_cn else "Push to QB",
+                 key=f"push_{inv['sub_id']}", use_container_width=True,
+                 type=("primary" if rec == "push" else "secondary")):
+        _apply_status(inv, push_label)
+    if cb.button("Mark Matched (hold)", key=f"matched_{inv['sub_id']}", use_container_width=True,
+                 type=("primary" if rec == "hold" else "secondary")):
+        _apply_status(inv, MATCHED_LABEL)
+    if cc.button("Flag discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True,
+                 type=("primary" if rec == "disc" else "secondary")):
+        _apply_status(inv, DISCREPANCY_LABEL)
 
 
 def _apply_status(inv, label):
@@ -1321,23 +1348,39 @@ def _apply_status(inv, label):
 
 
 def _bulk_check(invs, lbsku):
-    """Read + 3-way check every invoice in `invs` (cached), storing each verdict,
-    with a progress bar. Reruns when done."""
+    """Read + 3-way check every invoice (cached), then auto-process: fully matched
+    with order margin ≥5% → pushed to QB; matched but below 5% → held as Matched;
+    discrepancies left for review. Reruns when done."""
     pidx = _pricelist_index()
     n = len(invs)
-    prog = st.progress(0.0, text="Reading & checking invoices…")
-    ok = fail = 0
+    prog = st.progress(0.0, text="Reading, checking & processing invoices…")
+    pushed = held = disc = fail = 0
     for i, inv in enumerate(invs, 1):
         parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
         if parsed.get("error"):
             fail += 1
         else:
-            _check_and_store(inv, parsed, lbsku, pidx)
-            ok += 1
-        prog.progress(i / n, text=f"Checked {i}/{n}")
+            res, _om = _check_and_store(inv, parsed, lbsku, pidx)
+            matched = res["n_issues"] == 0
+            is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+            label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"))
+            if action in ("push", "hold"):
+                try:
+                    data_sources.set_invoice_status(inv["sub_id"], label)
+                    if action == "push":
+                        pushed += 1
+                    else:
+                        held += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                disc += 1
+        prog.progress(i / n, text=f"Processed {i}/{n}")
     prog.empty()
-    st.session_state["inv_flash"] = (f"Bulk-checked {ok} invoice(s)"
-                                     + (f" — {fail} couldn't be read" if fail else "") + ".")
+    invoices_by_status.clear()
+    st.session_state["inv_flash"] = (
+        f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, "
+        f"{disc} discrepancies left to review" + (f", {fail} unreadable" if fail else "") + ".")
     st.rerun()
 
 
@@ -1389,18 +1432,16 @@ def _invoice_tab(key, is_queue):
 
     lbsku = _lookup_by_sku()
 
-    # Bulk-check + live results summary (queue only).
-    if is_queue:
+    # Bulk-check & auto-process (To-check tab only; writes to QB, so always confirm).
+    if key == "review":
         checkable = [i for i in fil if i.get("asset_id")]
         pend = f"bulk_pending_{key}"
         bc1, bc2 = st.columns([1, 2])
-        if bc1.button(f"Bulk-check {len(checkable)}", key=f"bulk_{key}",
+        if bc1.button(f"Bulk-check & process {len(checkable)}", key=f"bulk_{key}",
                       disabled=not checkable, use_container_width=True,
-                      help="Reads & checks every invoice shown — a few pence each, cached."):
-            if len(checkable) > 20:            # confirm before a big (costly) run
-                st.session_state[pend] = True
-            else:
-                _bulk_check(checkable, lbsku)
+                      help="Checks every invoice shown, then pushes matched (≥5% margin) to QB and "
+                           "holds the rest as Matched."):
+            st.session_state[pend] = True
         done = [i for i in fil if i["sub_id"] in verdicts]
         if done:
             mt = sum(1 for i in done
@@ -1411,11 +1452,12 @@ def _invoice_tab(key, is_queue):
                          f"{len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
         if st.session_state.get(pend):
             n = len(checkable)
-            st.warning(f"This will AI-check **{n}** invoices — roughly **£{n * 0.01:.2f}–"
-                       f"£{n * 0.04:.2f}**. Any already checked are free (cached). "
-                       "Tip: filter by supplier to do fewer at a time.")
+            st.warning(f"This will check **{n}** invoices (~£{n * 0.01:.2f}–£{n * 0.04:.2f}) and then "
+                       "automatically **push fully-matched invoices with order margin ≥5% to "
+                       "QuickBooks**, hold matched-but-under-5% as Matched (TradeHub), and leave "
+                       "discrepancies for review. Already-checked reads are free (cached).")
             yc, nc = st.columns([1, 1])
-            if yc.button(f"Yes — check {n}", key=f"bulkyes_{key}", type="primary",
+            if yc.button(f"Yes — check & process {n}", key=f"bulkyes_{key}", type="primary",
                          use_container_width=True):
                 st.session_state.pop(pend, None)
                 _bulk_check(checkable, lbsku)
@@ -1522,16 +1564,17 @@ def render_invoice_check():
         <span class="sec">Invoice Check</span></span></div>""",
         unsafe_allow_html=True,
     )
-    st.caption("Check supplier invoices from Monday: prices vs the supplier's pricelist, SKUs & "
-               "quantities vs the Shopify order, and the margin you make. Uses your Anthropic key "
-               "— a few pence per invoice, cached.")
+    st.caption("Check supplier invoices from Monday (price vs pricelist, SKUs/qty vs the Shopify "
+               "order, margins). Fully-matched invoices with **order margin ≥5%** are pushed to "
+               "QuickBooks (Approved To QB); lower-margin matches are **held as Matched** for "
+               "review. Uses your Anthropic key — a few pence per invoice, cached.")
 
     flash = st.session_state.pop("inv_flash", None)
     if flash:
         st.success(flash)
 
     counts = {}
-    for k in ("review", "approved", "discrepancy"):
+    for k in ("review", "matched", "pushed", "discrepancy"):
         d = invoices_by_status(k)
         counts[k] = (None if d.get("error") else len(d.get("invoices", [])), d.get("more"))
 
@@ -1542,16 +1585,19 @@ def render_invoice_check():
     st.markdown(
         '<div style="display:flex;gap:22px;margin:2px 0 10px;font-size:14px">'
         f'<span><b>{_c("review")}</b> to check</span>'
-        f'<span>{_inv_inline("check", 16)} <b>{_c("approved")}</b> approved</span>'
+        f'<span><b>{_c("matched")}</b> matched (held)</span>'
+        f'<span>{_inv_inline("check", 16)} <b>{_c("pushed")}</b> pushed to QB</span>'
         f'<span>{_inv_inline("warn", 16)} <b>{_c("discrepancy")}</b> discrepancies</span></div>',
         unsafe_allow_html=True)
 
-    t1, t2, t3 = st.tabs(["To check", "Matched & approved", "Discrepancies"])
+    t1, t2, t3, t4 = st.tabs(["To check", "Matched (held)", "Pushed to QB", "Discrepancies"])
     with t1:
         _invoice_tab("review", is_queue=True)
     with t2:
-        _invoice_tab("approved", is_queue=False)
+        _invoice_tab("matched", is_queue=True)
     with t3:
+        _invoice_tab("pushed", is_queue=False)
+    with t4:
         _invoice_tab("discrepancy", is_queue=False)
 
 
