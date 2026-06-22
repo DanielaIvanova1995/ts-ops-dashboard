@@ -757,6 +757,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
+    store = get_secret("SHOPIFY_STORE")
     headers = {"Authorization": token, "API-Version": "2024-10"}
     vals = ", ".join(str(int(i)) for i in label_ids)
     query = """
@@ -817,6 +818,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
                 margin_live = float(m.group()) if m else None
             else:
                 pcv[c["id"]] = c.get("text")
+        sid = (pcv.get("text_mm04tmac") or "").strip() or None
         out.append({
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "asset_id": asset_id, "file_name": file_name,
@@ -825,7 +827,8 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
             "order_margin_live": margin_live,
-            "shopify_order_id": (pcv.get("text_mm04tmac") or "").strip() or None,
+            "shopify_order_id": sid,
+            "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
             "status": sv.get("text"), "date": date,
         })
     return {"invoices": out, "more": bool(page.get("cursor"))}

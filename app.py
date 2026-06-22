@@ -1151,6 +1151,10 @@ _INV_SVG = {
               '<path d="M13.2 2.7v4.3h4.3z" fill="#fff" fill-opacity="0.45"/>'
               '<path d="M9 12.5h6M9 16h4.5" stroke="#fff" stroke-width="1.5" '
               'stroke-linecap="round"/></svg>',
+    "ext": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+           'stroke="#F26A21" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+           '<path d="M14 4h6v6"/><path d="M20 4 10 14"/>'
+           '<path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></svg>',
 }
 _INV_ICON = {k: "data:image/svg+xml;base64," + base64.b64encode(v.encode()).decode()
              for k, v in _INV_SVG.items()}
@@ -1189,13 +1193,19 @@ def _run_one_invoice(inv, lbsku):
                     f'color:#991b1b;font-weight:700;padding:8px 12px;border-radius:4px;margin:2px 0 8px">'
                     f'{_inv_inline("warn", 20)} DISCREPANCY — {res["n_issues"]} thing(s) to review</div>',
                     unsafe_allow_html=True)
+    links = ""
     if inv.get("file_url"):
-        st.markdown(
-            f'<a href="{inv["file_url"]}" target="_blank" style="display:inline-flex;'
-            f'align-items:center;gap:7px;color:#F26A21;text-decoration:none;'
-            f"font-family:'Bebas Neue',sans-serif;font-size:19px;letter-spacing:1px\">"
-            f'{_inv_inline("file_o", 18)} OPEN INVOICE PDF</a>',
-            unsafe_allow_html=True)
+        links += (f'<a href="{inv["file_url"]}" target="_blank" style="display:inline-flex;'
+                  f'align-items:center;gap:7px;color:#F26A21;text-decoration:none;'
+                  f"font-family:'Bebas Neue',sans-serif;font-size:19px;letter-spacing:1px\">"
+                  f'{_inv_inline("file_o", 18)} OPEN INVOICE PDF</a>')
+    if inv.get("order_url"):
+        links += (f'<a href="{inv["order_url"]}" target="_blank" style="display:inline-flex;'
+                  f'align-items:center;gap:7px;color:#F26A21;text-decoration:none;margin-left:22px;'
+                  f"font-family:'Bebas Neue',sans-serif;font-size:19px;letter-spacing:1px\">"
+                  f'{_inv_inline("ext", 17)} VIEW ORDER ON SHOPIFY</a>')
+    if links:
+        st.markdown(f'<div style="margin:2px 0 6px">{links}</div>', unsafe_allow_html=True)
 
     it_total, mt = parsed.get("total"), inv.get("total")
     bits = []
