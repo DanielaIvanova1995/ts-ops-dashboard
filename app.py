@@ -1135,6 +1135,11 @@ _INV_SVG = {
                  '<text x="36" y="24.5" text-anchor="middle" fill="#fff" font-size="13" '
                  'font-weight="700" letter-spacing="1.5" '
                  "font-family=\"Bebas Neue,'Arial Narrow',Arial,sans-serif\">CRN</text></svg>",
+    "file_o": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+              '<path d="M6 2.5h7.5L18 7v14.5H6z" fill="#F26A21"/>'
+              '<path d="M13.2 2.7v4.3h4.3z" fill="#fff" fill-opacity="0.45"/>'
+              '<path d="M9 12.5h6M9 16h4.5" stroke="#fff" stroke-width="1.5" '
+              'stroke-linecap="round"/></svg>',
 }
 _INV_ICON = {k: "data:image/svg+xml;base64," + base64.b64encode(v.encode()).decode()
              for k, v in _INV_SVG.items()}
@@ -1174,7 +1179,11 @@ def _run_one_invoice(inv, lbsku):
                     f'{_inv_inline("warn", 20)} DISCREPANCY — {res["n_issues"]} thing(s) to review</div>',
                     unsafe_allow_html=True)
     if inv.get("file_url"):
-        st.markdown(f'[Open the invoice PDF]({inv["file_url"]})')
+        st.markdown(
+            f'<a href="{inv["file_url"]}" target="_blank" style="display:inline-flex;'
+            f'align-items:center;gap:6px;color:#F26A21;font-weight:600;font-size:13px;'
+            f'text-decoration:none">{_inv_inline("file_o", 16)} Open invoice PDF</a>',
+            unsafe_allow_html=True)
 
     it_total, mt = parsed.get("total"), inv.get("total")
     bits = []
@@ -1384,7 +1393,7 @@ def _invoice_tab(key, is_queue):
             row["vs Pricelist"] = _icon_pass((v or {}).get("price"))
         else:
             row["Date"] = inv.get("date") or ""
-        row["PDF"] = inv.get("file_url")
+        row["PDF"] = _INV_ICON["file_o"] if inv.get("file_url") else None
         rows.append(row)
 
     colcfg = {
@@ -1396,7 +1405,8 @@ def _invoice_tab(key, is_queue):
             help="OVERALL margin for this whole order from Monday — across ALL invoices and "
                  "credit notes relating to the order. Use this to be sure the order is profitable "
                  "before approving (catches duplicate/extra invoices)."),
-        "PDF": st.column_config.LinkColumn("PDF", display_text="open", width="small"),
+        "PDF": st.column_config.ImageColumn(
+            "PDF", width="small", help="Open the PDF via 'Open invoice PDF' in the row's detail below"),
     }
     if is_queue:
         colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
