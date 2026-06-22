@@ -996,16 +996,19 @@ MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
 CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
 DISCREPANCY_LABEL = "Discrepancy"
-MARGIN_PUSH_MIN = 5.0           # auto-push to QB only if live order margin ≥ this %
+MARGIN_PUSH_MIN = 5.0           # auto-push only if live order margin ≥ this %
+MARGIN_PUSH_MAX = 35.0          # …and ≤ this; above this looks wrong → flag for review
 
 
 def _push_decision(matched, is_cn, live_margin):
-    """(label, action) for a checked invoice. action: 'push' | 'hold' | None."""
+    """(label, action) for a checked invoice. action: 'push' | 'hold' | 'flag' | None."""
     if not matched:
         return None, None
-    if live_margin is not None and live_margin >= MARGIN_PUSH_MIN:
-        return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
-    return MATCHED_LABEL, "hold"
+    if live_margin is None or live_margin < MARGIN_PUSH_MIN:
+        return MATCHED_LABEL, "hold"          # low / unknown margin → hold for review
+    if live_margin > MARGIN_PUSH_MAX:
+        return DISCREPANCY_LABEL, "flag"      # suspiciously high → flag for review
+    return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1306,9 +1309,14 @@ def _run_one_invoice(inv, lbsku):
     st.write("")
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     push_label = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
-    if matched and live is not None and live >= MARGIN_PUSH_MIN:
-        st.success(f"Fully matched and order margin {live:.1f}% (≥5%) — ready to push to QuickBooks.")
+    if matched and live is not None and MARGIN_PUSH_MIN <= live <= MARGIN_PUSH_MAX:
+        st.success(f"Fully matched and order margin {live:.1f}% (5–{MARGIN_PUSH_MAX:.0f}%) — "
+                   "ready to push to QuickBooks.")
         rec = "push"
+    elif matched and live is not None and live > MARGIN_PUSH_MAX:
+        st.warning(f"Matched, but order margin {live:.1f}% is unusually high (>{MARGIN_PUSH_MAX:.0f}%) "
+                   "— likely a missing invoice or credit note. Flag it and check before pushing.")
+        rec = "disc"
     elif matched:
         mtxt = (f"order margin {live:.1f}% is below 5%" if live is not None
                 else "the order margin couldn't be read")
@@ -1354,7 +1362,7 @@ def _bulk_check(invs, lbsku):
     pidx = _pricelist_index()
     n = len(invs)
     prog = st.progress(0.0, text="Reading, checking & processing invoices…")
-    pushed = held = disc = fail = 0
+    pushed = held = flagged = unmatched = fail = 0
     for i, inv in enumerate(invs, 1):
         parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
         if parsed.get("error"):
@@ -1364,23 +1372,23 @@ def _bulk_check(invs, lbsku):
             matched = res["n_issues"] == 0
             is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
             label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"))
-            if action in ("push", "hold"):
+            if action in ("push", "hold", "flag"):
                 try:
                     data_sources.set_invoice_status(inv["sub_id"], label)
-                    if action == "push":
-                        pushed += 1
-                    else:
-                        held += 1
+                    pushed += action == "push"
+                    held += action == "hold"
+                    flagged += action == "flag"
                 except Exception:  # noqa: BLE001
                     pass
             else:
-                disc += 1
+                unmatched += 1
         prog.progress(i / n, text=f"Processed {i}/{n}")
     prog.empty()
     invoices_by_status.clear()
     st.session_state["inv_flash"] = (
-        f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, "
-        f"{disc} discrepancies left to review" + (f", {fail} unreadable" if fail else "") + ".")
+        f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, flagged {flagged} "
+        f"(margin >{MARGIN_PUSH_MAX:.0f}%), {unmatched} left for manual review"
+        + (f", {fail} unreadable" if fail else "") + ".")
     st.rerun()
 
 
@@ -1453,9 +1461,10 @@ def _invoice_tab(key, is_queue):
         if st.session_state.get(pend):
             n = len(checkable)
             st.warning(f"This will check **{n}** invoices (~£{n * 0.01:.2f}–£{n * 0.04:.2f}) and then "
-                       "automatically **push fully-matched invoices with order margin ≥5% to "
-                       "QuickBooks**, hold matched-but-under-5% as Matched (TradeHub), and leave "
-                       "discrepancies for review. Already-checked reads are free (cached).")
+                       "automatically **push fully-matched invoices with order margin 5–35% to "
+                       "QuickBooks**, hold under-5% as Matched (TradeHub), flag over-35% as a "
+                       "discrepancy, and leave mismatches for review. Already-checked reads are "
+                       "free (cached).")
             yc, nc = st.columns([1, 1])
             if yc.button(f"Yes — check & process {n}", key=f"bulkyes_{key}", type="primary",
                          use_container_width=True):
@@ -1565,9 +1574,9 @@ def render_invoice_check():
         unsafe_allow_html=True,
     )
     st.caption("Check supplier invoices from Monday (price vs pricelist, SKUs/qty vs the Shopify "
-               "order, margins). Fully-matched invoices with **order margin ≥5%** are pushed to "
-               "QuickBooks (Approved To QB); lower-margin matches are **held as Matched** for "
-               "review. Uses your Anthropic key — a few pence per invoice, cached.")
+               "order, margins). Fully-matched with **order margin 5–35%** → pushed to QuickBooks; "
+               "**under 5%** → held as Matched; **over 35%** → flagged (likely a missing "
+               "invoice/credit). Uses your Anthropic key — a few pence per invoice, cached.")
 
     flash = st.session_state.pop("inv_flash", None)
     if flash:
