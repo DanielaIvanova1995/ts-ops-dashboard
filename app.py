@@ -2173,44 +2173,69 @@ def _render_quote_block(email):
     btn = ("Create provisional quote (draft order + reply)" if provisional
            else "Create Shopify draft order + Outlook draft reply")
     if st.button(btn, type="primary", key=f"qcreate_{email['id']}"):
+        # 1) Try the Shopify draft order (needs write_draft_orders) — but don't block on it.
+        do, draft_err = None, None
         try:
             li = [{"variantId": l["match"]["variant_id"], "quantity": l["qty"]} for l in matched]
             do = data_sources.create_draft_order(li, email=email.get("from"),
                                                  note=f"Quote from email: {email['subject']}")
-            # Compose a proper, conversation-aware email (falls back to a template).
-            cdata = {"customer_name": q.get("customer_name"),
-                     "lines": [{"qty": l["qty"], "title": l["match"]["title"],
-                                "unit": l["match"]["price"],
-                                "line": l["match"]["price"] * l["qty"]} for l in matched],
-                     "total": do["total"], "ref": do["name"], "url": do["invoiceUrl"],
-                     "caveats": all_caveats, "provisional": provisional}
-            try:
-                body = data_sources.compose_customer_email(q.get("thread", ""), "quote", cdata)
-            except Exception:  # noqa: BLE001
-                body_lines = "\n".join(f"- {l['qty']} x {l['match']['title']} "
-                                       f"@ £{l['match']['price']:,.2f}" for l in matched)
-                cav_txt = (("\n\nA few things to check:\n"
-                            + "\n".join(f"- {c}" for c in all_caveats)) if all_caveats else "")
-                body = (f"Hi {_first_name(q.get('customer_name'), email.get('from_name'))},\n\n"
-                        f"Thank you for your enquiry. Based on the details provided, here is your "
-                        f"quote (ref {do['name']}):\n\n{body_lines}\n\nTotal (ex-VAT): "
-                        f"£{do['total']:,.2f}\n\nYou can view your quote here: {do['invoiceUrl']}"
-                        f"{cav_txt}\n\nPlease do check it over and confirm it is all correct, and "
-                        "let us know if anything needs adding or amending.\n\n"
-                        "Kind regards,\nTrade Superstore Online")
-            subj = f"Your quote {do['name']} – RE: {email['subject']}"
+        except Exception as e:  # noqa: BLE001
+            draft_err = str(e)
+        ref = do["name"] if do else None
+        url = do["invoiceUrl"] if do else None
+        total_amt = do["total"] if do else total
+
+        # 2) Compose the quote email from the priced lines (works with or without the draft).
+        cdata = {"customer_name": q.get("customer_name"),
+                 "lines": [{"qty": l["qty"], "title": l["match"]["title"],
+                            "unit": l["match"]["price"],
+                            "line": l["match"]["price"] * l["qty"]} for l in matched],
+                 "total": total_amt, "ref": ref, "url": url,
+                 "caveats": all_caveats, "provisional": provisional}
+        try:
+            body = data_sources.compose_customer_email(q.get("thread", ""), "quote", cdata)
+        except Exception:  # noqa: BLE001
+            body_lines = "\n".join(f"- {l['qty']} x {l['match']['title']} "
+                                   f"@ £{l['match']['price']:,.2f}" for l in matched)
+            cav_txt = (("\n\nA few things to check:\n"
+                        + "\n".join(f"- {c}" for c in all_caveats)) if all_caveats else "")
+            ref_txt = f" (ref {ref})" if ref else ""
+            url_txt = f"\n\nYou can view your quote here: {url}" if url else ""
+            body = (f"Hi {_first_name(q.get('customer_name'), email.get('from_name'))},\n\n"
+                    f"Thank you for your enquiry. Based on the details provided, here is your "
+                    f"quote{ref_txt}:\n\n{body_lines}\n\nTotal (ex-VAT): £{total_amt:,.2f}"
+                    f"{url_txt}{cav_txt}\n\nPlease do check it over and confirm it is all correct, "
+                    "and let us know if anything needs adding or amending.\n\n"
+                    "Kind regards,\nTrade Superstore Online")
+
+        # 3) Create the Outlook draft reply and mark progress.
+        link = None
+        try:
+            subj = (f"Your quote {ref} – RE: {email['subject']}" if ref
+                    else f"Your quote – RE: {email['subject']}")
             link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,
                                                    subject=subj, as_html=True)
             _mark_quote_progress(email, QUOTE_CAT_QUOTED)
-            st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}) and an "
-                       "Outlook draft reply — review and send from Outlook. Marked **✓ Quoted**.")
-            bits = [f"[Open the Shopify draft order]({do['invoiceUrl']})"]
-            if link:
-                bits.append(f"[Open the Outlook draft]({link})")
-            st.markdown(" · ".join(bits))
         except Exception as e:  # noqa: BLE001
-            st.error("Couldn't create it: " + str(e)[:240] + " — Shopify may need the "
-                     "**write_draft_orders** scope, or Outlook **Mail.ReadWrite**.")
+            st.error("Couldn't create the Outlook draft: " + str(e)[:200])
+
+        # 4) Report.
+        if do:
+            st.success(f"Created Shopify draft order **{ref}** (£{total_amt:,.2f}) and an Outlook "
+                       "draft reply — review and send from Outlook. Marked **✓ Quoted**.")
+        else:
+            st.warning("Couldn't create the Shopify draft order — the **write_draft_orders** scope "
+                       "is missing (see fix below). I drafted the quote **email** from the priced "
+                       f"lines instead (total £{total_amt:,.2f}). Marked **✓ Quoted**.")
+            if draft_err:
+                st.caption("Shopify said: " + draft_err[:180])
+        bits = []
+        if url:
+            bits.append(f"[Open the Shopify draft order]({url})")
+        if link:
+            bits.append(f"[Open the Outlook draft]({link})")
+        if bits:
+            st.markdown(" · ".join(bits))
 
 
 def _qbadge(text, bg, fg="#fff"):

@@ -1059,8 +1059,14 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         facts = ("QUOTED ITEMS (use these EXACT prices and figures, never change a number):\n"
                  + "\n".join(f"- {l['qty']} x {l['title']} @ GBP {l['unit']:.2f} "
                              f"= GBP {l['line']:.2f}" for l in data["lines"])
-                 + f"\nTotal (ex-VAT): GBP {data['total']:.2f}\nQuote reference: {data['ref']}\n"
-                 f"View / accept the quote online: {data['url']}")
+                 + f"\nTotal (ex-VAT): GBP {data['total']:.2f}")
+        if data.get("ref"):
+            facts += f"\nQuote reference: {data['ref']}"
+        if data.get("url"):
+            facts += f"\nView / accept the quote online: {data['url']}"
+        else:
+            facts += ("\n(No online quote link available — do NOT mention viewing or accepting "
+                      "online; just present the figures.)")
         cav = [c for c in (data.get("caveats") or []) if c and str(c).strip()]
         if cav:
             facts += ("\n\nASSUMPTIONS / THINGS FOR THE CUSTOMER TO CHECK (mention these clearly):\n"
