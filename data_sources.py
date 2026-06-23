@@ -1017,6 +1017,45 @@ def fetch_conversation(mailbox: str, conversation_id: str, token: str | None = N
     return out
 
 
+def triage_quote_email(email_text: str) -> dict:
+    """Lightweight AI summary of one quote email for the overview table. Returns
+    {customer_name, product_range, postcode, summary, ready_to_quote, urgency}.
+    Raises if no ANTHROPIC_API_KEY."""
+    import json as _json
+    import re
+
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    prompt = (
+        "Summarise this customer email to a UK building-supplies retailer (Trade Superstore) "
+        "for an internal quote-tracking table. Reply with ONLY JSON:\n"
+        '{"customer_name":"the person\'s name if identifiable, else null",'
+        '"product_range":"the product category in 1-3 words (e.g. Guttering, Fascia & soffit, '
+        'Roofing, Cladding, Insulation, Drainage, Doors, Mixed) or Unclear",'
+        '"postcode":"UK delivery postcode if mentioned, else null",'
+        '"summary":"one short line on what they want quoted",'
+        '"ready_to_quote":true|false,"urgency":"normal|urgent"}\n'
+        "ready_to_quote is true only when specific products AND quantities are given. urgency is "
+        "'urgent' only if they say they need it quickly / by a date. Never invent.\n\nEMAIL:\n"
+        + (email_text or "")[:5000]
+    )
+    r = requests.post(
+        ANTHROPIC_API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": SENTIMENT_MODEL, "max_tokens": 400,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=60,
+    )
+    r.raise_for_status()
+    txt = r.json()["content"][0]["text"]
+    m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise RuntimeError("AI returned no JSON")
+    return _json.loads(m.group(0))
+
+
 def compose_customer_email(context: str, kind: str, data: dict) -> str:
     """AI writes a polished, customer-facing email body (plain text, ready to review
     and send). kind='quote' presents priced items; kind='clarify' asks for missing

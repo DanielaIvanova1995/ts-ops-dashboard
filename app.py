@@ -2066,6 +2066,93 @@ def _render_quote_block(email):
                      "**write_draft_orders** scope, or Outlook **Mail.ReadWrite**.")
 
 
+_UK_POSTCODE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
+_FOLLOWUP_RE = re.compile(r"^\s*(re|fw|fwd)\s*:", re.I)
+
+
+def _quote_triage(emails):
+    """Triage every email (AI summary + deterministic postcode/follow-up), cached per
+    email in session state so repeat page loads are free. Returns {id: triage}."""
+    import concurrent.futures as _cf
+    cache = st.session_state.setdefault("quote_triage", {})
+    todo = [e for e in emails if e["id"] not in cache]
+    if todo:
+        def work(e):
+            try:
+                t = data_sources.triage_quote_email(e["body"])
+            except Exception as ex:  # noqa: BLE001
+                return e["id"], {"error": str(ex)}
+            if not t.get("postcode"):
+                m = _UK_POSTCODE.search(e["body"] or "")
+                t["postcode"] = m.group(1).upper() if m else None
+            return e["id"], t
+        with st.spinner(f"Summarising {len(todo)} quote email(s)…"):
+            with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+                for eid, t in ex.map(work, todo):
+                    cache[eid] = t
+    return cache
+
+
+def _qbadge(text, bg, fg="#fff"):
+    return (f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:10px;'
+            f'font-size:11px;font-weight:700;white-space:nowrap">{text}</span>')
+
+
+def _render_quote_overview(emails):
+    triage = _quote_triage(emails)
+    errs = [t["error"] for t in triage.values() if t.get("error")]
+    if errs and len(errs) == len(triage):
+        if "ANTHROPIC_API_KEY" in errs[0]:
+            st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to see the overview.")
+        else:
+            st.warning("Couldn't summarise the emails: " + errs[0][:160])
+        return
+
+    n_new = n_fu = n_ready = n_urgent = 0
+    rows = ""
+    for e in emails:
+        t = triage.get(e["id"]) or {}
+        if t.get("error"):
+            continue
+        is_fu = bool(_FOLLOWUP_RE.match(e.get("subject") or ""))
+        ready = bool(t.get("ready_to_quote"))
+        urgent = (t.get("urgency") == "urgent")
+        n_fu += is_fu
+        n_new += (not is_fu)
+        n_ready += ready
+        n_urgent += urgent
+        cust = t.get("customer_name") or e.get("from_name") or e.get("from") or "—"
+        typ = _qbadge("Follow-up", "#B45309") if is_fu else _qbadge("New", "#2563EB")
+        status = _qbadge("Ready", "#16A34A") if ready else _qbadge("Needs info", "#6B7280")
+        urg = (" " + _qbadge("URGENT", "#DC2626")) if urgent else ""
+        rows += (
+            '<tr style="border-top:1px solid var(--line)">'
+            f'<td style="padding:7px 10px;white-space:nowrap;color:var(--muted)">{e.get("received") or "—"}</td>'
+            f'<td style="padding:7px 10px;font-weight:600">{cust}</td>'
+            f'<td style="padding:7px 10px">{typ}</td>'
+            f'<td style="padding:7px 10px">{t.get("product_range") or "—"}</td>'
+            f'<td style="padding:7px 10px;white-space:nowrap">{t.get("postcode") or "—"}</td>'
+            f'<td style="padding:7px 10px">{t.get("summary") or "—"}</td>'
+            f'<td style="padding:7px 10px">{status}{urg}</td></tr>')
+
+    head = "".join(f'<th style="text-align:left;padding:7px 10px;color:var(--muted);'
+                   f'font-weight:600">{h}</th>' for h in
+                   ["Received", "Customer", "Type", "Product range", "Postcode",
+                    "What they want", "Status"])
+    st.markdown(
+        f'<table style="width:100%;border-collapse:collapse;font-size:12.5px;'
+        f'border:1px solid var(--line);border-radius:6px;overflow:hidden">'
+        f'<tr style="background:var(--card)">{head}</tr>{rows}</table>',
+        unsafe_allow_html=True)
+    st.caption(f"**{len(emails)}** request(s) · {n_new} new · {n_fu} follow-up · "
+               f"{n_ready} ready to quote · {n_urgent} urgent. "
+               "Summaries are AI-generated (cached). Pick rows below to build a quote.")
+    if st.button("↻ Refresh overview"):
+        st.session_state.pop("quote_triage", None)
+        _quote_emails.clear()
+        st.rerun()
+
+
 def render_quotes():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -2086,6 +2173,10 @@ def render_quotes():
     if not emails:
         st.success("No quote emails in the folder right now.")
         return
+
+    st.markdown("#### Quote requests")
+    _render_quote_overview(emails)
+    st.divider()
 
     labels = [f"{e['received']} · {e['from_name'] or e['from'] or '?'} · {e['subject']}"
               for e in emails]
