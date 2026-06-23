@@ -1953,6 +1953,44 @@ def _ensure_parsed(emails):
     return cache
 
 
+def _email_cladding_takeoff(clad):
+    """Turn a Hardie cladding email enquiry (area-based) into board + accessory lines —
+    so '15 m²' becomes the right number of boards, not 15 boards. Returns (raw_lines,
+    caveats). raw_lines: [{description, qty, search}]."""
+    import math
+    product = clad.get("product") or "Hardie Plank"
+    cov = 0.72 if "vl" in product.lower() else 0.54  # lap HardiePlank = 0.54 m²/board
+    gross = clad.get("gross_area_m2") or 0
+    openings = clad.get("openings_m2") or 0
+    net = max(0.0, gross - openings)
+    if net <= 0:
+        return None, None
+    boards = math.ceil(net / cov * 1.10)  # +10% waste
+    colour = (clad.get("colour") or "").strip()
+    board_desc = f"{product} cladding" + (f" — {colour}" if colour else "")
+    raw = [{"description": board_desc, "qty": boards,
+            "search": f"{product} {colour}".strip()}]
+    batten_lm = net / 0.6
+    if clad.get("wants_screws"):
+        raw.append({"description": "James Hardie cladding screws (box of 250)",
+                    "qty": max(1, math.ceil(boards * 7 / 250)),
+                    "search": "James Hardie cladding fixing screws"})
+    if clad.get("wants_epdm"):
+        raw.append({"description": "EPDM joint tape (20m roll)",
+                    "qty": max(1, math.ceil(batten_lm / 20)),
+                    "search": "James Hardie EPDM tape 20m"})
+    cav = [f"Boards worked out from {net:.1f} m² to clad "
+           f"({gross:.1f} m² less {openings:.1f} m² of openings) ÷ {cov} m²/board "
+           f"+ 10% waste = {boards} boards."]
+    if not colour:
+        cav.append("Colour/finish not confirmed — please let us know which colour you'd like.")
+    if clad.get("wants_trims"):
+        cav.append("Trims (starter/top vent, corner and window trims): these are sized from the "
+                   "elevation widths and corner count, which we don't have yet — send those and "
+                   "we'll add the exact trim pack.")
+    return raw, cav
+
+
 def _build_quote(email):
     """Full build for ONE email: reuse the shared parse, then lazily add Shopify
     matching and the composed clarify email (computed once, stored on the parse)."""
@@ -1964,15 +2002,32 @@ def _build_quote(email):
     if parsed.get("error"):
         return parsed
     if "lines" not in parsed:
-        lines = []
-        for it in (parsed.get("items") or []):
-            try:
-                match = data_sources.match_quote_variant(it.get("code"), it.get("description"))
-            except Exception:  # noqa: BLE001
-                match = None
-            lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
-                          "match": match})
-        parsed["lines"] = lines
+        clad = parsed.get("cladding") or {}
+        raw_clad, clad_cav = (None, None)
+        if clad.get("is_cladding") and (clad.get("gross_area_m2") or 0) > 0:
+            raw_clad, clad_cav = _email_cladding_takeoff(clad)
+        if raw_clad:
+            # Cladding: quote by converting area to boards (+ requested accessories).
+            lines = []
+            for it in raw_clad:
+                try:
+                    match = data_sources.match_quote_variant(None, it["search"])
+                except Exception:  # noqa: BLE001
+                    match = None
+                lines.append({"description": it["description"], "qty": it["qty"], "match": match})
+            parsed["lines"] = lines
+            parsed["caveats"] = (parsed.get("caveats") or []) + (clad_cav or [])
+            parsed["can_quote"] = True
+        else:
+            lines = []
+            for it in (parsed.get("items") or []):
+                try:
+                    match = data_sources.match_quote_variant(it.get("code"), it.get("description"))
+                except Exception:  # noqa: BLE001
+                    match = None
+                lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
+                              "match": match})
+            parsed["lines"] = lines
     # Only fall back to a pure "ask for details" email when there is genuinely nothing we
     # can price. If we found any priceable item we quote provisionally and flag the gaps.
     has_priceable = any(l.get("match") and l["match"].get("price") is not None

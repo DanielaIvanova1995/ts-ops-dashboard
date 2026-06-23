@@ -1132,11 +1132,21 @@ def extract_quote_items(email_text: str) -> dict:
         '"code":"any product code/SKU they gave, else null"}],'
         '"questions":["short, polite, customer-facing question for each missing detail"],'
         '"caveats":["short customer-facing note on any assumption or missing detail to check"],'
+        '"cladding":{"is_cladding":true|false,"product":"Hardie Plank|Hardie VL Plank|null",'
+        '"gross_area_m2":<number or null>,"openings_m2":<number or null>,"colour":"... or null",'
+        '"wants_trims":true|false,"wants_epdm":true|false,"wants_screws":true|false},'
         '"product_range":"the product category in 1-3 words (e.g. Guttering, Fascia & soffit, '
         'Roofing, Cladding, Insulation, Drainage, Doors, Mixed) or Unclear",'
         '"postcode":"UK delivery postcode if mentioned anywhere, else null",'
         '"summary":"one short line on what they want quoted",'
         '"urgency":"normal|urgent"}\n'
+        "JAMES HARDIE CLADDING: if this is a Hardie Plank / Hardie VL Plank cladding enquiry, set "
+        "cladding.is_cladding=true and fill it: product, gross_area_m2 = the area to clad "
+        "INCLUDING windows/doors (use the stated area; if only width×height dimensions are given, "
+        "multiply them), openings_m2 = total window/door area to deduct, colour, and whether they "
+        "asked for trims / EPDM tape / screws. CRITICAL: cladding is quoted by converting AREA to "
+        "boards (the system does this) — NEVER put an area figure as an item quantity, and leave "
+        "items EMPTY for cladding jobs.\n"
         "ALWAYS populate items with EVERY product you can identify, even if the request is "
         "incomplete — we prefer to quote for what we can and flag the rest. If a quantity is "
         "missing, assume a sensible quantity and add a caveat saying it was assumed. Only leave "
