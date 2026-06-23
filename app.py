@@ -2062,16 +2062,17 @@ def _render_quote_block(email):
     for l in lines:
         m = l["match"]
         if m and m.get("price") is not None:
-            prod = f'{m.get("title") or "?"}<div style="color:var(--muted);font-size:11px">SKU {m.get("sku") or "—"}</div>'
+            prod = (f'{_esc(m.get("title") or "?")}<div style="color:var(--muted);font-size:11px">'
+                    f'SKU {_esc(m.get("sku") or "—")}</div>')
             unit = f"£{m['price']:,.2f}"
             line = f"£{m['price'] * l['qty']:,.2f}"
         else:
             prod = '<span style="color:#ef4444">no match — add manually</span>'
             unit = line = "—"
         rows += (f'<tr style="border-top:1px solid var(--line)">'
-                 f'<td style="padding:6px 10px">{l["description"] or "—"}</td>'
+                 f'<td style="padding:6px 10px;overflow-wrap:break-word">{_esc(l["description"] or "—")}</td>'
                  f'<td style="padding:6px 10px;text-align:center">{l["qty"]}</td>'
-                 f'<td style="padding:6px 10px">{prod}</td>'
+                 f'<td style="padding:6px 10px;overflow-wrap:break-word">{prod}</td>'
                  f'<td style="padding:6px 10px;text-align:right">{unit}</td>'
                  f'<td style="padding:6px 10px;text-align:right">{line}</td></tr>')
     st.markdown(f"### Quote for {q.get('customer_name') or email.get('from_name') or 'customer'}")
@@ -2128,6 +2129,13 @@ def _render_quote_block(email):
 def _qbadge(text, bg, fg="#fff"):
     return (f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:10px;'
             f'font-size:11px;font-weight:700;white-space:nowrap">{text}</span>')
+
+
+def _esc(v):
+    """HTML-escape any cell value so AI/customer text (e.g. 'Fascia & soffit', a stray
+    '<') can't break the table markup and distort the layout."""
+    import html as _html
+    return _html.escape("" if v is None else str(v))
 
 
 def _quote_progress_badge(email):
@@ -2195,25 +2203,30 @@ def _render_quote_overview(emails, cache):
         typ = _qbadge("Follow-up", "#B45309") if is_fu else _qbadge("New", "#2563EB")
         status = _qbadge("Ready", "#16A34A") if ready else _qbadge("Needs info", "#6B7280")
         urg = (" " + _qbadge("URGENT", "#DC2626")) if urgent else ""
+        td = ('padding:7px 10px;overflow:hidden;text-overflow:ellipsis;'
+              'overflow-wrap:break-word;vertical-align:top')
         rows += (
             '<tr style="border-top:1px solid var(--line)">'
-            f'<td style="padding:7px 10px;white-space:nowrap;color:var(--muted)">{e.get("received") or "—"}</td>'
-            f'<td style="padding:7px 10px;font-weight:600">{cust}</td>'
-            f'<td style="padding:7px 10px">{typ}</td>'
-            f'<td style="padding:7px 10px">{p.get("product_range") or "—"}</td>'
-            f'<td style="padding:7px 10px;white-space:nowrap">{p.get("postcode") or "—"}</td>'
-            f'<td style="padding:7px 10px">{p.get("summary") or "—"}</td>'
-            f'<td style="padding:7px 10px">{status}{urg}</td>'
-            f'<td style="padding:7px 10px">{_quote_progress_badge(e)}</td></tr>')
+            f'<td style="{td};white-space:nowrap;color:var(--muted)">{_esc(e.get("received") or "—")}</td>'
+            f'<td style="{td};font-weight:600">{_esc(cust)}</td>'
+            f'<td style="{td}">{typ}</td>'
+            f'<td style="{td}">{_esc(p.get("product_range") or "—")}</td>'
+            f'<td style="{td};white-space:nowrap">{_esc(p.get("postcode") or "—")}</td>'
+            f'<td style="{td}">{_esc(p.get("summary") or "—")}</td>'
+            f'<td style="{td}">{status}{urg}</td>'
+            f'<td style="{td}">{_quote_progress_badge(e)}</td></tr>')
 
+    cols = [("Received", "8%"), ("Customer", "14%"), ("Type", "8%"), ("Product range", "13%"),
+            ("Postcode", "9%"), ("What they want", "26%"), ("Status", "12%"), ("Progress", "10%")]
+    colgroup = "".join(f'<col style="width:{w}">' for _, w in cols)
     head = "".join(f'<th style="text-align:left;padding:7px 10px;color:var(--muted);'
-                   f'font-weight:600">{h}</th>' for h in
-                   ["Received", "Customer", "Type", "Product range", "Postcode",
-                    "What they want", "Status", "Progress"])
+                   f'font-weight:600">{h}</th>' for h, _ in cols)
     st.markdown(
-        f'<table style="width:100%;border-collapse:collapse;font-size:12.5px;'
-        f'border:1px solid var(--line);border-radius:6px;overflow:hidden">'
-        f'<tr style="background:var(--card)">{head}</tr>{rows}</table>',
+        '<div style="width:100%;overflow-x:auto">'
+        '<table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:12.5px;'
+        'border:1px solid var(--line);border-radius:6px">'
+        f'<colgroup>{colgroup}</colgroup>'
+        f'<tr style="background:var(--card)">{head}</tr>{rows}</table></div>',
         unsafe_allow_html=True)
     st.caption(f"**{len(emails)}** request(s) · {n_new} new · {n_fu} follow-up · "
                f"{n_ready} ready to quote · {n_urgent} urgent. "
@@ -2329,8 +2342,8 @@ def render_cladding_calc():
     for l in lines:
         m = (priced or {}).get(l["key"]) if priced else None
         if m and m.get("price") is not None:
-            prod = (f'{m.get("title") or "?"}<div style="color:var(--muted);font-size:11px">'
-                    f'SKU {m.get("sku") or "—"}</div>')
+            prod = (f'{_esc(m.get("title") or "?")}<div style="color:var(--muted);font-size:11px">'
+                    f'SKU {_esc(m.get("sku") or "—")}</div>')
             unit = f"£{m['price']:,.2f}"
             line_tot = m["price"] * l["qty"]
             total += line_tot
