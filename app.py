@@ -2459,11 +2459,20 @@ def render_quotes():
     _render_quote_overview(shown, cache)
     st.divider()
 
-    lbl = {e["id"]: f"{e['received']} · {e['from_name'] or e['from'] or '?'} · {e['subject']}"
-           for e in emails}
+    def _picker_label(e):
+        p = cache.get(e["id"]) or {}
+        name = p.get("customer_name") or e.get("from_name") or e.get("from") or "?"
+        pr = p.get("product_range")
+        bits = [e["received"], name]
+        if pr and pr.lower() != "unclear":
+            bits.append(pr)
+        bits.append(e["subject"])
+        return " · ".join(str(b) for b in bits if b)
+
+    lbl = {e["id"]: _picker_label(e) for e in emails}
     picks = st.multiselect(
-        "Pick one or more quote requests to build", [e["id"] for e in shown],
-        format_func=lambda eid: lbl.get(eid, eid))
+        "Pick one or more quote requests to build (type to search by name, product or subject)",
+        [e["id"] for e in shown], format_func=lambda eid: lbl.get(eid, eid))
     st.caption(f"Selected **{len(picks)}**. Building reads each email with AI (~1p each, cached) "
                "and prices it from Shopify. Nothing is sent — you get a draft to review.")
 
