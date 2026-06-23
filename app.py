@@ -1902,12 +1902,25 @@ def _quote_emails():
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _build_quote(email_id, email_body):
-    """AI-extract requested items + match each to a Shopify variant. Cached per email."""
+def _build_quote(email_id, email_body, conversation_id=None):
+    """AI-extract requested items (using the whole conversation for context) + match
+    each to a Shopify variant. Pre-composes the clarify email. Cached per email."""
+    # Pull the full thread so an ongoing conversation informs the quote.
+    thread = email_body
+    if conversation_id:
+        try:
+            msgs = data_sources.fetch_conversation(QUOTE_MAILBOX, conversation_id)
+            if msgs:
+                thread = "\n\n".join(
+                    f"[{m['received']} · {m['from_name'] or m['from'] or '?'}]\n{m['body']}"
+                    for m in msgs)
+        except Exception:  # noqa: BLE001
+            pass
     try:
-        parsed = data_sources.extract_quote_items(email_body)
+        parsed = data_sources.extract_quote_items(thread)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
+    parsed["thread"] = thread
     lines = []
     for it in (parsed.get("items") or []):
         try:
@@ -1917,6 +1930,18 @@ def _build_quote(email_id, email_body):
         lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
                       "match": match})
     parsed["lines"] = lines
+    # Pre-compose a proper "we need more detail" email (cached) when we can't quote.
+    if not parsed.get("can_quote"):
+        qs = parsed.get("questions") or (
+            [parsed["missing_info"]] if parsed.get("missing_info") else [])
+        qs = [str(x).strip() for x in qs if x and str(x).strip()]
+        parsed["questions"] = qs
+        try:
+            parsed["clarify_email"] = data_sources.compose_customer_email(
+                thread, "clarify", {"customer_name": parsed.get("customer_name"),
+                                     "questions": qs})
+        except Exception:  # noqa: BLE001 — no AI key etc.; render falls back to a template
+            parsed["clarify_email"] = None
     return parsed
 
 
@@ -1944,8 +1969,8 @@ def _quote_clarify_body(q, email):
 def _render_quote_block(email):
     """Build + render one email's quote: the priced table + create buttons, or a
     clarify draft if we can't quote yet. Safe to call inside a loop/expander."""
-    with st.spinner("Reading the email and pricing from Shopify…"):
-        q = _build_quote(email["id"], email["body"])
+    with st.spinner("Reading the conversation and pricing from Shopify…"):
+        q = _build_quote(email["id"], email["body"], email.get("conversationId"))
     if q.get("error"):
         if "ANTHROPIC_API_KEY" in q["error"]:
             st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to read quote emails.")
@@ -1956,14 +1981,14 @@ def _render_quote_block(email):
     # Can't quote → draft a polite "what we need" email instead.
     if not q.get("can_quote"):
         st.warning("Not enough detail to quote yet — drafted a reply asking for what's needed.")
-        body = _quote_clarify_body(q, email)
-        st.text_area("Draft reply", value=body, height=210, key=f"qclar_{email['id']}")
+        body = q.get("clarify_email") or _quote_clarify_body(q, email)
+        st.text_area("Draft reply", value=body, height=240, key=f"qclar_{email['id']}")
         if st.button("Create Outlook draft (ask for details)", key=f"qclarbtn_{email['id']}"):
             try:
                 subj = f"RE: {email['subject']}"
                 link = data_sources.create_reply_draft(
                     QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"],
-                    subject=subj)
+                    subject=subj, as_html=True)
                 st.success("Draft reply created in Outlook — review and send from there.")
                 if link:
                     st.markdown(f"[Open the draft in Outlook]({link})")
@@ -2011,15 +2036,25 @@ def _render_quote_block(email):
             li = [{"variantId": l["match"]["variant_id"], "quantity": l["qty"]} for l in matched]
             do = data_sources.create_draft_order(li, email=email.get("from"),
                                                  note=f"Quote from email: {email['subject']}")
-            body_lines = "\n".join(f"- {l['qty']} x {l['match']['title']} "
-                                   f"@ £{l['match']['price']:,.2f}" for l in matched)
-            body = (f"Hi {q.get('customer_name') or 'there'},\n\nThank you for your enquiry — please "
-                    f"find your quote below (ref {do['name']}):\n\n{body_lines}\n\n"
-                    f"Total: £{do['total']:,.2f}\n\n"
-                    f"You can view your quote here: {do['invoiceUrl']}\n\n"
-                    "Kind regards,\nTrade Superstore Online")
+            # Compose a proper, conversation-aware email (falls back to a template).
+            cdata = {"customer_name": q.get("customer_name"),
+                     "lines": [{"qty": l["qty"], "title": l["match"]["title"],
+                                "unit": l["match"]["price"],
+                                "line": l["match"]["price"] * l["qty"]} for l in matched],
+                     "total": do["total"], "ref": do["name"], "url": do["invoiceUrl"]}
+            try:
+                body = data_sources.compose_customer_email(q.get("thread", ""), "quote", cdata)
+            except Exception:  # noqa: BLE001
+                body_lines = "\n".join(f"- {l['qty']} x {l['match']['title']} "
+                                       f"@ £{l['match']['price']:,.2f}" for l in matched)
+                body = (f"Hi {_first_name(q.get('customer_name'), email.get('from_name'))},\n\n"
+                        f"Thank you for your enquiry — please find your quote below "
+                        f"(ref {do['name']}):\n\n{body_lines}\n\nTotal: £{do['total']:,.2f}\n\n"
+                        f"You can view your quote here: {do['invoiceUrl']}\n\n"
+                        "Kind regards,\nTrade Superstore Online")
             subj = f"Your quote {do['name']} – RE: {email['subject']}"
-            link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body, subject=subj)
+            link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,
+                                                   subject=subj, as_html=True)
             st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}) and an "
                        "Outlook draft reply — review and send from Outlook.")
             bits = [f"[Open the Shopify draft order]({do['invoiceUrl']})"]

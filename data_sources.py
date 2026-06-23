@@ -978,10 +978,93 @@ def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 15,
         ea = ((m.get("from") or {}).get("emailAddress") or {})
         out.append({"id": m.get("id"), "subject": m.get("subject") or "(no subject)",
                     "from": ea.get("address"), "from_name": ea.get("name"),
+                    "conversationId": m.get("conversationId"),
                     "received": (m.get("receivedDateTime") or "")[:10],
                     "preview": (m.get("bodyPreview") or "").strip()[:200],
                     "body": content[:6000]})
     return out
+
+
+def fetch_conversation(mailbox: str, conversation_id: str, token: str | None = None,
+                       limit: int = 25) -> list:
+    """All messages in a conversation thread (across folders), oldest first, as
+    [{from, from_name, received, body}] with HTML stripped. For quote context."""
+    import re as _re
+    if not conversation_id:
+        return []
+    token = token or ms_token()
+    cid = conversation_id.replace("'", "''")
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$filter": f"conversationId eq '{cid}'", "$top": str(limit),
+                "$select": "subject,from,receivedDateTime,body,bodyPreview"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("value", []):
+        body = m.get("body") or {}
+        content = body.get("content") or m.get("bodyPreview") or ""
+        if body.get("contentType") == "html":
+            content = _re.sub(r"<[^>]+>", " ", content)
+        content = _re.sub(r"\s+", " ", content).strip()
+        ea = ((m.get("from") or {}).get("emailAddress") or {})
+        out.append({"from": ea.get("address"), "from_name": ea.get("name"),
+                    "received": (m.get("receivedDateTime") or "")[:16].replace("T", " "),
+                    "body": content[:3000]})
+    out.sort(key=lambda x: x["received"])
+    return out
+
+
+def compose_customer_email(context: str, kind: str, data: dict) -> str:
+    """AI writes a polished, customer-facing email body (plain text, ready to review
+    and send). kind='quote' presents priced items; kind='clarify' asks for missing
+    details. 'context' is the conversation thread so the email stays relevant.
+    Raises if no ANTHROPIC_API_KEY (caller falls back to a template)."""
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    name = (data.get("customer_name") or "").strip()
+    greet = f"the customer by first name ('{name}')" if name else "the customer with 'Hello'"
+    if kind == "quote":
+        facts = ("QUOTED ITEMS (use these EXACT prices and figures, never change a number):\n"
+                 + "\n".join(f"- {l['qty']} x {l['title']} @ GBP {l['unit']:.2f} "
+                             f"= GBP {l['line']:.2f}" for l in data["lines"])
+                 + f"\nTotal: GBP {data['total']:.2f}\nQuote reference: {data['ref']}\n"
+                 f"View / accept the quote online: {data['url']}")
+        task = ("Write a warm, professional email presenting this quote. Acknowledge their "
+                "enquiry using the conversation for context. Present the items and prices in a "
+                "clear bulleted list, state the total and the quote reference, and invite them "
+                "to view or accept it via the link. Note that prices exclude VAT. Offer to help "
+                "with anything else.")
+    else:
+        facts = ("DETAILS WE STILL NEED BEFORE WE CAN QUOTE:\n"
+                 + "\n".join(f"- {q}" for q in (data.get("questions") or [])))
+        task = ("Write a warm, professional email asking the customer for the missing details so "
+                "we can prepare their quote. Acknowledge their enquiry / our previous messages "
+                "using the conversation for context. Ask the questions politely as a short "
+                "bulleted list. Do NOT restate measurements or information they already gave.")
+    prompt = (
+        "You write on behalf of Trade Superstore Online, a UK building-supplies retailer. "
+        "British English, warm and professional, concise. Address " + greet + ". " + task + "\n"
+        "Structure it as a proper email: a greeting line, a short opening sentence, the body "
+        "(use '- ' for any bulleted list), a courteous closing line, then the sign-off exactly:\n"
+        "Kind regards,\nTrade Superstore Online\n"
+        "Return ONLY the email body text - no subject line, no notes, no preamble.\n\n"
+        "CONVERSATION SO FAR (most recent last):\n" + (context or "(no prior messages)")[:5000]
+        + "\n\n" + facts
+    )
+    r = requests.post(
+        ANTHROPIC_API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": SENTIMENT_MODEL, "max_tokens": 900,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.json()["content"][0]["text"].strip()
 
 
 def extract_quote_items(email_text: str) -> dict:
@@ -1132,17 +1215,51 @@ def create_draft_order(line_items, email=None, note=None, token: str | None = No
     return d
 
 
+def _plain_to_html(text: str) -> str:
+    """Turn a plain-text email body into tidy HTML: paragraphs, bullet lists, and
+    clickable links — so the Outlook draft reads like a real email, not a note."""
+    import html as _html
+    import re as _re
+
+    def esc_link(s: str) -> str:
+        parts = _re.split(r"(https?://[^\s]+)", s)
+        return "".join(f'<a href="{p}">{p}</a>' if i % 2 else _html.escape(p)
+                       for i, p in enumerate(parts))
+
+    out, in_ul = [], False
+    for ln in (text or "").split("\n"):
+        s = ln.strip()
+        if s.startswith("- ") or s.startswith("• "):
+            if not in_ul:
+                out.append("<ul style='margin:6px 0;padding-left:20px'>")
+                in_ul = True
+            out.append(f"<li>{esc_link(s[2:].strip())}</li>")
+            continue
+        if in_ul:
+            out.append("</ul>")
+            in_ul = False
+        out.append("<br>" if s == "" else f"{esc_link(s)}<br>")
+    if in_ul:
+        out.append("</ul>")
+    return ("<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;"
+            "color:#21242B;line-height:1.5\">" + "".join(out) + "</div>")
+
+
 def create_reply_draft(mailbox: str, message_id: str, body: str, subject: str | None = None,
-                       token: str | None = None) -> str | None:
+                       token: str | None = None, as_html: bool = False) -> str | None:
     """Create a *draft reply* to a message (lands in Drafts, threaded). Optionally
-    override the subject. Returns the draft's webLink. Needs Mail.ReadWrite."""
+    override the subject and send as formatted HTML. Returns the draft's webLink.
+    Needs Mail.ReadWrite."""
     token = token or ms_token()
     r = requests.post(f"{GRAPH}/users/{mailbox}/messages/{message_id}/createReply",
                       headers={"Authorization": f"Bearer {token}"}, timeout=25)
     r.raise_for_status()
     draft = r.json()
     did = draft.get("id")
-    patch = {"body": {"contentType": "Text", "content": body}}
+    if as_html:
+        patch = {"body": {"contentType": "HTML", "content": _plain_to_html(body)}}
+    else:
+        patch = {"body": {"contentType": "Text", "content": body}}
     if subject:
         patch["subject"] = subject
     r2 = requests.patch(f"{GRAPH}/users/{mailbox}/messages/{did}",
