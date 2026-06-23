@@ -1891,6 +1891,8 @@ def render_summary_dashboard():
 
 QUOTE_MAILBOX = "hello@tradesuperstoreonline.co.uk"
 QUOTE_FOLDER = "New Orders & Quotes"
+QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is drafted
+QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -2006,6 +2008,20 @@ def _quote_clarify_body(q, email):
             "Kind regards,\nTrade Superstore Online")
 
 
+def _mark_quote_progress(email, category):
+    """Stamp the source email in Outlook (category + read) so progress is durable and
+    visible to the team, and update the in-memory copy so the table updates at once."""
+    try:
+        data_sources.tag_message(QUOTE_MAILBOX, email["id"],
+                                 add_categories=[category], mark_read=True)
+        cats = email.setdefault("categories", [])
+        if category not in cats:
+            cats.append(category)
+        email["isRead"] = True
+    except Exception as e:  # noqa: BLE001
+        st.caption("⚠️ Couldn't tag the email in Outlook (" + str(e)[:120] + ").")
+
+
 def _render_quote_block(email):
     """Build + render one email's quote: the priced table + create buttons, or a
     clarify draft if we can't quote yet. Safe to call inside a loop/expander."""
@@ -2029,7 +2045,9 @@ def _render_quote_block(email):
                 link = data_sources.create_reply_draft(
                     QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"],
                     subject=subj, as_html=True)
-                st.success("Draft reply created in Outlook — review and send from there.")
+                _mark_quote_progress(email, QUOTE_CAT_INFO)
+                st.success("Draft reply created in Outlook — review and send from there. "
+                           "Marked **Info requested**.")
                 if link:
                     st.markdown(f"[Open the draft in Outlook]({link})")
             except Exception as e:  # noqa: BLE001
@@ -2095,8 +2113,9 @@ def _render_quote_block(email):
             subj = f"Your quote {do['name']} – RE: {email['subject']}"
             link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,
                                                    subject=subj, as_html=True)
+            _mark_quote_progress(email, QUOTE_CAT_QUOTED)
             st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}) and an "
-                       "Outlook draft reply — review and send from Outlook.")
+                       "Outlook draft reply — review and send from Outlook. Marked **✓ Quoted**.")
             bits = [f"[Open the Shopify draft order]({do['invoiceUrl']})"]
             if link:
                 bits.append(f"[Open the Outlook draft]({link})")
@@ -2111,6 +2130,19 @@ def _qbadge(text, bg, fg="#fff"):
             f'font-size:11px;font-weight:700;white-space:nowrap">{text}</span>')
 
 
+def _quote_progress_badge(email):
+    """Durable progress, read back from the Outlook message (categories + read flag).
+    Returns the HTML badge for the Progress column."""
+    cats = [str(c).lower() for c in (email.get("categories") or [])]
+    if QUOTE_CAT_QUOTED.lower() in cats:
+        return _qbadge("✓ Quoted", "#15803D")
+    if QUOTE_CAT_INFO.lower() in cats:
+        return _qbadge("✓ Info requested", "#7C3AED")
+    if email.get("isRead"):
+        return _qbadge("Opened", "#6B7280")
+    return _qbadge("New", "#94A3B8")
+
+
 def _quote_legend():
     items = [
         ("New", "#2563EB", "Brand-new enquiry (first contact)"),
@@ -2119,11 +2151,18 @@ def _quote_legend():
         ("Needs info", "#6B7280", "Missing detail — ask the customer first"),
         ("URGENT", "#DC2626", "Customer needs it quickly / by a date"),
     ]
-    cells = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">'
-        f'{_qbadge(lbl, bg)}<span style="font-size:11.5px;color:var(--muted)">{desc}</span></span>'
-        for lbl, bg, desc in items)
-    st.markdown(f'<div style="margin:2px 0 8px">{cells}</div>', unsafe_allow_html=True)
+    progress = [
+        ("✓ Quoted", "#15803D", "Quote drafted & saved to Outlook"),
+        ("✓ Info requested", "#7C3AED", "We've drafted a reply asking for detail"),
+        ("Opened", "#6B7280", "Seen / read, not yet actioned"),
+    ]
+    def line(its):
+        return "".join(
+            '<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">'
+            f'{_qbadge(lbl, bg)}<span style="font-size:11.5px;color:var(--muted)">{desc}</span>'
+            '</span>' for lbl, bg, desc in its)
+    st.markdown(f'<div style="margin:2px 0 2px">{line(items)}</div>'
+                f'<div style="margin:0 0 8px">{line(progress)}</div>', unsafe_allow_html=True)
 
 
 def _render_quote_overview(emails, cache):
@@ -2164,12 +2203,13 @@ def _render_quote_overview(emails, cache):
             f'<td style="padding:7px 10px">{p.get("product_range") or "—"}</td>'
             f'<td style="padding:7px 10px;white-space:nowrap">{p.get("postcode") or "—"}</td>'
             f'<td style="padding:7px 10px">{p.get("summary") or "—"}</td>'
-            f'<td style="padding:7px 10px">{status}{urg}</td></tr>')
+            f'<td style="padding:7px 10px">{status}{urg}</td>'
+            f'<td style="padding:7px 10px">{_quote_progress_badge(e)}</td></tr>')
 
     head = "".join(f'<th style="text-align:left;padding:7px 10px;color:var(--muted);'
                    f'font-weight:600">{h}</th>' for h in
                    ["Received", "Customer", "Type", "Product range", "Postcode",
-                    "What they want", "Status"])
+                    "What they want", "Status", "Progress"])
     st.markdown(
         f'<table style="width:100%;border-collapse:collapse;font-size:12.5px;'
         f'border:1px solid var(--line);border-radius:6px;overflow:hidden">'

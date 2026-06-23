@@ -964,7 +964,7 @@ def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 15,
         f"{GRAPH}/users/{mailbox}/mailFolders/{f['id']}/messages",
         headers={"Authorization": f"Bearer {token}"},
         params={"$top": str(limit), "$orderby": "receivedDateTime desc",
-                "$select": "subject,from,receivedDateTime,bodyPreview,body"},
+                "$select": "subject,from,receivedDateTime,bodyPreview,body,categories,isRead"},
         timeout=30,
     )
     r.raise_for_status()
@@ -980,9 +980,37 @@ def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 15,
                     "from": ea.get("address"), "from_name": ea.get("name"),
                     "conversationId": m.get("conversationId"),
                     "received": (m.get("receivedDateTime") or "")[:10],
+                    "categories": m.get("categories") or [],
+                    "isRead": bool(m.get("isRead")),
                     "preview": (m.get("bodyPreview") or "").strip()[:200],
                     "body": content[:6000]})
     return out
+
+
+def tag_message(mailbox: str, message_id: str, add_categories=None, mark_read=None,
+                token: str | None = None) -> list | None:
+    """Stamp an Outlook message with categories (merged with existing) and/or mark it
+    read — used to record quote progress durably in the mailbox. Needs Mail.ReadWrite.
+    Returns the message's categories after the update."""
+    token = token or ms_token()
+    patch = {}
+    if add_categories:
+        g = requests.get(f"{GRAPH}/users/{mailbox}/messages/{message_id}",
+                         headers={"Authorization": f"Bearer {token}"},
+                         params={"$select": "categories"}, timeout=20)
+        g.raise_for_status()
+        cur = g.json().get("categories") or []
+        patch["categories"] = list(dict.fromkeys([*cur, *add_categories]))
+    if mark_read is not None:
+        patch["isRead"] = bool(mark_read)
+    if not patch:
+        return None
+    r = requests.patch(f"{GRAPH}/users/{mailbox}/messages/{message_id}",
+                       headers={"Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json"},
+                       json=patch, timeout=20)
+    r.raise_for_status()
+    return patch.get("categories")
 
 
 def fetch_conversation(mailbox: str, conversation_id: str, token: str | None = None,
