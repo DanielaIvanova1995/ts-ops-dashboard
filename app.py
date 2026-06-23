@@ -1973,7 +1973,11 @@ def _build_quote(email):
             lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
                           "match": match})
         parsed["lines"] = lines
-    if not parsed.get("can_quote") and "clarify_email" not in parsed:
+    # Only fall back to a pure "ask for details" email when there is genuinely nothing we
+    # can price. If we found any priceable item we quote provisionally and flag the gaps.
+    has_priceable = any(l.get("match") and l["match"].get("price") is not None
+                        for l in parsed["lines"])
+    if not has_priceable and "clarify_email" not in parsed:
         qs = parsed.get("questions") or (
             [parsed["missing_info"]] if parsed.get("missing_info") else [])
         qs = [str(x).strip() for x in qs if x and str(x).strip()]
@@ -2034,9 +2038,13 @@ def _render_quote_block(email):
             st.error("Couldn't read the email: " + q["error"][:200])
         return
 
-    # Can't quote → draft a polite "what we need" email instead.
-    if not q.get("can_quote"):
-        st.warning("Not enough detail to quote yet — drafted a reply asking for what's needed.")
+    lines = q.get("lines") or []
+    matched = [l for l in lines if l["match"] and l["match"].get("price") is not None]
+    caveats = [c for c in (q.get("caveats") or []) if c and str(c).strip()]
+
+    # Nothing we can price → draft a polite "what we need" email instead.
+    if not matched:
+        st.warning("Nothing we can price yet — drafted a reply asking for what's needed.")
         body = q.get("clarify_email") or _quote_clarify_body(q, email)
         st.text_area("Draft reply", value=body, height=240, key=f"qclar_{email['id']}")
         if st.button("Create Outlook draft (ask for details)", key=f"qclarbtn_{email['id']}"):
@@ -2054,9 +2062,8 @@ def _render_quote_block(email):
                 st.error("Couldn't create the draft: " + str(e)[:200])
         return
 
-    # Build the quote table.
-    lines = q["lines"]
-    matched = [l for l in lines if l["match"] and l["match"].get("price") is not None]
+    # We can quote — provisional if the request was incomplete or had assumptions.
+    provisional = (not q.get("can_quote")) or (len(matched) < len(lines)) or bool(caveats)
     total = sum(l["match"]["price"] * l["qty"] for l in matched)
     rows = ""
     for l in lines:
@@ -2085,12 +2092,24 @@ def _render_quote_block(email):
                 '<th style="padding:6px 10px;text-align:right">Line</th></tr>'
                 + rows + "</table>", unsafe_allow_html=True)
     st.markdown(f"**Subtotal (matched lines): £{total:,.2f}**")
-    if len(matched) < len(lines):
-        st.warning(f"{len(lines) - len(matched)} item(s) couldn't be matched to Shopify — they "
-                   "won't be on the draft order; add them manually after.")
 
-    if matched and st.button("Create Shopify draft order + Outlook draft reply", type="primary",
-                             key=f"qcreate_{email['id']}"):
+    # Customer-facing caveats: the AI's assumptions + any items we couldn't price.
+    all_caveats = list(caveats)
+    unmatched = [l for l in lines if not (l["match"] and l["match"].get("price") is not None)]
+    if unmatched:
+        names = "; ".join((l["description"] or "item") for l in unmatched)
+        all_caveats.append("We couldn't price these from our catalogue yet so they're not on the "
+                           f"quote — please confirm and we'll add them: {names}.")
+    if provisional:
+        st.info("Goes out as a **provisional** quote — the email explains what it's based on and "
+                "asks the customer to confirm.")
+    if all_caveats:
+        st.markdown("**The email will ask the customer to check these:**")
+        st.markdown("\n".join(f"- {c}" for c in all_caveats))
+
+    btn = ("Create provisional quote (draft order + reply)" if provisional
+           else "Create Shopify draft order + Outlook draft reply")
+    if st.button(btn, type="primary", key=f"qcreate_{email['id']}"):
         try:
             li = [{"variantId": l["match"]["variant_id"], "quantity": l["qty"]} for l in matched]
             do = data_sources.create_draft_order(li, email=email.get("from"),
@@ -2100,16 +2119,21 @@ def _render_quote_block(email):
                      "lines": [{"qty": l["qty"], "title": l["match"]["title"],
                                 "unit": l["match"]["price"],
                                 "line": l["match"]["price"] * l["qty"]} for l in matched],
-                     "total": do["total"], "ref": do["name"], "url": do["invoiceUrl"]}
+                     "total": do["total"], "ref": do["name"], "url": do["invoiceUrl"],
+                     "caveats": all_caveats, "provisional": provisional}
             try:
                 body = data_sources.compose_customer_email(q.get("thread", ""), "quote", cdata)
             except Exception:  # noqa: BLE001
                 body_lines = "\n".join(f"- {l['qty']} x {l['match']['title']} "
                                        f"@ £{l['match']['price']:,.2f}" for l in matched)
+                cav_txt = (("\n\nA few things to check:\n"
+                            + "\n".join(f"- {c}" for c in all_caveats)) if all_caveats else "")
                 body = (f"Hi {_first_name(q.get('customer_name'), email.get('from_name'))},\n\n"
-                        f"Thank you for your enquiry — please find your quote below "
-                        f"(ref {do['name']}):\n\n{body_lines}\n\nTotal: £{do['total']:,.2f}\n\n"
-                        f"You can view your quote here: {do['invoiceUrl']}\n\n"
+                        f"Thank you for your enquiry. Based on the details provided, here is your "
+                        f"quote (ref {do['name']}):\n\n{body_lines}\n\nTotal (ex-VAT): "
+                        f"£{do['total']:,.2f}\n\nYou can view your quote here: {do['invoiceUrl']}"
+                        f"{cav_txt}\n\nPlease do check it over and confirm it is all correct, and "
+                        "let us know if anything needs adding or amending.\n\n"
                         "Kind regards,\nTrade Superstore Online")
             subj = f"Your quote {do['name']} – RE: {email['subject']}"
             link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,

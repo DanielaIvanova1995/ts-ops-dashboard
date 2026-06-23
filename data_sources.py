@@ -1059,13 +1059,30 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         facts = ("QUOTED ITEMS (use these EXACT prices and figures, never change a number):\n"
                  + "\n".join(f"- {l['qty']} x {l['title']} @ GBP {l['unit']:.2f} "
                              f"= GBP {l['line']:.2f}" for l in data["lines"])
-                 + f"\nTotal: GBP {data['total']:.2f}\nQuote reference: {data['ref']}\n"
+                 + f"\nTotal (ex-VAT): GBP {data['total']:.2f}\nQuote reference: {data['ref']}\n"
                  f"View / accept the quote online: {data['url']}")
-        task = ("Write a warm, professional email presenting this quote. Acknowledge their "
-                "enquiry using the conversation for context. Present the items and prices in a "
-                "clear bulleted list, state the total and the quote reference, and invite them "
-                "to view or accept it via the link. Note that prices exclude VAT. Offer to help "
-                "with anything else.")
+        cav = [c for c in (data.get("caveats") or []) if c and str(c).strip()]
+        if cav:
+            facts += ("\n\nASSUMPTIONS / THINGS FOR THE CUSTOMER TO CHECK (mention these clearly):\n"
+                      + "\n".join(f"- {c}" for c in cav))
+        prov = bool(data.get("provisional"))
+        task = (
+            "Write a warm, professional email presenting this quote. Acknowledge their enquiry "
+            "using the conversation for context. "
+            "ALWAYS include a short, clearly-labelled explanation of WHAT THE QUOTE IS BASED ON — "
+            "the products, the quantities, and any areas or assumptions used to work it out — so "
+            "the customer can see how we got there. Present the items and prices as a clear "
+            "bulleted list, state the total and the quote reference, and invite them to view or "
+            "accept via the link. Note prices exclude VAT. "
+            "Then ALWAYS ask the customer to check the quote over and confirm everything is "
+            "correct, and to let us know if anything needs amending or adding. If any assumptions "
+            "or things-to-check are listed, spell them out kindly — and where trims or accessories "
+            "were not specified, explicitly ask them to tell us if they need any so we can include "
+            "them. "
+            + ("Make clear this is based on the information provided so far, that some details may "
+               "still need confirming, and that the final figure could change once we have "
+               "everything. " if prov else "")
+            + "Offer to help with anything else.")
     else:
         facts = ("DETAILS WE STILL NEED BEFORE WE CAN QUOTE:\n"
                  + "\n".join(f"- {q}" for q in (data.get("questions") or [])))
@@ -1114,20 +1131,26 @@ def extract_quote_items(email_text: str) -> dict:
         '"items":[{"description":"the product as they described it","qty":<int>,'
         '"code":"any product code/SKU they gave, else null"}],'
         '"questions":["short, polite, customer-facing question for each missing detail"],'
+        '"caveats":["short customer-facing note on any assumption or missing detail to check"],'
         '"product_range":"the product category in 1-3 words (e.g. Guttering, Fascia & soffit, '
         'Roofing, Cladding, Insulation, Drainage, Doors, Mixed) or Unclear",'
         '"postcode":"UK delivery postcode if mentioned anywhere, else null",'
         '"summary":"one short line on what they want quoted",'
         '"urgency":"normal|urgent"}\n'
-        "can_quote is true ONLY when there are specific product(s) AND quantities we could "
-        "actually price. If the email is vague, a general question, or lacks products or "
-        "quantities, set can_quote=false, leave items empty, and fill questions.\n"
+        "ALWAYS populate items with EVERY product you can identify, even if the request is "
+        "incomplete — we prefer to quote for what we can and flag the rest. If a quantity is "
+        "missing, assume a sensible quantity and add a caveat saying it was assumed. Only leave "
+        "items empty when you genuinely cannot identify any product to price.\n"
+        "can_quote is true ONLY when specific product(s) AND quantities are clearly given (a firm "
+        "quote). Otherwise can_quote=false, but STILL fill items with what you found.\n"
+        "RULES for caveats (customer-facing): list anything they should check or that we assumed — "
+        "e.g. \"We've assumed 10 lengths - let us know the exact quantity\", \"Trims/accessories "
+        "weren't specified - tell us if you need any\", \"Colour/finish not confirmed\", "
+        "\"Measurements were unclear so this is approximate\". Keep each short and friendly.\n"
         "RULES for questions: write each as a short, friendly question you could send straight "
-        "to the customer (e.g. \"Which products do you need - for example fascia board, guttering "
-        "or roofing sheets?\" or \"How many lengths would you like?\"). Do NOT restate or analyse "
-        "what they already told you, do NOT mention measurements they gave, do NOT write in the "
-        "third person. urgency is 'urgent' only if they say they need it quickly or by a date. "
-        "Never invent products.\n\nEMAIL:\n"
+        "to the customer. Do NOT restate or analyse what they already told you, do NOT write in "
+        "the third person. urgency is 'urgent' only if they say they need it quickly or by a "
+        "date. Never invent products.\n\nEMAIL:\n"
         + (email_text or "")[:6000]
     )
     r = requests.post(
