@@ -1034,6 +1034,15 @@ def invoices_by_status(key):
         return {"error": str(e)}
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def invoice_count(key):
+    label_ids, _lim = INVOICE_STATUS[key]
+    try:
+        return data_sources.fetch_invoice_count(label_ids)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _order_discounts(order_ids):
     """{shopify_order_id: {amount, codes}} — customer discounts. {} if unavailable."""
@@ -1769,32 +1778,30 @@ def render_invoice_check():
     if flash:
         st.success(flash)
 
-    counts = {}
-    for k in ("review", "matched", "pushed", "discrepancy"):
-        d = invoices_by_status(k)
-        counts[k] = (None if d.get("error") else len(d.get("invoices", [])), d.get("more"))
+    # Lightweight counts (id-only) + render ONLY the selected tab — far faster than
+    # st.tabs (which builds all four every run) and fetching full data to count.
+    tabs = [("review", "To check", True), ("matched", "Matched (held)", True),
+            ("pushed", "Pushed to QB", False), ("discrepancy", "Discrepancies", False)]
+    if st.session_state.get("inv_tab") not in {k for k, _, _ in tabs}:
+        st.session_state["inv_tab"] = "review"
 
-    def _c(k):
-        n, more = counts[k]
-        return "—" if n is None else f"{n}{'+' if more else ''}"
+    def _count(k):
+        c = invoice_count(k)
+        if not c:
+            return "—"
+        return f"{c['count']}{'+' if c.get('more') else ''}"
 
-    st.markdown(
-        '<div style="display:flex;gap:22px;margin:2px 0 10px;font-size:14px">'
-        f'<span><b>{_c("review")}</b> to check</span>'
-        f'<span><b>{_c("matched")}</b> matched (held)</span>'
-        f'<span>{_inv_inline("check", 16)} <b>{_c("pushed")}</b> pushed to QB</span>'
-        f'<span>{_inv_inline("warn", 16)} <b>{_c("discrepancy")}</b> discrepancies</span></div>',
-        unsafe_allow_html=True)
+    for col, (key, label, _q) in zip(st.columns(len(tabs)), tabs):
+        active = st.session_state["inv_tab"] == key
+        if col.button(f"{label} ({_count(key)})", key=f"itab_{key}", use_container_width=True,
+                      type="primary" if active else "secondary"):
+            st.session_state["inv_tab"] = key
+            st.rerun()
+    st.write("")
 
-    t1, t2, t3, t4 = st.tabs(["To check", "Matched (held)", "Pushed to QB", "Discrepancies"])
-    with t1:
-        _invoice_tab("review", is_queue=True)
-    with t2:
-        _invoice_tab("matched", is_queue=True)
-    with t3:
-        _invoice_tab("pushed", is_queue=False)
-    with t4:
-        _invoice_tab("discrepancy", is_queue=False)
+    active = st.session_state["inv_tab"]
+    is_queue = {k: q for k, _, q in tabs}[active]
+    _invoice_tab(active, is_queue=is_queue)
 
 
 SUMMARY_STATUS_COL = {"green": "#10b981", "amber": "#f59e0b", "red": "#ef4444", "info": "#94a3b8"}

@@ -885,6 +885,46 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     return {"invoices": out[:limit], "more": bool(cursor)}
 
 
+def fetch_invoice_count(label_ids, cap: int = 2000, token: str | None = None) -> dict:
+    """Fast id-only count of subitems at the given Payment-Status labels (no parent
+    data). Returns {count, more}. Much lighter than fetch_invoices_by_status."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    vals = ", ".join(str(int(i)) for i in label_ids)
+    first_q = ("query ($board: [ID!], $limit: Int!) { boards(ids: $board) { "
+               'items_page(limit: $limit, query_params: {rules: [{column_id: "status7__1", '
+               "compare_value: [%s], operator: any_of}]}) { cursor items { id } } } }" % vals)
+    next_q = ("query ($c: String!, $limit: Int!) { next_items_page(cursor: $c, limit: $limit) "
+              "{ cursor items { id } } }")
+    n, page_size = 0, 500
+    r = requests.post(MONDAY_API, json={"query": first_q,
+                      "variables": {"board": [str(SUBITEMS_BOARD_ID)], "limit": page_size}},
+                      headers=headers, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    boards = payload.get("data", {}).get("boards", [])
+    page = boards[0]["items_page"] if boards else {"items": [], "cursor": None}
+    n += len(page.get("items", []))
+    cursor, pages = page.get("cursor"), 1
+    while cursor and n < cap and pages < 8:
+        r = requests.post(MONDAY_API, json={"query": next_q,
+                          "variables": {"c": cursor, "limit": page_size}},
+                          headers=headers, timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+        if "errors" in payload:
+            break
+        np = (payload.get("data") or {}).get("next_items_page") or {}
+        n += len(np.get("items", []))
+        cursor = np.get("cursor")
+        pages += 1
+    return {"count": n, "more": bool(cursor)}
+
+
 def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
                         pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
                         token: str | None = None) -> bool:
