@@ -1901,15 +1901,20 @@ def _quote_emails():
         return {"error": str(e)}
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def _build_quote(email_id, email_body, conversation_id=None):
-    """AI-extract requested items (using the whole conversation for context) + match
-    each to a Shopify variant. Pre-composes the clarify email. Cached per email."""
-    # Pull the full thread so an ongoing conversation informs the quote.
-    thread = email_body
-    if conversation_id:
+_UK_POSTCODE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
+_FOLLOWUP_RE = re.compile(r"^\s*(re|fw|fwd)\s*:", re.I)
+
+
+def _parse_one_quote(email):
+    """Thread fetch + ONE AI extraction (the single source of truth for both the
+    overview table and the quote build) + postcode backstop. Plain function — calls
+    only data_sources (no st.*), so it is safe to run in a worker thread. Returns the
+    parsed dict, or {'error': ...}."""
+    thread = email.get("body") or ""
+    cid = email.get("conversationId")
+    if cid:
         try:
-            msgs = data_sources.fetch_conversation(QUOTE_MAILBOX, conversation_id)
+            msgs = data_sources.fetch_conversation(QUOTE_MAILBOX, cid)
             if msgs:
                 thread = "\n\n".join(
                     f"[{m['received']} · {m['from_name'] or m['from'] or '?'}]\n{m['body']}"
@@ -1921,25 +1926,60 @@ def _build_quote(email_id, email_body, conversation_id=None):
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
     parsed["thread"] = thread
-    lines = []
-    for it in (parsed.get("items") or []):
-        try:
-            match = data_sources.match_quote_variant(it.get("code"), it.get("description"))
-        except Exception:  # noqa: BLE001
-            match = None
-        lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
-                      "match": match})
-    parsed["lines"] = lines
-    # Pre-compose a proper "we need more detail" email (cached) when we can't quote.
-    if not parsed.get("can_quote"):
+    if not parsed.get("postcode"):
+        m = _UK_POSTCODE.search(thread or "")
+        parsed["postcode"] = m.group(1).upper() if m else None
+    return parsed
+
+
+def _quote_cache():
+    return st.session_state.setdefault("quote_parse", {})
+
+
+def _ensure_parsed(emails):
+    """Parse every email once (uncached ones in parallel). Returns the {id: parsed}
+    cache so the table and the build share exactly the same extraction."""
+    import concurrent.futures as _cf
+    cache = _quote_cache()
+    todo = [e for e in emails if e["id"] not in cache]
+    if todo:
+        with st.spinner(f"Reading {len(todo)} quote email(s)…"):
+            with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+                done = list(ex.map(lambda e: (e["id"], _parse_one_quote(e)), todo))
+        for eid, parsed in done:
+            cache[eid] = parsed
+    return cache
+
+
+def _build_quote(email):
+    """Full build for ONE email: reuse the shared parse, then lazily add Shopify
+    matching and the composed clarify email (computed once, stored on the parse)."""
+    cache = _quote_cache()
+    parsed = cache.get(email["id"])
+    if parsed is None:
+        parsed = _parse_one_quote(email)
+        cache[email["id"]] = parsed
+    if parsed.get("error"):
+        return parsed
+    if "lines" not in parsed:
+        lines = []
+        for it in (parsed.get("items") or []):
+            try:
+                match = data_sources.match_quote_variant(it.get("code"), it.get("description"))
+            except Exception:  # noqa: BLE001
+                match = None
+            lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
+                          "match": match})
+        parsed["lines"] = lines
+    if not parsed.get("can_quote") and "clarify_email" not in parsed:
         qs = parsed.get("questions") or (
             [parsed["missing_info"]] if parsed.get("missing_info") else [])
         qs = [str(x).strip() for x in qs if x and str(x).strip()]
         parsed["questions"] = qs
         try:
             parsed["clarify_email"] = data_sources.compose_customer_email(
-                thread, "clarify", {"customer_name": parsed.get("customer_name"),
-                                     "questions": qs})
+                parsed.get("thread", ""), "clarify",
+                {"customer_name": parsed.get("customer_name"), "questions": qs})
         except Exception:  # noqa: BLE001 — no AI key etc.; render falls back to a template
             parsed["clarify_email"] = None
     return parsed
@@ -1970,7 +2010,7 @@ def _render_quote_block(email):
     """Build + render one email's quote: the priced table + create buttons, or a
     clarify draft if we can't quote yet. Safe to call inside a loop/expander."""
     with st.spinner("Reading the conversation and pricing from Shopify…"):
-        q = _build_quote(email["id"], email["body"], email.get("conversationId"))
+        q = _build_quote(email)
     if q.get("error"):
         if "ANTHROPIC_API_KEY" in q["error"]:
             st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to read quote emails.")
@@ -2066,33 +2106,6 @@ def _render_quote_block(email):
                      "**write_draft_orders** scope, or Outlook **Mail.ReadWrite**.")
 
 
-_UK_POSTCODE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
-_FOLLOWUP_RE = re.compile(r"^\s*(re|fw|fwd)\s*:", re.I)
-
-
-def _quote_triage(emails):
-    """Triage every email (AI summary + deterministic postcode/follow-up), cached per
-    email in session state so repeat page loads are free. Returns {id: triage}."""
-    import concurrent.futures as _cf
-    cache = st.session_state.setdefault("quote_triage", {})
-    todo = [e for e in emails if e["id"] not in cache]
-    if todo:
-        def work(e):
-            try:
-                t = data_sources.triage_quote_email(e["body"])
-            except Exception as ex:  # noqa: BLE001
-                return e["id"], {"error": str(ex)}
-            if not t.get("postcode"):
-                m = _UK_POSTCODE.search(e["body"] or "")
-                t["postcode"] = m.group(1).upper() if m else None
-            return e["id"], t
-        with st.spinner(f"Summarising {len(todo)} quote email(s)…"):
-            with _cf.ThreadPoolExecutor(max_workers=8) as ex:
-                for eid, t in ex.map(work, todo):
-                    cache[eid] = t
-    return cache
-
-
 def _qbadge(text, bg, fg="#fff"):
     return (f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:10px;'
             f'font-size:11px;font-weight:700;white-space:nowrap">{text}</span>')
@@ -2113,31 +2126,33 @@ def _quote_legend():
     st.markdown(f'<div style="margin:2px 0 8px">{cells}</div>', unsafe_allow_html=True)
 
 
-def _render_quote_overview(emails):
-    triage = _quote_triage(emails)
-    errs = [t["error"] for t in triage.values() if t.get("error")]
-    if errs and len(errs) == len(triage):
+def _render_quote_overview(emails, cache):
+    """Render the overview table for the given (already-parsed) emails. 'Ready' comes
+    straight from the same extraction the build uses, so they can never disagree."""
+    errs = [(cache.get(e["id"]) or {}).get("error") for e in emails]
+    errs = [x for x in errs if x]
+    if errs and len(errs) == len(emails):
         if "ANTHROPIC_API_KEY" in errs[0]:
             st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to see the overview.")
         else:
-            st.warning("Couldn't summarise the emails: " + errs[0][:160])
+            st.warning("Couldn't read the emails: " + errs[0][:160])
         return
     _quote_legend()
 
     n_new = n_fu = n_ready = n_urgent = 0
     rows = ""
     for e in emails:
-        t = triage.get(e["id"]) or {}
-        if t.get("error"):
+        p = cache.get(e["id"]) or {}
+        if p.get("error"):
             continue
         is_fu = bool(_FOLLOWUP_RE.match(e.get("subject") or ""))
-        ready = bool(t.get("ready_to_quote"))
-        urgent = (t.get("urgency") == "urgent")
+        ready = bool(p.get("can_quote"))
+        urgent = (p.get("urgency") == "urgent")
         n_fu += is_fu
         n_new += (not is_fu)
         n_ready += ready
         n_urgent += urgent
-        cust = t.get("customer_name") or e.get("from_name") or e.get("from") or "—"
+        cust = p.get("customer_name") or e.get("from_name") or e.get("from") or "—"
         typ = _qbadge("Follow-up", "#B45309") if is_fu else _qbadge("New", "#2563EB")
         status = _qbadge("Ready", "#16A34A") if ready else _qbadge("Needs info", "#6B7280")
         urg = (" " + _qbadge("URGENT", "#DC2626")) if urgent else ""
@@ -2146,9 +2161,9 @@ def _render_quote_overview(emails):
             f'<td style="padding:7px 10px;white-space:nowrap;color:var(--muted)">{e.get("received") or "—"}</td>'
             f'<td style="padding:7px 10px;font-weight:600">{cust}</td>'
             f'<td style="padding:7px 10px">{typ}</td>'
-            f'<td style="padding:7px 10px">{t.get("product_range") or "—"}</td>'
-            f'<td style="padding:7px 10px;white-space:nowrap">{t.get("postcode") or "—"}</td>'
-            f'<td style="padding:7px 10px">{t.get("summary") or "—"}</td>'
+            f'<td style="padding:7px 10px">{p.get("product_range") or "—"}</td>'
+            f'<td style="padding:7px 10px;white-space:nowrap">{p.get("postcode") or "—"}</td>'
+            f'<td style="padding:7px 10px">{p.get("summary") or "—"}</td>'
             f'<td style="padding:7px 10px">{status}{urg}</td></tr>')
 
     head = "".join(f'<th style="text-align:left;padding:7px 10px;color:var(--muted);'
@@ -2162,11 +2177,7 @@ def _render_quote_overview(emails):
         unsafe_allow_html=True)
     st.caption(f"**{len(emails)}** request(s) · {n_new} new · {n_fu} follow-up · "
                f"{n_ready} ready to quote · {n_urgent} urgent. "
-               "Summaries are AI-generated (cached). Pick rows below to build a quote.")
-    if st.button("↻ Refresh overview"):
-        st.session_state.pop("quote_triage", None)
-        _quote_emails.clear()
-        st.rerun()
+               "Summaries are AI-generated (cached).")
 
 
 def render_quotes():
@@ -2190,33 +2201,56 @@ def render_quotes():
         st.success("No quote emails in the folder right now.")
         return
 
+    by_id = {e["id"]: e for e in emails}
+    cache = _ensure_parsed(emails)
+
     st.markdown("#### Quote requests")
-    _render_quote_overview(emails)
+    c1, c2 = st.columns([4, 1])
+    query = c1.text_input(
+        "Search", label_visibility="collapsed", key="qsearch",
+        placeholder="🔍 Search by customer, product, postcode or subject…").strip().lower()
+    if c2.button("↻ Refresh", use_container_width=True):
+        st.session_state.pop("quote_parse", None)
+        _quote_emails.clear()
+        st.rerun()
+
+    def _hay(e):
+        p = cache.get(e["id"]) or {}
+        return " ".join(str(x) for x in [
+            e.get("from_name"), e.get("from"), e.get("subject"), e.get("preview"),
+            p.get("customer_name"), p.get("product_range"), p.get("postcode"),
+            p.get("summary")] if x).lower()
+
+    shown = [e for e in emails if query in _hay(e)] if query else emails
+    if query and not shown:
+        st.info("No requests match your search.")
+        return
+
+    _render_quote_overview(shown, cache)
     st.divider()
 
-    labels = [f"{e['received']} · {e['from_name'] or e['from'] or '?'} · {e['subject']}"
-              for e in emails]
+    lbl = {e["id"]: f"{e['received']} · {e['from_name'] or e['from'] or '?'} · {e['subject']}"
+           for e in emails}
     picks = st.multiselect(
-        "Pick one or more quote requests", range(len(emails)), default=[0],
-        format_func=lambda i: labels[i])
+        "Pick one or more quote requests to build", [e["id"] for e in shown],
+        format_func=lambda eid: lbl.get(eid, eid))
     st.caption(f"Selected **{len(picks)}**. Building reads each email with AI (~1p each, cached) "
                "and prices it from Shopify. Nothing is sent — you get a draft to review.")
 
-    if st.button(f"Read & build {len(picks) or ''} quote(s)".replace("  ", " "),
-                 type="primary", disabled=not picks):
+    if st.button("Read & build quote(s)", type="primary", disabled=not picks):
         st.session_state["quote_built"] = list(picks)
 
-    built = st.session_state.get("quote_built") or []
-    built = [i for i in built if i < len(emails)]
+    built = [eid for eid in (st.session_state.get("quote_built") or []) if eid in by_id]
     if not built:
         return
 
     if len(built) == 1:
-        st.caption(emails[built[0]]["preview"])
-        _render_quote_block(emails[built[0]])
+        e = by_id[built[0]]
+        st.caption(e["preview"])
+        _render_quote_block(e)
     else:
-        for i in built:
-            e = emails[i]
+        for eid in built:
+            e = by_id[eid]
             tag = e["from_name"] or e["from"] or "?"
             with st.expander(f"{tag} — {e['subject']}", expanded=True):
                 st.caption(e["preview"])
