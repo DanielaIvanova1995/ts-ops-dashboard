@@ -1893,6 +1893,9 @@ QUOTE_MAILBOX = "hello@tradesuperstoreonline.co.uk"
 QUOTE_FOLDER = "New Orders & Quotes"
 QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is drafted
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
+# Bump this whenever the parse/quote logic changes — stale cached quotes in a live
+# session then auto-recompute instead of showing old results.
+QUOTE_PARSE_VERSION = 3
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1928,10 +1931,15 @@ def _parse_one_quote(email):
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
     parsed["thread"] = thread
+    parsed["_v"] = QUOTE_PARSE_VERSION
     if not parsed.get("postcode"):
         m = _UK_POSTCODE.search(thread or "")
         parsed["postcode"] = m.group(1).upper() if m else None
     return parsed
+
+
+def _parse_is_current(p):
+    return bool(p) and not p.get("error") and p.get("_v") == QUOTE_PARSE_VERSION
 
 
 def _quote_cache():
@@ -1943,7 +1951,7 @@ def _ensure_parsed(emails):
     cache so the table and the build share exactly the same extraction."""
     import concurrent.futures as _cf
     cache = _quote_cache()
-    todo = [e for e in emails if e["id"] not in cache]
+    todo = [e for e in emails if not _parse_is_current(cache.get(e["id"]))]
     if todo:
         with st.spinner(f"Reading {len(todo)} quote email(s)…"):
             with _cf.ThreadPoolExecutor(max_workers=8) as ex:
@@ -1996,7 +2004,7 @@ def _build_quote(email):
     matching and the composed clarify email (computed once, stored on the parse)."""
     cache = _quote_cache()
     parsed = cache.get(email["id"])
-    if parsed is None:
+    if not _parse_is_current(parsed):
         parsed = _parse_one_quote(email)
         cache[email["id"]] = parsed
     if parsed.get("error"):
