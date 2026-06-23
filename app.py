@@ -2220,6 +2220,177 @@ def _render_quote_overview(emails, cache):
                "Summaries are AI-generated (cached).")
 
 
+# James Hardie cladding take-off — mirrors the official calculator (boards from area
+# using TRUE 0.54 m² coverage, not the 0.65 gross figure) + the trim/accessory pack.
+HARDIE_PRODUCTS = {
+    "Hardie Plank — horizontal lap (150mm cover)": {"coverage": 0.54, "search": "Hardie Plank"},
+    "Hardie VL Plank — horizontal": {"coverage": 0.72, "search": "Hardie VL Plank"},
+    "Hardie VL Plank — vertical": {"coverage": 0.72, "search": "Hardie VL Plank"},
+}
+HARDIE_TEXTURES = ["Cedar", "Smooth"]
+BATTEN_CENTRES = {"600 mm (standard)": 600, "450 mm": 450, "300 mm": 300}
+
+
+def _fixings_per_board(batten_mm, board_len_mm=3600):
+    return round(board_len_mm / batten_mm) + 1 if batten_mm else 0
+
+
+def _cladding_takeoff(inp):
+    """Pure calc: inputs -> (take-off lines, meta). Trims priced as 3m lengths."""
+    import math
+    net = max(0.0, inp["gable"] + inp["other"] - inp["openings"])
+    cov = inp["coverage"] or 0.54
+    boards = math.ceil((net / cov) * (1 + inp["waste_pct"] / 100.0)) if net else 0
+    bc = inp["batten_mm"]
+    batten_lm = net / (bc / 1000.0) if (net and bc) else 0.0
+    fpb = _fixings_per_board(bc)
+    fixings = boards * fpb
+    pcs = lambda lm: math.ceil(lm / 3.0) if lm > 0 else 0  # noqa: E731 — 3m trim lengths
+    lines = [
+        ("board", f"{inp['product_label'].split(' —')[0]} board (3.6m)", boards, "board",
+         inp["board_search"]),
+        ("starter", "Starter / base ventilation profile (3m)", pcs(inp["base_lm"]), "length",
+         "Hardie starter base vent profile"),
+        ("top", "Top ventilation profile (3m)", pcs(inp["top_lm"]), "length",
+         "Hardie top vent profile"),
+        ("extcorner", "External corner trim (3m)", pcs(inp["ext_corner_lm"]), "length",
+         "Hardie external corner trim"),
+        ("intcorner", "Internal corner trim (3m)", pcs(inp["int_corner_lm"]), "length",
+         "Hardie internal corner trim"),
+        ("hardietrim", "HardieTrim NT3 around openings (3m)", pcs(inp["opening_lm"]), "length",
+         "HardieTrim NT3"),
+        ("epdm", "EPDM joint tape (20m roll)", math.ceil(batten_lm / 20) if batten_lm else 0,
+         "roll", "EPDM joint tape"),
+        ("seal", "HardieSeal edge coat (1L)", max(1, math.ceil(net / 150)) if net else 0, "tub",
+         "HardieSeal edge coat"),
+        ("fixings", f"Cladding fixings (~{fpb}/board, ~{fixings} total)",
+         math.ceil(fixings / 250) if fixings else 0, "box of 250", "Hardie cladding fixings screws"),
+    ]
+    out = [{"key": k, "item": it, "qty": q, "unit": u, "search": s}
+           for k, it, q, u, s in lines if q > 0]
+    return out, {"net": net, "boards": boards, "batten_lm": batten_lm, "fixings": fixings, "fpb": fpb}
+
+
+def render_cladding_calc():
+    st.markdown("### 🧱 James Hardie cladding calculator")
+    st.caption("Boards are worked out from area using the **true 0.54 m² coverage** (not the 0.65 m² "
+               "gross figure on product pages — that under-orders by ~17%). Add the trim runs for the "
+               "accessory pack, then price from Shopify. Quantities include waste.")
+
+    with st.form("clad"):
+        c1, c2, c3 = st.columns(3)
+        product_label = c1.selectbox("Product", list(HARDIE_PRODUCTS))
+        texture = c2.selectbox("Texture", HARDIE_TEXTURES)
+        colour = c3.text_input("Colour", placeholder="e.g. Arctic White")
+        c4, c5, c6 = st.columns(3)
+        coverage = c4.number_input("Coverage m²/board", min_value=0.10,
+                                   value=float(HARDIE_PRODUCTS[product_label]["coverage"]),
+                                   step=0.01, format="%.2f",
+                                   help="Auto-set per product. Lap HardiePlank = 0.54. Confirm VL Plank.")
+        batten_label = c5.selectbox("Batten centres", list(BATTEN_CENTRES))
+        waste_pct = c6.number_input("Waste %", min_value=0, max_value=30, value=10, step=1,
+                                    help="10% standard; 15% for lots of gables, diagonal cuts or short runs.")
+        st.markdown("**Areas** (measure each elevation w×h; gable = w×h÷2)")
+        a1, a2, a3 = st.columns(3)
+        gable = a1.number_input("Gable area m²", min_value=0.0, value=0.0, step=0.5)
+        other = a2.number_input("Other cladding area m²", min_value=0.0, value=0.0, step=0.5)
+        openings = a3.number_input("Openings to deduct m²", min_value=0.0, value=0.0, step=0.5)
+        st.markdown("**Trim runs** — linear metres (the trim pack is driven by building shape, not area)")
+        t1, t2, t3 = st.columns(3)
+        base_lm = t1.number_input("Base / starter run (m)", min_value=0.0, value=0.0, step=0.5)
+        top_lm = t2.number_input("Top run + under sills (m)", min_value=0.0, value=0.0, step=0.5)
+        opening_lm = t3.number_input("Openings perimeter (m)", min_value=0.0, value=0.0, step=0.5)
+        t4, t5 = st.columns(2)
+        ext_corner_lm = t4.number_input("External corners total (m)", min_value=0.0, value=0.0, step=0.5)
+        int_corner_lm = t5.number_input("Internal corners total (m)", min_value=0.0, value=0.0, step=0.5)
+        go = st.form_submit_button("Calculate take-off", type="primary")
+
+    if go:
+        st.session_state["clad_calc"] = {
+            "product_label": product_label, "texture": texture, "colour": colour.strip(),
+            "coverage": coverage, "batten_mm": BATTEN_CENTRES[batten_label], "waste_pct": waste_pct,
+            "gable": gable, "other": other, "openings": openings,
+            "base_lm": base_lm, "top_lm": top_lm, "opening_lm": opening_lm,
+            "ext_corner_lm": ext_corner_lm, "int_corner_lm": int_corner_lm,
+            "board_search": (f"{HARDIE_PRODUCTS[product_label]['search']} {texture} {colour}").strip(),
+        }
+        st.session_state.pop("clad_priced", None)
+
+    data = st.session_state.get("clad_calc")
+    if not data:
+        return
+    lines, meta = _cladding_takeoff(data)
+    st.markdown(f"**Net area to clad: {meta['net']:,.1f} m² → {meta['boards']} boards** "
+                f"(at {data['coverage']:.2f} m²/board + {data['waste_pct']}% waste · "
+                f"~{meta['fpb']} fixings/board).")
+
+    priced = st.session_state.get("clad_priced")
+    rows, total = "", 0.0
+    for l in lines:
+        m = (priced or {}).get(l["key"]) if priced else None
+        if m and m.get("price") is not None:
+            prod = (f'{m.get("title") or "?"}<div style="color:var(--muted);font-size:11px">'
+                    f'SKU {m.get("sku") or "—"}</div>')
+            unit = f"£{m['price']:,.2f}"
+            line_tot = m["price"] * l["qty"]
+            total += line_tot
+            line = f"£{line_tot:,.2f}"
+        elif priced:
+            prod = '<span style="color:#ef4444">no match — add manually</span>'
+            unit = line = "—"
+        else:
+            prod = unit = line = "—"
+        rows += (f'<tr style="border-top:1px solid var(--line)">'
+                 f'<td style="padding:6px 10px">{l["item"]}</td>'
+                 f'<td style="padding:6px 10px;text-align:center">{l["qty"]}</td>'
+                 f'<td style="padding:6px 10px">{l["unit"]}</td>'
+                 f'<td style="padding:6px 10px">{prod}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{unit}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{line}</td></tr>')
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+                '<tr style="text-align:left;color:var(--muted)">'
+                '<th style="padding:6px 10px">Item</th>'
+                '<th style="padding:6px 10px;text-align:center">Qty</th>'
+                '<th style="padding:6px 10px">Unit</th>'
+                '<th style="padding:6px 10px">Matched product</th>'
+                '<th style="padding:6px 10px;text-align:right">Unit £</th>'
+                '<th style="padding:6px 10px;text-align:right">Line £</th></tr>'
+                + rows + "</table>", unsafe_allow_html=True)
+    if priced:
+        st.markdown(f"**Materials subtotal (matched lines, ex-VAT): £{total:,.2f}**")
+
+    b1, b2 = st.columns(2)
+    if b1.button("Price from Shopify", key="clad_price"):
+        out = {}
+        with st.spinner("Pricing from Shopify…"):
+            for l in lines:
+                try:
+                    out[l["key"]] = data_sources.match_quote_variant(None, l["search"])
+                except Exception:  # noqa: BLE001
+                    out[l["key"]] = None
+        st.session_state["clad_priced"] = out
+        st.rerun()
+
+    if priced:
+        matched = [l for l in lines if priced.get(l["key"])
+                   and priced[l["key"]].get("variant_id")]
+        if matched and b2.button("Build Shopify draft order", type="primary", key="clad_draft"):
+            try:
+                li = [{"variantId": priced[l["key"]]["variant_id"], "quantity": l["qty"]}
+                      for l in matched]
+                do = data_sources.create_draft_order(
+                    li, note=f"James Hardie cladding take-off — {data['product_label']} "
+                    f"{data['texture']} {data['colour']} — {meta['net']:.1f} m²")
+                st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}).")
+                st.markdown(f"[Open the Shopify draft order]({do['invoiceUrl']})")
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't create the draft: " + str(e)[:240] + " — Shopify may need the "
+                         "**write_draft_orders** scope.")
+        if len(matched) < len(lines):
+            st.caption(f"{len(lines) - len(matched)} line(s) had no Shopify match — add them to the "
+                       "draft manually, or tell me the exact product names and I'll map them.")
+
+
 def render_quotes():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -2229,6 +2400,12 @@ def render_quotes():
     st.caption("Reads the New Orders & Quotes emails, prices them from Shopify, and prepares a "
                "**Shopify draft order** + an **Outlook draft reply** (with the draft-order number in "
                "the subject) for you to review and send. Uses your Anthropic key.")
+
+    mode = st.radio("View", ["📧 Email requests", "🧱 Hardie cladding calculator"],
+                    horizontal=True, label_visibility="collapsed")
+    if mode.startswith("🧱"):
+        render_cladding_calc()
+        return
 
     data = _quote_emails()
     if data.get("error"):
