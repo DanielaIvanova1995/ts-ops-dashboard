@@ -1,3 +1,4 @@
+# rebuild trigger 2026-06-23 (force clean reimport of data_sources)
 streamlit==1.40.2
 streamlit-authenticator==0.3.3
 PyYAML==6.0.2
