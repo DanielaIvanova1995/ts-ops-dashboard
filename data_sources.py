@@ -951,6 +951,150 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
     return True
 
 
+def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 15,
+                       token: str | None = None) -> list:
+    """Full messages in a folder for quoting: [{id, subject, from, from_name,
+    received, preview, body}]. body is plain text (HTML stripped)."""
+    import re as _re
+    token = token or ms_token()
+    f = _find_folder(mailbox, folder_name, token)
+    if not f:
+        return []
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/mailFolders/{f['id']}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$top": str(limit), "$orderby": "receivedDateTime desc",
+                "$select": "subject,from,receivedDateTime,bodyPreview,body"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("value", []):
+        body = m.get("body") or {}
+        content = body.get("content") or m.get("bodyPreview") or ""
+        if body.get("contentType") == "html":
+            content = _re.sub(r"<[^>]+>", " ", content)
+        content = _re.sub(r"\s+", " ", content).strip()
+        ea = ((m.get("from") or {}).get("emailAddress") or {})
+        out.append({"id": m.get("id"), "subject": m.get("subject") or "(no subject)",
+                    "from": ea.get("address"), "from_name": ea.get("name"),
+                    "received": (m.get("receivedDateTime") or "")[:10],
+                    "preview": (m.get("bodyPreview") or "").strip()[:200],
+                    "body": content[:6000]})
+    return out
+
+
+def extract_quote_items(email_text: str) -> dict:
+    """AI reads a quote-request email and returns {customer_name, can_quote,
+    items:[{description, qty, code}], missing_info}. Raises if no key/failure."""
+    import json as _json
+    import re
+
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    prompt = (
+        "Read this customer email to a UK building-supplies retailer (Trade Superstore). "
+        "Work out the products and quantities they want quoted. Reply with ONLY JSON:\n"
+        '{"customer_name":"...","can_quote":true|false,'
+        '"items":[{"description":"the product as they described it","qty":<int>,'
+        '"code":"any product code/SKU they gave, else null"}],'
+        '"missing_info":"if you cannot quote, what is unclear or missing"}\n'
+        "If the email is vague, just a question, or lacks products/quantities, set "
+        'can_quote=false and explain in missing_info. Never invent products.\n\nEMAIL:\n'
+        + (email_text or "")[:6000]
+    )
+    r = requests.post(
+        ANTHROPIC_API,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": SENTIMENT_MODEL, "max_tokens": 1200,
+              "messages": [{"role": "user", "content": prompt}]},
+        timeout=60,
+    )
+    r.raise_for_status()
+    txt = r.json()["content"][0]["text"]
+    m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise RuntimeError("AI returned no JSON")
+    return _json.loads(m.group(0))
+
+
+def shopify_search_variants(query: str, first: int = 5, token: str | None = None) -> list:
+    """Search Shopify variants → [{variant_id, sku, price, title, available}]."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    q = ("query ($q: String!, $n: Int!) { productVariants(first: $n, query: $q) { edges { node "
+         "{ id sku price availableForSale title product { title } } } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": q, "variables": {"q": query, "n": first}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"}, timeout=20)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    out = []
+    for e in payload.get("data", {}).get("productVariants", {}).get("edges", []):
+        n = e["node"]
+        prod = n.get("product") or {}
+        out.append({"variant_id": n["id"], "sku": n.get("sku"),
+                    "price": float(n["price"]) if n.get("price") is not None else None,
+                    "available": n.get("availableForSale"),
+                    "title": prod.get("title") or n.get("title")})
+    return out
+
+
+def create_draft_order(line_items, email=None, note=None, token: str | None = None) -> dict:
+    """Create a Shopify draft order from line_items [{variantId, quantity}]. Shopify
+    prices it. Returns {id, name, invoiceUrl, total}. Needs write_draft_orders."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    mutation = ("mutation ($input: DraftOrderInput!) { draftOrderCreate(input: $input) { "
+                "draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount } } } "
+                "userErrors { field message } } }")
+    inp = {"lineItems": [{"variantId": li["variantId"], "quantity": int(li["quantity"])}
+                         for li in line_items]}
+    if email:
+        inp["email"] = email
+    if note:
+        inp["note"] = note
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": mutation, "variables": {"input": inp}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"}, timeout=25)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    res = payload["data"]["draftOrderCreate"]
+    if res["userErrors"]:
+        raise RuntimeError(res["userErrors"][0]["message"])
+    d = res["draftOrder"]
+    d["total"] = float((d.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
+    return d
+
+
+def create_reply_draft(mailbox: str, message_id: str, body: str, subject: str | None = None,
+                       token: str | None = None) -> str | None:
+    """Create a *draft reply* to a message (lands in Drafts, threaded). Optionally
+    override the subject. Returns the draft's webLink. Needs Mail.ReadWrite."""
+    token = token or ms_token()
+    r = requests.post(f"{GRAPH}/users/{mailbox}/messages/{message_id}/createReply",
+                      headers={"Authorization": f"Bearer {token}"}, timeout=25)
+    r.raise_for_status()
+    draft = r.json()
+    did = draft.get("id")
+    patch = {"body": {"contentType": "Text", "content": body}}
+    if subject:
+        patch["subject"] = subject
+    r2 = requests.patch(f"{GRAPH}/users/{mailbox}/messages/{did}",
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                        json=patch, timeout=25)
+    r2.raise_for_status()
+    return draft.get("webLink")
+
+
 def monday_asset_url(asset_id, token: str | None = None) -> str | None:
     """Temporary signed download URL for a Monday file asset."""
     token = token or get_token()

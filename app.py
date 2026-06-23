@@ -1889,6 +1889,156 @@ def render_summary_dashboard():
                     f'gap:8px;margin-bottom:6px">{tiles}</div>', unsafe_allow_html=True)
 
 
+QUOTE_MAILBOX = "hello@tradesuperstoreonline.co.uk"
+QUOTE_FOLDER = "New Orders & Quotes"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _quote_emails():
+    try:
+        return {"emails": data_sources.fetch_quote_emails(QUOTE_MAILBOX, QUOTE_FOLDER, limit=25)}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _build_quote(email_id, email_body):
+    """AI-extract requested items + match each to a Shopify variant. Cached per email."""
+    try:
+        parsed = data_sources.extract_quote_items(email_body)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+    lines = []
+    for it in (parsed.get("items") or []):
+        q = (it.get("code") or "").strip() or (it.get("description") or "")
+        try:
+            cands = data_sources.shopify_search_variants(q, first=3)
+        except Exception:  # noqa: BLE001
+            cands = []
+        lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
+                      "match": cands[0] if cands else None})
+    parsed["lines"] = lines
+    return parsed
+
+
+def render_quotes():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Quotes</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Reads the New Orders & Quotes emails, prices them from Shopify, and prepares a "
+               "**Shopify draft order** + an **Outlook draft reply** (with the draft-order number in "
+               "the subject) for you to review and send. Uses your Anthropic key.")
+
+    data = _quote_emails()
+    if data.get("error"):
+        msg = data["error"]
+        st.warning("Couldn't read the quotes folder: " + msg[:160]
+                   + (" — is Outlook connected?" if "token" in msg.lower() else ""))
+        return
+    emails = data["emails"]
+    if not emails:
+        st.success("No quote emails in the folder right now.")
+        return
+
+    k = st.selectbox("Pick a quote request", range(len(emails)),
+                     format_func=lambda i: f"{emails[i]['received']} · "
+                     f"{emails[i]['from_name'] or emails[i]['from'] or '?'} · {emails[i]['subject']}")
+    email = emails[k]
+    st.caption(email["preview"])
+    if not st.button("Read & build quote", type="primary"):
+        return
+
+    with st.spinner("Reading the email and pricing from Shopify…"):
+        q = _build_quote(email["id"], email["body"])
+    if q.get("error"):
+        if "ANTHROPIC_API_KEY" in q["error"]:
+            st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to read quote emails.")
+        else:
+            st.error("Couldn't read the email: " + q["error"][:200])
+        return
+
+    # Can't quote → draft a "what we need" email instead.
+    if not q.get("can_quote"):
+        st.warning("Not enough to quote: " + (q.get("missing_info") or "unclear request."))
+        body = (f"Hi {q.get('customer_name') or 'there'},\n\nThanks for your enquiry. To put a "
+                "quote together for you, could you please confirm:\n\n"
+                f"- {q.get('missing_info') or 'the exact products and quantities you need'}\n\n"
+                "Once we have that we'll send your quote straight over.\n\n"
+                "Kind regards,\nTrade Superstore Online")
+        st.text_area("Draft reply", value=body, height=200, key=f"qclar_{email['id']}")
+        if st.button("Create Outlook draft (ask for details)", key=f"qclarbtn_{email['id']}"):
+            try:
+                link = data_sources.create_reply_draft(
+                    QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"])
+                st.success("Draft reply created in Outlook.")
+                if link:
+                    st.markdown(f"[Open the draft in Outlook]({link})")
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't create the draft: " + str(e)[:200])
+        return
+
+    # Build the quote table.
+    lines = q["lines"]
+    matched = [l for l in lines if l["match"] and l["match"].get("price") is not None]
+    total = sum(l["match"]["price"] * l["qty"] for l in matched)
+    rows = ""
+    for l in lines:
+        m = l["match"]
+        if m and m.get("price") is not None:
+            prod = f'{m.get("title") or "?"}<div style="color:var(--muted);font-size:11px">SKU {m.get("sku") or "—"}</div>'
+            unit = f"£{m['price']:,.2f}"
+            line = f"£{m['price'] * l['qty']:,.2f}"
+        else:
+            prod = '<span style="color:#ef4444">no match — add manually</span>'
+            unit = line = "—"
+        rows += (f'<tr style="border-top:1px solid var(--line)">'
+                 f'<td style="padding:6px 10px">{l["description"] or "—"}</td>'
+                 f'<td style="padding:6px 10px;text-align:center">{l["qty"]}</td>'
+                 f'<td style="padding:6px 10px">{prod}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{unit}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{line}</td></tr>')
+    st.markdown(f"### Quote for {q.get('customer_name') or email.get('from_name') or 'customer'}")
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+                '<tr style="text-align:left;color:var(--muted)">'
+                '<th style="padding:6px 10px">Requested</th>'
+                '<th style="padding:6px 10px;text-align:center">Qty</th>'
+                '<th style="padding:6px 10px">Matched product</th>'
+                '<th style="padding:6px 10px;text-align:right">Unit</th>'
+                '<th style="padding:6px 10px;text-align:right">Line</th></tr>'
+                + rows + "</table>", unsafe_allow_html=True)
+    st.markdown(f"**Subtotal (matched lines): £{total:,.2f}**")
+    if len(matched) < len(lines):
+        st.warning(f"{len(lines) - len(matched)} item(s) couldn't be matched to Shopify — they "
+                   "won't be on the draft order; add them manually after.")
+
+    if matched and st.button("Create Shopify draft order + Outlook draft reply", type="primary",
+                             key=f"qcreate_{email['id']}"):
+        try:
+            li = [{"variantId": l["match"]["variant_id"], "quantity": l["qty"]} for l in matched]
+            do = data_sources.create_draft_order(li, email=email.get("from"),
+                                                 note=f"Quote from email: {email['subject']}")
+            body_lines = "\n".join(f"- {l['qty']} x {l['match']['title']} "
+                                   f"@ £{l['match']['price']:,.2f}" for l in matched)
+            body = (f"Hi {q.get('customer_name') or 'there'},\n\nThank you for your enquiry — please "
+                    f"find your quote below (ref {do['name']}):\n\n{body_lines}\n\n"
+                    f"Total: £{do['total']:,.2f}\n\n"
+                    f"You can view your quote here: {do['invoiceUrl']}\n\n"
+                    "Kind regards,\nTrade Superstore Online")
+            subj = f"Your quote {do['name']} – RE: {email['subject']}"
+            link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body, subject=subj)
+            st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}) and an "
+                       "Outlook draft reply — review and send from Outlook.")
+            bits = [f"[Open the Shopify draft order]({do['invoiceUrl']})"]
+            if link:
+                bits.append(f"[Open the Outlook draft]({link})")
+            st.markdown(" · ".join(bits))
+        except Exception as e:  # noqa: BLE001
+            st.error("Couldn't create it: " + str(e)[:240] + " — Shopify may need the "
+                     "**write_draft_orders** scope, or Outlook **Mail.ReadWrite**.")
+
+
 def _rules_table(headers, rows):
     th = "".join(f'<th style="text-align:left;padding:7px 12px;color:var(--muted);'
                  f'font-weight:600">{h}</th>' for h in headers)
@@ -2042,7 +2192,7 @@ with st.sidebar:
         )
 
     # --- Menu (the office login only sees Daily Ops) ---
-    all_modules = ("Daily Ops", "Daily Activity", "Pricing", "Invoice Check")
+    all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check")
     menu = ("Daily Ops",) if role == "office" else all_modules
     if "module" not in st.session_state or st.session_state.module not in menu:
         st.session_state.module = "Daily Ops"
@@ -2104,6 +2254,10 @@ if module == "Pricing":
 
 if module == "Daily Activity":
     render_daily_activity()
+    st.stop()
+
+if module == "Quotes":
+    render_quotes()
     st.stop()
 
 if module == "Invoice Check":
