@@ -1921,35 +1921,30 @@ def _build_quote(email_id, email_body):
     return parsed
 
 
-def render_quotes():
-    st.markdown(
-        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
-        <span class="sec">Quotes</span></span></div>""",
-        unsafe_allow_html=True,
-    )
-    st.caption("Reads the New Orders & Quotes emails, prices them from Shopify, and prepares a "
-               "**Shopify draft order** + an **Outlook draft reply** (with the draft-order number in "
-               "the subject) for you to review and send. Uses your Anthropic key.")
+def _first_name(*candidates):
+    for c in candidates:
+        if c and str(c).strip():
+            return str(c).strip().split()[0]
+    return "there"
 
-    data = _quote_emails()
-    if data.get("error"):
-        msg = data["error"]
-        st.warning("Couldn't read the quotes folder: " + msg[:160]
-                   + (" — is Outlook connected?" if "token" in msg.lower() else ""))
-        return
-    emails = data["emails"]
-    if not emails:
-        st.success("No quote emails in the folder right now.")
-        return
 
-    k = st.selectbox("Pick a quote request", range(len(emails)),
-                     format_func=lambda i: f"{emails[i]['received']} · "
-                     f"{emails[i]['from_name'] or emails[i]['from'] or '?'} · {emails[i]['subject']}")
-    email = emails[k]
-    st.caption(email["preview"])
-    if not st.button("Read & build quote", type="primary"):
-        return
+def _quote_clarify_body(q, email):
+    """A clean, customer-facing 'we need a bit more info' reply."""
+    qs = q.get("questions") or ([q["missing_info"]] if q.get("missing_info") else [])
+    qs = [x.strip() for x in qs if x and str(x).strip()]
+    if not qs:
+        qs = ["Could you confirm the exact products and quantities you need?"]
+    bullets = "\n".join(f"- {x if x.endswith('?') else x + '?'}" for x in qs)
+    name = _first_name(q.get("customer_name"), email.get("from_name"))
+    return (f"Hi {name},\n\nThanks for your enquiry. To put your quote together, could you "
+            "please confirm:\n\n" + bullets +
+            "\n\nOnce we have that we'll send your quote straight over.\n\n"
+            "Kind regards,\nTrade Superstore Online")
 
+
+def _render_quote_block(email):
+    """Build + render one email's quote: the priced table + create buttons, or a
+    clarify draft if we can't quote yet. Safe to call inside a loop/expander."""
     with st.spinner("Reading the email and pricing from Shopify…"):
         q = _build_quote(email["id"], email["body"])
     if q.get("error"):
@@ -1959,20 +1954,18 @@ def render_quotes():
             st.error("Couldn't read the email: " + q["error"][:200])
         return
 
-    # Can't quote → draft a "what we need" email instead.
+    # Can't quote → draft a polite "what we need" email instead.
     if not q.get("can_quote"):
-        st.warning("Not enough to quote: " + (q.get("missing_info") or "unclear request."))
-        body = (f"Hi {q.get('customer_name') or 'there'},\n\nThanks for your enquiry. To put a "
-                "quote together for you, could you please confirm:\n\n"
-                f"- {q.get('missing_info') or 'the exact products and quantities you need'}\n\n"
-                "Once we have that we'll send your quote straight over.\n\n"
-                "Kind regards,\nTrade Superstore Online")
-        st.text_area("Draft reply", value=body, height=200, key=f"qclar_{email['id']}")
+        st.warning("Not enough detail to quote yet — drafted a reply asking for what's needed.")
+        body = _quote_clarify_body(q, email)
+        st.text_area("Draft reply", value=body, height=210, key=f"qclar_{email['id']}")
         if st.button("Create Outlook draft (ask for details)", key=f"qclarbtn_{email['id']}"):
             try:
+                subj = f"RE: {email['subject']}"
                 link = data_sources.create_reply_draft(
-                    QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"])
-                st.success("Draft reply created in Outlook.")
+                    QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"],
+                    subject=subj)
+                st.success("Draft reply created in Outlook — review and send from there.")
                 if link:
                     st.markdown(f"[Open the draft in Outlook]({link})")
             except Exception as e:  # noqa: BLE001
@@ -2037,6 +2030,56 @@ def render_quotes():
         except Exception as e:  # noqa: BLE001
             st.error("Couldn't create it: " + str(e)[:240] + " — Shopify may need the "
                      "**write_draft_orders** scope, or Outlook **Mail.ReadWrite**.")
+
+
+def render_quotes():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Quotes</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Reads the New Orders & Quotes emails, prices them from Shopify, and prepares a "
+               "**Shopify draft order** + an **Outlook draft reply** (with the draft-order number in "
+               "the subject) for you to review and send. Uses your Anthropic key.")
+
+    data = _quote_emails()
+    if data.get("error"):
+        msg = data["error"]
+        st.warning("Couldn't read the quotes folder: " + msg[:160]
+                   + (" — is Outlook connected?" if "token" in msg.lower() else ""))
+        return
+    emails = data["emails"]
+    if not emails:
+        st.success("No quote emails in the folder right now.")
+        return
+
+    labels = [f"{e['received']} · {e['from_name'] or e['from'] or '?'} · {e['subject']}"
+              for e in emails]
+    picks = st.multiselect(
+        "Pick one or more quote requests", range(len(emails)), default=[0],
+        format_func=lambda i: labels[i])
+    st.caption(f"Selected **{len(picks)}**. Building reads each email with AI (~1p each, cached) "
+               "and prices it from Shopify. Nothing is sent — you get a draft to review.")
+
+    if st.button(f"Read & build {len(picks) or ''} quote(s)".replace("  ", " "),
+                 type="primary", disabled=not picks):
+        st.session_state["quote_built"] = list(picks)
+
+    built = st.session_state.get("quote_built") or []
+    built = [i for i in built if i < len(emails)]
+    if not built:
+        return
+
+    if len(built) == 1:
+        st.caption(emails[built[0]]["preview"])
+        _render_quote_block(emails[built[0]])
+    else:
+        for i in built:
+            e = emails[i]
+            tag = e["from_name"] or e["from"] or "?"
+            with st.expander(f"{tag} — {e['subject']}", expanded=True):
+                st.caption(e["preview"])
+                _render_quote_block(e)
 
 
 def _rules_table(headers, rows):

@@ -996,12 +996,18 @@ def extract_quote_items(email_text: str) -> dict:
     prompt = (
         "Read this customer email to a UK building-supplies retailer (Trade Superstore). "
         "Work out the products and quantities they want quoted. Reply with ONLY JSON:\n"
-        '{"customer_name":"...","can_quote":true|false,'
+        '{"customer_name":"first name only if you can tell, else null","can_quote":true|false,'
         '"items":[{"description":"the product as they described it","qty":<int>,'
         '"code":"any product code/SKU they gave, else null"}],'
-        '"missing_info":"if you cannot quote, what is unclear or missing"}\n'
-        "If the email is vague, just a question, or lacks products/quantities, set "
-        'can_quote=false and explain in missing_info. Never invent products.\n\nEMAIL:\n'
+        '"questions":["short, polite, customer-facing question for each missing detail"]}\n'
+        "If the email is vague, just a question, or lacks specific products/quantities, set "
+        "can_quote=false, leave items empty, and fill questions.\n"
+        "RULES for questions: write each as a short, friendly question you could send straight "
+        "to the customer (e.g. \"Which products do you need - for example fascia board, guttering "
+        "or roofing sheets?\" or \"How many lengths would you like?\"). Do NOT restate or analyse "
+        "what they already told you, do NOT mention measurements they gave, do NOT write in the "
+        "third person. Just the questions that, once answered, let us quote. Never invent "
+        "products.\n\nEMAIL:\n"
         + (email_text or "")[:6000]
     )
     r = requests.post(
