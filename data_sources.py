@@ -600,6 +600,38 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 
 
+def fetch_all_folder_counts(mailbox: str, token: str | None = None) -> dict:
+    """Walk the mailbox's folder tree ONCE and return {normalised_name: {count,
+    unread, name}} for every folder. Use this instead of calling
+    fetch_outlook_folder_count once per folder (one walk, not N)."""
+    token = token or ms_token()
+    out: dict = {}
+    queue = _graph_children(mailbox, None, token)
+    visited = 0
+    while queue and visited < 1500:
+        visited += 1
+        f = queue.pop(0)
+        nm = _norm(f.get("displayName"))
+        if nm and nm not in out:
+            out[nm] = {"count": f.get("totalItemCount", 0),
+                       "unread": f.get("unreadItemCount", 0), "name": f.get("displayName")}
+        if f.get("childFolderCount", 0) > 0:
+            queue += _graph_children(mailbox, f["id"], token)
+    return out
+
+
+def match_folder(folder_map: dict, folder_name: str):
+    """Resolve a folder by name from a fetch_all_folder_counts map (exact, else
+    contains). Returns the folder dict or None."""
+    t = _norm(folder_name)
+    if t in folder_map:
+        return folder_map[t]
+    for nm, v in folder_map.items():
+        if t and t in nm:
+            return v
+    return None
+
+
 def fetch_outlook_folder_count(mailbox: str, folder_name: str, token: str | None = None) -> dict:
     """Recursively search a mailbox's folders for one whose (normalised) name
     matches folder_name (exact preferred, else contains) and return its total

@@ -321,7 +321,7 @@ def mood(kpis: list) -> dict:
 # ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_kpis() -> dict:
     """Load KPI policy from kpis.json, then overlay LIVE count + age from the
     Monday 'Daily KPI Tracker' board. Falls back to the saved snapshot if the
@@ -329,10 +329,11 @@ def load_kpis() -> dict:
     with open(BASE / "kpis.json", encoding="utf-8") as f:
         data = json.load(f)
 
+    import concurrent.futures as _cf
+    import data_sources
+
     data["live"] = False
     try:
-        import data_sources
-
         live = data_sources.fetch_live_counts(data.get("monday_board_id", 18416416116))
         data["kpis"] = data_sources.merge_live(data["kpis"], live)
         data["live"] = True
@@ -340,84 +341,87 @@ def load_kpis() -> dict:
     except Exception as e:  # noqa: BLE001 — stay up on any data-source hiccup
         data["live_error"] = str(e)
 
-    # Live counts straight from the real Orders board (overrides the stale
-    # summary-board figures for the stage-group KPIs).
+    by_id = {k["id"]: k for k in data["kpis"]}
     group_map = {k["id"]: k["orders_group_id"] for k in data["kpis"] if k.get("orders_group_id")}
-    if group_map:
-        try:
-            gc = data_sources.fetch_orders_group_counts(group_map)
-            for k in data["kpis"]:
-                if k["id"] in gc:
-                    k["count"] = gc[k["id"]]["count"]
-                    k["oldest_age_days"] = gc[k["id"]]["age"]
-            data["orders_live"] = True
-        except Exception as e:  # noqa: BLE001 — fall back to summary board figures
-            data["orders_error"] = str(e)
-
-    # Booked overdue/future — split the booked group by Customer ETA date.
-    try:
-        bs = data_sources.fetch_booked_split(1786542990, "group_mkv7t11j", "date", now_uk().date())
-        for k in data["kpis"]:
-            if k["id"] == "booked_overdue":
-                k["count"], k["oldest_age_days"] = bs["overdue"]["count"], bs["overdue"]["age"]
-                k["source"] = "Monday · Orders board (live)"
-            elif k["id"] == "booked_future":
-                k["count"], k["oldest_age_days"] = bs["future"]["count"], 0
-                k["source"] = "Monday · Orders board (live)"
-    except Exception as e:  # noqa: BLE001
-        data["booked_error"] = str(e)
-
-    # Invoices & discrepancies — live subitem Payment Status counts.
-    for kid, label_id in (("invoices", 3), ("discrepancies", 4)):
-        try:
-            r = data_sources.fetch_filtered_count(3547638043, "status7__1", [label_id])
-            for k in data["kpis"]:
-                if k["id"] == kid:
-                    k["count"], k["oldest_age_days"] = r["count"], r["age"]
-                    k["source"] = "Monday · subitems (live)"
-        except Exception as e:  # noqa: BLE001
-            data[f"{kid}_error"] = str(e)
-
-    # Complaints — live count of Orders with Customer Stage = Complaint.
-    try:
-        r = data_sources.fetch_filtered_count(1786542990, "color_mktyyf7w", [8])
-        for k in data["kpis"]:
-            if k["id"] == "complaints":
-                k["count"], k["oldest_age_days"] = r["count"], r["age"]
-                k["source"] = "Monday · Customer Stage = Complaint (live)"
-    except Exception as e:  # noqa: BLE001
-        data["complaints_error"] = str(e)
-
-    # Outlook folders (read + unread) via Microsoft Graph.
+    today = now_uk().date()
     outlook_kpis = [k for k in data["kpis"] if k.get("outlook")]
-    if outlook_kpis:
-        try:
-            tok = data_sources.ms_token()
-            data["outlook_live"] = True
-        except Exception as e:  # noqa: BLE001 — M365 not configured / unreachable
-            tok = None
-            data["outlook_error"] = str(e)
-        if tok:
-            for k in outlook_kpis:
-                try:
-                    spec = k["outlook"]
-                    res = data_sources.fetch_outlook_folder_count(spec["mailbox"], spec["folder"], token=tok)
-                    k["count"], k["oldest_age_days"] = res["count"], 0
-                    k["unread"] = res["unread"]
-                except Exception as e:  # noqa: BLE001 — folder not found etc.
-                    k["folder_error"] = str(e)
+    mailboxes = {k["outlook"]["mailbox"] for k in outlook_kpis}
 
-    # Chargebacks straight from Shopify (overrides the Monday-mirrored figure).
-    try:
-        cb = data_sources.fetch_shopify_chargebacks()
-        for k in data["kpis"]:
-            if k["id"] == "chargebacks":
-                k["count"] = cb["count"]
-                k["oldest_age_days"] = cb["age"]
-                k["source"] = "Shopify · Live disputes"
+    # Each task returns (kind, value, error) so it can run independently in a thread.
+    def _safe(kind, fn):
+        try:
+            return (kind, fn(), None)
+        except Exception as e:  # noqa: BLE001
+            return (kind, None, str(e))
+
+    tasks = [
+        lambda: _safe("groups", lambda: data_sources.fetch_orders_group_counts(group_map)),
+        lambda: _safe("booked", lambda: data_sources.fetch_booked_split(
+            1786542990, "group_mkv7t11j", "date", today)),
+        lambda: _safe("invoices", lambda: data_sources.fetch_filtered_count(
+            3547638043, "status7__1", [3])),
+        lambda: _safe("discrepancies", lambda: data_sources.fetch_filtered_count(
+            3547638043, "status7__1", [4])),
+        lambda: _safe("complaints", lambda: data_sources.fetch_filtered_count(
+            1786542990, "color_mktyyf7w", [8])),
+        lambda: _safe("chargebacks", lambda: data_sources.fetch_shopify_chargebacks()),
+    ]
+    if outlook_kpis:
+        def _outlook():
+            tok = data_sources.ms_token()
+            return {mb: data_sources.fetch_all_folder_counts(mb, tok) for mb in mailboxes}
+        tasks.append(lambda: _safe("outlook", _outlook))
+
+    res = {}
+    with _cf.ThreadPoolExecutor(max_workers=len(tasks)) as ex:
+        for kind, val, err in ex.map(lambda t: t(), tasks):
+            res[kind] = val
+            if err:
+                data[f"{kind}_error"] = err
+
+    if group_map and res.get("groups"):
+        for kid, info in res["groups"].items():
+            if kid in by_id:
+                by_id[kid]["count"], by_id[kid]["oldest_age_days"] = info["count"], info["age"]
+        data["orders_live"] = True
+
+    if res.get("booked"):
+        bs = res["booked"]
+        if "booked_overdue" in by_id:
+            by_id["booked_overdue"]["count"] = bs["overdue"]["count"]
+            by_id["booked_overdue"]["oldest_age_days"] = bs["overdue"]["age"]
+            by_id["booked_overdue"]["source"] = "Monday · Orders board (live)"
+        if "booked_future" in by_id:
+            by_id["booked_future"]["count"], by_id["booked_future"]["oldest_age_days"] = \
+                bs["future"]["count"], 0
+            by_id["booked_future"]["source"] = "Monday · Orders board (live)"
+
+    for kid in ("invoices", "discrepancies"):
+        if res.get(kid) and kid in by_id:
+            by_id[kid]["count"], by_id[kid]["oldest_age_days"] = res[kid]["count"], res[kid]["age"]
+            by_id[kid]["source"] = "Monday · subitems (live)"
+
+    if res.get("complaints") and "complaints" in by_id:
+        by_id["complaints"]["count"] = res["complaints"]["count"]
+        by_id["complaints"]["oldest_age_days"] = res["complaints"]["age"]
+        by_id["complaints"]["source"] = "Monday · Customer Stage = Complaint (live)"
+
+    if outlook_kpis and res.get("outlook") is not None:
+        data["outlook_live"] = True
+        for k in outlook_kpis:
+            spec = k["outlook"]
+            fmap = res["outlook"].get(spec["mailbox"], {})
+            hit = data_sources.match_folder(fmap, spec["folder"])
+            if hit:
+                k["count"], k["oldest_age_days"], k["unread"] = hit["count"], 0, hit["unread"]
+            else:
+                k["folder_error"] = "folder not found"
+
+    if res.get("chargebacks") and "chargebacks" in by_id:
+        by_id["chargebacks"]["count"] = res["chargebacks"]["count"]
+        by_id["chargebacks"]["oldest_age_days"] = res["chargebacks"]["age"]
+        by_id["chargebacks"]["source"] = "Shopify · Live disputes"
         data["shopify_live"] = True
-    except Exception as e:  # noqa: BLE001 — fall back to the Monday number
-        data["shopify_error"] = str(e)
     return data
 
 
