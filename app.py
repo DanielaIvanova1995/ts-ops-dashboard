@@ -1910,13 +1910,12 @@ def _build_quote(email_id, email_body):
         return {"error": str(e)}
     lines = []
     for it in (parsed.get("items") or []):
-        q = (it.get("code") or "").strip() or (it.get("description") or "")
         try:
-            cands = data_sources.shopify_search_variants(q, first=3)
+            match = data_sources.match_quote_variant(it.get("code"), it.get("description"))
         except Exception:  # noqa: BLE001
-            cands = []
+            match = None
         lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
-                      "match": cands[0] if cands else None})
+                      "match": match})
     parsed["lines"] = lines
     return parsed
 

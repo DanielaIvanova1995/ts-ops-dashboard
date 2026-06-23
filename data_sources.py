@@ -1051,6 +1051,57 @@ def shopify_search_variants(query: str, first: int = 5, token: str | None = None
     return out
 
 
+def _norm_sku(s: str) -> str:
+    import re as _re
+    return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _best_title_match(cands: list, query: str):
+    """Pick the candidate whose title best overlaps the query words; tie-break on
+    having a price and being in stock."""
+    import re as _re
+    qwords = {w for w in _re.findall(r"[a-z0-9]+", (query or "").lower()) if len(w) > 2}
+
+    def score(c):
+        twords = set(_re.findall(r"[a-z0-9]+", (c.get("title") or "").lower()))
+        return (len(qwords & twords), c.get("price") is not None, bool(c.get("available")))
+
+    return max(cands, key=score) if cands else None
+
+
+def match_quote_variant(code: str | None, description: str | None,
+                        token: str | None = None):
+    """Match a requested line to a Shopify variant. SKU first: try the given code as
+    an exact SKU; if there's no code or no SKU hit, fall back to the best title match
+    in the product range. Returns a variant dict or None."""
+    token = token or shopify_products_token()
+    code = (code or "").strip()
+    desc = (description or "").strip()
+
+    # 1) SKU first — exact code wins.
+    if code:
+        try:
+            cands = shopify_search_variants(f"sku:{code}", first=5, token=token)
+        except Exception:  # noqa: BLE001
+            cands = []
+        nc = _norm_sku(code)
+        exact = next((c for c in cands if _norm_sku(c.get("sku")) == nc), None)
+        if exact:
+            return exact
+        if cands:  # close SKU hit (e.g. variant suffix)
+            return cands[0]
+
+    # 2) Best title match in the range.
+    query = desc or code
+    if not query:
+        return None
+    try:
+        cands = shopify_search_variants(query, first=10, token=token)
+    except Exception:  # noqa: BLE001
+        cands = []
+    return _best_title_match(cands, query)
+
+
 def create_draft_order(line_items, email=None, note=None, token: str | None = None) -> dict:
     """Create a Shopify draft order from line_items [{variantId, quantity}]. Shopify
     prices it. Returns {id, name, invoiceUrl, total}. Needs write_draft_orders."""
