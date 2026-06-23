@@ -2098,6 +2098,21 @@ def _qbadge(text, bg, fg="#fff"):
             f'font-size:11px;font-weight:700;white-space:nowrap">{text}</span>')
 
 
+def _quote_legend():
+    items = [
+        ("New", "#2563EB", "Brand-new enquiry (first contact)"),
+        ("Follow-up", "#B45309", "Part of an existing conversation"),
+        ("Ready", "#16A34A", "Has products + quantities — quote now"),
+        ("Needs info", "#6B7280", "Missing detail — ask the customer first"),
+        ("URGENT", "#DC2626", "Customer needs it quickly / by a date"),
+    ]
+    cells = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:6px;margin:2px 14px 2px 0">'
+        f'{_qbadge(lbl, bg)}<span style="font-size:11.5px;color:var(--muted)">{desc}</span></span>'
+        for lbl, bg, desc in items)
+    st.markdown(f'<div style="margin:2px 0 8px">{cells}</div>', unsafe_allow_html=True)
+
+
 def _render_quote_overview(emails):
     triage = _quote_triage(emails)
     errs = [t["error"] for t in triage.values() if t.get("error")]
@@ -2107,6 +2122,7 @@ def _render_quote_overview(emails):
         else:
             st.warning("Couldn't summarise the emails: " + errs[0][:160])
         return
+    _quote_legend()
 
     n_new = n_fu = n_ready = n_urgent = 0
     rows = ""
