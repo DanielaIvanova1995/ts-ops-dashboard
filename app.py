@@ -2531,8 +2531,12 @@ def render_quotes():
             static = bool(data_sources.get_secret("SHOPIFY_ADMIN_TOKEN"))
             st.write("**Token source:**",
                      "Static SHOPIFY_ADMIN_TOKEN" if static else "client-credentials (Client ID/Secret)")
+            cid = data_sources.get_secret("SHOPIFY_CLIENT_ID") or ""
+            st.write("**Client ID in use:**", (cid[:10] + "…") if cid else "(none)")
             try:
-                scopes = data_sources.shopify_token_scopes()
+                info = data_sources.shopify_token_scopes()
+                st.write("**App this token belongs to:**", info.get("app") or "(unknown)")
+                scopes = info.get("scopes") or []
                 st.write("**Scopes this token actually has:**", scopes or "(none)")
                 need = ["read_products", "read_orders", "write_draft_orders"]
                 missing = [s for s in need if s not in scopes]

@@ -246,12 +246,12 @@ def shopify_products_token() -> str:
     return tok
 
 
-def shopify_token_scopes() -> list:
-    """The access scopes the CURRENT Shopify token actually carries — the definitive
-    check of what the live app can do. Raises on auth failure."""
+def shopify_token_scopes() -> dict:
+    """Which app the CURRENT token belongs to + the scopes it actually carries — the
+    definitive check of what the live app can do. Raises on auth failure."""
     store = get_secret("SHOPIFY_STORE")
     token = shopify_products_token()
-    q = "{ currentAppInstallation { accessScopes { handle } } }"
+    q = "{ currentAppInstallation { app { title } accessScopes { handle } } }"
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": q},
@@ -261,7 +261,8 @@ def shopify_token_scopes() -> list:
     if payload.get("errors"):
         raise RuntimeError(str(payload["errors"]))
     inst = (payload.get("data") or {}).get("currentAppInstallation") or {}
-    return [s["handle"] for s in (inst.get("accessScopes") or [])]
+    return {"app": (inst.get("app") or {}).get("title"),
+            "scopes": [s["handle"] for s in (inst.get("accessScopes") or [])]}
 
 
 def shopify_variant_price(sku: str) -> dict | None:
