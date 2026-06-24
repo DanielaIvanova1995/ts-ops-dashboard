@@ -1263,9 +1263,10 @@ def match_quote_variant(code: str | None, description: str | None,
 
 def create_draft_order(line_items, email=None, note=None, token: str | None = None) -> dict:
     """Create a Shopify draft order from line_items [{variantId, quantity}]. Shopify
-    prices it. Returns {id, name, invoiceUrl, total}. Needs write_draft_orders."""
+    prices it. Returns {id, name, invoiceUrl, total}. Needs write_draft_orders.
+    Retries once with a freshly-minted token if the cached one lacks the scope (so a
+    just-granted scope works without rebooting the app)."""
     store = get_secret("SHOPIFY_STORE")
-    token = token or shopify_products_token()
     mutation = ("mutation ($input: DraftOrderInput!) { draftOrderCreate(input: $input) { "
                 "draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount } } } "
                 "userErrors { field message } } }")
@@ -1275,14 +1276,27 @@ def create_draft_order(line_items, email=None, note=None, token: str | None = No
         inp["email"] = email
     if note:
         inp["note"] = note
-    r = requests.post(
-        f"https://{store}/admin/api/2024-10/graphql.json",
-        json={"query": mutation, "variables": {"input": inp}},
-        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"}, timeout=25)
-    r.raise_for_status()
-    payload = r.json()
-    if payload.get("errors"):
-        raise RuntimeError(f"Shopify error: {payload['errors']}")
+
+    def _attempt(tok):
+        r = requests.post(
+            f"https://{store}/admin/api/2024-10/graphql.json",
+            json={"query": mutation, "variables": {"input": inp}},
+            headers={"X-Shopify-Access-Token": tok, "Content-Type": "application/json"},
+            timeout=25)
+        r.raise_for_status()
+        return r.json()
+
+    tok = token or shopify_products_token()
+    payload = _attempt(tok)
+    errs = payload.get("errors")
+    denied = errs and any("access denied" in str(e.get("message", "")).lower() for e in errs)
+    if denied and not token:
+        # Cached token may predate a scope change — mint a fresh one and try again.
+        _SHOP_TOK["token"] = None
+        payload = _attempt(shopify_products_token())
+        errs = payload.get("errors")
+    if errs:
+        raise RuntimeError(f"Shopify error: {errs}")
     res = payload["data"]["draftOrderCreate"]
     if res["userErrors"]:
         raise RuntimeError(res["userErrors"][0]["message"])
