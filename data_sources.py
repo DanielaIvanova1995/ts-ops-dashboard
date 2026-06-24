@@ -246,6 +246,24 @@ def shopify_products_token() -> str:
     return tok
 
 
+def shopify_token_scopes() -> list:
+    """The access scopes the CURRENT Shopify token actually carries — the definitive
+    check of what the live app can do. Raises on auth failure."""
+    store = get_secret("SHOPIFY_STORE")
+    token = shopify_products_token()
+    q = "{ currentAppInstallation { accessScopes { handle } } }"
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": q},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"}, timeout=20)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(str(payload["errors"]))
+    inst = (payload.get("data") or {}).get("currentAppInstallation") or {}
+    return [s["handle"] for s in (inst.get("accessScopes") or [])]
+
+
 def shopify_variant_price(sku: str) -> dict | None:
     """Live current Shopify price for a SKU (tries the bare SKU and a leading
     'TSO' prefix). Returns {price, vendor, url} if sold, or None if not on

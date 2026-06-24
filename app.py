@@ -2526,6 +2526,31 @@ def render_quotes():
                "**Shopify draft order** + an **Outlook draft reply** (with the draft-order number in "
                "the subject) for you to review and send. Uses your Anthropic key.")
 
+    with st.expander("🔧 Shopify connection check (run if quotes won't price or draft)"):
+        if st.button("Run Shopify check", key="shopdiag"):
+            static = bool(data_sources.get_secret("SHOPIFY_ADMIN_TOKEN"))
+            st.write("**Token source:**",
+                     "Static SHOPIFY_ADMIN_TOKEN" if static else "client-credentials (Client ID/Secret)")
+            try:
+                scopes = data_sources.shopify_token_scopes()
+                st.write("**Scopes this token actually has:**", scopes or "(none)")
+                need = ["read_products", "read_orders", "write_draft_orders"]
+                missing = [s for s in need if s not in scopes]
+                if missing:
+                    st.error("MISSING scopes: " + ", ".join(missing)
+                             + " — the token predates the version that granted them; "
+                             "generate a NEW token after releasing and update the secret.")
+                else:
+                    st.success("All required scopes present ✓")
+            except Exception as e:  # noqa: BLE001
+                st.error("Token/auth failed: " + str(e)[:300]
+                         + " — the token is invalid or not installed.")
+            try:
+                v = data_sources.shopify_search_variants("Hardie Plank", first=1)
+                st.write("**Product read test:**", "OK ✓" if v else "no results", (v or [])[:1])
+            except Exception as e:  # noqa: BLE001
+                st.error("Product read failed: " + str(e)[:300])
+
     mode = st.radio("View", ["📧 Email requests", "🧱 Hardie cladding calculator"],
                     horizontal=True, label_visibility="collapsed")
     if mode.startswith("🧱"):
