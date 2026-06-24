@@ -213,12 +213,21 @@ _SHOP_TOK = {"token": None}
 
 
 def shopify_configured() -> bool:
-    return all(get_secret(s) for s in ("SHOPIFY_STORE", "SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET"))
+    store = get_secret("SHOPIFY_STORE")
+    has_static = bool(get_secret("SHOPIFY_ADMIN_TOKEN"))
+    has_oauth = bool(get_secret("SHOPIFY_CLIENT_ID") and get_secret("SHOPIFY_CLIENT_SECRET"))
+    return bool(store and (has_static or has_oauth))
 
 
 def shopify_products_token() -> str:
     if _SHOP_TOK["token"]:
         return _SHOP_TOK["token"]
+    # Prefer a static Admin API token (e.g. the app's automation token) if provided —
+    # it carries the app's granted scopes directly, sidestepping client-credentials.
+    static = get_secret("SHOPIFY_ADMIN_TOKEN")
+    if static:
+        _SHOP_TOK["token"] = static
+        return static
     store = get_secret("SHOPIFY_STORE")
     cid = get_secret("SHOPIFY_CLIENT_ID")
     csec = get_secret("SHOPIFY_CLIENT_SECRET")
