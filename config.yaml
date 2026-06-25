@@ -20,23 +20,23 @@ credentials:
       name: Natasha Stewart
       email: natasha@tradesuperstoreonline.co.uk
       role: staff
-      password: $2b$12$QKlUmY3M74cXDGAPcJaGE.OJPhwVI5viCrVlOF3f5WgZWDtIi6/QK
+      password: $2b$12$BwzJHH53p2pGtHbwgfKfqOLa78YIRdi12KRgYmt1zgUTTskk3hyse
     megan:
       name: Megan Steer
       email: megan@tradesuperstoreonline.co.uk
       role: staff
-      password: $2b$12$gmdhypfptrcrVOJ2Ibwa4OF0/inAWIv6DID3HeNm1J5BYfULDD9u.
+      password: $2b$12$8LzNd.m9hkxgYXAqJaHer.d6.W0LJJUoXpbURrv03ATJAYjcb3Cyu
     melissa:
       name: Melissa Covaci
       email: mel@tradesuperstoreonline.co.uk
       role: staff
-      password: $2b$12$yIYEcdLELFfKR2VJU3My7.Bxx.QT8wMWBZ9g983vrDjbpXFrNLBTe
+      password: $2b$12$XgUg/j85C6cDRlU3Xiud5.pz4.FlSP9Nv.VPo54O3QU4q2NsGNsyK
     malyeka:
       name: Malyeka Najib
       email: malyeka@tradesuperstoreonline.co.uk
       role: staff
       exclude_from_pairing: true
-      password: $2b$12$Vq3vGp/.AhFjeEYQlEtpIuAVJ7X.usZYnbujKB8r9ZriLjpOfENoq
+      password: $2b$12$y7sRRd2okVseWO2LaynYeOnG5cN/G.6cszhkXQvftsIdHUFnRweVi
     daniela:
       name: Daniela
       email: daniela@tradesuperstoreonline.co.uk
@@ -46,7 +46,7 @@ credentials:
       name: Lorena
       email: lorena@tradesuperstoreonline.co.uk
       role: staff
-      password: $2b$12$gn9.0jLANLqruO5pfygBd.Mx.gQiMST1dJDTKo6eZOstVVJqAaxYK
+      password: $2b$12$QbI29E474hsVmw8ypsfU4..5sEiTDR6FcKMh/tKpGBl1.Tj2O5vFK
     office:
       # Shared office login — restricted to the Daily Ops module only (role: office).
       name: Office

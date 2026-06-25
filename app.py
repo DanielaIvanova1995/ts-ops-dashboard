@@ -3093,9 +3093,18 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
-    # --- Menu (the office login only sees Daily Ops) ---
+    # --- Menu (role-gated) ---
+    #   admin / manager : everything, including Invoice Check
+    #   office          : Daily Ops only
+    #   staff (others)  : Daily Ops, Daily Activity, Quotes, Pricing (no Invoice Check)
     all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check")
-    menu = ("Daily Ops",) if role == "office" else all_modules
+    staff_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing")
+    if role == "office":
+        menu = ("Daily Ops",)
+    elif role in ("admin", "manager"):
+        menu = all_modules
+    else:
+        menu = staff_modules
     if "module" not in st.session_state or st.session_state.module not in menu:
         st.session_state.module = "Daily Ops"
     for _m in menu:
@@ -3143,8 +3152,11 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Module dispatch — Pricing renders here and stops before the Daily Ops view.
 # ---------------------------------------------------------------------------
-# Office login is locked to Daily Ops, whatever the session state says.
+# Role guards (enforced even if session state is tampered):
+#   office → Daily Ops only · only admin/manager may open Invoice Check.
 if role == "office":
+    module = "Daily Ops"
+elif role not in ("admin", "manager") and module == "Invoice Check":
     module = "Daily Ops"
 
 if module == "Pricing":
