@@ -1214,11 +1214,11 @@ def extract_quote_items(email_text: str) -> dict:
 
 
 def shopify_search_variants(query: str, first: int = 5, token: str | None = None) -> list:
-    """Search Shopify variants → [{variant_id, sku, price, title, available}]."""
+    """Search Shopify variants → [{variant_id, sku, price, title, vendor, available}]."""
     store = get_secret("SHOPIFY_STORE")
     token = token or shopify_products_token()
     q = ("query ($q: String!, $n: Int!) { productVariants(first: $n, query: $q) { edges { node "
-         "{ id sku price availableForSale title product { title } } } } }")
+         "{ id sku price availableForSale title product { title vendor } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": q, "variables": {"q": query, "n": first}},
@@ -1234,8 +1234,51 @@ def shopify_search_variants(query: str, first: int = 5, token: str | None = None
         out.append({"variant_id": n["id"], "sku": n.get("sku"),
                     "price": float(n["price"]) if n.get("price") is not None else None,
                     "available": n.get("availableForSale"),
+                    "vendor": prod.get("vendor"),
                     "title": prod.get("title") or n.get("title")})
     return out
+
+
+# Product-category brand locks: if a requested line matches the keywords, ONLY quote
+# products from the given brand/vendor (never anything else). Add rules here to extend.
+QUOTE_BRAND_LOCKS = [
+    {"brand": "Molan",
+     "keywords": ["polycarbonate", "poly carbonate", "multiwall", "multi-wall", "multi wall",
+                  "twinwall", "twin wall", "ezglaze", "ez glaze", "ez-glaze", "solid sheet",
+                  "solid polycarbonate"]},
+]
+
+
+def _brand_lock_for(text: str):
+    """Return the brand a requested line is locked to (e.g. polycarbonate → Molan), or None."""
+    t = (text or "").lower()
+    for rule in QUOTE_BRAND_LOCKS:
+        if any(k in t for k in rule["keywords"]):
+            return rule["brand"]
+    return None
+
+
+def _match_branded(code: str, desc: str, brand: str, token: str):
+    """Find the best matching variant restricted to a single brand/vendor. Returns None
+    if nothing from that brand matches (so we never quote a different brand)."""
+    bl = brand.lower()
+    seen = {}
+    queries = []
+    if code:
+        queries.append(f"sku:{code}")
+    queries.append(f"{brand} {desc}".strip())
+    queries.append((desc or code or brand).strip())
+    for qy in queries:
+        if not qy:
+            continue
+        try:
+            for c in shopify_search_variants(qy, first=20, token=token):
+                seen[c["variant_id"]] = c
+        except Exception:  # noqa: BLE001
+            pass
+    branded = [c for c in seen.values()
+               if bl in ((c.get("vendor") or "") + " " + (c.get("title") or "")).lower()]
+    return _best_title_match(branded, desc or code) if branded else None
 
 
 def _norm_sku(s: str) -> str:
@@ -1264,6 +1307,11 @@ def match_quote_variant(code: str | None, description: str | None,
     token = token or shopify_products_token()
     code = (code or "").strip()
     desc = (description or "").strip()
+
+    # 0) Brand lock — e.g. any polycarbonate (solid / multiwall / EZ Glaze) → Molan only.
+    brand = _brand_lock_for(f"{code} {desc}")
+    if brand:
+        return _match_branded(code, desc, brand, token)
 
     # 1) SKU first — exact code wins.
     if code:
