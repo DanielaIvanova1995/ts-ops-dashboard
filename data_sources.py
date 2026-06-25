@@ -1300,16 +1300,18 @@ def _best_title_match(cands: list, query: str):
 
 
 def match_quote_variant(code: str | None, description: str | None,
-                        token: str | None = None):
+                        token: str | None = None, brand: str | None = None):
     """Match a requested line to a Shopify variant. SKU first: try the given code as
     an exact SKU; if there's no code or no SKU hit, fall back to the best title match
-    in the product range. Returns a variant dict or None."""
+    in the product range. Pass brand=... to force a brand/vendor (e.g. 'Molan').
+    Returns a variant dict or None."""
     token = token or shopify_products_token()
     code = (code or "").strip()
     desc = (description or "").strip()
 
-    # 0) Brand lock — e.g. any polycarbonate (solid / multiwall / EZ Glaze) → Molan only.
-    brand = _brand_lock_for(f"{code} {desc}")
+    # 0) Brand lock — explicit (brand=...) or detected (polycarbonate → Molan). When
+    #    locked, only that brand/vendor can be quoted.
+    brand = brand or _brand_lock_for(f"{code} {desc}")
     if brand:
         return _match_branded(code, desc, brand, token)
 

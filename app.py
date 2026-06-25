@@ -2516,6 +2516,170 @@ def render_cladding_calc():
                        "draft manually, or tell me the exact product names and I'll map them.")
 
 
+# Polycarbonate roof take-off — Molan range only (vendor-locked). Glazing bars run with
+# the slope, one more than the number of sheets; sealing tape top, vented tape bottom.
+POLY_SHEETS = {
+    "10mm Twinwall": "Twinwall", "16mm Multiwall": "Multiwall", "25mm Multiwall": "Multiwall",
+    "32mm Multiwall": "Multiwall", "35mm Multiwall": "Multiwall",
+}
+POLY_COLOURS = ["Clear", "Opal", "Bronze", "Heatguard Opal", "Bronze on Opal"]
+POLY_WIDTHS = {"700 mm": 700, "1050 mm": 1050, "1200 mm": 1200, "2100 mm": 2100}
+POLY_SYSTEMS = {
+    "Self-Supported (16/35mm)": {"end": "Self Supported End Bar",
+                                 "inter": "Self Supported Intermediate Bar",
+                                 "wallplate": "Wallplate Assembly", "eaves": None},
+    "Artisan": {"end": "Artisan Edge Bar + End Cap", "inter": "Artisan Intermediate Bar + End Cap",
+                "wallplate": "Artisan Full Wallplate", "eaves": "Artisan Eaves Beam"},
+}
+POLY_BAR_LENGTHS = [2, 3, 4, 6]
+
+
+def _poly_takeoff(inp):
+    """Roof dimensions + sheet/system choice -> Molan take-off lines. Each line carries
+    a 'search' string matched against Molan products only."""
+    import math
+    width, rake = inp["width"], inp["rake"]
+    sw_m = inp["sheet_width_mm"] / 1000.0
+    sheets = math.ceil(width / sw_m) if (width and sw_m) else 0
+    barlen = next((b for b in POLY_BAR_LENGTHS if b >= rake), 6) if rake else 0
+    inter = max(0, sheets - 1)
+    ends = 2 if sheets else 0
+    sysd = POLY_SYSTEMS[inp["system"]]
+    bc = inp["bar_colour"]
+    kind = POLY_SHEETS[inp["sheet_type"]]
+    thick = inp["sheet_type"].split("mm")[0] + "mm"
+    colour = inp["colour"]
+    pieces = lambda run, plen: math.ceil(run / plen) if run > 0 else 0  # noqa: E731
+    lines = [
+        ("sheet", f"{thick} {colour} {kind} sheet — {inp['sheet_width_mm']}mm × {rake:.1f}m",
+         sheets, "sheet", f"{thick} {colour} {kind} Polycarbonate Sheet"),
+        ("inter", f"{inp['system']} intermediate bar {bc} — {barlen}m", inter, "bar",
+         f"{sysd['inter']} {bc} {barlen}m"),
+        ("end", f"{inp['system']} end/edge bar {bc} — {barlen}m", ends, "bar",
+         f"{sysd['end']} {bc} {barlen}m"),
+        ("wallplate", f"Wallplate {bc} (top, along {width:.1f}m)", pieces(width, 4), "length",
+         f"{sysd['wallplate']} {bc} 4m"),
+    ]
+    if sysd["eaves"]:
+        lines.append(("eaves", f"Eaves beam {bc} (front, along {width:.1f}m)", pieces(width, 4),
+                      "length", f"{sysd['eaves']} {bc} 4m"))
+    if inp["include_acc"]:
+        lines += [
+            ("antidust", "Anti-dust tape (seals sheet tops)", max(1, pieces(width, 33)), "roll",
+             "Anti Dust Tape"),
+            ("foil", "Vented foil tape (sheet bottoms)", max(1, pieces(width, 33)), "roll",
+             "Aluminium Foil Blanking Tape"),
+        ]
+    out = [{"key": k, "item": it, "qty": q, "unit": u, "search": s}
+           for k, it, q, u, s in lines if q > 0]
+    note = ""
+    if rake > 6:
+        note = (f"Slope is {rake:.1f}m — longer than a 6m bar/sheet, so bars and sheets will "
+                "need joining (extra H-section/joints not yet added).")
+    return out, {"sheets": sheets, "bars": inter + ends, "barlen": barlen, "note": note}
+
+
+def render_poly_calc():
+    st.markdown("### 🪟 Polycarbonate roof calculator — Molan")
+    st.caption("Works out sheets, glazing bars, wallplate/eaves and tapes for a polycarbonate "
+               "roof, **priced from Molan products only**. Glazing bars run with the slope "
+               "(one more than the number of sheets).")
+    with st.form("poly"):
+        c1, c2, c3 = st.columns(3)
+        sheet_type = c1.selectbox("Sheet", list(POLY_SHEETS))
+        colour = c2.selectbox("Colour", POLY_COLOURS)
+        sheet_width_label = c3.selectbox("Sheet width", list(POLY_WIDTHS), index=1)
+        c4, c5, c6 = st.columns(3)
+        system = c4.selectbox("Glazing system", list(POLY_SYSTEMS))
+        bar_colour = c5.selectbox("Bar colour", ["White", "Brown"])
+        include_acc = c6.checkbox("Include tapes", value=True)
+        st.markdown("**Roof size** (width = along the wall; slope = eaves-to-ridge length)")
+        a1, a2 = st.columns(2)
+        width = a1.number_input("Roof width m", min_value=0.0, value=0.0, step=0.1)
+        rake = a2.number_input("Slope length m", min_value=0.0, value=0.0, step=0.1)
+        go = st.form_submit_button("Calculate take-off", type="primary")
+
+    if go:
+        st.session_state["poly_calc"] = {
+            "sheet_type": sheet_type, "colour": colour,
+            "sheet_width_mm": POLY_WIDTHS[sheet_width_label], "system": system,
+            "bar_colour": bar_colour, "include_acc": include_acc, "width": width, "rake": rake}
+        st.session_state.pop("poly_priced", None)
+
+    data = st.session_state.get("poly_calc")
+    if not data:
+        return
+    lines, meta = _poly_takeoff(data)
+    if not lines:
+        st.info("Enter the roof width and slope length to calculate.")
+        return
+    st.markdown(f"**{meta['sheets']} sheets across · {meta['bars']} glazing bars "
+                f"({meta['barlen']}m)**")
+    if meta["note"]:
+        st.warning(meta["note"])
+
+    priced = st.session_state.get("poly_priced")
+    rows, total = "", 0.0
+    for l in lines:
+        m = (priced or {}).get(l["key"]) if priced else None
+        if m and m.get("price") is not None:
+            prod = (f'{_esc(m.get("title") or "?")}<div style="color:var(--muted);font-size:11px">'
+                    f'SKU {_esc(m.get("sku") or "—")}</div>')
+            unit = f"£{m['price']:,.2f}"
+            lt = m["price"] * l["qty"]
+            total += lt
+            line = f"£{lt:,.2f}"
+        elif priced:
+            prod = '<span style="color:#ef4444">no Molan match — add manually</span>'
+            unit = line = "—"
+        else:
+            prod = unit = line = "—"
+        rows += (f'<tr style="border-top:1px solid var(--line)">'
+                 f'<td style="padding:6px 10px">{_esc(l["item"])}</td>'
+                 f'<td style="padding:6px 10px;text-align:center">{l["qty"]}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{unit}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{line}</td>'
+                 f'<td style="padding:6px 10px">{prod}</td></tr>')
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+                '<tr style="text-align:left;color:var(--muted)">'
+                '<th style="padding:6px 10px">Item</th>'
+                '<th style="padding:6px 10px;text-align:center">Qty</th>'
+                '<th style="padding:6px 10px;text-align:right">Unit £</th>'
+                '<th style="padding:6px 10px;text-align:right">Line £</th>'
+                '<th style="padding:6px 10px">Matched Molan product</th></tr>'
+                + rows + "</table>", unsafe_allow_html=True)
+    if priced:
+        st.markdown(f"**Materials subtotal (matched, ex-VAT): £{total:,.2f}**")
+
+    b1, b2 = st.columns(2)
+    if b1.button("Price from Molan", key="poly_price"):
+        out = {}
+        with st.spinner("Pricing from Molan…"):
+            for l in lines:
+                try:
+                    out[l["key"]] = data_sources.match_quote_variant(None, l["search"], brand="Molan")
+                except Exception:  # noqa: BLE001
+                    out[l["key"]] = None
+        st.session_state["poly_priced"] = out
+        st.rerun()
+    if priced:
+        matched = [l for l in lines if priced.get(l["key"]) and priced[l["key"]].get("variant_id")]
+        if matched and b2.button("Build Shopify draft order", type="primary", key="poly_draft"):
+            try:
+                li = [{"variantId": priced[l["key"]]["variant_id"], "quantity": l["qty"]}
+                      for l in matched]
+                do = data_sources.create_draft_order(
+                    li, note=f"Polycarbonate roof (Molan) — {data['sheet_type']} {data['colour']} "
+                    f"— {data['width']}×{data['rake']}m")
+                st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}).")
+                st.markdown(f"[Open the Shopify draft order]({do['invoiceUrl']})")
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't create the draft: " + str(e)[:240])
+        if len(matched) < len(lines):
+            st.caption(f"{len(lines) - len(matched)} line(s) had no Molan match — tell me the exact "
+                       "Molan product names and I'll map them.")
+
+
 def render_quotes():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -2555,10 +2719,14 @@ def render_quotes():
             except Exception as e:  # noqa: BLE001
                 st.error("Product read failed: " + str(e)[:300])
 
-    mode = st.radio("View", ["📧 Email requests", "🧱 Hardie cladding calculator"],
+    mode = st.radio("View", ["📧 Email requests", "🧱 Hardie cladding calculator",
+                             "🪟 Polycarbonate calculator"],
                     horizontal=True, label_visibility="collapsed")
     if mode.startswith("🧱"):
         render_cladding_calc()
+        return
+    if mode.startswith("🪟"):
+        render_poly_calc()
         return
 
     data = _quote_emails()
