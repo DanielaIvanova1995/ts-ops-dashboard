@@ -2579,8 +2579,144 @@ def _poly_takeoff(inp):
     return out, {"sheets": sheets, "bars": inter + ends, "barlen": barlen, "note": note}
 
 
+EZGLAZE_COLOURS = {
+    "Clear": ("EZ Glaze Clear", "CLR"),
+    "Breeze Blue": ("EZ Glaze Breeze Blue", "BREEZE"),
+    "Solar Ice": ("EZ Glaze Solar Ice", "SOLARICE"),
+    "Beehive Clear": ("Beehive EZ Glaze", "BEEHIVECLR"),
+}
+EZGLAZE_LENGTHS = [2.5, 3, 3.5, 4, 6, 7]
+
+
+def _ezglaze_takeoff(inp):
+    """EZ Glaze corrugated roof → Molan take-off. Sheets are SKU-exact; accessory
+    quantities are estimates to confirm."""
+    import math
+    width, slope, cover = inp["width"], inp["slope"], inp["cover"]
+    sheets = math.ceil(width / cover) if (width and cover) else 0
+    length = next((L for L in EZGLAZE_LENGTHS if L >= slope), 7) if slope else 0
+    cname, ccode = EZGLAZE_COLOURS[inp["colour"]]
+    # length suffix in the SKU (2.5 is written "25" for most, "2.5" for Breeze)
+    suffixes = (["25", "2.5"] if length == 2.5 else
+                [("%g" % length)])
+    sheet_skus = [f"EZGLAZE{ccode}-{s}" for s in suffixes]
+    lines = [
+        {"key": "sheet", "item": f"{cname} corrugated sheet — {length:g}m",
+         "qty": sheets, "unit": "sheet", "skus": sheet_skus, "search": cname},
+        {"key": "foam", "item": "EZ Glaze foam sealing strip (eaves/ridge)",
+         "qty": max(1, sheets), "unit": "strip", "skus": ["EZGLAZEFOAM"], "search": "EZ Glaze Foam"},
+        {"key": "screws", "item": "EZ Glaze screws & washers (50 pack)",
+         "qty": max(1, math.ceil(sheets / 3)), "unit": "pack", "skus": ["EZGLAZESCREW50"],
+         "search": "EZ Glaze Screw 50"},
+        {"key": "wallconn", "item": f"EZ Glaze 60mm wall connector (2m, along {width:.1f}m)",
+         "qty": max(1, math.ceil(width / 2)) if width else 0, "unit": "length",
+         "skus": ["EZGLAZEW-CONN2M"], "search": "EZ Glaze Wall Connector"},
+    ]
+    out = [l for l in lines if l["qty"] > 0]
+    return out, {"sheets": sheets, "length": length}
+
+
+def _render_ezglaze_calc():
+    st.caption("EZ Glaze corrugated roof, **Molan only**. Sheets are matched to the exact "
+               "EZ Glaze length; accessory quantities are estimates — confirm against the job.")
+    with st.form("ezg"):
+        c1, c2, c3 = st.columns(3)
+        colour = c1.selectbox("Colour", list(EZGLAZE_COLOURS))
+        cover = c2.number_input("Sheet cover width m", min_value=0.3, value=1.0, step=0.05,
+                                help="EZ Glaze corrugated cover width — confirm for your profile.")
+        c3.markdown("&nbsp;")
+        a1, a2 = st.columns(2)
+        width = a1.number_input("Roof width m", min_value=0.0, value=0.0, step=0.1)
+        slope = a2.number_input("Slope length m (eaves→ridge)", min_value=0.0, value=0.0, step=0.1)
+        go = st.form_submit_button("Calculate take-off", type="primary")
+    if go:
+        st.session_state["ezg_calc"] = {"colour": colour, "cover": cover,
+                                        "width": width, "slope": slope}
+        st.session_state.pop("ezg_priced", None)
+    data = st.session_state.get("ezg_calc")
+    if not data:
+        return
+    lines, meta = _ezglaze_takeoff(data)
+    if not lines:
+        st.info("Enter the roof width and slope length to calculate.")
+        return
+    st.markdown(f"**{meta['sheets']} sheets across, each {meta['length']:g}m long**")
+    priced = st.session_state.get("ezg_priced")
+    rows, total = "", 0.0
+    for l in lines:
+        m = (priced or {}).get(l["key"]) if priced else None
+        if m and m.get("price") is not None:
+            prod = (f'{_esc(m.get("title") or "?")}<div style="color:var(--muted);font-size:11px">'
+                    f'SKU {_esc(m.get("sku") or "—")}</div>')
+            unit = f"£{m['price']:,.2f}"
+            lt = m["price"] * l["qty"]
+            total += lt
+            line = f"£{lt:,.2f}"
+        elif priced:
+            prod = '<span style="color:#ef4444">no Molan match — add manually</span>'
+            unit = line = "—"
+        else:
+            prod = unit = line = "—"
+        rows += (f'<tr style="border-top:1px solid var(--line)">'
+                 f'<td style="padding:6px 10px">{_esc(l["item"])}</td>'
+                 f'<td style="padding:6px 10px;text-align:center">{l["qty"]}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{unit}</td>'
+                 f'<td style="padding:6px 10px;text-align:right">{line}</td>'
+                 f'<td style="padding:6px 10px">{prod}</td></tr>')
+    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+                '<tr style="text-align:left;color:var(--muted)">'
+                '<th style="padding:6px 10px">Item</th><th style="padding:6px 10px;text-align:center">Qty</th>'
+                '<th style="padding:6px 10px;text-align:right">Unit £</th>'
+                '<th style="padding:6px 10px;text-align:right">Line £</th>'
+                '<th style="padding:6px 10px">Matched Molan product</th></tr>'
+                + rows + "</table>", unsafe_allow_html=True)
+    if priced:
+        st.markdown(f"**Materials subtotal (matched, ex-VAT): £{total:,.2f}**")
+    b1, b2 = st.columns(2)
+    if b1.button("Price from Molan", key="ezg_price"):
+        out = {}
+        with st.spinner("Pricing from Molan…"):
+            for l in lines:
+                hit = None
+                for sku in l["skus"]:
+                    try:
+                        hit = data_sources.match_quote_variant(sku, l["search"], brand="Molan")
+                    except Exception:  # noqa: BLE001
+                        hit = None
+                    if hit:
+                        break
+                out[l["key"]] = hit
+        st.session_state["ezg_priced"] = out
+        st.rerun()
+    if priced:
+        matched = [l for l in lines if priced.get(l["key"]) and priced[l["key"]].get("variant_id")]
+        if matched and b2.button("Build Shopify draft order", type="primary", key="ezg_draft"):
+            try:
+                li = [{"variantId": priced[l["key"]]["variant_id"], "quantity": l["qty"]}
+                      for l in matched]
+                do = data_sources.create_draft_order(
+                    li, note=f"EZ Glaze roof (Molan) — {data['colour']} — "
+                    f"{data['width']}×{data['slope']}m")
+                st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}).")
+                st.markdown(f"[Open the Shopify draft order]({do['invoiceUrl']})")
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't create the draft: " + str(e)[:240])
+        if len(matched) < len(lines):
+            st.caption(f"{len(lines) - len(matched)} line(s) had no Molan match — tell me the exact "
+                       "product name/SKU and I'll map it.")
+
+
 def render_poly_calc():
     st.markdown("### 🪟 Polycarbonate roof calculator — Molan")
+    rtype = st.radio("Roof type", ["Multiwall + glazing bars", "EZ Glaze corrugated"],
+                     horizontal=True, key="poly_rtype")
+    if rtype.startswith("EZ"):
+        _render_ezglaze_calc()
+        return
+    _render_multiwall_poly()
+
+
+def _render_multiwall_poly():
     st.caption("Works out sheets, glazing bars, wallplate/eaves and tapes for a polycarbonate "
                "roof, **priced from Molan products only**. Glazing bars run with the slope "
                "(one more than the number of sheets).")

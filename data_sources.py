@@ -1262,6 +1262,21 @@ def _match_branded(code: str, desc: str, brand: str, token: str):
     """Find the best matching variant restricted to a single brand/vendor. Returns None
     if nothing from that brand matches (so we never quote a different brand)."""
     bl = brand.lower()
+
+    def is_brand(c):
+        return bl in ((c.get("vendor") or "") + " " + (c.get("title") or "")).lower()
+
+    # Exact SKU within the brand wins (e.g. a specific EZ Glaze length variant).
+    if code:
+        try:
+            cands = shopify_search_variants(f"sku:{code}", first=10, token=token)
+        except Exception:  # noqa: BLE001
+            cands = []
+        nc = _norm_sku(code)
+        exact = next((c for c in cands if _norm_sku(c.get("sku")) == nc and is_brand(c)), None)
+        if exact:
+            return exact
+
     seen = {}
     queries = []
     if code:
