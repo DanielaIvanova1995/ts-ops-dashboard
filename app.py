@@ -1895,7 +1895,7 @@ QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is 
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 3
+QUOTE_PARSE_VERSION = 4
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -2045,13 +2045,58 @@ def _build_quote(email):
             [parsed["missing_info"]] if parsed.get("missing_info") else [])
         qs = [str(x).strip() for x in qs if x and str(x).strip()]
         parsed["questions"] = qs
+        # Fallback: search our catalogue for the products the customer described.
+        parsed["suggestions"] = _quote_suggestions(parsed)
+        parsed["delivery_note"] = _delivery_note(parsed)
         try:
             parsed["clarify_email"] = data_sources.compose_customer_email(
                 parsed.get("thread", ""), "clarify",
-                {"customer_name": parsed.get("customer_name"), "questions": qs})
+                {"customer_name": parsed.get("customer_name"), "questions": qs,
+                 "suggestions": parsed["suggestions"], "delivery_note": parsed["delivery_note"]})
         except Exception:  # noqa: BLE001 — no AI key etc.; render falls back to a template
             parsed["clarify_email"] = None
     return parsed
+
+
+def _delivery_note(parsed):
+    """Standard stock/delivery-by-postcode note, with the internal-doors caveat when the
+    enquiry involves doors."""
+    note = ("Please note that stock availability and delivery charges can vary depending on the "
+            "delivery postcode — if you let us know your postcode we'll confirm both.")
+    text = " ".join(str(parsed.get(k) or "") for k in ("product_range", "summary")).lower()
+    text += " " + " ".join(str(it.get("description") or "")
+                           for it in (parsed.get("items") or [])).lower()
+    if "door" in text:
+        note += (" Internal doors in particular cannot be quoted for delivery until we have a "
+                 "delivery postcode.")
+    return note
+
+
+def _quote_suggestions(parsed, limit=5):
+    """As a fallback for vague enquiries, search our catalogue for product titles matching
+    what the customer described. Returns up to `limit` distinct titles."""
+    terms = [(it.get("description") or "").strip()
+             for it in (parsed.get("items") or []) if (it.get("description") or "").strip()]
+    if not terms:
+        for f in ("summary", "product_range"):
+            v = (parsed.get(f) or "").strip()
+            if v and v.lower() != "unclear":
+                terms.append(v)
+                break
+    titles, seen = [], set()
+    for t in terms[:3]:
+        try:
+            cands = data_sources.shopify_search_variants(t, first=5)
+        except Exception:  # noqa: BLE001
+            cands = []
+        for c in cands:
+            ti = (c.get("title") or "").strip()
+            if ti and ti.lower() not in seen:
+                seen.add(ti.lower())
+                titles.append(ti)
+            if len(titles) >= limit:
+                return titles
+    return titles
 
 
 def _first_name(*candidates):
@@ -2069,9 +2114,15 @@ def _quote_clarify_body(q, email):
         qs = ["Could you confirm the exact products and quantities you need?"]
     bullets = "\n".join(f"- {x if x.endswith('?') else x + '?'}" for x in qs)
     name = _first_name(q.get("customer_name"), email.get("from_name"))
+    sugg = [s for s in (q.get("suggestions") or []) if s and str(s).strip()]
+    sugg_txt = ""
+    if sugg:
+        sugg_txt = ("\n\nFrom what you've described, these from our range may suit — let us know "
+                    "which you'd like:\n" + "\n".join(f"- {s}" for s in sugg))
+    note = q.get("delivery_note") or _delivery_note(q)
     return (f"Hi {name},\n\nThanks for your enquiry. To put your quote together, could you "
-            "please confirm:\n\n" + bullets +
-            "\n\nOnce we have that we'll send your quote straight over.\n\n"
+            "please confirm:\n\n" + bullets + sugg_txt +
+            f"\n\n{note}\n\nOnce we have that we'll send your quote straight over.\n\n"
             "Kind regards,\nTrade Superstore Online")
 
 
@@ -2186,12 +2237,14 @@ def _render_quote_block(email):
         total_amt = do["total"] if do else total
 
         # 2) Compose the quote email from the priced lines (works with or without the draft).
+        #    No payment/quote link is included in the customer email.
+        dnote = _delivery_note(q)
         cdata = {"customer_name": q.get("customer_name"),
                  "lines": [{"qty": l["qty"], "title": l["match"]["title"],
                             "unit": l["match"]["price"],
                             "line": l["match"]["price"] * l["qty"]} for l in matched],
-                 "total": total_amt, "ref": ref, "url": url,
-                 "caveats": all_caveats, "provisional": provisional}
+                 "total": total_amt, "ref": ref,
+                 "caveats": all_caveats, "provisional": provisional, "delivery_note": dnote}
         try:
             body = data_sources.compose_customer_email(q.get("thread", ""), "quote", cdata)
         except Exception:  # noqa: BLE001
@@ -2200,12 +2253,11 @@ def _render_quote_block(email):
             cav_txt = (("\n\nA few things to check:\n"
                         + "\n".join(f"- {c}" for c in all_caveats)) if all_caveats else "")
             ref_txt = f" (ref {ref})" if ref else ""
-            url_txt = f"\n\nYou can view your quote here: {url}" if url else ""
             body = (f"Hi {_first_name(q.get('customer_name'), email.get('from_name'))},\n\n"
                     f"Thank you for your enquiry. Based on the details provided, here is your "
                     f"quote{ref_txt}:\n\n{body_lines}\n\nTotal (ex-VAT): £{total_amt:,.2f}"
-                    f"{url_txt}{cav_txt}\n\nPlease do check it over and confirm it is all correct, "
-                    "and let us know if anything needs adding or amending.\n\n"
+                    f"{cav_txt}\n\n{dnote}\n\nPlease do check it over and confirm it is all "
+                    "correct, and let us know if anything needs adding or amending.\n\n"
                     "Kind regards,\nTrade Superstore Online")
 
         # 3) Create the Outlook draft reply and mark progress.

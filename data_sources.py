@@ -1083,6 +1083,11 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         raise RuntimeError("No ANTHROPIC_API_KEY configured")
     name = (data.get("customer_name") or "").strip()
     greet = f"the customer by first name ('{name}')" if name else "the customer with 'Hello'"
+    # Standard note for every quote/clarify email: stock + delivery vary by postcode.
+    delivery_note = (data.get("delivery_note") or
+                     "Please note that stock availability and delivery charges can vary "
+                     "depending on the delivery postcode — let us know your postcode and we'll "
+                     "confirm both.")
     if kind == "quote":
         facts = ("QUOTED ITEMS (use these EXACT prices and figures, never change a number):\n"
                  + "\n".join(f"- {l['qty']} x {l['title']} @ GBP {l['unit']:.2f} "
@@ -1090,15 +1095,11 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
                  + f"\nTotal (ex-VAT): GBP {data['total']:.2f}")
         if data.get("ref"):
             facts += f"\nQuote reference: {data['ref']}"
-        if data.get("url"):
-            facts += f"\nView / accept the quote online: {data['url']}"
-        else:
-            facts += ("\n(No online quote link available — do NOT mention viewing or accepting "
-                      "online; just present the figures.)")
         cav = [c for c in (data.get("caveats") or []) if c and str(c).strip()]
         if cav:
             facts += ("\n\nASSUMPTIONS / THINGS FOR THE CUSTOMER TO CHECK (mention these clearly):\n"
                       + "\n".join(f"- {c}" for c in cav))
+        facts += "\n\nINCLUDE THIS NOTE (reword naturally): " + delivery_note
         prov = bool(data.get("provisional"))
         task = (
             "Write a warm, professional email presenting this quote. Acknowledge their enquiry "
@@ -1106,8 +1107,9 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
             "ALWAYS include a short, clearly-labelled explanation of WHAT THE QUOTE IS BASED ON — "
             "the products, the quantities, and any areas or assumptions used to work it out — so "
             "the customer can see how we got there. Present the items and prices as a clear "
-            "bulleted list, state the total and the quote reference, and invite them to view or "
-            "accept via the link. Note prices exclude VAT. "
+            "bulleted list and state the total. Note prices exclude VAT. "
+            "Do NOT include or mention any online payment/quote link. "
+            "Include the stock/delivery-by-postcode note near the end. "
             "Then ALWAYS ask the customer to check the quote over and confirm everything is "
             "correct, and to let us know if anything needs amending or adding. If any assumptions "
             "or things-to-check are listed, spell them out kindly — and where trims or accessories "
@@ -1120,10 +1122,18 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
     else:
         facts = ("DETAILS WE STILL NEED BEFORE WE CAN QUOTE:\n"
                  + "\n".join(f"- {q}" for q in (data.get("questions") or [])))
+        sugg = [s for s in (data.get("suggestions") or []) if s and str(s).strip()]
+        if sugg:
+            facts += ("\n\nPRODUCTS FROM OUR RANGE THAT MAY MATCH WHAT THEY DESCRIBED (offer these "
+                      "as suggestions to confirm):\n" + "\n".join(f"- {s}" for s in sugg))
+        facts += "\n\nINCLUDE THIS NOTE (reword naturally): " + delivery_note
         task = ("Write a warm, professional email asking the customer for the missing details so "
                 "we can prepare their quote. Acknowledge their enquiry / our previous messages "
                 "using the conversation for context. Ask the questions politely as a short "
-                "bulleted list. Do NOT restate measurements or information they already gave.")
+                "bulleted list. If suggested products from our range are listed, mention them as "
+                "options and ask the customer to confirm which they'd like. Do NOT restate "
+                "measurements or information they already gave. Include the stock/delivery-by-"
+                "postcode note. Do NOT include any online payment/quote link.")
     prompt = (
         "You write on behalf of Trade Superstore Online, a UK building-supplies retailer. "
         "British English, warm and professional, concise. Address " + greet + ". " + task + "\n"
