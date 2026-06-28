@@ -425,8 +425,14 @@ def load_kpis() -> dict:
     return data
 
 
-data = load_kpis()
-KPIS = data["kpis"]
+# Only the Daily Ops board + Summary use the live KPI fetch. Skip it on the other
+# modules so Quotes / Pricing / Finance / Invoice Check / Activity don't wait on Monday.
+_kpi_modules = ("Daily Ops",)
+if st.session_state.get("module", "Daily Ops") in _kpi_modules:
+    data = load_kpis()
+else:
+    data = {"kpis": [], "updated": "—", "_lazy": True}
+KPIS = data.get("kpis", [])
 
 
 # ---------------------------------------------------------------------------
@@ -3077,9 +3083,15 @@ def _est_margin_gbp(o):
 @st.cache_data(ttl=1800, show_spinner=False)
 def _finance_data():
     try:
-        return data_sources.fetch_finance_orders()
+        data = data_sources.fetch_finance_orders()
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
+    # Enrich once per cache period (not on every rerun): range, £ estimate, anomalies.
+    for o in data.get("orders", []):
+        o["range"] = _order_range(o.get("order_items"))
+        o["est_gbp"] = _est_margin_gbp(o)
+        o["flags"] = _order_anomalies(o)
+    return data
 
 
 def _avg(xs):
@@ -3129,10 +3141,6 @@ def render_finance():
         return
 
     orders = data["orders"]
-    for o in orders:
-        o["range"] = _order_range(o.get("order_items"))
-        o["est_gbp"] = _est_margin_gbp(o)
-        o["flags"] = _order_anomalies(o)
     st.caption("Reading group(s): " + ", ".join(f"**{t}**" for t in data["groups"])
                + (" · ⚠️ more orders exist than were pulled (showing the most recent)"
                   if data.get("more") else ""))
@@ -3465,6 +3473,11 @@ with st.sidebar:
 
     # --- Data & connections (one collapsible) ---
     with st.expander("Data & connections"):
+        if data.get("_lazy"):
+            st.caption("Live connection status loads on the **Daily Ops** page (kept off other "
+                       "pages for speed).")
+            if st.button("Check now", use_container_width=True):
+                data = load_kpis()
         st.markdown("**Monday** — " + ("🟢 live" if data.get("live") else "🟡 snapshot"))
         if not data.get("live") and data.get("live_error"):
             st.caption(data["live_error"][:200])

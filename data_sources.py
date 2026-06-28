@@ -914,7 +914,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
 
 
 def fetch_finance_orders(token: str | None = None, group_keywords=("paid",),
-                         page_size: int = 200, max_pages: int = 60) -> dict:
+                         page_size: int = 500, max_pages: int = 30) -> dict:
     """Every order in the Orders board's 'Paid & Delivered' group(s), for the Finance
     view. Returns {orders:[{id, order_no, supplier, margin, agreed_cost, order_items,
     shopify_order_id, created, month, has_invoice, group}], groups:[titles used],
