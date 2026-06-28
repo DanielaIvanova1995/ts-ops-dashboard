@@ -968,16 +968,43 @@ def _norm_code(s):
 
 
 def _parse_order_items(text):
-    """Order line text → {norm_sku: {sku, qty}}."""
+    """Order line text → {norm_sku: {sku, qty, name}}. The product name (the text before
+    'SKU:') lets us still match a line when the supplier's invoice SKU differs from ours."""
     out = {}
     for line in (text or "").split("\n"):
         skum = re.search(r"SKU:\s*([^\s|]+)", line)
         if not skum:
             continue
         qtym = re.search(r"Quantity:\s*(\d+)", line)
+        name = re.split(r"\bSKU:", line)[0].strip(" |-\t")
         out[_norm_code(skum.group(1))] = {"sku": skum.group(1),
-                                          "qty": int(qtym.group(1)) if qtym else None}
+                                          "qty": int(qtym.group(1)) if qtym else None,
+                                          "name": name}
     return out
+
+
+def _title_tokens(s):
+    return {w for w in re.findall(r"[a-z0-9]+", (s or "").lower()) if len(w) > 2}
+
+
+def _title_match(desc, order, used):
+    """When an invoice SKU isn't on the order, find the order line whose product name
+    best overlaps the invoice description. Returns its norm_sku key or None. Requires a
+    solid overlap (≥2 shared words AND ≥40% of the order line's words) to avoid bad hits."""
+    dt = _title_tokens(desc)
+    if not dt:
+        return None
+    best, best_score = None, 0
+    for k, v in order.items():
+        if k in used:
+            continue
+        ot = _title_tokens(v.get("name"))
+        if not ot:
+            continue
+        shared = len(dt & ot)
+        if shared > best_score and shared >= 2 and shared >= 0.4 * len(ot):
+            best, best_score = k, shared
+    return best
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -1120,6 +1147,7 @@ DELIVERY_CHARGES = {
     "molan": {"name": "Molan", "flat": 23.74},
     "pjh": {"name": "PJH", "flat": 25.0},
     "travisperkins": {"name": "Travis Perkins", "flat": 25.0, "free_over": 100.0},
+    "nbp": {"name": "NBP", "flat": 17.0, "free_over": 300.0},
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
@@ -1188,7 +1216,6 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             continue
 
         sk = _norm_code(sku_raw)
-        invoiced.add(sk)
         issues = []
         supcosts = pidx.get(sk) or {}
         cost = supcosts.get(supplier)
@@ -1199,16 +1226,23 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                             f"(+£{unit - cost:,.2f})"))
             elif isinstance(unit, (int, float)) and cost is None:
                 issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
-        if sk and sk not in order:
-            issues.append(("notorder", "not on the order"))
-        elif sk in order:
-            exp = order[sk]["qty"]
+        # Order match: SKU first, then fall back to the product title/name.
+        okey = sk if sk in order else _title_match(desc, order, invoiced)
+        if okey:
+            invoiced.add(okey)
+            exp = order[okey]["qty"]
             if exp is not None and qty is not None and int(qty) != exp:
                 issues.append(("qty", f"invoiced {qty} vs order {exp}"))
+            if okey != sk:
+                issues.append(("name", f"matched to order line {order[okey]['sku']} by product "
+                                       "name (invoice SKU differs)"))
+        else:
+            issues.append(("notorder", "not on the order"))
         lines.append({"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
                       "unit": unit, "cost": cost, "issues": issues})
     missing = [order[s]["sku"] for s in order if s not in invoiced]
-    n_issues = sum(len(l["issues"]) for l in lines) + len(missing)
+    # "name" notes are informational (a successful title fallback), not discrepancies.
+    n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name") + len(missing)
     return {"lines": lines, "missing": missing, "n_issues": n_issues}
 
 
@@ -1403,7 +1437,7 @@ def _run_one_invoice(inv, lbsku):
         st.caption(f"Agreed price at point of ordering (Monday £ to Supplier): £{agreed:,.2f}{extra}")
 
     badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444",
-             "noprice": "#94a3b8", "delivery": "#ea580c"}
+             "noprice": "#94a3b8", "delivery": "#ea580c", "name": "#16A34A"}
     rows = ""
     for l in res["lines"]:
         u = f"£{l['unit']:,.2f}" if isinstance(l["unit"], (int, float)) else "—"
