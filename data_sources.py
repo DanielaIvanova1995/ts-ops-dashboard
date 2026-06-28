@@ -913,6 +913,96 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     return {"invoices": out[:limit], "more": bool(cursor)}
 
 
+def fetch_finance_orders(token: str | None = None, group_keywords=("paid",),
+                         page_size: int = 200, max_pages: int = 60) -> dict:
+    """Every order in the Orders board's 'Paid & Delivered' group(s), for the Finance
+    view. Returns {orders:[{id, order_no, supplier, margin, agreed_cost, order_items,
+    shopify_order_id, created, month, has_invoice, group}], groups:[titles used],
+    all_groups:{id:title}, more:bool}. margin is the live order margin % (or None).
+    Groups are matched by title keyword so we don't hardcode a fragile group id."""
+    import re
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    all_groups = fetch_group_names(ORDERS_BOARD_ID, token)
+    target_ids = [gid for gid, t in all_groups.items()
+                  if any(k in (t or "").lower() for k in group_keywords)]
+    if not target_ids:
+        return {"orders": [], "groups": [], "all_groups": all_groups, "more": False}
+
+    item_fields = """
+        id name created_at group { title }
+        subitems { id }
+        column_values(ids: ["dropdown_mkyqdeqd", "order_items0", "numbers6",
+            "formula_mkn9918j", "text_mkv6z0nt", "text_mm04tmac"]) {
+            id text ... on FormulaValue { display_value } }
+    """
+    first_q = ("query ($board:[ID!], $grp:[String!], $limit:Int!) { boards(ids:$board) { "
+               "groups(ids:$grp) { title items_page(limit:$limit) { cursor items { %s } } } } }"
+               % item_fields)
+    next_q = ("query ($c:String!, $limit:Int!) { next_items_page(cursor:$c, limit:$limit) "
+              "{ cursor items { %s } } }" % item_fields)
+
+    def _parse(it):
+        pcv, margin = {}, None
+        for c in (it.get("column_values") or []):
+            if c.get("id") == "formula_mkn9918j":
+                m = re.search(r"-?\d+(?:\.\d+)?", c.get("display_value") or "")
+                margin = float(m.group()) if m else None
+            else:
+                pcv[c["id"]] = c.get("text")
+        try:
+            cost = float(pcv.get("numbers6"))
+        except (TypeError, ValueError):
+            cost = None
+        created = (it.get("created_at") or "")[:10]
+        return {
+            "id": it["id"], "name": it.get("name"),
+            "order_no": (pcv.get("text_mkv6z0nt") or it.get("name") or "").strip(),
+            "supplier": (pcv.get("dropdown_mkyqdeqd") or "").strip() or None,
+            "margin": margin, "agreed_cost": cost,
+            "order_items": pcv.get("order_items0") or "",
+            "shopify_order_id": (pcv.get("text_mm04tmac") or "").strip() or None,
+            "created": created, "month": created[:7] if created else None,
+            "has_invoice": bool(it.get("subitems")),
+            "group": (it.get("group") or {}).get("title"),
+        }
+
+    orders, used_titles, cursors = [], [], []
+    r = requests.post(MONDAY_API, json={"query": first_q, "variables": {
+        "board": [str(ORDERS_BOARD_ID)], "grp": target_ids, "limit": page_size}},
+        headers=headers, timeout=60)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    boards = (payload.get("data") or {}).get("boards") or []
+    for g in (boards[0].get("groups", []) if boards else []):
+        used_titles.append(g.get("title"))
+        ip = g.get("items_page") or {}
+        orders.extend(_parse(it) for it in ip.get("items", []))
+        if ip.get("cursor"):
+            cursors.append(ip["cursor"])
+
+    pages = 1
+    while cursors and pages < max_pages:
+        c = cursors.pop(0)
+        r = requests.post(MONDAY_API, json={"query": next_q,
+                          "variables": {"c": c, "limit": page_size}}, headers=headers, timeout=60)
+        r.raise_for_status()
+        payload = r.json()
+        if "errors" in payload:
+            break
+        np = (payload.get("data") or {}).get("next_items_page") or {}
+        orders.extend(_parse(it) for it in np.get("items", []))
+        if np.get("cursor"):
+            cursors.append(np["cursor"])
+        pages += 1
+    return {"orders": orders, "groups": used_titles, "all_groups": all_groups,
+            "more": bool(cursors)}
+
+
 def fetch_invoice_count(label_ids, cap: int = 2000, token: str | None = None) -> dict:
     """Fast id-only count of subitems at the given Payment-Status labels (no parent
     data). Returns {count, more}. Much lighter than fetch_invoices_by_status."""

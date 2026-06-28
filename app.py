@@ -3004,6 +3004,239 @@ def _rules_table(headers, rows):
             f'<tr style="background:var(--card)">{th}</tr>{trs}</table>')
 
 
+# --- Finance (admin-only) -------------------------------------------------
+_RANGE_RULES = [
+    ("Polycarbonate", ("polycarbonate", "twinwall", "multiwall", "ezglaze", "ez glaze",
+                       "ez-glaze", "glazing bar", "wallplate", "eaves beam", "f-section",
+                       "h profile", "h-section", "corrugated poly")),
+    ("Doors", ("door", "deanta", "latch", "hinge", "handle", "architrave")),
+    ("Roofline & Cladding", ("fascia", "soffit", "cladding", "hardie", "bargeboard",
+                             "roofline", "capping", "shiplap")),
+    ("Guttering", ("gutter", "downpipe", "hopper", "running outlet", "guttering")),
+    ("Roofing", ("flashing", "ridge", "roof sheet", "felt", "tile", "slate", "verge", "purlin")),
+    ("Bathroom", ("basin", "toilet", "bath", "shower", "ceramic", "suite", "pedestal",
+                  "cistern", "tap", "wc")),
+    ("Insulation", ("insulation", "celotex", "kingspan", "rockwool", "pir board")),
+    ("PVC & Trims", ("pvc", "packer", "trim", "sheeting")),
+]
+
+
+def _classify_range(text):
+    t = (text or "").lower()
+    for name, kws in _RANGE_RULES:
+        if any(k in t for k in kws):
+            return name
+    return "Other"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _sku_name_index():
+    lk = load_lookup()
+    return {_norm_code(it.get("sku")): (it.get("name") or "")
+            for it in (lk["items"] if lk else [])}
+
+
+def _order_range(order_items_text):
+    idx = _sku_name_index()
+    ranges = []
+    for nk, d in _parse_order_items(order_items_text).items():
+        ranges.append(_classify_range(idx.get(nk) or d.get("sku") or ""))
+    distinct = {r for r in ranges if r != "Other"}
+    if len(distinct) == 1:
+        return distinct.pop()
+    if len(distinct) > 1:
+        return "Mixed"
+    return "Other"
+
+
+def _order_anomalies(o):
+    flags = []
+    if o.get("margin") is None:
+        flags.append("no margin")
+    elif o["margin"] < 0:
+        flags.append("loss-making")
+    elif o["margin"] > 50:
+        flags.append("margin >50% (check cost/credit note)")
+    if not o.get("agreed_cost"):
+        flags.append("no agreed cost")
+    if not o.get("supplier"):
+        flags.append("no supplier")
+    if not o.get("has_invoice"):
+        flags.append("no invoice")
+    return flags
+
+
+def _est_margin_gbp(o):
+    """Approx £ margin from agreed cost + live margin % (assumes margin-on-sell)."""
+    m, c = o.get("margin"), o.get("agreed_cost")
+    if m is None or c is None or m >= 100:
+        return None
+    return c * (m / 100.0) / (1 - m / 100.0)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _finance_data():
+    try:
+        return data_sources.fetch_finance_orders()
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def _avg(xs):
+    xs = [x for x in xs if x is not None]
+    return sum(xs) / len(xs) if xs else None
+
+
+def render_finance():
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Finance</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Live actual margin from the Orders board **Paid & Delivered** group(s) — per "
+               "month, per supplier, with loss-making, missing-invoice and anomaly flags. "
+               "Admin only.")
+
+    c1, c2 = st.columns([4, 1])
+    c1.caption("Margin is the live order-margin % from Monday. £ figures are estimates from the "
+               "agreed supplier cost + that margin.")
+    if c2.button("↻ Refresh", use_container_width=True):
+        _finance_data.clear()
+        st.rerun()
+
+    data = _finance_data()
+    if data.get("error"):
+        st.error("Couldn't load orders: " + str(data["error"])[:200])
+        return
+    if not data.get("groups"):
+        st.warning("Couldn't find a 'Paid & Delivered' group on the Orders board. Groups found: "
+                   + ", ".join(f"`{t}`" for t in (data.get("all_groups") or {}).values()))
+        st.caption("Tell me the exact group name(s) to use and I'll point Finance at them.")
+        return
+
+    orders = data["orders"]
+    for o in orders:
+        o["range"] = _order_range(o.get("order_items"))
+        o["est_gbp"] = _est_margin_gbp(o)
+        o["flags"] = _order_anomalies(o)
+    st.caption("Reading group(s): " + ", ".join(f"**{t}**" for t in data["groups"])
+               + (" · ⚠️ more orders exist than were pulled (showing the most recent)"
+                  if data.get("more") else ""))
+
+    # Filters
+    months = sorted({o["month"] for o in orders if o["month"]}, reverse=True)
+    sups = sorted({o["supplier"] for o in orders if o["supplier"]})
+    f1, f2 = st.columns(2)
+    msel = f1.multiselect("Months", months, default=months[:12])
+    ssel = f2.multiselect("Suppliers", sups, default=[])
+    rows = [o for o in orders
+            if (not msel or o["month"] in msel) and (not ssel or o["supplier"] in ssel)]
+    if not rows:
+        st.info("No orders match the filters.")
+        return
+
+    # Headline tiles
+    losses = [o for o in rows if o.get("margin") is not None and o["margin"] < 0]
+    no_inv = [o for o in rows if not o.get("has_invoice")]
+    flagged = [o for o in rows if o.get("flags")]
+    t = st.columns(5)
+    t[0].metric("Orders", len(rows))
+    am = _avg([o.get("margin") for o in rows])
+    t[1].metric("Avg margin", f"{am:.1f}%" if am is not None else "—")
+    t[2].metric("Loss-making", len(losses))
+    t[3].metric("No invoice", len(no_inv))
+    t[4].metric("Flagged", len(flagged))
+
+    def agg(items):
+        ms = [o["margin"] for o in items if o.get("margin") is not None]
+        cost = sum(o["agreed_cost"] or 0 for o in items)
+        egbp = sum(o["est_gbp"] or 0 for o in items)
+        nloss = sum(1 for o in items if o.get("margin") is not None and o["margin"] < 0)
+        ninv = sum(1 for o in items if not o.get("has_invoice"))
+        return len(items), (_avg(ms)), nloss, ninv, cost, egbp
+
+    def mcell(v):
+        return f"{v:.1f}%" if v is not None else "—"
+
+    # Per month × supplier
+    st.markdown("#### Margin by month × supplier")
+    pairs = {}
+    for o in rows:
+        pairs.setdefault((o["month"], o["supplier"] or "—"), []).append(o)
+    prows = []
+    for (mth, sup) in sorted(pairs, key=lambda k: (k[0] or "", k[1]), reverse=True):
+        n, avgm, nloss, ninv, cost, egbp = agg(pairs[(mth, sup)])
+        prows.append((mth or "—", _esc(sup), str(n), mcell(avgm),
+                      str(nloss) if nloss else "—", str(ninv) if ninv else "—",
+                      f"£{cost:,.0f}", f"£{egbp:,.0f}"))
+    st.markdown(_rules_table(
+        ["Month", "Supplier", "Orders", "Avg margin", "Losses", "No inv", "Cost £", "Est. margin £"],
+        prows), unsafe_allow_html=True)
+
+    # Per supplier (all selected months)
+    st.markdown("#### By supplier")
+    bysup = {}
+    for o in rows:
+        bysup.setdefault(o["supplier"] or "—", []).append(o)
+    srows = []
+    for sup in sorted(bysup, key=lambda s: agg(bysup[s])[5], reverse=True):
+        n, avgm, nloss, ninv, cost, egbp = agg(bysup[sup])
+        srows.append((_esc(sup), str(n), mcell(avgm), str(nloss) if nloss else "—",
+                      str(ninv) if ninv else "—", f"£{cost:,.0f}", f"£{egbp:,.0f}"))
+    st.markdown(_rules_table(
+        ["Supplier", "Orders", "Avg margin", "Losses", "No inv", "Cost £", "Est. margin £"],
+        srows), unsafe_allow_html=True)
+
+    # Per product range
+    st.markdown("#### By product range")
+    byrange = {}
+    for o in rows:
+        byrange.setdefault(o["range"], []).append(o)
+    rrows = []
+    for rg in sorted(byrange, key=lambda r: agg(byrange[r])[5], reverse=True):
+        n, avgm, nloss, ninv, cost, egbp = agg(byrange[rg])
+        rrows.append((_esc(rg), str(n), mcell(avgm), str(nloss) if nloss else "—",
+                      f"£{cost:,.0f}", f"£{egbp:,.0f}"))
+    st.markdown(_rules_table(
+        ["Product range", "Orders", "Avg margin", "Losses", "Cost £", "Est. margin £"],
+        rrows), unsafe_allow_html=True)
+    st.caption("Range is inferred from the order's SKUs/product names — 'Mixed' = more than one "
+               "range on the order, 'Other' = couldn't classify.")
+
+    store = data_sources.get_secret("SHOPIFY_STORE")
+
+    def _olink(o):
+        oid = o.get("shopify_order_id")
+        label = _esc(o.get("order_no") or o.get("name") or "order")
+        if store and oid:
+            return f'<a href="https://{store}/admin/orders/{oid}">{label}</a>'
+        return label
+
+    # Loss-making detail
+    with st.expander(f"⚠️ Loss-making orders ({len(losses)})"):
+        lr = [(_olink(o), _esc(o.get("supplier") or "—"), _esc(o["range"]),
+               mcell(o.get("margin")), f"£{o['est_gbp']:,.0f}" if o.get("est_gbp") else "—",
+               o.get("month") or "—") for o in sorted(losses, key=lambda x: x.get("margin") or 0)]
+        st.markdown(_rules_table(["Order", "Supplier", "Range", "Margin", "Est. £", "Month"], lr)
+                    if lr else "None 🎉", unsafe_allow_html=True)
+
+    # No-invoice detail
+    with st.expander(f"🧾 Paid & Delivered but no invoice ({len(no_inv)})"):
+        nr = [(_olink(o), _esc(o.get("supplier") or "—"), _esc(o["range"]),
+               mcell(o.get("margin")), o.get("month") or "—")
+              for o in sorted(no_inv, key=lambda x: x.get("month") or "", reverse=True)]
+        st.markdown(_rules_table(["Order", "Supplier", "Range", "Margin", "Month"], nr)
+                    if nr else "None — all have invoices 🎉", unsafe_allow_html=True)
+
+    # Anomalies
+    with st.expander(f"🚩 Anomalies to check ({len(flagged)})"):
+        ar = [(_olink(o), _esc(o.get("supplier") or "—"), mcell(o.get("margin")),
+               _esc(", ".join(o["flags"])), o.get("month") or "—")
+              for o in sorted(flagged, key=lambda x: x.get("month") or "", reverse=True)]
+        st.markdown(_rules_table(["Order", "Supplier", "Margin", "Flags", "Month"], ar)
+                    if ar else "Nothing flagged 🎉", unsafe_allow_html=True)
+
+
 def render_supplier_rules():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -3149,7 +3382,7 @@ with st.sidebar:
     #   admin / manager : everything, including Invoice Check
     #   office          : Daily Ops only
     #   staff (others)  : Daily Ops, Daily Activity, Quotes, Pricing (no Invoice Check)
-    all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check")
+    all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check", "Finance")
     staff_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing")
     if role == "office":
         menu = ("Daily Ops",)
@@ -3208,7 +3441,7 @@ with st.sidebar:
 #   office → Daily Ops only · only admin/manager may open Invoice Check.
 if role == "office":
     module = "Daily Ops"
-elif role not in ("admin", "manager") and module == "Invoice Check":
+elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance"):
     module = "Daily Ops"
 
 if module == "Pricing":
@@ -3228,6 +3461,10 @@ if module == "Quotes":
 
 if module == "Invoice Check":
     render_invoice_check()
+    st.stop()
+
+if module == "Finance":
+    render_finance()
     st.stop()
 
 if module == "Daily Ops" and st.session_state.get("ops_view") == "Summary dashboard":
