@@ -1023,6 +1023,56 @@ def _pricelist_index():
     return idx
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _pricelist_name_index():
+    """For matching an invoice line to a pricelist cost by PRODUCT NAME when the SKU
+    doesn't match — across all suppliers. Returns {items:[{tokens, sku, offers}],
+    inv:{token:[item_idx]}} (an inverted index keeps lookups fast over ~50k items)."""
+    lk = load_lookup()
+    items, inv = [], {}
+    for it in (lk["items"] if lk else []):
+        toks = _title_tokens(it.get("name"))
+        if not toks:
+            continue
+        offers = {}
+        for o in (it.get("offers") or []):
+            sup = _norm_code(o.get("s"))
+            if sup and o.get("c") is not None:
+                offers[sup] = o.get("c")
+        if not offers:
+            continue
+        i = len(items)
+        items.append({"tokens": toks, "sku": it.get("sku"), "offers": offers})
+        for t in toks:
+            inv.setdefault(t, []).append(i)
+    return {"items": items, "inv": inv}
+
+
+def _pricelist_title_cost(desc, supplier, nidx):
+    """Cost for `supplier` of the pricelist item whose NAME best matches `desc`, or
+    (None, None). Strict (≥3 shared words AND ≥50% of the item's words) so a fuzzy
+    name match can't pull in the wrong product's cost. Returns (cost, that item's SKU)."""
+    dt = _title_tokens(desc)
+    if len(dt) < 3:
+        return None, None
+    items, inv = nidx["items"], nidx["inv"]
+    cand = {}
+    for t in dt:
+        posting = inv.get(t)
+        if not posting or len(posting) > 3000:   # skip ultra-common words (no signal)
+            continue
+        for i in posting:
+            cand[i] = cand.get(i, 0) + 1
+    best, best_score = None, 0
+    for i, shared in cand.items():
+        it = items[i]
+        if supplier not in it["offers"]:
+            continue
+        if shared > best_score and shared >= 3 and shared >= 0.5 * len(it["tokens"]):
+            best, best_score = it, shared
+    return (best["offers"][supplier], best["sku"]) if best else (None, None)
+
+
 INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limit)
     "review": ([3], 1500),          # Needs Review — pull them ALL (paginated)
     "matched": ([9], 500),          # Matched (TradeHub) — checked, held (NOT pushed)
@@ -1182,6 +1232,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     order's SKUs/quantities. Known supplier delivery charges are recognised."""
     supplier = _norm_code(meta.get("supplier"))
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
+    nidx = _pricelist_name_index() if not no_pl else None
     order = _parse_order_items(meta.get("order_items"))
     parsed_lines = parsed.get("lines") or []
 
@@ -1219,11 +1270,20 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         issues = []
         supcosts = pidx.get(sk) or {}
         cost = supcosts.get(supplier)
+        cost_by_name = None
+        # SKU not on this supplier's pricelist → fall back to matching by product name.
+        if cost is None and not no_pl and nidx:
+            c2, csku = _pricelist_title_cost(desc, supplier, nidx)
+            if c2 is not None:
+                cost, cost_by_name = c2, csku
         if not no_pl:                                 # suppliers with no pricelist: skip price check
             if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                 if unit > cost + tol:
+                    note = f" (cost matched to {cost_by_name} by name)" if cost_by_name else ""
                     issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                            f"(+£{unit - cost:,.2f})"))
+                                            f"(+£{unit - cost:,.2f}){note}"))
+                elif cost_by_name:
+                    issues.append(("name", f"price checked vs {cost_by_name} (matched by name)"))
             elif isinstance(unit, (int, float)) and cost is None:
                 issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         # Order match: SKU first, then fall back to the product title/name.
