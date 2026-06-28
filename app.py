@@ -985,7 +985,13 @@ def _parse_order_items(text):
 
 
 def _title_tokens(s):
-    return {w for w in re.findall(r"[a-z0-9]+", (s or "").lower()) if len(w) > 2}
+    # Split letter↔digit boundaries so '3600mm' matches '3600', '8mm' matches '8mm',
+    # so supplier vs order naming (e.g. NBP 'HARDIEPLANK CEDAR 3600mm x 180mm x 8mm
+    # (SOFT GREEN)' vs 'Hardie Plank ... Soft Green - 3600 x 180 x 8mm - Cedar') lines up.
+    s = (s or "").lower()
+    s = re.sub(r"(?<=\d)(?=[a-z])", " ", s)
+    s = re.sub(r"(?<=[a-z])(?=\d)", " ", s)
+    return {w for w in re.findall(r"[a-z0-9]+", s) if len(w) > 2}
 
 
 def _title_match(desc, order, used):
