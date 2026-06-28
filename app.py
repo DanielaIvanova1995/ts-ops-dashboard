@@ -3087,6 +3087,20 @@ def _avg(xs):
     return sum(xs) / len(xs) if xs else None
 
 
+_MONTH_NAMES = ["", "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
+                "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"]
+
+
+def _month_label(m):
+    """'2026-05' -> 'MAY 2026'."""
+    if not m or len(str(m)) < 7:
+        return m or "—"
+    try:
+        return f"{_MONTH_NAMES[int(str(m)[5:7])]} {str(m)[:4]}"
+    except (ValueError, IndexError):
+        return m
+
+
 def render_finance():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -3127,7 +3141,7 @@ def render_finance():
     months = sorted({o["month"] for o in orders if o["month"]}, reverse=True)
     sups = sorted({o["supplier"] for o in orders if o["supplier"]})
     f1, f2 = st.columns(2)
-    msel = f1.multiselect("Months", months, default=months[:12])
+    msel = f1.multiselect("Months", months, default=months[:12], format_func=_month_label)
     ssel = f2.multiselect("Suppliers", sups, default=[])
     rows = [o for o in orders
             if (not msel or o["month"] in msel) and (not ssel or o["supplier"] in ssel)]
@@ -3208,7 +3222,7 @@ def render_finance():
     for mth in sorted(by_m, reverse=True):
         m_orders = [o for s in by_m[mth].values() for o in s]
         n, avgm, nloss, ninv, cost, egbp = agg(m_orders)
-        parts.append(f'<details><summary><span class="fttl">{_esc(mth)}</span>'
+        parts.append(f'<details><summary><span class="fttl">{_esc(_month_label(mth))}</span>'
                      f'{pills(n, avgm, nloss, ninv, cost)}</summary>')
         for sup in sorted(by_m[mth], key=lambda s: agg(by_m[mth][s])[4], reverse=True):
             items = by_m[mth][sup]
@@ -3253,14 +3267,14 @@ def render_finance():
     with st.expander(f"⚠️ Loss-making orders ({len(losses)})"):
         lr = [(_olink(o), _esc(o.get("supplier") or "—"), _esc(o["range"]),
                mcell(o.get("margin")), f"£{o['est_gbp']:,.0f}" if o.get("est_gbp") else "—",
-               o.get("month") or "—") for o in sorted(losses, key=lambda x: x.get("margin") or 0)]
+               _month_label(o.get("month"))) for o in sorted(losses, key=lambda x: x.get("margin") or 0)]
         st.markdown(_rules_table(["Order", "Supplier", "Range", "Margin", "Est. £", "Month"], lr)
                     if lr else "None 🎉", unsafe_allow_html=True)
 
     # No-invoice detail
     with st.expander(f"🧾 Paid & Delivered but no invoice ({len(no_inv)})"):
         nr = [(_olink(o), _esc(o.get("supplier") or "—"), _esc(o["range"]),
-               mcell(o.get("margin")), o.get("month") or "—")
+               mcell(o.get("margin")), _month_label(o.get("month")))
               for o in sorted(no_inv, key=lambda x: x.get("month") or "", reverse=True)]
         st.markdown(_rules_table(["Order", "Supplier", "Range", "Margin", "Month"], nr)
                     if nr else "None — all have invoices 🎉", unsafe_allow_html=True)
@@ -3268,7 +3282,7 @@ def render_finance():
     # Anomalies
     with st.expander(f"🚩 Anomalies to check ({len(flagged)})"):
         ar = [(_olink(o), _esc(o.get("supplier") or "—"), mcell(o.get("margin")),
-               _esc(", ".join(o["flags"])), o.get("month") or "—")
+               _esc(", ".join(o["flags"])), _month_label(o.get("month")))
               for o in sorted(flagged, key=lambda x: x.get("month") or "", reverse=True)]
         st.markdown(_rules_table(["Order", "Supplier", "Margin", "Flags", "Month"], ar)
                     if ar else "Nothing flagged 🎉", unsafe_allow_html=True)
