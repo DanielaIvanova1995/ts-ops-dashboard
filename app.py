@@ -976,7 +976,8 @@ def _parse_order_items(text):
         if not skum:
             continue
         qtym = re.search(r"Quantity:\s*(\d+)", line)
-        name = re.split(r"\bSKU:", line)[0].strip(" |-\t")
+        # Product name = text before the 'Quantity:'/'SKU:' tokens (whichever comes first).
+        name = re.split(r"\|?\s*(?:Quantity:|SKU:)", line)[0].strip(" |-\t")
         out[_norm_code(skum.group(1))] = {"sku": skum.group(1),
                                           "qty": int(qtym.group(1)) if qtym else None,
                                           "name": name}
@@ -989,12 +990,13 @@ def _title_tokens(s):
 
 def _title_match(desc, order, used):
     """When an invoice SKU isn't on the order, find the order line whose product name
-    best overlaps the invoice description. Returns its norm_sku key or None. Requires a
-    solid overlap (≥2 shared words AND ≥40% of the order line's words) to avoid bad hits."""
+    best overlaps the invoice description. Returns its norm_sku key or None. Overlap is
+    judged against the SHORTER description (≥2 shared words AND ≥50% of the shorter side),
+    so a terse supplier line still matches a verbose order line."""
     dt = _title_tokens(desc)
-    if not dt:
+    if len(dt) < 2:
         return None
-    best, best_score = None, 0
+    best, best_score = None, 0.0
     for k, v in order.items():
         if k in used:
             continue
@@ -1002,8 +1004,11 @@ def _title_match(desc, order, used):
         if not ot:
             continue
         shared = len(dt & ot)
-        if shared > best_score and shared >= 2 and shared >= 0.4 * len(ot):
-            best, best_score = k, shared
+        if shared < 2:
+            continue
+        ratio = shared / min(len(dt), len(ot))
+        if ratio >= 0.5 and (shared + ratio) > best_score:
+            best, best_score = k, shared + ratio
     return best
 
 
