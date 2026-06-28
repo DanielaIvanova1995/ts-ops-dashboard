@@ -3137,13 +3137,18 @@ def render_finance():
                + (" · ⚠️ more orders exist than were pulled (showing the most recent)"
                   if data.get("more") else ""))
 
-    # Filters
-    months = sorted({o["month"] for o in orders if o["month"]}, reverse=True)
-    sups = sorted({o["supplier"] for o in orders if o["supplier"]})
-    f1, f2 = st.columns(2)
-    msel = f1.multiselect("Months", months, default=months[:12], format_func=_month_label)
+    # Filters — default to the current year only.
+    years = sorted({o["month"][:4] for o in orders if o["month"]}, reverse=True)
+    this_year = now_uk().strftime("%Y")
+    f0, f1, f2 = st.columns([1, 2, 2])
+    year = f0.selectbox("Year", years or [this_year],
+                        index=(years.index(this_year) if this_year in years else 0))
+    yorders = [o for o in orders if o["month"] and o["month"].startswith(year)]
+    months = sorted({o["month"] for o in yorders}, reverse=True)
+    sups = sorted({o["supplier"] for o in yorders if o["supplier"]})
+    msel = f1.multiselect("Months", months, default=months, format_func=_month_label)
     ssel = f2.multiselect("Suppliers", sups, default=[])
-    rows = [o for o in orders
+    rows = [o for o in yorders
             if (not msel or o["month"] in msel) and (not ssel or o["supplier"] in ssel)]
     if not rows:
         st.info("No orders match the filters.")
