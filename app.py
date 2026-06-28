@@ -1557,11 +1557,21 @@ def _run_one_invoice(inv, lbsku):
         st.info(f"No pricelist for {sup} — price not checked (Monday's agreed price is the "
                 "reference; not flagged).")
     else:
-        pissues = [l for l in res["lines"] if any(t == "price" for t, _ in l["issues"])]
-        if pissues:
+        priced = [l for l in res["lines"] if isinstance(l.get("cost"), (int, float))]
+        pissues = [l for l in priced if any(t == "price" for t, _ in l["issues"])]
+        nopl = [l for l in res["lines"]
+                if any(t == "noprice" for t, _ in l["issues"])]
+        if not priced:
+            st.warning(f"⚠️ No **{sup}** pricelist found in Airtable — the price was **not "
+                       f"checked**. Add a {sup} pricelist, or the margin/agreed-price is the only "
+                       "reference for this invoice.")
+        elif pissues:
             st.warning(f"Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
         else:
-            st.success(f"Checked against {sup} pricelist: all priced lines match.")
+            extra = (f" — but {len(nopl)} line(s) had no {sup} cost on file"
+                     if nopl else "")
+            st.success(f"Checked against {sup} pricelist: all {len(priced)} priced line(s) "
+                       f"match{extra}.")
 
     # Recommendation + write-back to Monday's Payment Status.
     st.write("")
