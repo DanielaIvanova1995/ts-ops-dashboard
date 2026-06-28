@@ -3158,51 +3158,6 @@ def render_finance():
     def mcell(v):
         return f"{v:.1f}%" if v is not None else "—"
 
-    # Per month × supplier
-    st.markdown("#### Margin by month × supplier")
-    pairs = {}
-    for o in rows:
-        pairs.setdefault((o["month"], o["supplier"] or "—"), []).append(o)
-    prows = []
-    for (mth, sup) in sorted(pairs, key=lambda k: (k[0] or "", k[1]), reverse=True):
-        n, avgm, nloss, ninv, cost, egbp = agg(pairs[(mth, sup)])
-        prows.append((mth or "—", _esc(sup), str(n), mcell(avgm),
-                      str(nloss) if nloss else "—", str(ninv) if ninv else "—",
-                      f"£{cost:,.0f}", f"£{egbp:,.0f}"))
-    st.markdown(_rules_table(
-        ["Month", "Supplier", "Orders", "Avg margin", "Losses", "No inv", "Cost £", "Est. margin £"],
-        prows), unsafe_allow_html=True)
-
-    # Per supplier (all selected months)
-    st.markdown("#### By supplier")
-    bysup = {}
-    for o in rows:
-        bysup.setdefault(o["supplier"] or "—", []).append(o)
-    srows = []
-    for sup in sorted(bysup, key=lambda s: agg(bysup[s])[5], reverse=True):
-        n, avgm, nloss, ninv, cost, egbp = agg(bysup[sup])
-        srows.append((_esc(sup), str(n), mcell(avgm), str(nloss) if nloss else "—",
-                      str(ninv) if ninv else "—", f"£{cost:,.0f}", f"£{egbp:,.0f}"))
-    st.markdown(_rules_table(
-        ["Supplier", "Orders", "Avg margin", "Losses", "No inv", "Cost £", "Est. margin £"],
-        srows), unsafe_allow_html=True)
-
-    # Per product range
-    st.markdown("#### By product range")
-    byrange = {}
-    for o in rows:
-        byrange.setdefault(o["range"], []).append(o)
-    rrows = []
-    for rg in sorted(byrange, key=lambda r: agg(byrange[r])[5], reverse=True):
-        n, avgm, nloss, ninv, cost, egbp = agg(byrange[rg])
-        rrows.append((_esc(rg), str(n), mcell(avgm), str(nloss) if nloss else "—",
-                      f"£{cost:,.0f}", f"£{egbp:,.0f}"))
-    st.markdown(_rules_table(
-        ["Product range", "Orders", "Avg margin", "Losses", "Cost £", "Est. margin £"],
-        rrows), unsafe_allow_html=True)
-    st.caption("Range is inferred from the order's SKUs/product names — 'Mixed' = more than one "
-               "range on the order, 'Other' = couldn't classify.")
-
     store = data_sources.get_secret("SHOPIFY_STORE")
 
     def _olink(o):
@@ -3211,6 +3166,88 @@ def render_finance():
         if store and oid:
             return f'<a href="https://{store}/admin/orders/{oid}">{label}</a>'
         return label
+
+    def mcolor(m):
+        if m is None:
+            return "var(--muted)"
+        return "#DC2626" if m < 0 else ("#B45309" if m < 10 else "#16A34A")
+
+    def pills(n, avgm, nloss, ninv, cost):
+        p = (f'<span class="fpill" style="color:{mcolor(avgm)}">{mcell(avgm)}</span>'
+             f'<span class="fsub">{n} orders</span><span class="fsub">£{cost:,.0f}</span>')
+        if nloss:
+            p += f'<span class="fbad">{nloss} loss</span>'
+        if ninv:
+            p += f'<span class="fwarn">{ninv} no inv</span>'
+        return p
+
+    # Month → Supplier → Orders drill-down (native <details> = instant, no reload).
+    by_m = {}
+    for o in rows:
+        by_m.setdefault(o["month"] or "—", {}).setdefault(o["supplier"] or "—", []).append(o)
+
+    css = """<style>
+    .findd details{border:1px solid var(--line);border-radius:10px;margin:8px 0;background:var(--card);overflow:hidden}
+    .findd details details{margin:8px 10px}
+    .findd summary{display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;padding:11px 15px}
+    .findd summary::-webkit-details-marker{display:none}
+    .findd summary::before{content:'▸';color:var(--muted);font-size:12px}
+    .findd details[open]>summary::before{content:'▾'}
+    .findd summary:hover{background:rgba(242,106,33,.06)}
+    .findd .fttl{font-weight:800;font-size:16px;margin-right:auto}
+    .findd .fttl2{font-weight:700;font-size:13.5px;margin-right:auto}
+    .findd .fsub{color:var(--muted);font-size:12px}
+    .findd .fpill{font-weight:800}
+    .findd .fbad{background:#DC2626;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700}
+    .findd .fwarn{background:#B45309;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700}
+    .findd table{width:100%;border-collapse:collapse;font-size:12.5px;margin:0 4px 8px}
+    .findd th{color:var(--muted);font-weight:600;text-align:left;padding:6px 12px}
+    .findd td{padding:6px 12px;border-top:1px solid var(--line)}
+    </style>"""
+    parts = [css, '<div class="findd">']
+    for mth in sorted(by_m, reverse=True):
+        m_orders = [o for s in by_m[mth].values() for o in s]
+        n, avgm, nloss, ninv, cost, egbp = agg(m_orders)
+        parts.append(f'<details><summary><span class="fttl">{_esc(mth)}</span>'
+                     f'{pills(n, avgm, nloss, ninv, cost)}</summary>')
+        for sup in sorted(by_m[mth], key=lambda s: agg(by_m[mth][s])[4], reverse=True):
+            items = by_m[mth][sup]
+            n2, avgm2, nloss2, ninv2, cost2, egbp2 = agg(items)
+            parts.append(f'<details><summary><span class="fttl2">{_esc(sup)}</span>'
+                         f'{pills(n2, avgm2, nloss2, ninv2, cost2)}</summary>')
+            trs = ('<table><tr><th>Order</th><th>Range</th><th>Margin</th>'
+                   '<th style="text-align:right">Cost</th><th style="text-align:right">Est £</th>'
+                   '<th style="text-align:center">Inv</th><th>Flags</th></tr>')
+            for o in sorted(items, key=lambda x: (x["margin"] if x.get("margin") is not None else 999)):
+                inv = ('✓' if o.get("has_invoice")
+                       else '<span style="color:#DC2626;font-weight:700">✗</span>')
+                est = f"£{o['est_gbp']:,.0f}" if o.get("est_gbp") else "—"
+                trs += (f'<tr><td>{_olink(o)}</td><td>{_esc(o["range"])}</td>'
+                        f'<td style="color:{mcolor(o.get("margin"))};font-weight:700">{mcell(o.get("margin"))}</td>'
+                        f'<td style="text-align:right">£{(o.get("agreed_cost") or 0):,.0f}</td>'
+                        f'<td style="text-align:right">{est}</td>'
+                        f'<td style="text-align:center">{inv}</td>'
+                        f'<td style="color:var(--muted);font-size:11px">{_esc(", ".join(o["flags"]))}</td></tr>')
+            parts.append(trs + '</table></details>')
+        parts.append('</details>')
+    parts.append('</div>')
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+    # By product range (cross-cutting quick view)
+    with st.expander("📦 By product range"):
+        byrange = {}
+        for o in rows:
+            byrange.setdefault(o["range"], []).append(o)
+        rrows = []
+        for rg in sorted(byrange, key=lambda r: agg(byrange[r])[4], reverse=True):
+            n, avgm, nloss, ninv, cost, egbp = agg(byrange[rg])
+            rrows.append((_esc(rg), str(n), mcell(avgm), str(nloss) if nloss else "—",
+                          f"£{cost:,.0f}", f"£{egbp:,.0f}"))
+        st.markdown(_rules_table(
+            ["Product range", "Orders", "Avg margin", "Losses", "Cost £", "Est. margin £"],
+            rrows), unsafe_allow_html=True)
+        st.caption("Range inferred from the order's SKUs — 'Mixed' = multiple ranges, "
+                   "'Other' = couldn't classify.")
 
     # Loss-making detail
     with st.expander(f"⚠️ Loss-making orders ({len(losses)})"):
