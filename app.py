@@ -985,13 +985,20 @@ def _parse_order_items(text):
 
 
 def _title_tokens(s):
-    # Split letter↔digit boundaries so '3600mm' matches '3600', '8mm' matches '8mm',
-    # so supplier vs order naming (e.g. NBP 'HARDIEPLANK CEDAR 3600mm x 180mm x 8mm
-    # (SOFT GREEN)' vs 'Hardie Plank ... Soft Green - 3600 x 180 x 8mm - Cedar') lines up.
+    # Split letter↔digit boundaries so '3600mm' matches '3600'. Keep 3+ letter words and
+    # 2+ digit numbers (dimensions like 25, 38, 180, 3600 are strong signals — they tell
+    # a 25mm vent strip from a 38mm one), so supplier vs order naming lines up.
     s = (s or "").lower()
     s = re.sub(r"(?<=\d)(?=[a-z])", " ", s)
     s = re.sub(r"(?<=[a-z])(?=\d)", " ", s)
-    return {w for w in re.findall(r"[a-z0-9]+", s) if len(w) > 2}
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", s):
+        if w.isdigit():
+            if len(w) >= 2:
+                out.add(w)
+        elif len(w) > 2:
+            out.add(w)
+    return out
 
 
 def _title_match(desc, order, used):
@@ -1013,7 +1020,8 @@ def _title_match(desc, order, used):
         if shared < 2:
             continue
         ratio = shared / min(len(dt), len(ot))
-        if ratio >= 0.5 and (shared + ratio) > best_score:
+        # Lenient: only the order's own few lines are candidates, and we take the best.
+        if ratio >= 0.4 and (shared + ratio) > best_score:
             best, best_score = k, shared + ratio
     return best
 
