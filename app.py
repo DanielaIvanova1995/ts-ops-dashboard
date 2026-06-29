@@ -987,34 +987,34 @@ def _parse_order_items(text):
 # Supplier shorthand → full word, so an abbreviated invoice line ('Ali Ext Corner')
 # matches the spelled-out pricelist title ('External Aluminium Corner'). Deterministic;
 # extend as new shorthand turns up.
+# Supplier shorthand → full word(s). Multi-word expansions (e.g. hplank → 'hardie plank')
+# split into separate tokens, and 'hardieplank' is normalised the same way so the joined
+# and spaced forms line up. Extend as new shorthand turns up.
 _TOK_ABBREV = {
     "ali": "aluminium", "alu": "aluminium", "alum": "aluminium",
     "ext": "external", "int": "internal",
-    "hplank": "hardieplank", "hplk": "hardieplank",
+    "hplank": "hardie plank", "hplk": "hardie plank", "hardieplank": "hardie plank",
     "galvan": "galvanised", "galv": "galvanised",
     "conn": "connector", "vert": "vertical", "horiz": "horizontal",
     "vent": "ventilation", "qty": "", "pk": "pack",
 }
+# Noise words to ignore (so 'WINDOW AND VERTICAL' doesn't carry the filler 'and').
+_TOK_STOP = {"and", "the", "for", "with", "mm", "cm", "to", "of", "in", "on", "at", "by", "or"}
 
 
 def _title_tokens(s):
-    # Split letter↔digit boundaries so '3600mm' matches '3600'. Keep 3+ letter words and
-    # 2+ digit numbers (dimensions like 25, 38, 180, 3600 are strong signals — they tell
-    # a 25mm vent strip from a 38mm one), so supplier vs order naming lines up. Expand
-    # known supplier shorthand so abbreviated invoice lines match spelled-out pricelist names.
+    # Split letter↔digit boundaries so '3600mm' matches '3600'. Expand supplier shorthand,
+    # drop noise words, and keep 2+ char tokens (so short but meaningful codes like 'VL'
+    # survive). Dimensions (25, 38, 180, 3600) are strong signals and are kept.
     s = (s or "").lower()
     s = re.sub(r"(?<=\d)(?=[a-z])", " ", s)
     s = re.sub(r"(?<=[a-z])(?=\d)", " ", s)
     out = set()
     for w in re.findall(r"[a-z0-9]+", s):
-        w = _TOK_ABBREV.get(w, w)
-        if not w:
-            continue
-        if w.isdigit():
-            if len(w) >= 2:
-                out.add(w)
-        elif len(w) > 2:
-            out.add(w)
+        for part in _TOK_ABBREV.get(w, w).split():
+            if part in _TOK_STOP or len(part) < 2:
+                continue
+            out.add(part)
     return out
 
 
