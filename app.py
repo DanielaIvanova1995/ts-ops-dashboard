@@ -1116,6 +1116,8 @@ INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limi
     "matched": ([9], 500),          # Matched (TradeHub) — checked, held (NOT pushed)
     "pushed": ([0, 1, 2, 8], 500),  # Approved (To QB)/CN Approved (To QB)/etc → pushed to QB
     "discrepancy": ([4], 500),
+    # Cross-cutting "what's happened lately" view: every actioned status, newest first.
+    "recent": ([0, 1, 2, 8, 9, 4], 800),
 }
 MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
@@ -1128,6 +1130,21 @@ MARGIN_PUSH_MAX = 35.0
 def _thresholds():
     return (float(st.session_state.get("inv_margin_min", MARGIN_PUSH_MIN)),
             float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX)))
+
+
+def _recent_result(status_text):
+    """Short, readable label for the Recent-activity 'Result' column, from the
+    Monday Payment Status."""
+    s = (status_text or "").lower()
+    if "cn approved" in s:
+        return "✅ CN pushed to QB"
+    if "approved" in s:
+        return "✅ Pushed to QB"
+    if "matched" in s:
+        return "🟡 Held (matched)"
+    if "discrepancy" in s:
+        return "🔴 Discrepancy"
+    return status_text or "—"
 
 
 def _push_decision(matched, is_cn, live_margin, supplier=None):
@@ -1471,6 +1488,17 @@ def _run_one_invoice(inv, lbsku):
         else:
             st.error("Couldn't read the invoice: " + parsed["error"][:200])
         return
+
+    # Copy-friendly order/invoice numbers. Selecting text from the expander header
+    # collapses the panel, so put one-click copy fields here (st.code has a hover
+    # copy icon and copying doesn't rerun, so the box stays open).
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        st.caption("Order number — hover, click the copy icon")
+        st.code(inv.get("order_no") or "—", language=None)
+    with cc2:
+        st.caption("Invoice number")
+        st.code(inv.get("invoice_no") or "—", language=None)
 
     if st.button("Re-run check", key=f"recheck_btn_{sub}",
                  help="Reads the invoice PDF again and re-runs the match (a few pence)."):
@@ -1816,14 +1844,22 @@ def _invoice_tab(key, is_queue):
         return True
 
     fil = [i for i in invs if keep(i)]
-    st.caption(f"{len(fil)} of {len(invs)}{'+' if data.get('more') else ''} invoices "
-               "— click a row to see its summary and check results.")
+    is_recent = (key == "recent")
+    if is_recent:
+        fil.sort(key=lambda i: i.get("date") or "", reverse=True)   # newest action first
+        fil = fil[:60]
+        st.caption("The most recently actioned invoices — pushed to QB, held or flagged — "
+                   "newest first. Search above to find a specific one.")
+    else:
+        st.caption(f"{len(fil)} of {len(invs)}{'+' if data.get('more') else ''} invoices "
+                   "— click a row to see its summary and check results.")
     if not fil:
         st.info("No invoices match that filter/search.")
         return
 
-    # Customer discounts on the Shopify orders (annotate each invoice).
-    disc = _order_discounts(tuple(sorted({i["shopify_order_id"] for i in invs
+    # Customer discounts on the Shopify orders (annotate each invoice). Keyed off the
+    # rows we'll actually show (fil), so the Recent tab doesn't fan out 800 Shopify calls.
+    disc = _order_discounts(tuple(sorted({i["shopify_order_id"] for i in fil
                                           if i.get("shopify_order_id")})))
     for i in fil:
         i["_discount"] = (disc.get(i.get("shopify_order_id")) or {}).get("amount")
@@ -1881,6 +1917,8 @@ def _invoice_tab(key, is_queue):
         row["Invoice"] = inv.get("invoice_no") or ""
         row["Order"] = inv.get("order_no") or ""
         row["Supplier"] = inv.get("supplier") or ""
+        if is_recent:
+            row["Result"] = _recent_result(inv.get("status"))
         row["Inv £"] = inv.get("total")
         if is_queue:
             row["Invoice margin"] = (v or {}).get("margin")
@@ -1910,6 +1948,11 @@ def _invoice_tab(key, is_queue):
         "PDF": st.column_config.LinkColumn(
             "PDF", display_text="OPEN", width="small", help="Open the invoice PDF"),
     }
+    if is_recent:
+        colcfg["Result"] = st.column_config.TextColumn(
+            "Result", width="medium", help="What Trade Hub last did with this invoice")
+        colcfg["Date"] = st.column_config.TextColumn(
+            "When", width="small", help="When this invoice was last actioned")
     if is_queue:
         colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
                                                         help="Matched or discrepancy")
@@ -1958,10 +2001,13 @@ def _invoice_tab(key, is_queue):
 
     if review:
         st.markdown("##### Review — open an invoice to see the detail")
+        st.caption("✓ = already checked — reopen it as many times as you like, it's free "
+                   "(the read is cached for 24h). Only an unchecked invoice or the "
+                   "**Re-run check** button uses the AI (a few pence).")
         for inv, expanded in review:
             v = verdicts.get(inv["sub_id"]) or {}
-            tag = ("discrepancy" if (v and not (v.get("order") and v.get("price")))
-                   else "matched" if v else "click to check")
+            tag = ("✓ checked · discrepancy" if (v and not (v.get("order") and v.get("price")))
+                   else "✓ checked · matched" if v else "▸ not checked yet — opens & checks (a few pence)")
             is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
             head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
                     f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
@@ -2004,7 +2050,7 @@ def render_invoice_check():
     # Lightweight counts (id-only) + render ONLY the selected tab — far faster than
     # st.tabs (which builds all four every run) and fetching full data to count.
     tabs = [("review", "To check", True), ("matched", "Matched (held)", True),
-            ("pushed", "Pushed to QB", False), ("discrepancy", "Discrepancies", False)]
+            ("recent", "Recent activity", False), ("discrepancy", "Discrepancies", False)]
     if st.session_state.get("inv_tab") not in {k for k, _, _ in tabs}:
         st.session_state["inv_tab"] = "review"
 
@@ -2016,7 +2062,8 @@ def render_invoice_check():
 
     for col, (key, label, _q) in zip(st.columns(len(tabs)), tabs):
         active = st.session_state["inv_tab"] == key
-        if col.button(f"{label} ({_count(key)})", key=f"itab_{key}", use_container_width=True,
+        btn_label = label if key == "recent" else f"{label} ({_count(key)})"
+        if col.button(btn_label, key=f"itab_{key}", use_container_width=True,
                       type="primary" if active else "secondary"):
             st.session_state["inv_tab"] = key
             st.rerun()
