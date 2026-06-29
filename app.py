@@ -1505,13 +1505,29 @@ def _run_one_invoice(inv, lbsku):
         st.markdown(f'<div style="margin:2px 0 6px">{links}</div>', unsafe_allow_html=True)
 
     it_total, mt = parsed.get("total"), inv.get("total")
-    bits = []
+    sale_total = om.get("rev") if om else None
+
+    def _tot_chip(label, value, sub, color):
+        return (f'<div style="background:var(--card);border:1px solid var(--line);'
+                f'border-top:3px solid {color};border-radius:7px;padding:9px 16px;min-width:150px">'
+                f'<div style="font-size:11px;color:var(--muted);font-weight:700;'
+                f'text-transform:uppercase;letter-spacing:.6px">{label}</div>'
+                f'<div style="font-size:22px;font-weight:800;color:var(--ink);line-height:1.15">'
+                f'{value}</div>'
+                f'<div style="font-size:11px;color:var(--muted)">{sub}</div></div>')
+
+    chips = []
     if isinstance(it_total, (int, float)):
-        bits.append(f"Invoice total **£{it_total:,.2f}** ex-VAT")
+        chips.append(_tot_chip("Invoice total", f"£{it_total:,.2f}",
+                               "ex-VAT · billed by supplier", "#F26A21"))
+    if isinstance(sale_total, (int, float)):
+        chips.append(_tot_chip("Sale total (to us)", f"£{sale_total:,.2f}",
+                               "what the customer pays us", "#16a34a"))
     if isinstance(mt, (int, float)):
-        bits.append(f"Monday total £{mt:,.2f}")
-    if bits:
-        st.caption(" · ".join(bits))
+        chips.append(_tot_chip("Monday total", f"£{mt:,.2f}", "recorded on the order", "#6b7280"))
+    if chips:
+        st.markdown('<div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 12px">'
+                    + "".join(chips) + "</div>", unsafe_allow_html=True)
 
     # Live order margin from Monday (whole order, across all its invoices/credit
     # notes) — the safeguard against approving a duplicate or extra invoice.
@@ -1547,29 +1563,39 @@ def _run_one_invoice(inv, lbsku):
         st.caption(f"Agreed price at point of ordering (Monday £ to Supplier): £{agreed:,.2f}{extra}")
 
     badge = {"price": "#ef4444", "qty": "#ea580c", "notorder": "#ef4444",
-             "noprice": "#94a3b8", "delivery": "#ea580c", "name": "#16A34A"}
+             "noprice": "#94a3b8", "delivery": "#ea580c", "name": "#16a34a"}
+    td = "padding:9px 12px;vertical-align:top"
     rows = ""
     for l in res["lines"]:
         u = f"£{l['unit']:,.2f}" if isinstance(l["unit"], (int, float)) else "—"
         c = f"£{l['cost']:,.2f}" if isinstance(l["cost"], (int, float)) else "—"
         flags = "".join(
-            f'<span style="background:{badge.get(t, "#94a3b8")};color:#fff;border-radius:3px;'
-            f'padding:0 5px;font-size:10px;margin-right:4px">{msg}</span>'
-            for t, msg in l["issues"]) or _inv_inline("check", 15)
+            f'<span style="display:inline-block;background:{badge.get(t, "#94a3b8")};color:#fff;'
+            f'border-radius:4px;padding:2px 8px;font-size:11.5px;font-weight:600;'
+            f'margin:1px 4px 1px 0">{_esc(msg)}</span>'
+            for t, msg in l["issues"]) or (
+            f'<span style="display:inline-flex;align-items:center;gap:5px;color:#16a34a;'
+            f'font-weight:700;font-size:12.5px"><img src="{_INV_ICON["check"]}" '
+            f'style="width:16px;height:16px"> OK</span>')
         rows += (f'<tr style="border-top:1px solid var(--line)">'
-                 f'<td style="padding:6px 10px"><b>{l["sku"] or "—"}</b>'
-                 f'<div style="color:var(--muted);font-size:11px">{(l.get("desc") or "")[:60]}</div></td>'
-                 f'<td style="padding:6px 10px;text-align:center">{l["qty"] if l["qty"] is not None else "—"}</td>'
-                 f'<td style="padding:6px 10px;text-align:right">{u}</td>'
-                 f'<td style="padding:6px 10px;text-align:right">{c}</td>'
-                 f'<td style="padding:6px 10px">{flags}</td></tr>')
-    st.markdown('<table style="width:100%;border-collapse:collapse;font-size:12.5px">'
-                '<tr style="text-align:left;color:var(--muted)">'
-                '<th style="padding:6px 10px">SKU</th><th style="padding:6px 10px;text-align:center">Qty</th>'
-                '<th style="padding:6px 10px;text-align:right">Invoiced</th>'
-                '<th style="padding:6px 10px;text-align:right">Pricelist</th>'
-                '<th style="padding:6px 10px">Check</th></tr>' + rows + "</table>",
-                unsafe_allow_html=True)
+                 f'<td style="{td}"><b style="font-size:13.5px">{_esc(l["sku"] or "—")}</b>'
+                 f'<div style="color:var(--muted);font-size:12px;margin-top:1px">'
+                 f'{_esc((l.get("desc") or "")[:70])}</div></td>'
+                 f'<td style="{td};text-align:center">{l["qty"] if l["qty"] is not None else "—"}</td>'
+                 f'<td style="{td};text-align:right">{u}</td>'
+                 f'<td style="{td};text-align:right">{c}</td>'
+                 f'<td style="{td}">{flags}</td></tr>')
+    th = ('color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;'
+          'letter-spacing:.4px;padding:8px 12px')
+    st.markdown(
+        '<table style="width:100%;border-collapse:collapse;font-size:13.5px;'
+        'border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:2px 0 10px">'
+        f'<tr style="background:var(--card);text-align:left">'
+        f'<th style="{th}">SKU</th><th style="{th};text-align:center">Qty</th>'
+        f'<th style="{th};text-align:right">Invoiced</th>'
+        f'<th style="{th};text-align:right">Pricelist</th>'
+        f'<th style="{th}">Check</th></tr>' + rows + "</table>",
+        unsafe_allow_html=True)
 
     # Two explicit checks, stated separately so it's clear both ran.
     order = _parse_order_items(inv.get("order_items"))
