@@ -1189,6 +1189,10 @@ DELIVERY_CHARGES = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
+    # UPB invoices use James Hardie manufacturer codes; we don't hold UPB costs keyed
+    # to those, so price isn't pricelist-checked — the live order margin is the guard.
+    "upb": {"name": "UPB", "no_pricelist": True},
+    "up": {"name": "UPB", "no_pricelist": True},
 }
 
 
