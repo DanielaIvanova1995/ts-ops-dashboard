@@ -1454,9 +1454,11 @@ def match_quote_variant(code: str | None, description: str | None,
     return _best_title_match(cands, query)
 
 
-def create_draft_order(line_items, email=None, note=None, token: str | None = None) -> dict:
+def create_draft_order(line_items, email=None, note=None, token: str | None = None,
+                       name=None, phone=None) -> dict:
     """Create a Shopify draft order from line_items [{variantId, quantity}]. Shopify
     prices it. Returns {id, name, invoiceUrl, total}. Needs write_draft_orders.
+    `email`/`name`/`phone` are the CUSTOMER's (from the form body, not the sender).
     Retries once with a freshly-minted token if the cached one lacks the scope (so a
     just-granted scope works without rebooting the app)."""
     store = get_secret("SHOPIFY_STORE")
@@ -1469,6 +1471,12 @@ def create_draft_order(line_items, email=None, note=None, token: str | None = No
         inp["email"] = email
     if note:
         inp["note"] = note
+    if phone:
+        inp["phone"] = phone
+    if name:
+        parts = name.strip().split(None, 1)
+        inp["billingAddress"] = {"firstName": parts[0],
+                                 "lastName": parts[1] if len(parts) > 1 else ""}
 
     def _attempt(tok):
         r = requests.post(
@@ -1529,10 +1537,12 @@ def _plain_to_html(text: str) -> str:
 
 
 def create_reply_draft(mailbox: str, message_id: str, body: str, subject: str | None = None,
-                       token: str | None = None, as_html: bool = False) -> str | None:
+                       token: str | None = None, as_html: bool = False,
+                       to_email: str | None = None) -> str | None:
     """Create a *draft reply* to a message (lands in Drafts, threaded). Optionally
-    override the subject and send as formatted HTML. Returns the draft's webLink.
-    Needs Mail.ReadWrite."""
+    override the subject, send as formatted HTML, and re-address it to `to_email` (the
+    real customer — form-submission emails come FROM the form app, not the customer, so
+    a plain reply would go back to the form). Returns the draft's webLink. Mail.ReadWrite."""
     token = token or ms_token()
     r = requests.post(f"{GRAPH}/users/{mailbox}/messages/{message_id}/createReply",
                       headers={"Authorization": f"Bearer {token}"}, timeout=25)
@@ -1545,6 +1555,8 @@ def create_reply_draft(mailbox: str, message_id: str, body: str, subject: str | 
         patch = {"body": {"contentType": "Text", "content": body}}
     if subject:
         patch["subject"] = subject
+    if to_email:
+        patch["toRecipients"] = [{"emailAddress": {"address": to_email}}]
     r2 = requests.patch(f"{GRAPH}/users/{mailbox}/messages/{did}",
                         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                         json=patch, timeout=25)

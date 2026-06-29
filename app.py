@@ -1964,7 +1964,7 @@ QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is 
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 5
+QUOTE_PARSE_VERSION = 6
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -2006,10 +2006,59 @@ def _parse_one_quote(email):
         return {"error": str(e)}
     parsed["thread"] = thread
     parsed["_v"] = QUOTE_PARSE_VERSION
+    # Strict web-form fields ('Name :', 'Email :', …) override AI guesses, and the real
+    # customer email comes from the BODY — form emails are sent FROM the form app, not
+    # the customer, so the sender is only used when it's clearly a real person.
+    ff = _form_fields(email.get("body") or "")
+    if ff.get("customer_name"):
+        parsed["customer_name"] = ff["customer_name"].title()
+    if ff.get("customer_email"):
+        parsed["customer_email"] = ff["customer_email"]
+    elif email.get("from") and not _is_automated_sender(email.get("from")):
+        parsed["customer_email"] = email["from"]
+    if ff.get("customer_phone"):
+        parsed["customer_phone"] = ff["customer_phone"]
+    if ff.get("postcode"):
+        parsed["postcode"] = ff["postcode"]
     if not parsed.get("postcode"):
         m = _UK_POSTCODE.search(thread or "")
         parsed["postcode"] = m.group(1).upper() if m else None
     return parsed
+
+
+_AUTOMATED_SENDERS = ("notification@", "noreply", "no-reply", "donotreply", "do-not-reply",
+                      "pifyapp.com", "mailer-daemon", "@shopify")
+
+
+def _is_automated_sender(addr):
+    a = (addr or "").lower()
+    return any(s in a for s in _AUTOMATED_SENDERS)
+
+
+def _form_fields(body):
+    """Pull the customer's details from a web-form submission body ('Name : …',
+    'Email : …', 'Phone : …', 'Postcode : …'). Strict regex on the form's own fields —
+    no guessing. Returns only the fields actually present."""
+    # Stop a field value at the next bullet or the next KNOWN form label (works whether
+    # the form separates fields with bullets or spaces). Postcode is left as-is so non-UK
+    # ones (e.g. Irish Eircodes like 'H91 RY22') aren't lost.
+    labels = (r"Name|Email|Phone|Mobile|Delivery\s*Postcode|Postcode|Address|Company|Are\s*you|"
+              r"Notes|Required|Which|Approximate|Dimensions|Window|Door|Quantity|SKU")
+    end = rf"(?=\s*(?:[•·*|]|(?:{labels})\b[^:]{{0,15}}:|$))"
+    out, text = {}, (body or "")
+    m = re.search(r"\bEmail\s*:\s*([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})", text, re.I)
+    if m:
+        out["customer_email"] = m.group(1).strip()
+    m = re.search(r"\bName\s*:\s*([A-Za-z][A-Za-z .'\-]*?)" + end, text, re.I)
+    if m and m.group(1).strip():
+        out["customer_name"] = m.group(1).strip()
+    m = re.search(r"\bPhone\s*:\s*([+(]?\d[\d ()\-+]{6,})", text, re.I)
+    if m:
+        out["customer_phone"] = m.group(1).strip()
+    m = re.search(r"\bPostcode\s*:\s*([A-Za-z0-9][A-Za-z0-9 ]*?)" + end, text, re.I)
+    if m and m.group(1).strip():
+        out["postcode"] = m.group(1).strip().upper()
+    return out
 
 
 def _parse_is_current(p):
@@ -2240,7 +2289,7 @@ def _render_quote_block(email):
                 subj = f"RE: {email['subject']}"
                 link = data_sources.create_reply_draft(
                     QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"],
-                    subject=subj, as_html=True)
+                    subject=subj, as_html=True, to_email=q.get("customer_email"))
                 _mark_quote_progress(email, QUOTE_CAT_INFO)
                 st.success("Draft reply created in Outlook — review and send from there. "
                            "Marked **Info requested**.")
@@ -2298,12 +2347,17 @@ def _render_quote_block(email):
     btn = ("Create provisional quote (draft order + reply)" if provisional
            else "Create Shopify draft order + Outlook draft reply")
     if st.button(btn, type="primary", key=f"qcreate_{email['id']}"):
+        # The customer's real details (form body), NOT the form app's sender address.
+        cust_email = q.get("customer_email")
+        cust_name = q.get("customer_name")
+        cust_phone = q.get("customer_phone")
+        note = f"Quote for {cust_name or 'customer'} — from: {email['subject']}"
         # 1) Try the Shopify draft order (needs write_draft_orders) — but don't block on it.
         do, draft_err = None, None
         try:
             li = [{"variantId": l["match"]["variant_id"], "quantity": l["qty"]} for l in matched]
-            do = data_sources.create_draft_order(li, email=email.get("from"),
-                                                 note=f"Quote from email: {email['subject']}")
+            do = data_sources.create_draft_order(li, email=cust_email, note=note,
+                                                 name=cust_name, phone=cust_phone)
         except Exception as e:  # noqa: BLE001
             draft_err = str(e)
         ref = do["name"] if do else None
@@ -2340,7 +2394,7 @@ def _render_quote_block(email):
             subj = (f"Your quote {ref} – RE: {email['subject']}" if ref
                     else f"Your quote – RE: {email['subject']}")
             link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,
-                                                   subject=subj, as_html=True)
+                                                   subject=subj, as_html=True, to_email=cust_email)
             _mark_quote_progress(email, QUOTE_CAT_QUOTED)
         except Exception as e:  # noqa: BLE001
             st.error("Couldn't create the Outlook draft: " + str(e)[:200])
