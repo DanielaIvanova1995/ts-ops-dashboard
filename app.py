@@ -1653,27 +1653,34 @@ def _run_one_invoice(inv, lbsku):
     lo = rule.get("push_min", _thresholds()[0])
     hi = _thresholds()[1]
     _label, action = _push_decision(matched, is_cn, live, inv.get("supplier"))
+    livetxt = f"{live:.1f}%" if live is not None else "—"
     if action == "push":
-        st.success(f"Fully matched and order margin {live:.1f}% — ready to push to QuickBooks.")
-        rec = "push"
+        rec, head, col = "push", "READY TO APPROVE", "#16a34a"
+        msg = f"Fully matched and order margin {livetxt} — ready to push to QuickBooks."
     elif action == "flag":
-        st.warning(f"Matched, but order margin {live:.1f}% is unusually high (>{hi:.0f}%) — likely "
-                   "a missing invoice or credit note. Flag it and check before pushing.")
-        rec = "disc"
+        rec, head, col = "disc", "FLAG — CHECK FIRST", "#dc2626"
+        msg = (f"Matched, but order margin {livetxt} is unusually high (>{hi:.0f}%) — likely a "
+               "missing invoice or credit note. Flag it and check before pushing.")
     elif action == "hold":
+        rec, head, col = "hold", "HOLD — REVIEW", "#ea580c"
         if rule.get("no_pricelist"):
-            mtxt = f"order margin {live:.1f}%" if live is not None else "the order margin couldn't be read"
-            st.warning(f"Matched ({mtxt}, at/under {lo:.0f}%) — held as Matched. Consider raising "
-                       "the selling price on the website to improve the margin.")
+            mtxt = f"order margin {livetxt}" if live is not None else "the order margin couldn't be read"
+            msg = (f"Matched ({mtxt}, at/under {lo:.0f}%) — held as Matched. Consider raising the "
+                   "selling price on the website to improve the margin.")
         else:
-            mtxt = (f"order margin {live:.1f}% is below {lo:.0f}%" if live is not None
+            mtxt = (f"order margin {livetxt} is below {lo:.0f}%" if live is not None
                     else "the order margin couldn't be read")
-            st.warning(f"Matched, but {mtxt} — review before pushing. Holding as Matched is "
-                       "recommended.")
-        rec = "hold"
+            msg = f"Matched, but {mtxt} — review before pushing. Holding as Matched is recommended."
     else:
-        st.warning("Discrepancy found (see above) — flag it, or fix it on Monday and re-check.")
-        rec = "disc"
+        rec, head, col = "disc", "DISCREPANCY", "#dc2626"
+        msg = "Discrepancy found (see above) — flag it, or fix it on Monday and re-check."
+    st.markdown(
+        f'<div style="background:var(--card);border:1px solid var(--line);border-left:6px solid '
+        f'{col};border-radius:8px;padding:12px 16px;margin:4px 0 10px">'
+        f'<div style="font-size:13px;font-weight:800;color:{col};text-transform:uppercase;'
+        f'letter-spacing:1px">{head}</div>'
+        f'<div style="font-size:14px;color:var(--ink);margin-top:3px;line-height:1.4">'
+        f'{_esc(msg)}</div></div>', unsafe_allow_html=True)
     ca, cb, cc = st.columns(3)
     if ca.button("Push credit note to QB" if is_cn else "Push to QB",
                  key=f"push_{inv['sub_id']}", use_container_width=True,
