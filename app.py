@@ -1055,7 +1055,7 @@ def _title_match(desc, order, used):
     return best
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _supplier_title_index():
     """{norm_supplier: [(title_tokens, title, cost)]} from the feed's per-supplier
     product titles — for price-checking a supplier's invoice by the product TITLE it
