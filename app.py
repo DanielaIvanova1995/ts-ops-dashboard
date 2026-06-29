@@ -1536,14 +1536,22 @@ def _run_one_invoice(inv, lbsku):
     live = inv.get("order_margin_live")
     if live is not None:
         lcol = "#dc2626" if live < 15.01 else "#ea580c" if live <= 18 else "#16a34a"
-        st.markdown(
-            f'<div style="font-size:15px;margin:2px 0 4px">Order margin on Monday (live): '
-            f'<b style="color:{lcol}">{live:.1f}%</b> '
-            f'<span style="color:var(--muted);font-size:12px">— the whole order on Monday, across '
-            f'all its invoices &amp; credit notes</span></div>', unsafe_allow_html=True)
+        warn = ""
         if live < 15.01:
-            st.warning("Order margin on Monday is below target — check for a duplicate or extra "
-                       "invoice/credit note on this order before approving.")
+            warn = ('<div style="font-size:13px;color:#dc2626;font-weight:600;margin-top:5px">'
+                    '&#9888; Below target — check for a duplicate or extra invoice / credit note '
+                    'on this order before approving.</div>')
+        st.markdown(
+            f'<div style="background:var(--card);border:1px solid var(--line);border-left:6px solid '
+            f'{lcol};border-radius:8px;padding:11px 16px;margin:4px 0 8px">'
+            f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
+            f'<span style="font-size:12px;font-weight:800;color:var(--muted);'
+            f'text-transform:uppercase;letter-spacing:.6px">Order margin · Monday (live)</span>'
+            f'<span style="font-size:24px;font-weight:800;color:{lcol};line-height:1">'
+            f'{live:.1f}%</span></div>'
+            f'<div style="font-size:12px;color:var(--muted);margin-top:2px">the whole order on '
+            f'Monday, across all its invoices &amp; credit notes</div>'
+            f'{warn}</div>', unsafe_allow_html=True)
 
     dval = inv.get("_discount")
     if dval and dval > 0:
