@@ -1039,6 +1039,46 @@ def _title_match(desc, order, used):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _supplier_title_index():
+    """{norm_supplier: [(title_tokens, title, cost)]} from the feed's per-supplier
+    product titles — for price-checking a supplier's invoice by the product TITLE it
+    prints when its SKU codes differ from ours (e.g. UPB)."""
+    lk = load_lookup()
+    st_map = (lk or {}).get("supplier_titles") or {}
+    out = {}
+    for sup, pairs in st_map.items():
+        lst = []
+        for t, c in pairs:
+            toks = _title_tokens(t)
+            if toks and c is not None:
+                lst.append((toks, t, c))
+        if lst:
+            out[_norm_code(sup)] = lst
+    return out
+
+
+def _supplier_title_cost(desc, supplier, tidx):
+    """Cost of the line in `supplier`'s OWN pricelist whose product title best matches
+    the invoice description. Scoped to that one supplier's catalogue (small, their own
+    consistent naming) — not a cross-catalogue guess. Returns (cost, matched title)."""
+    cands = tidx.get(supplier)
+    if not cands:
+        return None, None
+    dt = _title_tokens(desc)
+    if len(dt) < 2:
+        return None, None
+    best, best_score, best_title = None, 0.0, None
+    for toks, title, cost in cands:
+        shared = len(dt & toks)
+        if shared < 2:
+            continue
+        ratio = shared / min(len(dt), len(toks))
+        if ratio >= 0.5 and (shared + ratio) > best_score:
+            best, best_score, best_title = cost, shared + ratio, title
+    return best, best_title
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def _pricelist_index():
     """{norm_sku: {norm_supplier: cost}} from the pricing lookup offers."""
     lk = load_lookup()
@@ -1189,10 +1229,6 @@ DELIVERY_CHARGES = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
-    # UPB invoices use James Hardie manufacturer codes; we don't hold UPB costs keyed
-    # to those, so price isn't pricelist-checked — the live order margin is the guard.
-    "upb": {"name": "UPB", "no_pricelist": True},
-    "up": {"name": "UPB", "no_pricelist": True},
 }
 
 
@@ -1219,6 +1255,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     order's SKUs/quantities. Known supplier delivery charges are recognised."""
     supplier = _norm_code(meta.get("supplier"))
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
+    tidx = _supplier_title_index() if not no_pl else None
     order = _parse_order_items(meta.get("order_items"))
     parsed_lines = parsed.get("lines") or []
 
@@ -1256,11 +1293,22 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         issues = []
         supcosts = pidx.get(sk) or {}
         cost = supcosts.get(supplier)                 # strictly the SKU's cost for this supplier
+        title_note = None
+        # If this supplier's SKU isn't on our pricelist, fall back to THIS SUPPLIER's
+        # own pricelist titles (their codes differ from ours, but they name products
+        # the same way on pricelist and invoice — e.g. UPB). Scoped to one supplier.
+        if cost is None and not no_pl and tidx:
+            c2, mt = _supplier_title_cost(desc, supplier, tidx)
+            if c2 is not None:
+                cost, title_note = c2, mt
         if not no_pl:                                 # suppliers with no pricelist: skip price check
             if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                 if unit > cost + tol:
+                    via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
                     issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                            f"(+£{unit - cost:,.2f})"))
+                                            f"(+£{unit - cost:,.2f}){via}"))
+                elif title_note:
+                    issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
             elif isinstance(unit, (int, float)) and cost is None:
                 issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         # Order match: exact SKU → embedded manufacturer code → product name.
