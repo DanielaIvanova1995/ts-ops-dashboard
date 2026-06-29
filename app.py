@@ -1167,6 +1167,8 @@ DELIVERY_CHARGES = {
     "pjh": {"name": "PJH", "flat": 25.0},
     "travisperkins": {"name": "Travis Perkins", "flat": 25.0, "free_over": 100.0},
     "nbp": {"name": "NBP", "flat": 17.0, "free_over": 250.0},
+    "upb": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
+    "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
