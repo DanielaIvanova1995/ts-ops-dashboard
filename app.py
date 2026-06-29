@@ -1505,7 +1505,9 @@ def _run_one_invoice(inv, lbsku):
         st.markdown(f'<div style="margin:2px 0 6px">{links}</div>', unsafe_allow_html=True)
 
     it_total, mt = parsed.get("total"), inv.get("total")
-    sale_total = om.get("rev") if om else None
+    # 'Sale total (to us)' = Monday '£ to us' (the customer paid) — Shopify total is
+    # wrong for mixed orders, so use the figure recorded on Monday.
+    sale_total = inv.get("to_us")
 
     def _tot_chip(label, value, sub, color):
         return (f'<div style="background:var(--card);border:1px solid var(--line);'
@@ -1597,38 +1599,51 @@ def _run_one_invoice(inv, lbsku):
         f'<th style="{th}">Check</th></tr>' + rows + "</table>",
         unsafe_allow_html=True)
 
-    # Two explicit checks, stated separately so it's clear both ran.
+    # Two explicit checks, shown as cards so it's clear both ran (order + price).
+    def _check_card(title, status, color, icon, msg):
+        return (f'<div style="flex:1;min-width:250px;background:var(--card);'
+                f'border:1px solid var(--line);border-left:5px solid {color};border-radius:7px;'
+                f'padding:10px 14px">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">'
+                f'<img src="{_INV_ICON[icon]}" style="width:18px;height:18px">'
+                f'<span style="font-weight:800;font-size:13.5px">{title}</span>'
+                f'<span style="margin-left:auto;font-size:11px;font-weight:800;color:{color};'
+                f'text-transform:uppercase;letter-spacing:.5px">{_esc(status)}</span></div>'
+                f'<div style="font-size:13px;color:var(--ink);line-height:1.4">{_esc(msg)}</div></div>')
+
     order = _parse_order_items(inv.get("order_items"))
     onum = inv.get("order_no") or "?"
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
     if not qmiss and not res["missing"]:
-        st.success(f"Checked against Shopify order {onum}: all {len(order)} order line(s) "
-                   f"match on SKU & quantity.")
+        oc = ("Order check", "Match", "#16a34a", "check",
+              f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
     else:
-        extra = (f", {len(res['missing'])} ordered but not invoiced ({', '.join(res['missing'])})"
-                 if res["missing"] else "")
-        st.warning(f"Checked against Shopify order {onum}: {len(qmiss)} line(s) don't match"
-                   f"{extra}.")
+        extra = (f"; {len(res['missing'])} ordered but not invoiced "
+                 f"({', '.join(res['missing'])})" if res["missing"] else "")
+        oc = ("Order check", "Review", "#dc2626", "warn",
+              f"{len(qmiss)} line(s) don't match order {onum}{extra}.")
+
     sup = inv.get("supplier") or "supplier"
     if SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {}).get("no_pricelist"):
-        st.info(f"No pricelist for {sup} — price not checked (Monday's agreed price is the "
-                "reference; not flagged).")
+        pc = ("Price check", "Not checked", "#6b7280", "invoice",
+              f"No pricelist held for {sup} — the order margin is the reference (not flagged).")
     else:
         priced = [l for l in res["lines"] if isinstance(l.get("cost"), (int, float))]
         pissues = [l for l in priced if any(t == "price" for t, _ in l["issues"])]
-        nopl = [l for l in res["lines"]
-                if any(t == "noprice" for t, _ in l["issues"])]
+        nopl = [l for l in res["lines"] if any(t == "noprice" for t, _ in l["issues"])]
         if not priced:
-            st.warning(f"⚠️ No **{sup}** pricelist found in Airtable — the price was **not "
-                       f"checked**. Add a {sup} pricelist, or the margin/agreed-price is the only "
-                       "reference for this invoice.")
+            pc = ("Price check", "No pricelist", "#ea580c", "warn",
+                  f"No {sup} pricelist cost found — price not checked. Add {sup}'s pricelist.")
         elif pissues:
-            st.warning(f"Checked against {sup} pricelist: {len(pissues)} line(s) above pricelist.")
+            pc = ("Price check", "Over pricelist", "#dc2626", "warn",
+                  f"{len(pissues)} line(s) invoiced above {sup}'s pricelist.")
         else:
-            extra = (f" — but {len(nopl)} line(s) had no {sup} cost on file"
-                     if nopl else "")
-            st.success(f"Checked against {sup} pricelist: all {len(priced)} priced line(s) "
-                       f"match{extra}.")
+            extra = f" ({len(nopl)} had no cost on file)" if nopl else ""
+            pc = ("Price check", "Match", "#16a34a", "check",
+                  f"All {len(priced)} priced line(s) match {sup}'s pricelist{extra}.")
+
+    st.markdown('<div style="display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 8px">'
+                + _check_card(*oc) + _check_card(*pc) + "</div>", unsafe_allow_html=True)
 
     # Recommendation + write-back to Monday's Payment Status.
     st.write("")

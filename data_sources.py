@@ -825,7 +825,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
-                "text_mm04tmac", "email", "numbers6", "formula_mkn9918j"]) {
+                "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j"]) {
                 id text ... on FormulaValue { display_value } } }
     """
     first_q = ("query ($board: [ID!], $limit: Int!) { boards(ids: $board) { "
@@ -871,8 +871,13 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             agreed_cost = float(pcv.get("numbers6"))
         except (TypeError, ValueError):
             agreed_cost = None
+        try:
+            to_us = float(pcv.get("numbers48"))      # Monday '£ to us' (customer paid)
+        except (TypeError, ValueError):
+            to_us = None
         return {
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
+            "to_us": to_us,
             "asset_id": asset_id, "file_name": file_name,
             "file_url": (cv.get("file_mm38gx3j", {}) or {}).get("text") or None,
             "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
