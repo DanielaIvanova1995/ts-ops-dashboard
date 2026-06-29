@@ -1711,11 +1711,9 @@ def _apply_status(inv, label):
         st.error("Couldn't update Monday: " + str(e)[:200])
         return
     invoices_by_status.clear()                       # refetch queue + logs
-    for kk in ("review", "approved", "discrepancy"):  # clear row selections
-        try:
-            del st.session_state[f"sel_{kk}"]
-        except Exception:  # noqa: BLE001
-            pass
+    for kk in ("review", "approved", "discrepancy"):  # clear row selections + open panel
+        for pref in ("sel_", "inv_open_"):
+            st.session_state.pop(f"{pref}{kk}", None)
     st.session_state["inv_flash"] = f"Invoice {inv.get('invoice_no')} marked “{label}” on Monday."
     st.rerun()
 
@@ -1906,8 +1904,17 @@ def _invoice_tab(key, is_queue):
     # Expandable review sub-items: the clicked row, plus any discrepancies, each
     # opens in place to show exactly what's wrong. (Streamlit can't expand inside a
     # grid row, so they sit just beneath the table.)
+    # Persist the open invoice in session state: clicking a button inside the detail
+    # (e.g. Push to QB) reruns and clears the dataframe selection, which would otherwise
+    # close the panel and swallow the click. Remembering it keeps the panel + its
+    # buttons alive across that rerun, so a single click registers.
     picked = event.selection.rows if (event and event.selection) else []
-    sel_id = fil[picked[0]]["sub_id"] if picked else None
+    open_key = f"inv_open_{key}"
+    if picked:
+        st.session_state[open_key] = fil[picked[0]]["sub_id"]
+    sel_id = st.session_state.get(open_key)
+    if sel_id and not any(i["sub_id"] == sel_id for i in fil):
+        sel_id = None  # the open invoice has left this queue (e.g. after a push)
 
     def _is_disc(sid):
         v = verdicts.get(sid)
