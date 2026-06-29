@@ -1001,6 +1001,18 @@ def _title_tokens(s):
     return out
 
 
+def _code_match(sk, order, used):
+    """Match a supplier's numeric manufacturer code to an order line whose SKU EMBEDS it
+    — e.g. UPB invoice '5420121' → our SKU 'JHHPK5420121'. Deterministic (the full code
+    must appear as a substring), not fuzzy. Only fires for 6+ digit codes."""
+    if not (sk and sk.isdigit() and len(sk) >= 6):
+        return None
+    for k in order:
+        if k not in used and sk in k:
+            return k
+    return None
+
+
 def _title_match(desc, order, used):
     """When an invoice SKU isn't on the order, find the order line whose product name
     best overlaps the invoice description. Returns its norm_sku key or None. Overlap is
@@ -1247,14 +1259,22 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                             f"(+£{unit - cost:,.2f})"))
             elif isinstance(unit, (int, float)) and cost is None:
                 issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
-        # Order match: SKU first, then fall back to the product title/name.
-        okey = sk if sk in order else _title_match(desc, order, invoiced)
+        # Order match: exact SKU → embedded manufacturer code → product name.
+        if sk in order:
+            okey, how = sk, "sku"
+        elif _code_match(sk, order, invoiced):
+            okey, how = _code_match(sk, order, invoiced), "code"
+        else:
+            okey, how = _title_match(desc, order, invoiced), "name"
         if okey:
             invoiced.add(okey)
             exp = order[okey]["qty"]
             if exp is not None and qty is not None and int(qty) != exp:
                 issues.append(("qty", f"invoiced {qty} vs order {exp}"))
-            if okey != sk:
+            if how == "code":
+                issues.append(("name", f"matched to order line {order[okey]['sku']} by product "
+                                       "code (in our SKU)"))
+            elif how == "name":
                 issues.append(("name", f"matched to order line {order[okey]['sku']} by product "
                                        "name (invoice SKU differs)"))
         else:
