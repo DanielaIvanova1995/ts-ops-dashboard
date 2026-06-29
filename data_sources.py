@@ -1628,23 +1628,49 @@ def read_invoice_pdf(pdf_url: str) -> dict:
 
 def set_invoice_status(sub_id, label: str, token: str | None = None) -> bool:
     """Set a subitem's Payment Status (status7__1) to a label, e.g.
-    'Approved (To QB)' or 'Discrepancy'. Returns True. Raises on failure."""
+    'Approved (To QB)' or 'Discrepancy'. Uses change_column_value with {label} (the
+    canonical method for status columns) and VERIFIES it stuck by reading the value
+    back in the same response. Returns True, or raises a clear error if it didn't apply."""
+    import json as _json
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
-    query = ("mutation ($board: ID!, $item: ID!, $val: String!) {"
-             " change_simple_column_value(board_id: $board, item_id: $item,"
-             " column_id: \"status7__1\", value: $val) { id } }")
+    query = ("mutation ($board: ID!, $item: ID!, $val: JSON!) {"
+             " change_column_value(board_id: $board, item_id: $item,"
+             " column_id: \"status7__1\", value: $val, create_labels_if_missing: false)"
+             " { id column_values(ids: [\"status7__1\"]) { text } } }")
     r = requests.post(
         MONDAY_API,
         json={"query": query, "variables": {"board": str(SUBITEMS_BOARD_ID),
-                                            "item": str(sub_id), "val": label}},
+                                            "item": str(sub_id),
+                                            "val": _json.dumps({"label": label})}},
         headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
     r.raise_for_status()
     payload = r.json()
     if "errors" in payload:
-        raise RuntimeError(f"Monday API error: {payload['errors']}")
+        raise RuntimeError(f"Monday rejected '{label}': {payload['errors']}")
+    cv = (((payload.get("data") or {}).get("change_column_value") or {})
+          .get("column_values") or [])
+    actual = cv[0].get("text") if cv else None
+    if actual != label:
+        raise RuntimeError(f"Monday did not apply '{label}' (it shows '{actual}') — "
+                           "check the label exists and the API token can edit subitems.")
     return True
+
+
+def get_invoice_status(sub_id, token: str | None = None) -> str | None:
+    """Read a subitem's current Payment Status label (status7__1)."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    q = ('query ($ids: [ID!]) { items(ids: $ids) { '
+         'column_values(ids: ["status7__1"]) { text } } }')
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"ids": [str(sub_id)]}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    items = (r.json().get("data") or {}).get("items") or []
+    cv = items[0].get("column_values") if items else None
+    return cv[0].get("text") if cv else None
 
 
 def find_kind_words(emails: list) -> dict | None:
