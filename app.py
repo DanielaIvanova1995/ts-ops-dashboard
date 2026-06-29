@@ -1964,7 +1964,7 @@ QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is 
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 4
+QUOTE_PARSE_VERSION = 5
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -1989,7 +1989,12 @@ def _parse_one_quote(email):
     if cid:
         try:
             msgs = data_sources.fetch_conversation(QUOTE_MAILBOX, cid)
-            if msgs:
+            froms = {(m.get("from") or "").strip().lower() for m in (msgs or []) if m.get("from")}
+            # Only merge the thread when it's a GENUINE back-and-forth (2+ distinct senders).
+            # Shopify form submissions all share one sender + a subject-based conversation, so
+            # Outlook lumps unrelated customers (Lee, Michael…) into one "thread" — merging
+            # them makes the AI grab the wrong name. In that case use just this one email.
+            if msgs and len(msgs) > 1 and len(froms) > 1:
                 thread = "\n\n".join(
                     f"[{m['received']} · {m['from_name'] or m['from'] or '?'}]\n{m['body']}"
                     for m in msgs)
