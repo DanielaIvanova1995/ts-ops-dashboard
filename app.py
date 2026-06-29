@@ -984,15 +984,32 @@ def _parse_order_items(text):
     return out
 
 
+# Supplier shorthand → full word, so an abbreviated invoice line ('Ali Ext Corner')
+# matches the spelled-out pricelist title ('External Aluminium Corner'). Deterministic;
+# extend as new shorthand turns up.
+_TOK_ABBREV = {
+    "ali": "aluminium", "alu": "aluminium", "alum": "aluminium",
+    "ext": "external", "int": "internal",
+    "hplank": "hardieplank", "hplk": "hardieplank",
+    "galvan": "galvanised", "galv": "galvanised",
+    "conn": "connector", "vert": "vertical", "horiz": "horizontal",
+    "vent": "ventilation", "qty": "", "pk": "pack",
+}
+
+
 def _title_tokens(s):
     # Split letter↔digit boundaries so '3600mm' matches '3600'. Keep 3+ letter words and
     # 2+ digit numbers (dimensions like 25, 38, 180, 3600 are strong signals — they tell
-    # a 25mm vent strip from a 38mm one), so supplier vs order naming lines up.
+    # a 25mm vent strip from a 38mm one), so supplier vs order naming lines up. Expand
+    # known supplier shorthand so abbreviated invoice lines match spelled-out pricelist names.
     s = (s or "").lower()
     s = re.sub(r"(?<=\d)(?=[a-z])", " ", s)
     s = re.sub(r"(?<=[a-z])(?=\d)", " ", s)
     out = set()
     for w in re.findall(r"[a-z0-9]+", s):
+        w = _TOK_ABBREV.get(w, w)
+        if not w:
+            continue
         if w.isdigit():
             if len(w) >= 2:
                 out.add(w)
