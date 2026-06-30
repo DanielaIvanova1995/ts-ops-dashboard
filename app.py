@@ -1835,8 +1835,7 @@ def _run_one_invoice(inv, lbsku):
                         data_sources.set_invoice_status(sub, DISCREPANCY_LABEL)
                         invoices_by_status.clear()
                         for kk in ("review", "matched", "recent", "discrepancy"):
-                            for pref in ("sel_", "inv_open_"):
-                                st.session_state.pop(f"{pref}{kk}", None)
+                            st.session_state.pop(f"sel_{kk}", None)
                         st.session_state["inv_flash"] = (
                             f"Emailed {to} about invoice {inv.get('invoice_no')}, noted it on "
                             "Monday and marked it Discrepancy.")
@@ -1854,9 +1853,8 @@ def _apply_status(inv, label):
         st.error("Couldn't update Monday: " + str(e)[:200])
         return
     invoices_by_status.clear()                       # refetch queue + logs
-    for kk in ("review", "approved", "discrepancy"):  # clear row selections + open panel
-        for pref in ("sel_", "inv_open_"):
-            st.session_state.pop(f"{pref}{kk}", None)
+    for kk in ("review", "matched", "recent", "discrepancy"):  # reset row selections
+        st.session_state.pop(f"sel_{kk}", None)
     st.session_state["inv_flash"] = f"Invoice {inv.get('invoice_no')} marked “{label}” on Monday."
     st.rerun()
 
@@ -2056,36 +2054,47 @@ def _invoice_tab(key, is_queue):
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
     event = st.dataframe(df, hide_index=True, use_container_width=True,
-                         key=f"sel_{key}", on_select="rerun", selection_mode="single-row",
+                         key=f"sel_{key}", on_select="rerun", selection_mode="multi-row",
                          column_config=colcfg)
 
-    # Expandable review sub-items: the clicked row, plus any discrepancies, each
-    # opens in place to show exactly what's wrong. (Streamlit can't expand inside a
-    # grid row, so they sit just beneath the table.)
-    # Persist the open invoice in session state: clicking a button inside the detail
-    # (e.g. Push to QB) reruns and clears the dataframe selection, which would otherwise
-    # close the panel and swallow the click. Remembering it keeps the panel + its
-    # buttons alive across that rerun, so a single click registers.
+    # NOTHING runs on a row click — ticking rows only selects them. The user then presses
+    # "Check & open selected" to actually read/open them, so the AI (which costs money) is
+    # never triggered just by clicking. The chosen ids live in session so the panels — and
+    # their buttons (e.g. Push to QB) — survive the reruns those buttons cause.
     picked = event.selection.rows if (event and event.selection) else []
-    open_key = f"inv_open_{key}"
-    if picked:
-        st.session_state[open_key] = fil[picked[0]]["sub_id"]
-    sel_id = st.session_state.get(open_key)
-    if sel_id and not any(i["sub_id"] == sel_id for i in fil):
-        sel_id = None  # the open invoice has left this queue (e.g. after a push)
+    picked_ids = [fil[i]["sub_id"] for i in picked]
+    show_key = f"inv_show_{key}"
+
+    if picked_ids:
+        n_uncheck = sum(1 for sid in picked_ids if sid not in verdicts)
+        if n_uncheck:
+            lbl = f"Check & open selected ({len(picked_ids)})"
+            hlp = (f"{n_uncheck} not checked yet — reads those PDFs now "
+                   f"(~£{n_uncheck * 0.01:.2f}–£{n_uncheck * 0.04:.2f}). "
+                   "Already-checked ones are free (cached).")
+        else:
+            lbl = f"Open selected ({len(picked_ids)})"
+            hlp = "All selected are already checked — opening them is free (cached)."
+        if st.button(lbl, key=f"opensel_{key}", type="primary", help=hlp):
+            st.session_state[show_key] = picked_ids
+            st.rerun()
+    else:
+        st.caption("Tick one or more invoices above, then click **Check & open selected** — "
+                   "nothing runs (or costs) until you press it.")
+
+    show_ids = [sid for sid in st.session_state.get(show_key, [])
+                if any(i["sub_id"] == sid for i in fil)]  # drop any that left this queue
 
     def _is_disc(sid):
         v = verdicts.get(sid)
         return bool(v) and not (v.get("order") and v.get("price"))
 
-    review = []
-    if sel_id:
-        review.append((next(i for i in fil if i["sub_id"] == sel_id), True))
-    flagged = [i for i in fil if is_queue and _is_disc(i["sub_id"]) and i["sub_id"] != sel_id]
-    review += [(i, False) for i in flagged[:15]]
+    chosen = [i for i in fil if i["sub_id"] in show_ids]
+    flagged = [i for i in fil if is_queue and _is_disc(i["sub_id"]) and i["sub_id"] not in show_ids]
+    review = [(i, True) for i in chosen] + [(i, False) for i in flagged[:15]]
 
     if review:
-        st.markdown("##### Review — open an invoice to see the detail")
+        st.markdown("##### Review — selected invoices and any discrepancies")
         st.caption("✓ = already checked — reopen it as many times as you like, it's free "
                    "(the read is cached for 24h). Only an unchecked invoice or the "
                    "**Re-run check** button uses the AI (a few pence).")
