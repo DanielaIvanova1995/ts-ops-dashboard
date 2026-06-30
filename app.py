@@ -1262,6 +1262,7 @@ DELIVERY_CHARGES = {
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",
     "up": "janetwitt@upbuildingproducts.com",
+    "upbuildingproducts": "janetwitt@upbuildingproducts.com",
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
