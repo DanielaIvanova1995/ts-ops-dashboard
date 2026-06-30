@@ -1111,6 +1111,44 @@ def _pricelist_index():
     return idx
 
 
+def _is_code(tok):
+    """A token that looks like a product code (so it won't false-match plain words or
+    bare pack sizes): letter+digit mix of 3+ chars (VL7, HP3600) or a 5+ digit number
+    (5300436)."""
+    has_d = any(c.isdigit() for c in tok)
+    has_a = any(c.isalpha() for c in tok)
+    return (len(tok) >= 3 and has_d and has_a) or (len(tok) >= 5 and tok.isdigit())
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _supplier_code_index():
+    """{norm_supplier: {code_sku: cost}} of each supplier's code-like pricelist SKUs.
+    Lets us price a line when the supplier prints its OWN code (e.g. UPB's VL7) in the
+    invoice description rather than the SKU field — their codes differ from ours."""
+    out = {}
+    for sku, supmap in _pricelist_index().items():
+        if not _is_code(sku):
+            continue
+        for sup, cost in supmap.items():
+            if cost is not None:
+                out.setdefault(sup, {})[sku] = cost
+    return out
+
+
+def _supplier_code_cost(sku_raw, desc, supplier, cidx):
+    """If one of `supplier`'s own pricelist codes appears as a whole token anywhere in
+    the invoice line (SKU or description), return (cost, matched code). Strict equality
+    on the code token — no fuzzy guessing. Else (None, None)."""
+    codes = cidx.get(supplier)
+    if not codes:
+        return None, None
+    toks = {t for t in re.findall(r"[a-z0-9]+", f"{sku_raw} {desc}".lower()) if _is_code(t)}
+    for t in toks:
+        if t in codes:
+            return codes[t], t.upper()
+    return None, None
+
+
 INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limit)
     "review": ([3], 1500),          # Needs Review — pull them ALL (paginated)
     "matched": ([9], 500),          # Matched (TradeHub) — checked, held (NOT pushed)
@@ -1298,6 +1336,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     supplier = _norm_code(meta.get("supplier"))
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     tidx = _supplier_title_index() if not no_pl else None
+    cidx = _supplier_code_index() if not no_pl else None
     order = _parse_order_items(meta.get("order_items"))
     parsed_lines = parsed.get("lines") or []
 
@@ -1336,9 +1375,15 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         supcosts = pidx.get(sk) or {}
         cost = supcosts.get(supplier)                 # strictly the SKU's cost for this supplier
         title_note = None
-        # If this supplier's SKU isn't on our pricelist, fall back to THIS SUPPLIER's
-        # own pricelist titles (their codes differ from ours, but they name products
-        # the same way on pricelist and invoice — e.g. UPB). Scoped to one supplier.
+        # If this supplier's SKU isn't on our pricelist, first look for THIS SUPPLIER's
+        # own pricelist code printed in the line (e.g. UPB's VL7 in the description) — a
+        # strict code match, the most reliable fallback…
+        if cost is None and not no_pl and cidx:
+            c2, mc = _supplier_code_cost(sku_raw, desc, supplier, cidx)
+            if c2 is not None:
+                cost, title_note = c2, f"code {mc}"
+        # …then fall back to matching THIS SUPPLIER's product title (their codes differ
+        # from ours, but they name products consistently — e.g. UPB). Scoped to one supplier.
         if cost is None and not no_pl and tidx:
             c2, mt = _supplier_title_cost(desc, supplier, tidx)
             if c2 is not None:
