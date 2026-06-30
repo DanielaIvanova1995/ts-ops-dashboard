@@ -1838,7 +1838,7 @@ def _run_one_invoice(inv, lbsku):
     # Chase the supplier by email (discrepancies only) — saves to Outlook Drafts.
     if res["n_issues"] > 0:
         sub = inv["sub_id"]
-        if st.toggle("Email the supplier about this", key=f"emailtog_{sub}"):
+        if st.toggle("Draft an email to the supplier about this", key=f"emailtog_{sub}"):
             subj0, body0 = _discrepancy_email(inv, res)
             default_to = (SUPPLIER_EMAILS.get(_norm_code(inv.get("supplier")))
                           or inv.get("supplier_email") or "")
@@ -1852,28 +1852,30 @@ def _run_one_invoice(inv, lbsku):
             st.text_area("Monday note (awaiting credit note)", key=f"enote_{sub}", height=80,
                          help="Saved to the invoice's note column on Monday when you send. "
                               "Includes the expected credit-note total.")
-            st.caption(f"On send: emails from {SUPPLIER_FROM_MAILBOX} with the PDF attached, "
-                       "writes the note to Monday, and marks the invoice **Discrepancy**.")
+            st.caption(f"Saves a **draft** in {SUPPLIER_FROM_MAILBOX} (PDF attached) for you to "
+                       "review and send from Outlook, writes the note to Monday, and marks the "
+                       "invoice **Discrepancy**.")
             if not inv.get("supplier_email"):
                 st.caption("No supplier email on this order in Monday — type one in above.")
-            if st.button("Send to supplier & flag", key=f"esend_{sub}", type="primary",
+            if st.button("Draft to supplier & flag", key=f"esend_{sub}", type="primary",
                          disabled=not st.session_state.get(f"eto_{sub}", "").strip()):
                 to = st.session_state[f"eto_{sub}"].strip()
-                sent = False
+                draft_link = None
+                drafted = False
                 try:
                     pdf_url = (data_sources.monday_asset_url(inv["asset_id"])
                                if inv.get("asset_id") else None)
                     pdf_name = inv.get("file_name") or f"invoice-{inv.get('invoice_no')}.pdf"
-                    data_sources.send_supplier_email(
+                    draft_link = data_sources.create_supplier_draft(
                         SUPPLIER_FROM_MAILBOX, to, st.session_state[f"esub_{sub}"],
                         st.session_state[f"ebod_{sub}"], pdf_url=pdf_url, pdf_name=pdf_name)
-                    sent = True
+                    drafted = True
                 except Exception as e:  # noqa: BLE001
-                    st.error("Couldn't send: " + str(e)[:200]
-                             + " — if it mentions permission/scope, Mail.Send may need adding to "
-                             "the app, or accounts@ may be outside its access policy.")
-                if sent:
-                    # Email went — now record it on Monday: the note + Discrepancy status.
+                    st.error("Couldn't create the draft: " + str(e)[:200]
+                             + " — if it mentions permission/scope, the app needs **Mail.ReadWrite** "
+                             "for accounts@ (or accounts@ is outside its access policy).")
+                if drafted:
+                    # Draft created — now record it on Monday: the note + Discrepancy status.
                     try:
                         data_sources.set_subitem_text(
                             sub, "text_mm3gh2za", st.session_state[f"enote_{sub}"].strip())
@@ -1881,12 +1883,13 @@ def _run_one_invoice(inv, lbsku):
                         invoices_by_status.clear()
                         for kk in ("review", "matched", "recent", "discrepancy"):
                             st.session_state.pop(f"sel_{kk}", None)
+                        link = f" [Open the draft]({draft_link})" if draft_link else ""
                         st.session_state["inv_flash"] = (
-                            f"Emailed {to} about invoice {inv.get('invoice_no')}, noted it on "
-                            "Monday and marked it Discrepancy.")
+                            f"Draft to {to} saved in {SUPPLIER_FROM_MAILBOX} Drafts (review & send "
+                            f"in Outlook). Noted on Monday and marked Discrepancy.{link}")
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
-                        st.warning(f"Emailed {to}, but couldn't fully update Monday: "
+                        st.warning(f"Draft to {to} created, but couldn't fully update Monday: "
                                    + str(e)[:180] + " — set the status/note manually if needed.")
 
 

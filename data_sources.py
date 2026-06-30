@@ -1081,6 +1081,39 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
     return True
 
 
+def create_supplier_draft(mailbox: str, to_email: str, subject: str, body: str,
+                          pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
+                          token: str | None = None) -> str | None:
+    """Create a DRAFT email in `mailbox` (lands in Drafts, addressed to to_email, PDF
+    attached). The user reviews it in Outlook and presses send. Uses Mail.ReadWrite —
+    which works where sendMail's Mail.Send is blocked — and keeps a human in the loop
+    before anything reaches a supplier. Returns the draft's webLink. Raises on failure."""
+    import base64
+    token = token or ms_token()
+    if not (to_email or "").strip():
+        raise RuntimeError("No recipient email address.")
+    msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
+           "toRecipients": [{"emailAddress": {"address": to_email.strip()}}]}
+    if pdf_url:
+        try:  # best-effort attach — don't lose the draft over a bad PDF link
+            pdf = requests.get(pdf_url, timeout=40)
+            pdf.raise_for_status()
+            msg["attachments"] = [{
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": pdf_name, "contentType": "application/pdf",
+                "contentBytes": base64.b64encode(pdf.content).decode(),
+            }]
+        except Exception:  # noqa: BLE001
+            pass
+    r = requests.post(
+        f"{GRAPH}/users/{mailbox}/messages",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=msg, timeout=45,
+    )
+    r.raise_for_status()
+    return r.json().get("webLink")
+
+
 def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 15,
                        token: str | None = None) -> list:
     """Full messages in a folder for quoting: [{id, subject, from, from_name,
