@@ -1257,6 +1257,13 @@ DELIVERY_CHARGES = {
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
 }
 
+# Default email address for supplier discrepancy chases, keyed by normalised supplier
+# name (_norm_code). Used as the 'To' default before the order's own email field.
+SUPPLIER_EMAILS = {
+    "upb": "janetwitt@upbuildingproducts.com",
+    "up": "janetwitt@upbuildingproducts.com",
+}
+
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
 # don't hold one); push_min = margin % to push above (else hold); flag_high =
 # whether to flag suspiciously-high margins.
@@ -1787,7 +1794,9 @@ def _run_one_invoice(inv, lbsku):
         sub = inv["sub_id"]
         if st.toggle("Email the supplier about this", key=f"emailtog_{sub}"):
             subj0, body0 = _discrepancy_email(inv, res)
-            st.session_state.setdefault(f"eto_{sub}", inv.get("supplier_email") or "")
+            default_to = (SUPPLIER_EMAILS.get(_norm_code(inv.get("supplier")))
+                          or inv.get("supplier_email") or "")
+            st.session_state.setdefault(f"eto_{sub}", default_to)
             st.session_state.setdefault(f"esub_{sub}", subj0)
             st.session_state.setdefault(f"ebod_{sub}", body0)
             st.session_state.setdefault(f"enote_{sub}", _discrepancy_note(inv, res))
