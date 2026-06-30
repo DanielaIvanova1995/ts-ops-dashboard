@@ -1055,16 +1055,23 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
     pdf_url). Sends immediately and saves to Sent Items. Needs Mail.Send. Raises."""
     import base64
     token = token or ms_token()
+    if not (to_email or "").strip():
+        raise RuntimeError("No recipient email address.")
     msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
-           "toRecipients": [{"emailAddress": {"address": to_email}}]}
+           "toRecipients": [{"emailAddress": {"address": to_email.strip()}}]}
     if pdf_url:
-        pdf = requests.get(pdf_url, timeout=40)
-        pdf.raise_for_status()
-        msg["attachments"] = [{
-            "@odata.type": "#microsoft.graph.fileAttachment",
-            "name": pdf_name, "contentType": "application/pdf",
-            "contentBytes": base64.b64encode(pdf.content).decode(),
-        }]
+        # Best-effort attachment: if the PDF can't be fetched (expired link, auth),
+        # still send the email rather than failing the whole chase.
+        try:
+            pdf = requests.get(pdf_url, timeout=40)
+            pdf.raise_for_status()
+            msg["attachments"] = [{
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": pdf_name, "contentType": "application/pdf",
+                "contentBytes": base64.b64encode(pdf.content).decode(),
+            }]
+        except Exception:  # noqa: BLE001
+            pass
     r = requests.post(
         f"{GRAPH}/users/{mailbox}/sendMail",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -1660,6 +1667,28 @@ def set_invoice_status(sub_id, label: str, token: str | None = None) -> bool:
     if actual != label:
         raise RuntimeError(f"Monday did not apply '{label}' (it shows '{actual}') — "
                            "check the label exists and the API token can edit subitems.")
+    return True
+
+
+def set_subitem_text(sub_id, column_id: str, text: str, token: str | None = None) -> bool:
+    """Write plain text into a subitem's text column (e.g. the discrepancy note in
+    text_mm3gh2za). Uses change_simple_column_value. Raises on API failure."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    query = ("mutation ($board: ID!, $item: ID!, $col: String!, $val: String!) {"
+             " change_simple_column_value(board_id: $board, item_id: $item,"
+             " column_id: $col, value: $val) { id } }")
+    r = requests.post(
+        MONDAY_API,
+        json={"query": query, "variables": {"board": str(SUBITEMS_BOARD_ID),
+                                            "item": str(sub_id), "col": column_id,
+                                            "val": text}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday rejected note write: {payload['errors']}")
     return True
 
 

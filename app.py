@@ -1443,6 +1443,55 @@ def _inv_inline(name, size=18):
 SUPPLIER_FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"  # supplier chases sent from here
 
 
+def _expected_credit(res):
+    """Total £ we expect the supplier to credit back = overcharges + not-ordered items
+    across the discrepancy lines. Best-effort; 0 if nothing quantifiable."""
+    import re as _re
+    total = 0.0
+    for l in res["lines"]:
+        unit, qty, cost = l.get("unit"), l.get("qty"), l.get("cost")
+        for t, msg in l["issues"]:
+            if t == "price" and isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
+                q = qty if isinstance(qty, (int, float)) else 1
+                total += max(0.0, unit - cost) * q
+            elif t == "delivery" and isinstance(cost, (int, float)) \
+                    and isinstance(unit, (int, float)) and unit > cost:
+                total += unit - cost
+            elif t == "notorder" and isinstance(unit, (int, float)):
+                q = qty if isinstance(qty, (int, float)) else 1
+                total += unit * q
+            elif t == "qty" and isinstance(unit, (int, float)):
+                m = _re.search(r"invoiced\s+(\d+)\s+vs\s+order\s+(\d+)", msg or "")
+                if m and int(m.group(1)) > int(m.group(2)):
+                    total += (int(m.group(1)) - int(m.group(2))) * unit
+    return round(total, 2)
+
+
+def _discrepancy_note(inv, res):
+    """Short note for Monday's text_mm3gh2za — awaiting credit note, the expected
+    credit total, and a brief reason."""
+    credit = _expected_credit(res)
+    reasons, seen = [], set()
+    for l in res["lines"]:
+        sku = l.get("sku") or "item"
+        for t, _msg in l["issues"]:
+            r = ({"price": f"{sku} overcharged", "delivery": "delivery overcharged",
+                  "notorder": f"{sku} not on order", "qty": f"{sku} qty wrong"}).get(t)
+            if r and r not in seen:
+                seen.add(r)
+                reasons.append(r)
+    for sku in res.get("missing", []):
+        r = f"{sku} missing from invoice"
+        if r not in seen:
+            seen.add(r)
+            reasons.append(r)
+    reason = "; ".join(reasons[:6]) or "see invoice"
+    head = f"Awaiting credit note from {inv.get('supplier') or 'supplier'}"
+    if credit > 0:
+        head += f" of £{credit:,.2f}"
+    return f"{head} — invoice {inv.get('invoice_no')}, order {inv.get('order_no')}: {reason}."
+
+
 def _discrepancy_email(inv, res):
     """(subject, body) for a supplier chase email built from the discrepancy."""
     lines = []
@@ -1464,11 +1513,15 @@ def _discrepancy_email(inv, res):
     for sku in res.get("missing", []):
         lines.append(f"- {sku}: on our order but not shown on this invoice — please confirm.")
     detail = "\n".join(lines) or "- please see the attached invoice."
+    credit = _expected_credit(res)
+    ask = ("Please could you check and confirm, or issue a credit note where appropriate?"
+           if credit <= 0 else
+           f"Please could you check and confirm, and issue a credit note for "
+           f"£{credit:,.2f} where appropriate?")
     subject = f"Invoice query – Invoice {inv.get('invoice_no')} (our order {inv.get('order_no')})"
     body = (f"Hi,\n\nWe're reviewing invoice {inv.get('invoice_no')} relating to our order "
             f"{inv.get('order_no')} and have the following query:\n\n{detail}\n\n"
-            "Please could you check and confirm, or issue a credit where appropriate?\n\n"
-            "Many thanks,\nTrade Superstore Online")
+            f"{ask}\n\nMany thanks,\nTrade Superstore Online")
     return subject, body
 
 
@@ -1737,28 +1790,50 @@ def _run_one_invoice(inv, lbsku):
             st.session_state.setdefault(f"eto_{sub}", inv.get("supplier_email") or "")
             st.session_state.setdefault(f"esub_{sub}", subj0)
             st.session_state.setdefault(f"ebod_{sub}", body0)
+            st.session_state.setdefault(f"enote_{sub}", _discrepancy_note(inv, res))
             st.text_input("To", key=f"eto_{sub}")
             st.text_input("Subject", key=f"esub_{sub}")
             st.text_area("Message", key=f"ebod_{sub}", height=230)
-            st.caption(f"Sends from {SUPPLIER_FROM_MAILBOX} with the invoice PDF attached.")
+            st.text_area("Monday note (awaiting credit note)", key=f"enote_{sub}", height=80,
+                         help="Saved to the invoice's note column on Monday when you send. "
+                              "Includes the expected credit-note total.")
+            st.caption(f"On send: emails from {SUPPLIER_FROM_MAILBOX} with the PDF attached, "
+                       "writes the note to Monday, and marks the invoice **Discrepancy**.")
             if not inv.get("supplier_email"):
                 st.caption("No supplier email on this order in Monday — type one in above.")
-            if st.button("Send to supplier", key=f"esend_{sub}", type="primary",
+            if st.button("Send to supplier & flag", key=f"esend_{sub}", type="primary",
                          disabled=not st.session_state.get(f"eto_{sub}", "").strip()):
+                to = st.session_state[f"eto_{sub}"].strip()
+                sent = False
                 try:
                     pdf_url = (data_sources.monday_asset_url(inv["asset_id"])
                                if inv.get("asset_id") else None)
                     pdf_name = inv.get("file_name") or f"invoice-{inv.get('invoice_no')}.pdf"
                     data_sources.send_supplier_email(
-                        SUPPLIER_FROM_MAILBOX, st.session_state[f"eto_{sub}"].strip(),
-                        st.session_state[f"esub_{sub}"], st.session_state[f"ebod_{sub}"],
-                        pdf_url=pdf_url, pdf_name=pdf_name)
-                    st.success(f"Sent to {st.session_state[f'eto_{sub}'].strip()} from "
-                               f"{SUPPLIER_FROM_MAILBOX} (invoice attached).")
+                        SUPPLIER_FROM_MAILBOX, to, st.session_state[f"esub_{sub}"],
+                        st.session_state[f"ebod_{sub}"], pdf_url=pdf_url, pdf_name=pdf_name)
+                    sent = True
                 except Exception as e:  # noqa: BLE001
                     st.error("Couldn't send: " + str(e)[:200]
                              + " — if it mentions permission/scope, Mail.Send may need adding to "
                              "the app, or accounts@ may be outside its access policy.")
+                if sent:
+                    # Email went — now record it on Monday: the note + Discrepancy status.
+                    try:
+                        data_sources.set_subitem_text(
+                            sub, "text_mm3gh2za", st.session_state[f"enote_{sub}"].strip())
+                        data_sources.set_invoice_status(sub, DISCREPANCY_LABEL)
+                        invoices_by_status.clear()
+                        for kk in ("review", "matched", "recent", "discrepancy"):
+                            for pref in ("sel_", "inv_open_"):
+                                st.session_state.pop(f"{pref}{kk}", None)
+                        st.session_state["inv_flash"] = (
+                            f"Emailed {to} about invoice {inv.get('invoice_no')}, noted it on "
+                            "Monday and marked it Discrepancy.")
+                        st.rerun()
+                    except Exception as e:  # noqa: BLE001
+                        st.warning(f"Emailed {to}, but couldn't fully update Monday: "
+                                   + str(e)[:180] + " — set the status/note manually if needed.")
 
 
 def _apply_status(inv, label):
