@@ -1411,16 +1411,15 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                       if not (_is_delivery(l.get("sku")) or _is_delivery(l.get("description"))))
 
     common = _order_common_tokens(order)
-    lines, invoiced, pending = [], set(), []
+    lines, pending, hit = [], [], set()
+    inv_qty = {}   # order key → TOTAL invoiced qty (a product split across invoice lines sums)
 
-    def _qty_note(rec, k):
-        exp = order[k]["qty"]
-        if exp is not None and rec["qty"] is not None:
-            try:
-                if int(rec["qty"]) != exp:
-                    rec["issues"].append(("qty", f"invoiced {rec['qty']} vs order {exp}"))
-            except (TypeError, ValueError):
-                pass
+    def _hit(rec, k):
+        rec["_okey"] = k
+        hit.add(k)
+        q = rec.get("qty")
+        if isinstance(q, (int, float)):
+            inv_qty[k] = inv_qty.get(k, 0) + q
 
     for ln in parsed_lines:
         sku_raw = ln.get("sku") or ""
@@ -1471,23 +1470,22 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             elif isinstance(unit, (int, float)) and cost is None:
                 issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
-               "unit": unit, "cost": cost, "issues": issues}
+               "unit": unit, "cost": cost, "issues": issues, "_okey": None}
         lines.append(rec)
 
         # Order match. Exact SKU and embedded-code matches are certain, so assign them now.
         # A fuzzy NAME match is DEFERRED — all name matches are then resolved together,
         # strongest first, so a weak colour-only overlap can't steal a line the right line
-        # needs (see _assign below).
-        if sk in order and sk not in invoiced:
-            invoiced.add(sk)
-            _qty_note(rec, sk)
+        # needs. Exact SKU does NOT consume the order line — the same product can appear on
+        # several invoice lines and we sum their quantities (checked after the loop).
+        if sk in order:
+            _hit(rec, sk)
             issues.append(("name", f"matched to order line {order[sk]['sku']} — SKU matches "
                                    "exactly"))
         else:
-            ck = _code_match(sk, order, invoiced)
+            ck = _code_match(sk, order, hit)
             if ck:
-                invoiced.add(ck)
-                _qty_note(rec, ck)
+                _hit(rec, ck)
                 issues.append(("name", f"matched to order line {order[ck]['sku']} by product "
                                        "code (in our SKU)"))
             else:
@@ -1500,7 +1498,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     for idx, rec in enumerate(pending):
         dt = _title_tokens(rec["desc"])
         for k, v in order.items():
-            if k in invoiced:
+            if k in hit:
                 continue
             s = _name_pair_score(dt, _title_tokens(v.get("name")), common)
             if s > 0:
@@ -1508,19 +1506,29 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     scored.sort(key=lambda x: (-x[0], x[1]))          # best score first, then earliest line
     done = set()
     for _s, idx, k in scored:
-        if idx in done or k in invoiced:
+        if idx in done or k in hit:
             continue
         done.add(idx)
-        invoiced.add(k)
-        rec = pending[idx]
-        _qty_note(rec, k)
-        rec["issues"].append(("name", f"matched to order line {order[k]['sku']} by product "
-                                      "name (invoice SKU differs)"))
+        _hit(pending[idx], k)
+        pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} by "
+                                               "product name (invoice SKU differs)"))
     for idx, rec in enumerate(pending):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
 
-    missing = [order[s]["sku"] for s in order if s not in invoiced]
+    # Quantity check on the TOTAL invoiced per order line — a product split across two
+    # invoice lines that sums to the ordered qty is NOT flagged. One note per order line.
+    for k in hit:
+        exp, tot = order[k]["qty"], inv_qty.get(k)
+        if exp is None or tot is None or int(round(tot)) == exp:
+            continue
+        recs = [r for r in lines if r.get("_okey") == k]
+        if recs:
+            td = int(tot) if float(tot).is_integer() else tot
+            extra = f" (across {len(recs)} invoice lines)" if len(recs) > 1 else ""
+            recs[0]["issues"].append(("qty", f"invoiced {td}{extra} vs order {exp}"))
+
+    missing = [order[s]["sku"] for s in order if s not in hit]
     # "name" notes are informational (a successful title fallback), not discrepancies.
     n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name") + len(missing)
     return {"lines": lines, "missing": missing, "n_issues": n_issues}
