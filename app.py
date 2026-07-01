@@ -1464,7 +1464,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         # needs (see _assign below).
         if sk in order and sk not in invoiced:
             invoiced.add(sk)
-            _qty_note(rec, sk)                        # exact SKU → clean, no note
+            _qty_note(rec, sk)
+            issues.append(("name", f"matched to order line {order[sk]['sku']} — SKU matches "
+                                   "exactly"))
         else:
             ck = _code_match(sk, order, invoiced)
             if ck:
