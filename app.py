@@ -968,19 +968,24 @@ def _norm_code(s):
 
 
 def _parse_order_items(text):
-    """Order line text → {norm_sku: {sku, qty, name}}. The product name (the text before
-    'SKU:') lets us still match a line when the supplier's invoice SKU differs from ours."""
+    """Order line text → {key: {sku, qty, name}}. Keyed by normalised SKU when the line has
+    one, else a synthetic key so a product that's on the order but has NO SKU set is still a
+    candidate (matched by name). The product name (text before 'Quantity:'/'SKU:') lets us
+    match a line even when the supplier's invoice SKU differs from ours."""
     out = {}
-    for line in (text or "").split("\n"):
+    for i, line in enumerate((text or "").split("\n")):
         skum = re.search(r"SKU:\s*([^\s|]+)", line)
-        if not skum:
-            continue
         qtym = re.search(r"Quantity:\s*(\d+)", line)
+        if not skum and not qtym:
+            continue  # header / blank / non-product line
         # Product name = text before the 'Quantity:'/'SKU:' tokens (whichever comes first).
         name = re.split(r"\|?\s*(?:Quantity:|SKU:)", line)[0].strip(" |-\t")
-        out[_norm_code(skum.group(1))] = {"sku": skum.group(1),
-                                          "qty": int(qtym.group(1)) if qtym else None,
-                                          "name": name}
+        if not skum and not name:
+            continue
+        key = _norm_code(skum.group(1)) if skum else f"line{i}:{_norm_code(name)}"
+        out[key] = {"sku": skum.group(1) if skum else (name or "(no SKU)"),
+                    "qty": int(qtym.group(1)) if qtym else None,
+                    "name": name}
     return out
 
 
