@@ -1023,6 +1023,34 @@ def _title_tokens(s):
     return out
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _shopify_order_lines(order_id):
+    """Live Shopify order line items (cached). None if orders aren't readable."""
+    try:
+        return data_sources.fetch_order_line_items(order_id)
+    except Exception:  # noqa: BLE001 — fall back to Monday's copy of the order
+        return None
+
+
+def _order_candidates(meta):
+    """The order lines to check the invoice against. Prefers the LIVE Shopify order (the
+    source of truth — Monday's cached order list can be stale or miss lines), and falls
+    back to Monday's order_items text if Shopify can't be read."""
+    sid = meta.get("shopify_order_id")
+    if sid:
+        lines = _shopify_order_lines(sid)
+        if lines:
+            out = {}
+            for i, l in enumerate(lines):
+                sku = l.get("sku")
+                key = _norm_code(sku) if sku else f"shop{i}:{_norm_code(l.get('title'))}"
+                out[key] = {"sku": sku or (l.get("title") or "(no SKU)"),
+                            "qty": l.get("qty"), "name": l.get("title")}
+            if out:
+                return out
+    return _parse_order_items(meta.get("order_items"))
+
+
 def _code_match(sk, order, used):
     """Match a supplier's numeric manufacturer code to an order line whose SKU EMBEDS it
     — e.g. UPB invoice '5420121' → our SKU 'JHHPK5420121'. Deterministic (the full code
@@ -1349,7 +1377,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     tidx = _supplier_title_index() if not no_pl else None
     cidx = _supplier_code_index() if not no_pl else None
-    order = _parse_order_items(meta.get("order_items"))
+    order = _order_candidates(meta)
     parsed_lines = parsed.get("lines") or []
 
     def _line_total(l):
@@ -1775,7 +1803,7 @@ def _run_one_invoice(inv, lbsku):
                 f'text-transform:uppercase;letter-spacing:.5px">{_esc(status)}</span></div>'
                 f'<div style="font-size:13px;color:var(--ink);line-height:1.4">{_esc(msg)}</div></div>')
 
-    order = _parse_order_items(inv.get("order_items"))
+    order = _order_candidates(inv)  # same source the check used (live Shopify, else Monday)
     onum = inv.get("order_no") or "?"
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
     if not qmiss and not res["missing"]:

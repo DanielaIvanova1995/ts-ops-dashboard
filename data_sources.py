@@ -325,6 +325,35 @@ def fetch_order_discounts(order_ids, token: str | None = None) -> dict:
     return out
 
 
+def fetch_order_line_items(order_id, token: str | None = None) -> list:
+    """Live Shopify order line items: [{title, sku, qty}] — the source of truth for the
+    invoice order-check when Monday's cached order list is incomplete/out of date. Raises
+    if the order can't be read (caller falls back to Monday's copy)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
+             "title quantity sku } } } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"id": gid}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    order = (payload.get("data") or {}).get("order") or {}
+    out = []
+    for e in (order.get("lineItems") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        out.append({"title": n.get("title"),
+                    "sku": (n.get("sku") or "").strip() or None,
+                    "qty": n.get("quantity")})
+    return out
+
+
 def shopify_variant_barcode(sku: str) -> str | None:
     """The product's barcode/EAN on Shopify (tries bare SKU then 'TSO' prefix),
     used to match the exact product at competitors. None if not found."""
