@@ -2205,6 +2205,71 @@ def _invoice_tab(key, is_queue):
         if len(flagged) > 15:
             st.caption(f"+{len(flagged) - 15} more discrepancies — filter by supplier to narrow.")
 
+        # Bulk-approve: push the checked, fully-matched invoices to QuickBooks together —
+        # no need to open each and click Push. Discrepancies and not-fully-checked ones are
+        # excluded (they need review first). Each is pre-ticked only if it's within the
+        # auto-push margin range; the rest are shown but left for you to tick deliberately.
+        pushable = [i for i in chosen
+                    if (verdicts.get(i["sub_id"]) or {}).get("order")
+                    and (verdicts.get(i["sub_id"]) or {}).get("price") is True]
+        if pushable:
+            st.markdown("---")
+            st.markdown("##### Approve matched invoices → push to QuickBooks in bulk")
+            for i in pushable:
+                sidp = i["sub_id"]
+                is_cn = isinstance(i.get("total"), (int, float)) and i["total"] < 0
+                om = i.get("order_margin_live")
+                _, action = _push_decision(True, is_cn, om, i.get("supplier"))
+                note = ("" if action == "push"
+                        else " — below target, review" if action == "hold"
+                        else " — margin high, review" if action == "flag" else "")
+                st.session_state.setdefault(f"pushpick_{key}_{sidp}", action == "push")
+                st.checkbox(
+                    f"{'CRN' if is_cn else 'INV'} {i.get('invoice_no')} · "
+                    f"{i.get('supplier') or '—'} · order {i.get('order_no') or '—'}"
+                    + (f" · order margin {om:.0f}%" if isinstance(om, (int, float)) else "")
+                    + note,
+                    key=f"pushpick_{key}_{sidp}")
+            ticked = [i for i in pushable if st.session_state.get(f"pushpick_{key}_{i['sub_id']}")]
+            pend = f"bulkpush_pending_{key}"
+            if st.button(f"Push {len(ticked)} to QuickBooks", key=f"bulkpushbtn_{key}",
+                         type="primary", disabled=not ticked):
+                st.session_state[pend] = [i["sub_id"] for i in ticked]
+            if st.session_state.get(pend):
+                ids = st.session_state[pend]
+                st.warning(f"Push **{len(ids)}** matched invoice(s) to QuickBooks? This marks each "
+                           "**Approved (To QB)** (credit notes → **CN Approved (To QB)**) on Monday.")
+                yc, nc = st.columns(2)
+                if yc.button("Yes — push to QuickBooks", key=f"bulkpushyes_{key}", type="primary",
+                             use_container_width=True):
+                    st.session_state.pop(pend, None)
+                    byid = {i["sub_id"]: i for i in pushable}
+                    ok = fail = 0
+                    prog = st.progress(0.0, text="Pushing to QuickBooks…")
+                    for n, sid in enumerate(ids, 1):
+                        inv2 = byid.get(sid)
+                        if inv2:
+                            is_cn2 = isinstance(inv2.get("total"), (int, float)) and inv2["total"] < 0
+                            lab = CN_APPROVED_QB_LABEL if is_cn2 else APPROVED_QB_LABEL
+                            try:
+                                data_sources.set_invoice_status(sid, lab)
+                                ok += 1
+                            except Exception:  # noqa: BLE001
+                                fail += 1
+                        prog.progress(n / len(ids))
+                    invoices_by_status.clear()
+                    for kk in ("review", "matched", "recent", "discrepancy"):
+                        st.session_state.pop(f"sel_{kk}", None)
+                    for sid in ids:
+                        st.session_state.pop(f"pushpick_{key}_{sid}", None)
+                    st.session_state["inv_flash"] = (
+                        f"Pushed {ok} invoice(s) to QuickBooks."
+                        + (f" {fail} failed — check Monday." if fail else ""))
+                    st.rerun()
+                if nc.button("Cancel", key=f"bulkpushno_{key}", use_container_width=True):
+                    st.session_state.pop(pend, None)
+                    st.rerun()
+
 
 def render_invoice_check():
     st.markdown(
