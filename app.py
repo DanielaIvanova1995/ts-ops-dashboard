@@ -1957,7 +1957,8 @@ def _run_one_invoice(inv, lbsku):
         parts = []
         if qmiss:
             parts.append(f"{len(qmiss)} invoice line{'s' if len(qmiss) != 1 else ''} "
-                         f"don't match the order (wrong item or quantity)")
+                         f"{'do not' if len(qmiss) != 1 else 'does not'} match the order "
+                         "(wrong item or quantity)")
         if missing:
             parts.append(f"{len(missing)} ordered item{'s' if len(missing) != 1 else ''} "
                          f"not on this invoice: {', '.join(missing)} — may be on a separate "
