@@ -999,6 +999,7 @@ _TOK_ABBREV = {
     "ali": "aluminium", "alu": "aluminium", "alum": "aluminium",
     "ext": "external", "int": "internal",
     "hplank": "hardie plank", "hplk": "hardie plank", "hardieplank": "hardie plank",
+    "hardieseal": "hardie seal",
     "galvan": "galvanised", "galv": "galvanised",
     "conn": "connector", "vert": "vertical", "horiz": "horizontal",
     "vent": "ventilation", "qty": "", "pk": "pack",
