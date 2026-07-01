@@ -1382,8 +1382,8 @@ CARRON_ZONES = {
 # approximate (from Carron's zone map) — edit freely if a postcode lands in the wrong zone.
 CARRON_AREA_ZONE = {
     "AB": 2, "DD": 2, "DG": 2, "EH": 2, "FK": 2, "G": 2, "KA": 2, "KY": 2,
-    "ML": 2, "PA": 2, "PH": 2, "TD": 2,                       # Zone 2 — Scotland
-    "IV": 3, "KW": 3,                                         # Zone 3 — Highlands
+    "ML": 2, "PA": 2, "TD": 2,                                # Zone 2 — Scotland
+    "IV": 3, "KW": 3, "PH": 3,                                # Zone 3 — Highlands
     "BT": 4,                                                  # Zone 4 — N. Ireland
     "HS": 6, "ZE": 6, "IM": 6,                                # Zone 6 — Isles
 }
@@ -1949,14 +1949,23 @@ def _run_one_invoice(inv, lbsku):
     order = _order_candidates(inv)  # same source the check used (live Shopify, else Monday)
     onum = inv.get("order_no") or "?"
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
-    if not qmiss and not res["missing"]:
+    missing = res.get("missing") or []
+    if not qmiss and not missing:
         oc = ("Order check", "Match", "#16a34a", "check",
               f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
     else:
-        extra = (f"; {len(res['missing'])} ordered but not invoiced "
-                 f"({', '.join(res['missing'])})" if res["missing"] else "")
-        oc = ("Order check", "Review", "#dc2626", "warn",
-              f"{len(qmiss)} line(s) don't match order {onum}{extra}.")
+        parts = []
+        if qmiss:
+            parts.append(f"{len(qmiss)} invoice line{'s' if len(qmiss) != 1 else ''} "
+                         f"don't match the order (wrong item or quantity)")
+        if missing:
+            parts.append(f"{len(missing)} ordered item{'s' if len(missing) != 1 else ''} "
+                         f"not on this invoice: {', '.join(missing)} — may be on a separate "
+                         "delivery or invoice")
+        # Missing-only is a softer amber (often legitimate); a real mismatch is red.
+        colour = "#dc2626" if qmiss else "#ea580c"
+        oc = ("Order check", "Review", colour, "warn",
+              f"Order {onum}: " + "; ".join(parts) + ".")
 
     sup = inv.get("supplier") or "supplier"
     if SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {}).get("no_pricelist"):
