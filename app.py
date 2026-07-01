@@ -2147,11 +2147,23 @@ def _invoice_tab(key, is_queue):
             lbl = f"Open selected ({len(picked_ids)})"
             hlp = "All selected are already checked — opening them is free (cached)."
         if st.button(lbl, key=f"opensel_{key}", type="primary", help=hlp):
+            # Run each check now (cached reads) so verdicts exist — the panels then open
+            # COLLAPSED with an accurate matched/discrepancy header, rather than all blowing
+            # open at once. The user opens the ones they want to inspect.
+            pidx = _pricelist_index()
+            with st.spinner(f"Checking {len(picked_ids)} invoice(s)…"):
+                for sid in picked_ids:
+                    iv = next((i for i in fil if i["sub_id"] == sid), None)
+                    if iv and iv.get("asset_id"):
+                        parsed = _read_invoice(iv["asset_id"], iv["sub_id"])
+                        if not parsed.get("error"):
+                            _check_and_store(iv, parsed, lbsku, pidx)
             st.session_state[show_key] = picked_ids
             st.rerun()
     else:
         st.caption("Tick one or more invoices above, then click **Check & open selected** — "
-                   "nothing runs (or costs) until you press it.")
+                   "nothing runs (or costs) until you press it. They then list closed, each "
+                   "clearly marked matched or discrepancy — open the ones you want to check.")
 
     show_ids = [sid for sid in st.session_state.get(show_key, [])
                 if any(i["sub_id"] == sid for i in fil)]  # drop any that left this queue
@@ -2162,21 +2174,32 @@ def _invoice_tab(key, is_queue):
 
     chosen = [i for i in fil if i["sub_id"] in show_ids]
     flagged = [i for i in fil if is_queue and _is_disc(i["sub_id"]) and i["sub_id"] not in show_ids]
-    review = [(i, True) for i in chosen] + [(i, False) for i in flagged[:15]]
+    # Open a single pick for convenience; keep a batch of picks (and all flagged) CLOSED so
+    # the screen stays readable — the header tells you which is which; open what you want.
+    solo = len(chosen) == 1 and not flagged
+    review = [(i, solo) for i in chosen] + [(i, False) for i in flagged[:15]]
+
+    def _outcome_tag(inv):
+        v = verdicts.get(inv["sub_id"])
+        if not v:
+            return "▸ not checked yet — opens & checks (a few pence)"
+        if v.get("order") and v.get("price") is True:
+            m = v.get("margin")
+            return f"✅ MATCHED — ready to approve{f' · {m}% margin' if m is not None else ''}"
+        if v.get("order") and v.get("price") is None:
+            return "❓ PRICE NOT CHECKED — review (no pricelist cost)"
+        return "⚠ DISCREPANCY — review"
 
     if review:
-        st.markdown("##### Review — selected invoices and any discrepancies")
-        st.caption("✓ = already checked — reopen it as many times as you like, it's free "
-                   "(the read is cached for 24h). Only an unchecked invoice or the "
-                   "**Re-run check** button uses the AI (a few pence).")
+        st.markdown("##### Review — checked invoices (closed; open the ones you want)")
+        st.caption("Each line shows its result in the title: ✅ matched & ready to approve, "
+                   "⚠ discrepancy, or ❓ price couldn't be checked. Opening a checked one is free "
+                   "(cached 24h) — only an unchecked invoice or **Re-run check** uses the AI.")
         for inv, expanded in review:
-            v = verdicts.get(inv["sub_id"]) or {}
-            tag = ("✓ checked · discrepancy" if (v and not (v.get("order") and v.get("price")))
-                   else "✓ checked · matched" if v else "▸ not checked yet — opens & checks (a few pence)")
             is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
             head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
                     f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
-                    f"   —   {tag}")
+                    f"   —   {_outcome_tag(inv)}")
             with st.expander(head, expanded=expanded):
                 _run_one_invoice(inv, lbsku)
         if len(flagged) > 15:
