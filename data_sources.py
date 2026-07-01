@@ -893,12 +893,14 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             except Exception:  # noqa: BLE001
                 pass
         total = _num((cv.get("numbers4", {}) or {}).get("text"))
-        date = None
+        date = actioned_at = None
         sv = cv.get("status7__1", {}) or {}
         if sv.get("value"):
             try:
                 ca = _json.loads(sv["value"]).get("changed_at")
-                date = ca[:10] if ca else None
+                if ca:
+                    actioned_at = ca             # full ISO timestamp of the last status change
+                    date = ca[:10]
             except Exception:  # noqa: BLE001
                 pass
         parent = it.get("parent_item") or {}
@@ -925,7 +927,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "shopify_order_id": sid,
             "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
             "supplier_email": (pcv.get("email") or "").strip() or None,
-            "status": sv.get("text"), "date": date,
+            "status": sv.get("text"), "date": date, "actioned_at": actioned_at,
         }
 
     out, page_size = [], min(limit, 500)

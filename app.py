@@ -1230,6 +1230,18 @@ def _recent_result(status_text):
     return status_text or "—"
 
 
+def _fmt_actioned(iso):
+    """Monday status-change timestamp (UTC ISO) → 'DD Mon HH:MM' in UK local time, for the
+    Recent-activity 'When' column."""
+    if not iso:
+        return ""
+    try:
+        return (datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+                .astimezone(UK_TZ).strftime("%d %b %H:%M"))
+    except Exception:  # noqa: BLE001
+        return str(iso)[:16].replace("T", " ")
+
+
 def _push_decision(matched, is_cn, live_margin, supplier=None):
     """(label, action) for a checked invoice. action: 'push' | 'hold' | 'flag' | None.
     Supplier rules can override the push floor and the high-margin flag."""
@@ -2074,7 +2086,9 @@ def _invoice_tab(key, is_queue):
     fil = [i for i in invs if keep(i)]
     is_recent = (key == "recent")
     if is_recent:
-        fil.sort(key=lambda i: i.get("date") or "", reverse=True)   # newest action first
+        # Newest action first, by the FULL status-change timestamp so same-day actions
+        # order by time too (falls back to the date if a timestamp is missing).
+        fil.sort(key=lambda i: i.get("actioned_at") or i.get("date") or "", reverse=True)
         fil = fil[:60]
         st.caption("The most recently actioned invoices — pushed to QB, held or flagged — "
                    "newest first. Search above to find a specific one.")
@@ -2158,7 +2172,8 @@ def _invoice_tab(key, is_queue):
             row["vs Pricelist"] = (None if not v else _INV_ICON["qmark"]
                                    if v["price"] is None else _icon_pass(v["price"]))
         else:
-            row["Date"] = inv.get("date") or ""
+            row["Date"] = (_fmt_actioned(inv.get("actioned_at")) if is_recent
+                           else inv.get("date") or "")
         row["PDF"] = inv.get("file_url")
         rows.append(row)
 
