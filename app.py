@@ -1064,29 +1064,33 @@ def _code_match(sk, order, used):
     return None
 
 
-def _title_match(desc, order, used):
-    """When an invoice SKU isn't on the order, find the order line whose product name
-    best overlaps the invoice description. Returns its norm_sku key or None. Overlap is
-    judged against the SHORTER description (≥2 shared words AND ≥50% of the shorter side),
-    so a terse supplier line still matches a verbose order line."""
-    dt = _title_tokens(desc)
-    if len(dt) < 2:
-        return None
-    best, best_score = None, 0.0
-    for k, v in order.items():
-        if k in used:
-            continue
-        ot = _title_tokens(v.get("name"))
-        if not ot:
-            continue
-        shared = len(dt & ot)
-        if shared < 2:
-            continue
-        ratio = shared / min(len(dt), len(ot))
-        # Lenient: only the order's own few lines are candidates, and we take the best.
-        if ratio >= 0.4 and (shared + ratio) > best_score:
-            best, best_score = k, shared + ratio
-    return best
+def _order_common_tokens(order):
+    """Tokens shared across MOST order lines — typically the colour (e.g. 'Sail Cloth'),
+    identical on every line and so useless for telling one product from another. We ignore
+    these when name-matching, so a screw doesn't match a board just because both are that
+    colour. Only applied for orders of 3+ lines."""
+    from collections import Counter
+    if len(order) < 3:
+        return set()
+    c = Counter()
+    for v in order.values():
+        c.update(_title_tokens(v.get("name")))
+    thresh = max(2, (len(order) + 1) // 2)   # appears in roughly half the lines or more
+    return {t for t, cnt in c.items() if cnt >= thresh}
+
+
+def _name_pair_score(dt, ot, common):
+    """Score an invoice-line vs order-line NAME match on its DISTINCTIVE shared words
+    (colour / order-wide common words removed), weighted by word length so a specific word
+    like 'ventilation' outweighs a generic one like 'profile'. 0 if not a credible match —
+    needs 2+ distinctive shared words AND ≥40% overlap of the shorter side."""
+    shared = dt & ot
+    distinctive = shared - common
+    if len(distinctive) < 2:
+        return 0.0
+    if not dt or not ot or len(shared) / min(len(dt), len(ot)) < 0.4:
+        return 0.0
+    return float(sum(len(t) for t in distinctive))
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1390,7 +1394,18 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     goods_value = sum(_line_total(l) for l in parsed_lines
                       if not (_is_delivery(l.get("sku")) or _is_delivery(l.get("description"))))
 
-    lines, invoiced = [], set()
+    common = _order_common_tokens(order)
+    lines, invoiced, pending = [], set(), []
+
+    def _qty_note(rec, k):
+        exp = order[k]["qty"]
+        if exp is not None and rec["qty"] is not None:
+            try:
+                if int(rec["qty"]) != exp:
+                    rec["issues"].append(("qty", f"invoiced {rec['qty']} vs order {exp}"))
+            except (TypeError, ValueError):
+                pass
+
     for ln in parsed_lines:
         sku_raw = ln.get("sku") or ""
         desc = ln.get("description") or ""
@@ -1439,28 +1454,54 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                     issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
             elif isinstance(unit, (int, float)) and cost is None:
                 issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
-        # Order match: exact SKU → embedded manufacturer code → product name.
-        if sk in order:
-            okey, how = sk, "sku"
-        elif _code_match(sk, order, invoiced):
-            okey, how = _code_match(sk, order, invoiced), "code"
+        rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
+               "unit": unit, "cost": cost, "issues": issues}
+        lines.append(rec)
+
+        # Order match. Exact SKU and embedded-code matches are certain, so assign them now.
+        # A fuzzy NAME match is DEFERRED — all name matches are then resolved together,
+        # strongest first, so a weak colour-only overlap can't steal a line the right line
+        # needs (see _assign below).
+        if sk in order and sk not in invoiced:
+            invoiced.add(sk)
+            _qty_note(rec, sk)                        # exact SKU → clean, no note
         else:
-            okey, how = _title_match(desc, order, invoiced), "name"
-        if okey:
-            invoiced.add(okey)
-            exp = order[okey]["qty"]
-            if exp is not None and qty is not None and int(qty) != exp:
-                issues.append(("qty", f"invoiced {qty} vs order {exp}"))
-            if how == "code":
-                issues.append(("name", f"matched to order line {order[okey]['sku']} by product "
+            ck = _code_match(sk, order, invoiced)
+            if ck:
+                invoiced.add(ck)
+                _qty_note(rec, ck)
+                issues.append(("name", f"matched to order line {order[ck]['sku']} by product "
                                        "code (in our SKU)"))
-            elif how == "name":
-                issues.append(("name", f"matched to order line {order[okey]['sku']} by product "
-                                       "name (invoice SKU differs)"))
-        else:
-            issues.append(("notorder", "not on the order"))
-        lines.append({"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
-                      "unit": unit, "cost": cost, "issues": issues})
+            else:
+                pending.append(rec)                  # resolve by name after the loop
+
+    # Resolve deferred name matches: score every (invoice line, unused order line) pair on
+    # their distinctive shared words, then assign the strongest pairs first (each order line
+    # used once). This stops the greedy "first line wins" mis-assignments.
+    scored = []
+    for idx, rec in enumerate(pending):
+        dt = _title_tokens(rec["desc"])
+        for k, v in order.items():
+            if k in invoiced:
+                continue
+            s = _name_pair_score(dt, _title_tokens(v.get("name")), common)
+            if s > 0:
+                scored.append((s, idx, k))
+    scored.sort(key=lambda x: (-x[0], x[1]))          # best score first, then earliest line
+    done = set()
+    for _s, idx, k in scored:
+        if idx in done or k in invoiced:
+            continue
+        done.add(idx)
+        invoiced.add(k)
+        rec = pending[idx]
+        _qty_note(rec, k)
+        rec["issues"].append(("name", f"matched to order line {order[k]['sku']} by product "
+                                      "name (invoice SKU differs)"))
+    for idx, rec in enumerate(pending):
+        if idx not in done:
+            rec["issues"].append(("notorder", "not on the order"))
+
     missing = [order[s]["sku"] for s in order if s not in invoiced]
     # "name" notes are informational (a successful title fallback), not discrepancies.
     n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name") + len(missing)

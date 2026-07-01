@@ -333,7 +333,7 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title quantity sku } } } } }")
+             "title variantTitle quantity sku } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": query, "variables": {"id": gid}},
@@ -348,7 +348,13 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     out = []
     for e in (order.get("lineItems") or {}).get("edges") or []:
         n = e.get("node") or {}
-        out.append({"title": n.get("title"),
+        # Fold the variant (usually the colour) into the name so it's present on EVERY line —
+        # that lets the matcher spot the colour as an order-wide 'common' token and ignore it.
+        title = n.get("title") or ""
+        variant = (n.get("variantTitle") or "").strip()
+        if variant and variant.lower() != "default title" and variant.lower() not in title.lower():
+            title = f"{title} {variant}"
+        out.append({"title": title,
                     "sku": (n.get("sku") or "").strip() or None,
                     "qty": n.get("quantity")})
     return out
