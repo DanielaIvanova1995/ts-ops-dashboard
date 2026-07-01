@@ -1087,16 +1087,23 @@ def _supplier_title_cost(desc, supplier, tidx):
     if not cands:
         return None, None
     dt = _title_tokens(desc)
-    if len(dt) < 2:
+    if not dt:
         return None, None
     best, best_score, best_title = None, 0.0, None
     for toks, title, cost in cands:
-        shared = len(dt & toks)
-        if shared < 2:
+        shared = dt & toks
+        n = len(shared)
+        if n == 0:
             continue
-        ratio = shared / min(len(dt), len(toks))
-        if ratio >= 0.5 and (shared + ratio) > best_score:
-            best, best_score, best_title = cost, shared + ratio, title
+        mn = min(len(dt), len(toks))
+        # Normally require 2+ shared words. Exception: a single distinctive (8+ char) word
+        # that IS the whole shorter title — for one-word supplier products like 'Guillotine',
+        # which can never reach two shared words.
+        if n < 2 and not (mn == 1 and len(next(iter(shared))) >= 8):
+            continue
+        ratio = n / mn
+        if ratio >= 0.5 and (n + ratio) > best_score:
+            best, best_score, best_title = cost, n + ratio, title
     return best, best_title
 
 
