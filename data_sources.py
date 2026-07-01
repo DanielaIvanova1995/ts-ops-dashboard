@@ -870,6 +870,17 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     next_q = ("query ($c: String!, $limit: Int!) { next_items_page(cursor: $c, limit: $limit) "
               "{ cursor items { %s } } }" % item_fields)
 
+    def _num(v):
+        """Parse a Monday value to float, tolerating '£', commas and spaces — so a total
+        stored as text like '£469.74' or '1,234.56' still reads as a number, not blank."""
+        if v in (None, ""):
+            return None
+        s = re.sub(r"[^0-9.\-]", "", str(v))
+        try:
+            return float(s) if s not in ("", "-", ".", "-.") else None
+        except (TypeError, ValueError):
+            return None
+
     def _parse(it):
         cv = {c["id"]: c for c in it.get("column_values", [])}
         asset_id = file_name = None
@@ -881,10 +892,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
                     asset_id, file_name = files[0].get("assetId"), files[0].get("name")
             except Exception:  # noqa: BLE001
                 pass
-        try:
-            total = float((cv.get("numbers4", {}) or {}).get("text") or "")
-        except Exception:  # noqa: BLE001
-            total = None
+        total = _num((cv.get("numbers4", {}) or {}).get("text"))
         date = None
         sv = cv.get("status7__1", {}) or {}
         if sv.get("value"):
@@ -902,14 +910,8 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             else:
                 pcv[c["id"]] = c.get("text")
         sid = (pcv.get("text_mm04tmac") or "").strip() or None
-        try:
-            agreed_cost = float(pcv.get("numbers6"))
-        except (TypeError, ValueError):
-            agreed_cost = None
-        try:
-            to_us = float(pcv.get("numbers48"))      # Monday '£ to us' (customer paid)
-        except (TypeError, ValueError):
-            to_us = None
+        agreed_cost = _num(pcv.get("numbers6"))
+        to_us = _num(pcv.get("numbers48"))           # Monday '£ to us' (customer paid)
         return {
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "to_us": to_us,
