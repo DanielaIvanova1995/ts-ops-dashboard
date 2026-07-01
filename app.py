@@ -1033,6 +1033,16 @@ def _shopify_order_lines(order_id):
         return None
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _shopify_order_ship(order_id):
+    """Live Shopify delivery postcode + country (cached), for Carron zone delivery. None
+    if unreadable."""
+    try:
+        return data_sources.fetch_order_shipping(order_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _order_candidates(meta):
     """The order lines to check the invoice against. Prefers the LIVE Shopify order (the
     source of truth — Monday's cached order list can be stale or miss lines), and falls
@@ -1355,6 +1365,61 @@ DELIVERY_CHARGES = {
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
 }
 
+# --- Carron: zone-based delivery, priced on the DELIVERY POSTCODE (ex-VAT, per pallet).
+# Zone 1 (UK mainland) is free over £250 ex-VAT, else £25 large / £10 small. Zones 2-6 are
+# per-zone surcharges. We can't tell 'large' from 'small' (Carron say "ask sales"), so we
+# check against the LARGER (max legitimate) charge and only flag a genuine overcharge. ---
+CARRON_FREE_OVER = 250.0
+CARRON_ZONES = {
+    1: {"name": "UK Mainland", "large": 25.0, "small": 10.0},
+    2: {"name": "Scotland", "large": 50.0, "small": 20.0},
+    3: {"name": "Scottish Highlands", "large": 85.0, "small": 25.0},
+    4: {"name": "Northern Ireland", "large": 65.0, "small": 25.0},
+    5: {"name": "Republic of Ireland", "large": None, "small": None},   # rates TBC
+    6: {"name": "Isles", "large": 105.0, "small": 25.0},
+}
+# Postcode AREA (leading letters) → zone. Anything not listed = Zone 1 (mainland). This is
+# approximate (from Carron's zone map) — edit freely if a postcode lands in the wrong zone.
+CARRON_AREA_ZONE = {
+    "AB": 2, "DD": 2, "DG": 2, "EH": 2, "FK": 2, "G": 2, "KA": 2, "KY": 2,
+    "ML": 2, "PA": 2, "PH": 2, "TD": 2,                       # Zone 2 — Scotland
+    "IV": 3, "KW": 3,                                         # Zone 3 — Highlands
+    "BT": 4,                                                  # Zone 4 — N. Ireland
+    "HS": 6, "ZE": 6, "IM": 6,                                # Zone 6 — Isles
+}
+
+
+def _is_carron(supplier):
+    return (supplier or "").startswith("carron")
+
+
+def _carron_zone(ship):
+    """Carron delivery zone (1-6) for a Shopify shipping address {postcode, country}.
+    Defaults to Zone 1 (mainland) when the address can't be read."""
+    if not ship:
+        return 1
+    country = (ship.get("country") or "").strip().upper()
+    if country in ("IE", "IRL", "IRELAND", "REPUBLIC OF IRELAND", "EIRE"):
+        return 5
+    pc = re.sub(r"[^A-Z0-9]", "", (ship.get("postcode") or "").upper())
+    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
+    return CARRON_AREA_ZONE.get(area, 1)
+
+
+def _carron_zone_label(ship):
+    z = _carron_zone(ship)
+    pc = (ship or {}).get("postcode") or "no postcode"
+    return f"Carron Zone {z} — {CARRON_ZONES[z]['name']}, {pc}"
+
+
+def _carron_expected(goods_value, ship):
+    """Max legitimate ex-VAT Carron delivery for the zone (None if unknown/TBC)."""
+    z = _carron_zone(ship)
+    zc = CARRON_ZONES[z]
+    if z == 1 and goods_value is not None and goods_value >= CARRON_FREE_OVER:
+        return 0.0                                            # free over £250 ex-VAT, mainland
+    return zc["large"]                                        # None for Zone 5 (ROI, TBC)
+
 # Default email address for supplier discrepancy chases, keyed by normalised supplier
 # name (_norm_code). Used as the 'To' default before the order's own email field.
 SUPPLIER_EMAILS = {
@@ -1373,9 +1438,11 @@ SUPPLIER_RULES = {
 }
 
 
-def _expected_delivery(supplier, goods_value):
-    """Expected ex-VAT delivery charge for a supplier given the order's goods value,
-    or None if there's no rule on file."""
+def _expected_delivery(supplier, goods_value, ship=None):
+    """Expected (max legitimate) ex-VAT delivery charge for a supplier given the order's
+    goods value (and, for Carron, the delivery address). None if there's no rule on file."""
+    if _is_carron(supplier):
+        return _carron_expected(goods_value, ship)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
@@ -1400,6 +1467,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     cidx = _supplier_code_index() if not no_pl else None
     order = _order_candidates(meta)
     parsed_lines = parsed.get("lines") or []
+    # Carron delivery is priced by the delivery postcode's zone — fetch it once.
+    carron_ship = (_shopify_order_ship(meta["shopify_order_id"])
+                   if _is_carron(supplier) and meta.get("shopify_order_id") else None)
 
     def _line_total(l):
         if isinstance(l.get("line_total"), (int, float)):
@@ -1428,13 +1498,18 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
         # Delivery / carriage line — check against the supplier's expected charge.
         if _is_delivery(sku_raw) or _is_delivery(desc):
-            known = _expected_delivery(supplier, goods_value)
+            known = _expected_delivery(supplier, goods_value, carron_ship)
+            zinfo = f" ({_carron_zone_label(carron_ship)})" if _is_carron(supplier) else ""
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
             if isinstance(amt, (int, float)):
                 if known is not None:
                     if amt > known + tol:        # only flag if charged MORE (less is fine)
-                        dissues.append(("delivery", f"delivery £{amt:,.2f} vs expected £{known:,.2f}"))
+                        dissues.append(("delivery", f"delivery £{amt:,.2f} vs expected "
+                                                    f"£{known:,.2f}{zinfo}"))
+                elif _is_carron(supplier):
+                    dissues.append(("delivery", f"delivery £{amt:,.2f} —{zinfo} rate is TBC, "
+                                                "can't check"))
                 else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,

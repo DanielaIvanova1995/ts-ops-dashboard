@@ -325,6 +325,28 @@ def fetch_order_discounts(order_ids, token: str | None = None) -> dict:
     return out
 
 
+def fetch_order_shipping(order_id, token: str | None = None) -> dict:
+    """Shopify order's delivery postcode + country — for zone-based delivery checks (Carron).
+    Returns {postcode, country}. Raises if the order can't be read (caller falls back)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    query = ("query ($id: ID!) { order(id: $id) { shippingAddress { zip countryCodeV2 "
+             "country } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"id": gid}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    sa = (((payload.get("data") or {}).get("order") or {}).get("shippingAddress") or {})
+    return {"postcode": sa.get("zip"), "country": sa.get("countryCodeV2") or sa.get("country")}
+
+
 def fetch_order_line_items(order_id, token: str | None = None) -> list:
     """Live Shopify order line items: [{title, sku, qty}] — the source of truth for the
     invoice order-check when Monday's cached order list is incomplete/out of date. Raises
