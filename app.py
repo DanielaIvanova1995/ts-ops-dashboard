@@ -1432,10 +1432,15 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
 
 def _verdict(res):
-    """{order, price} pass/fail booleans for a check result."""
+    """{order, price} for a check result. 'order' is a pass/fail bool. 'price' is
+    tri-state: True (checked, all OK), False (a price/delivery mismatch), or None
+    (couldn't check — at least one line had no pricelist cost). None must NOT read as a
+    pass, so the table shows a grey '?' rather than a green tick."""
     order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
     price_issue = any(t in ("price", "delivery") for l in res["lines"] for t, _ in l["issues"])
-    return {"order": not order_issue and not res["missing"], "price": not price_issue}
+    price_unchecked = any(t == "noprice" for l in res["lines"] for t, _ in l["issues"])
+    price = False if price_issue else (None if price_unchecked else True)
+    return {"order": not order_issue and not res["missing"], "price": price}
 
 
 def _check_and_store(inv, parsed, lbsku, pidx):
@@ -1463,6 +1468,11 @@ _INV_SVG = {
     "cross": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" '
              'r="11" fill="#dc2626"/><path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2.4" '
              'stroke-linecap="round"/></svg>',
+    # Grey "?" — price couldn't be checked (no pricelist cost matched). NOT a pass.
+    "qmark": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" '
+             'r="11" fill="#94a3b8"/><path d="M9 9.2a3 3 0 1 1 4 2.8c-.8.5-1 .9-1 1.8" fill="none" '
+             'stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+             '<circle cx="12" cy="17.3" r="1.3" fill="#fff"/></svg>',
     "invoice": '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
                'stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
                '<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/><path d="M9 13h6M9 17h6"/></svg>',
@@ -1784,10 +1794,13 @@ def _run_one_invoice(inv, lbsku):
         elif pissues:
             pc = ("Price check", "Over pricelist", "#dc2626", "warn",
                   f"{len(pissues)} line(s) invoiced above {sup}'s pricelist.")
+        elif nopl:
+            pc = ("Price check", "Partly checked", "#ea580c", "warn",
+                  f"{len(priced)} line(s) match {sup}'s pricelist, but {len(nopl)} couldn't be "
+                  f"checked — no pricelist cost found. Review those before approving.")
         else:
-            extra = f" ({len(nopl)} had no cost on file)" if nopl else ""
             pc = ("Price check", "Match", "#16a34a", "check",
-                  f"All {len(priced)} priced line(s) match {sup}'s pricelist{extra}.")
+                  f"All {len(priced)} priced line(s) match {sup}'s pricelist.")
 
     st.markdown('<div style="display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 8px">'
                 + _check_card(*oc) + _check_card(*pc) + "</div>", unsafe_allow_html=True)
@@ -2061,8 +2074,10 @@ def _invoice_tab(key, is_queue):
         row["Order margin"] = inv.get("order_margin_live")
         row["Discount"] = inv.get("_discount") if inv.get("_discount") else None
         if is_queue:
-            row["vs Shopify"] = _icon_pass((v or {}).get("order"))
-            row["vs Pricelist"] = _icon_pass((v or {}).get("price"))
+            row["vs Shopify"] = _icon_pass(v["order"]) if v else None
+            # price is tri-state: None = couldn't check → grey '?', never a green tick.
+            row["vs Pricelist"] = (None if not v else _INV_ICON["qmark"]
+                                   if v["price"] is None else _icon_pass(v["price"]))
         else:
             row["Date"] = inv.get("date") or ""
         row["PDF"] = inv.get("file_url")
@@ -2099,7 +2114,10 @@ def _invoice_tab(key, is_queue):
         colcfg["vs Shopify"] = st.column_config.ImageColumn(
             "vs Shopify", width="small", help="SKUs & quantities match the order")
         colcfg["vs Pricelist"] = st.column_config.ImageColumn(
-            "vs Pricelist", width="small", help="Line prices match the supplier's pricelist")
+            "vs Pricelist", width="small",
+            help="Green tick = all line prices checked and match the pricelist. Red cross = a "
+                 "price is wrong. Grey ? = couldn't check (no pricelist cost matched) — treat as "
+                 "a discrepancy to review, NOT a pass.")
 
     df = pd.DataFrame(rows)
     for c in ("Inv £", "Invoice margin", "Order margin", "Discount"):  # None → blank
