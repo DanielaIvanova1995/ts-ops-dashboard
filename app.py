@@ -1082,13 +1082,16 @@ def _order_common_tokens(order):
 def _name_pair_score(dt, ot, common):
     """Score an invoice-line vs order-line NAME match on its DISTINCTIVE shared words
     (colour / order-wide common words removed), weighted by word length so a specific word
-    like 'ventilation' outweighs a generic one like 'profile'. 0 if not a credible match —
-    needs 2+ distinctive shared words AND ≥40% overlap of the shorter side."""
+    like 'ventilation' outweighs a generic one like 'profile'. Normally needs 2+ distinctive
+    shared words AND ≥40% overlap of the shorter side; a single genuinely specific word
+    (8+ chars, e.g. 'guillotine') is allowed for one-word products. 0 if not credible."""
+    if not dt or not ot:
+        return 0.0
     shared = dt & ot
     distinctive = shared - common
-    if len(distinctive) < 2:
+    if len(distinctive) < 2 and not (len(distinctive) == 1 and len(next(iter(distinctive))) >= 8):
         return 0.0
-    if not dt or not ot or len(shared) / min(len(dt), len(ot)) < 0.4:
+    if len(shared) / min(len(dt), len(ot)) < 0.4:
         return 0.0
     return float(sum(len(t) for t in distinctive))
 
