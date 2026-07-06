@@ -2311,6 +2311,7 @@ def _bulk_check(invs, lbsku):
     n = len(invs)
     _, hi = _thresholds()
     prog = st.progress(0.0, text="Reading, checking & processing invoices…")
+    goneset = st.session_state.setdefault("inv_gone", set())
     pushed = held = flagged = unmatched = fail = 0
     for i, inv in enumerate(invs, 1):
         parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
@@ -2325,6 +2326,7 @@ def _bulk_check(invs, lbsku):
             if action in ("push", "hold", "flag"):
                 try:
                     data_sources.set_invoice_status(inv["sub_id"], label)
+                    goneset.add(str(inv["sub_id"]))       # hide actioned instantly (no refetch)
                     pushed += action == "push"
                     held += action == "hold"
                     flagged += action == "flag"
@@ -2334,7 +2336,6 @@ def _bulk_check(invs, lbsku):
                 unmatched += 1
         prog.progress(i / n, text=f"Processed {i}/{n}")
     prog.empty()
-    invoices_by_status.clear()
     st.session_state["inv_flash"] = (
         f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, flagged {flagged} "
         f"(margin >{hi:.0f}%), {unmatched} left for manual review"
@@ -2549,7 +2550,9 @@ def _invoice_tab(key, is_queue):
         else:
             lbl = f"Open selected ({len(picked_ids)})"
             hlp = "All selected are already checked — opening them is free (cached)."
-        if st.button(lbl, key=f"opensel_{key}", type="primary", help=hlp):
+        c_open, c_push = st.columns(2)
+        if c_open.button(lbl, key=f"opensel_{key}", type="secondary", help=hlp,
+                         use_container_width=True):
             # Run each check now (cached reads) so verdicts exist — the panels then open
             # COLLAPSED with an accurate matched/discrepancy header, rather than all blowing
             # open at once. The user opens the ones they want to inspect.
@@ -2564,10 +2567,34 @@ def _invoice_tab(key, is_queue):
             st.session_state[show_key] = picked_ids
             st.session_state.pop(f"sel_{key}", None)   # clear the ticks now they're opened
             st.rerun()
+        # Direct push — check the selected and push matched ones to QB, no detail window needed.
+        pushpend = f"pushsel_pending_{key}"
+        if c_push.button(f"Check & push selected ({len(picked_ids)})", key=f"pushsel_{key}",
+                         type="primary", use_container_width=True,
+                         help="Checks the ticked invoices and pushes fully-matched ones straight "
+                              "to QuickBooks — no need to open each one."):
+            st.session_state[pushpend] = picked_ids
+        if st.session_state.get(pushpend):
+            ids = st.session_state[pushpend]
+            lo, hi = _thresholds()
+            st.warning(f"Check **{len(ids)}** selected invoice(s) and push the fully-matched ones "
+                       f"(order margin {lo:.0f}–{hi:.0f}%) straight to QuickBooks? Under {lo:.0f}% "
+                       f"are held as Matched, over {hi:.0f}% flagged, mismatches left for review. "
+                       "Already-checked reads are free.")
+            yc, nc = st.columns(2)
+            if yc.button(f"Yes — check & push {len(ids)}", key=f"pushselyes_{key}", type="primary",
+                         use_container_width=True):
+                st.session_state.pop(pushpend, None)
+                st.session_state.pop(f"sel_{key}", None)
+                sel_invs = [i for i in fil if i["sub_id"] in ids and i.get("asset_id")]
+                _bulk_check(sel_invs, lbsku)
+            if nc.button("Cancel", key=f"pushselno_{key}", use_container_width=True,
+                         on_click=_ss_pop, args=(pushpend,)):
+                pass
     else:
-        st.caption("Tick one or more invoices above, then click **Check & open selected** — "
-                   "nothing runs (or costs) until you press it. They then list closed, each "
-                   "clearly marked matched or discrepancy — open the ones you want to check.")
+        st.caption("Tick invoices above, then **Check & push selected** to push matched ones "
+                   "straight to QuickBooks, or **Check & open selected** to review them first — "
+                   "nothing runs (or costs) until you press a button.")
 
     show_ids = [sid for sid in st.session_state.get(show_key, [])
                 if any(i["sub_id"] == sid for i in fil)]  # drop any that left this queue
