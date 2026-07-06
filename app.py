@@ -1467,6 +1467,11 @@ def _is_delivery(text):
                                 "postage", "haulage", "transport"))
 
 
+def _is_surcharge(text):
+    t = (text or "").lower()
+    return "surcharge" in t or "uplift" in t
+
+
 def _check_invoice(parsed, meta, pidx, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
     order's SKUs/quantities. Known supplier delivery charges are recognised."""
@@ -1486,8 +1491,11 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         u, q = l.get("unit_price"), l.get("qty")
         return u * q if isinstance(u, (int, float)) and isinstance(q, (int, float)) else 0
 
-    goods_value = sum(_line_total(l) for l in parsed_lines
-                      if not (_is_delivery(l.get("sku")) or _is_delivery(l.get("description"))))
+    def _is_charge_line(l):  # delivery or surcharge — not a product line
+        return (_is_delivery(l.get("sku")) or _is_delivery(l.get("description"))
+                or _is_surcharge(l.get("sku")) or _is_surcharge(l.get("description")))
+
+    goods_value = sum(_line_total(l) for l in parsed_lines if not _is_charge_line(l))
 
     common = _order_common_tokens(order)
     lines, pending, hit = [], [], set()
@@ -1523,6 +1531,27 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
                           "unit": unit, "cost": known, "issues": dissues})
+            continue
+
+        # Surcharge line (e.g. Eurocell's temporary 5%). It's on the invoice but NEVER on the
+        # Shopify order, so it must NOT be flagged 'not on the order'. If we know the supplier's
+        # surcharge rate, check the amount is ~that % of goods; otherwise just accept it.
+        if _is_surcharge(sku_raw) or _is_surcharge(desc):
+            sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
+            amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
+            sissues = []
+            if sur and isinstance(amt, (int, float)) and goods_value:
+                exp = goods_value * sur
+                if amt > exp + tol:              # only flag an OVER-applied surcharge
+                    sissues.append(("price", f"surcharge £{amt:,.2f} vs expected "
+                                             f"{sur * 100:.0f}% of goods (£{exp:,.2f})"))
+                else:
+                    sissues.append(("name", f"{sur * 100:.0f}% surcharge £{amt:,.2f} — expected, "
+                                            "not on the Shopify order"))
+            else:
+                sissues.append(("name", "surcharge — expected, not on the Shopify order"))
+            lines.append({"sku": sku_raw or "Surcharge", "desc": desc, "qty": qty,
+                          "unit": unit, "cost": None, "issues": sissues})
             continue
 
         sk = _norm_code(sku_raw)
