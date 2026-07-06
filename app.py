@@ -1582,27 +1582,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         cost = None
         title_note = None
         if _is_decor8(supplier):
-            # Decor8 invoice at ~12% off OUR OWN ex-VAT sell price. Check what we paid per unit
-            # ≈ (our price − 12%). 'Paid' is the net line total ÷ qty (falls back to unit price).
-            our_sell = _sell_index().get(sk)
-            paid = None
-            if isinstance(ln.get("line_total"), (int, float)) and isinstance(qty, (int, float)) and qty:
-                paid = ln["line_total"] / qty
-            elif isinstance(unit, (int, float)):
-                paid = unit
-            cost = paid
-            if our_sell and paid is not None:
-                disc = (1 - paid / our_sell) * 100
-                floor = our_sell * (1 - DECOR8_MIN_DISCOUNT)    # must be at least ~10% off
-                if paid > floor + tol:
-                    issues.append(("price", f"paid £{paid:,.2f}/unit vs our price £{our_sell:,.2f} "
-                                            f"— only {disc:.1f}% off (expect ~"
-                                            f"{DECOR8_DISCOUNT * 100:.0f}%)"))
-                else:
-                    issues.append(("name", f"£{paid:,.2f} = our price £{our_sell:,.2f} less "
-                                           f"{disc:.1f}% (≈{DECOR8_DISCOUNT * 100:.0f}% expected)"))
-            elif paid is not None:
-                issues.append(("noprice", "no Shopify sell price found to check Decor8's discount"))
+            # Decor8 have NO SKUs and no cost pricelist — priced vs OUR OWN price, taken from the
+            # Shopify order line they match by NAME. Resolved after the order match, below.
+            pass
         else:
             supcosts = pidx.get(sk) or {}
             cost = supcosts.get(supplier)             # strictly the SKU's cost for this supplier
@@ -1638,7 +1620,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 elif isinstance(unit, (int, float)) and cost is None:
                     issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
-               "unit": unit, "cost": cost, "issues": issues, "_okey": None}
+               "unit": unit, "line_total": ln.get("line_total"), "cost": cost,
+               "issues": issues, "_okey": None}
         lines.append(rec)
 
         # Order match. Exact SKU and embedded-code matches are certain, so assign them now.
@@ -1695,6 +1678,35 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             td = int(tot) if float(tot).is_integer() else tot
             extra = f" (across {len(recs)} invoice lines)" if len(recs) > 1 else ""
             recs[0]["issues"].append(("qty", f"invoiced {td}{extra} vs order {exp}"))
+
+    # Decor8 price check (deferred): they have no SKUs/cost pricelist, so use OUR OWN price —
+    # the ex-VAT sell price of the order line they matched by NAME — less ~12%. Also flag a
+    # reminder to eyeball the SIZE, as Decor8 name different pot sizes very similarly.
+    if _is_decor8(supplier):
+        sidx = _sell_index()
+        for rec in lines:
+            okey = rec.get("_okey")
+            if okey is None:                          # charge line or not matched to the order
+                continue
+            rec["issues"].append(("name", "⚠ check the SIZE matches (Decor8 name different "
+                                          "pot sizes very similarly)"))
+            our_sell = sidx.get(_norm_code(order[okey]["sku"]))
+            q, lt = rec.get("qty"), rec.get("line_total")
+            paid = (lt / q if isinstance(lt, (int, float)) and isinstance(q, (int, float)) and q
+                    else rec.get("unit"))
+            if our_sell and isinstance(paid, (int, float)):
+                rec["cost"] = paid
+                disc = (1 - paid / our_sell) * 100
+                if paid > our_sell * (1 - DECOR8_MIN_DISCOUNT) + tol:
+                    rec["issues"].append(("price", f"paid £{paid:,.2f}/unit vs our price "
+                                                   f"£{our_sell:,.2f} — only {disc:.1f}% off "
+                                                   f"(expect ~{DECOR8_DISCOUNT * 100:.0f}%)"))
+                else:
+                    rec["issues"].append(("name", f"£{paid:,.2f} = our price £{our_sell:,.2f} "
+                                                  f"less {disc:.1f}%"))
+            elif isinstance(paid, (int, float)):
+                rec["issues"].append(("noprice", "matched by name, but no Shopify sell price on "
+                                                 "file for it"))
 
     missing = [order[s]["sku"] for s in order if s not in hit]
     # "name" notes are informational (a successful title fallback), not discrepancies.
