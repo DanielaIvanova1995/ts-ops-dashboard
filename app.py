@@ -1371,7 +1371,7 @@ def _order_margin(order_items_text, lbsku, cost_override=None):
 # goods value. Keys are normalised supplier names.
 DELIVERY_CHARGES = {
     "molan": {"name": "Molan", "flat": 23.74},
-    "pjh": {"name": "PJH", "flat": 25.0},
+    "pjh": {"name": "PJH", "flat": 37.50, "free_over": 1000.0},   # from 1 Jul 2026
     "travisperkins": {"name": "Travis Perkins", "flat": 25.0, "free_over": 100.0},
     "nbp": {"name": "NBP", "flat": 17.0, "free_over": 250.0},
     "upb": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
