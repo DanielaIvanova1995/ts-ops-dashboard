@@ -1868,11 +1868,7 @@ def _discrepancy_note(inv, res):
             if r and r not in seen:
                 seen.add(r)
                 reasons.append(r)
-    for sku in res.get("missing", []):
-        r = f"{sku} missing from invoice"
-        if r not in seen:
-            seen.add(r)
-            reasons.append(r)
+    # Missing-from-this-invoice items are excluded — they normally fall on other invoices.
     reason = "; ".join(reasons[:6]) or "see invoice"
     head = f"Awaiting credit note from {inv.get('supplier') or 'supplier'}"
     if credit > 0:
@@ -1898,8 +1894,8 @@ def _discrepancy_email(inv, res):
                 lines.append(f"- {sku}: please confirm the agreed price.")
             elif t == "delivery":
                 lines.append(f"- Delivery/carriage: {_msg}.")
-    for sku in res.get("missing", []):
-        lines.append(f"- {sku}: on our order but not shown on this invoice — please confirm.")
+    # NB: items on the order but not on this invoice are deliberately NOT included — they
+    # normally fall on the order's other invoices, so we don't query them with the supplier.
     detail = "\n".join(lines) or "- please see the attached invoice."
     credit = _expected_credit(res)
     ask = ("Please could you check and confirm, or issue a credit note where appropriate?"
@@ -2692,6 +2688,11 @@ def _invoice_tab(key, is_queue):
                    "⚠ discrepancy, or ❓ price couldn't be checked. Opening a checked one is free "
                    "(cached 24h) — only an unchecked invoice or **Re-run check** uses the AI.")
         for inv, expanded in review:
+            sid = inv["sub_id"]
+            # Keep the panel OPEN across reruns while you're mid-action inside it (drafting the
+            # email or confirming a delete), otherwise toggling the email collapses the box.
+            expanded = (expanded or bool(st.session_state.get(f"emailtog_{sid}"))
+                        or bool(st.session_state.get(f"delpend_{sid}")))
             is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
             mark = ("   ·   ⛔ DUPLICATE" if inv.get("_dup")
                     else f"   ·   🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
