@@ -2439,16 +2439,17 @@ def _invoice_tab(key, is_queue):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    event = st.dataframe(df, hide_index=True, use_container_width=True,
-                         key=f"sel_{key}", on_select="rerun", selection_mode="multi-row",
-                         column_config=colcfg)
-
-    # NOTHING runs on a row click — ticking rows only selects them. The user then presses
-    # "Check & open selected" to actually read/open them, so the AI (which costs money) is
-    # never triggered just by clicking. The chosen ids live in session so the panels — and
-    # their buttons (e.g. Push to QB) — survive the reruns those buttons cause.
-    picked = event.selection.rows if (event and event.selection) else []
-    picked_ids = [fil[i]["sub_id"] for i in picked]
+    # Selection via a real checkbox column (st.data_editor) — ticks accumulate reliably and
+    # feel instant, unlike st.dataframe row-selection which could drop ticks on fast clicks.
+    # NOTHING runs on a tick; the user then presses "Check & open selected" to read/open them.
+    df.insert(0, "✓", False)
+    colcfg["✓"] = st.column_config.CheckboxColumn(
+        "Select", width="small", help="Tick invoices, then click Check & open selected below")
+    edited = st.data_editor(
+        df, hide_index=True, use_container_width=True, key=f"sel_{key}",
+        column_config=colcfg, disabled=[c for c in df.columns if c != "✓"])
+    ticks = edited["✓"] if "✓" in edited.columns else []
+    picked_ids = [fil[i]["sub_id"] for i in range(len(fil)) if bool(ticks.iloc[i])]
     show_key = f"inv_show_{key}"
 
     if picked_ids:
@@ -2474,6 +2475,7 @@ def _invoice_tab(key, is_queue):
                         if not parsed.get("error"):
                             _check_and_store(iv, parsed, lbsku, pidx)
             st.session_state[show_key] = picked_ids
+            st.session_state.pop(f"sel_{key}", None)   # clear the ticks now they're opened
             st.rerun()
     else:
         st.caption("Tick one or more invoices above, then click **Check & open selected** — "
