@@ -1056,7 +1056,8 @@ def _order_candidates(meta):
                 sku = l.get("sku")
                 key = _norm_code(sku) if sku else f"shop{i}:{_norm_code(l.get('title'))}"
                 out[key] = {"sku": sku or (l.get("title") or "(no SKU)"),
-                            "qty": l.get("qty"), "name": l.get("title")}
+                            "qty": l.get("qty"), "name": l.get("title"),
+                            "price": l.get("price")}   # our ex-VAT line price (for Decor8)
             if out:
                 return out
     return _parse_order_items(meta.get("order_items"))
@@ -1167,19 +1168,6 @@ def _pricelist_index():
             if sup and o.get("c") is not None:
                 idx.setdefault(sk, {})[sup] = o.get("c")
     return idx
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _sell_index():
-    """{norm_sku: our ex-VAT Shopify sell price} — the reference for Decor8, who invoice us
-    at a % off OUR OWN price rather than from a cost pricelist."""
-    lk = load_lookup()
-    out = {}
-    for it in (lk["items"] if lk else []):
-        sk, s = _norm_code(it.get("sku")), it.get("sell")
-        if sk and s is not None:
-            out[sk] = s
-    return out
 
 
 def _is_code(tok):
@@ -1680,17 +1668,16 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             recs[0]["issues"].append(("qty", f"invoiced {td}{extra} vs order {exp}"))
 
     # Decor8 price check (deferred): they have no SKUs/cost pricelist, so use OUR OWN price —
-    # the ex-VAT sell price of the order line they matched by NAME — less ~12%. Also flag a
-    # reminder to eyeball the SIZE, as Decor8 name different pot sizes very similarly.
+    # the ex-VAT line price from the Shopify order line they matched by NAME — less ~12%. Also
+    # flag a reminder to eyeball the SIZE, as Decor8 name different pot sizes very similarly.
     if _is_decor8(supplier):
-        sidx = _sell_index()
         for rec in lines:
             okey = rec.get("_okey")
             if okey is None:                          # charge line or not matched to the order
                 continue
             rec["issues"].append(("name", "⚠ check the SIZE matches (Decor8 name different "
                                           "pot sizes very similarly)"))
-            our_sell = sidx.get(_norm_code(order[okey]["sku"]))
+            our_sell = order[okey].get("price")       # our ex-VAT price on the Shopify order line
             q, lt = rec.get("qty"), rec.get("line_total")
             paid = (lt / q if isinstance(lt, (int, float)) and isinstance(q, (int, float)) and q
                     else rec.get("unit"))
@@ -1705,8 +1692,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                     rec["issues"].append(("name", f"£{paid:,.2f} = our price £{our_sell:,.2f} "
                                                   f"less {disc:.1f}%"))
             elif isinstance(paid, (int, float)):
-                rec["issues"].append(("noprice", "matched by name, but no Shopify sell price on "
-                                                 "file for it"))
+                rec["issues"].append(("noprice", "matched by name, but that Shopify order line "
+                                                 "has no price to compare"))
 
     missing = [order[s]["sku"] for s in order if s not in hit]
     # "name" notes are informational (a successful title fallback), not discrepancies.
@@ -2112,8 +2099,8 @@ def _run_one_invoice(inv, lbsku):
     # Decor8 aren't checked against a cost pricelist — they're checked vs OUR own price less
     # ~12%. Word the card accordingly (and 'couldn't check' = no Shopify sell price on file).
     ref = "our price less ~12%" if is_d8 else f"{sup}'s pricelist"
-    nocost_why = ("we don't hold a Shopify sell price for its SKU (Decor8's code may differ "
-                  "from ours)") if is_d8 else "no pricelist cost found"
+    nocost_why = ("that Shopify order line has no price to compare against"
+                  if is_d8 else "no pricelist cost found")
     if SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {}).get("no_pricelist"):
         pc = ("Price check", "Not checked", "#6b7280", "invoice",
               f"No pricelist held for {sup} — the order margin is the reference (not flagged).")

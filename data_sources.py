@@ -355,7 +355,8 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title variantTitle quantity sku } } } } }")
+             "title variantTitle quantity sku "
+             "originalUnitPriceSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": query, "variables": {"id": gid}},
@@ -376,9 +377,14 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
         variant = (n.get("variantTitle") or "").strip()
         if variant and variant.lower() != "default title" and variant.lower() not in title.lower():
             title = f"{title} {variant}"
+        try:
+            price = float((((n.get("originalUnitPriceSet") or {}).get("shopMoney") or {})
+                           .get("amount")))
+        except (TypeError, ValueError):
+            price = None
         out.append({"title": title,
                     "sku": (n.get("sku") or "").strip() or None,
-                    "qty": n.get("quantity")})
+                    "qty": n.get("quantity"), "price": price})
     return out
 
 
