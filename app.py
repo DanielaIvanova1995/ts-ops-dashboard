@@ -1836,6 +1836,41 @@ def _run_one_invoice(inv, lbsku):
             st.error("Couldn't read the invoice: " + parsed["error"][:200])
         return
 
+    # Duplicate invoice — same invoice number logged more than once on this order. Flag it
+    # red and offer to delete THIS subitem from Monday (destructive → confirm first).
+    if inv.get("_dup"):
+        st.markdown(
+            '<div style="background:#fee2e2;border:1px solid #fecaca;color:#991b1b;'
+            'font-weight:700;font-size:14px;padding:9px 14px;border-radius:6px;margin:2px 0 8px">'
+            '&#9940; DUPLICATE INVOICE — this invoice number is logged more than once on order '
+            f'{inv.get("order_no") or "?"}. Delete the extra copy so the order is not '
+            'double-counted.</div>', unsafe_allow_html=True)
+        dpend = f"delpend_{sub}"
+        if not st.session_state.get(dpend):
+            if st.button("🗑 Delete this duplicate from Monday", key=f"del_{sub}"):
+                st.session_state[dpend] = True
+                st.rerun()
+        else:
+            st.warning(f"Permanently delete invoice **{inv.get('invoice_no')}** (this Monday "
+                       "subitem)? This can't be undone.")
+            dy, dn = st.columns(2)
+            if dy.button("Yes — delete from Monday", key=f"delyes_{sub}", type="primary",
+                         use_container_width=True):
+                try:
+                    data_sources.delete_subitem(sub)
+                    invoices_by_status.clear()
+                    for kk in ("review", "matched", "recent", "discrepancy"):
+                        st.session_state.pop(f"sel_{kk}", None)
+                    st.session_state["inv_flash"] = (
+                        f"Deleted duplicate invoice {inv.get('invoice_no')} from Monday.")
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.session_state.pop(dpend, None)
+                    st.error("Couldn't delete from Monday: " + str(e)[:200])
+            if dn.button("Cancel", key=f"delno_{sub}", use_container_width=True):
+                st.session_state.pop(dpend, None)
+                st.rerun()
+
     # Copy-friendly order/invoice numbers. Selecting text from the expander header
     # collapses the panel, so put one-click copy fields here (st.code has a hover
     # copy icon and copying doesn't rerun, so the box stays open).
@@ -2263,6 +2298,15 @@ def _invoice_tab(key, is_queue):
     for i in fil:
         i["_discount"] = (disc.get(i.get("shopify_order_id")) or {}).get("amount")
 
+    # Duplicate detection: the SAME invoice number logged twice on the SAME order = a
+    # duplicate subitem to delete. Counted across ALL fetched (invs), flagged on the shown.
+    from collections import Counter as _Counter
+    def _dupkey(i):
+        return (i.get("order_no") or "", (i.get("invoice_no") or "").strip().upper())
+    _dupc = _Counter(_dupkey(i) for i in invs if (i.get("invoice_no") or "").strip())
+    for i in fil:
+        i["_dup"] = _dupc.get(_dupkey(i), 0) >= 2
+
     verdicts = st.session_state.get("inv_verdict", {})
 
     def _icon_pass(b):  # True → check, False → cross, None → blank
@@ -2314,11 +2358,13 @@ def _invoice_tab(key, is_queue):
             row["Status"] = (_INV_ICON["check"] if (v and v["order"] and v["price"])
                              else _INV_ICON["warn"] if v else None)
         row["Invoice"] = inv.get("invoice_no") or ""
-        row["Order"] = (inv.get("order_no") or "") + (
-            f"  🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
+        omark = ("  ⛔ DUPLICATE" if inv.get("_dup")
+                 else f"  🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
+        row["Order"] = (inv.get("order_no") or "") + omark
         row["Supplier"] = inv.get("supplier") or ""
         if is_recent:
             row["Result"] = _recent_result(inv.get("status"))
+        row["Date"] = inv.get("created") or ""       # invoice date (logged on Monday)
         row["Inv £"] = inv.get("total")
         if is_queue:
             row["Invoice margin"] = (v or {}).get("margin")
@@ -2329,15 +2375,16 @@ def _invoice_tab(key, is_queue):
             # price is tri-state: None = couldn't check → grey '?', never a green tick.
             row["vs Pricelist"] = (None if not v else _INV_ICON["qmark"]
                                    if v["price"] is None else _icon_pass(v["price"]))
-        else:
-            row["Date"] = (_fmt_actioned(inv.get("actioned_at")) if is_recent
-                           else inv.get("date") or "")
+        if is_recent:
+            row["When"] = _fmt_actioned(inv.get("actioned_at"))
         row["PDF"] = inv.get("file_url")
         rows.append(row)
 
     colcfg = {
         "Type": st.column_config.ImageColumn("Type", width="small",
                                              help="Invoice or credit note"),
+        "Date": st.column_config.TextColumn("Date", width="small",
+                                            help="Invoice date — when it was logged on Monday"),
         "Inv £": st.column_config.NumberColumn(format="£%.2f", width="small"),
         "Order margin": st.column_config.NumberColumn(
             format="%.1f%%", width="small",
@@ -2354,7 +2401,7 @@ def _invoice_tab(key, is_queue):
     if is_recent:
         colcfg["Result"] = st.column_config.TextColumn(
             "Result", width="medium", help="What Trade Hub last did with this invoice")
-        colcfg["Date"] = st.column_config.TextColumn(
+        colcfg["When"] = st.column_config.TextColumn(
             "When", width="small", help="When this invoice was last actioned")
     if is_queue:
         colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
@@ -2449,10 +2496,11 @@ def _invoice_tab(key, is_queue):
                    "(cached 24h) — only an unchecked invoice or **Re-run check** uses the AI.")
         for inv, expanded in review:
             is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
-            multi = f"   ·   🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else ""
+            mark = ("   ·   ⛔ DUPLICATE" if inv.get("_dup")
+                    else f"   ·   🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
             head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
                     f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
-                    f"{multi}   —   {_outcome_tag(inv)}")
+                    f"{mark}   —   {_outcome_tag(inv)}")
             with st.expander(head, expanded=expanded):
                 _run_one_invoice(inv, lbsku)
         if len(flagged) > 15:

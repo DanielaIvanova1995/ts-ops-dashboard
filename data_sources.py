@@ -878,7 +878,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     headers = {"Authorization": token, "API-Version": "2024-10"}
     vals = ", ".join(str(int(i)) for i in label_ids)
     item_fields = """
-            id name
+            id name created_at
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
@@ -951,6 +951,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "supplier_email": (pcv.get("email") or "").strip() or None,
             "status": sv.get("text"), "date": date, "actioned_at": actioned_at,
             "n_invoices": len(parent.get("subitems") or []),   # invoices/CNs on this order
+            "created": (it.get("created_at") or "")[:10],      # date the invoice was logged
         }
 
     out, page_size = [], min(limit, 500)
@@ -1784,6 +1785,22 @@ def set_subitem_text(sub_id, column_id: str, text: str, token: str | None = None
     payload = r.json()
     if "errors" in payload:
         raise RuntimeError(f"Monday rejected note write: {payload['errors']}")
+    return True
+
+
+def delete_subitem(sub_id, token: str | None = None) -> bool:
+    """Delete a subitem (an invoice / credit note) from Monday. DESTRUCTIVE and permanent —
+    the caller must confirm first. Raises on API failure."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    q = "mutation ($id: ID!) { delete_item(item_id: $id) { id } }"
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"id": str(sub_id)}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday rejected delete: {payload['errors']}")
     return True
 
 
