@@ -1079,15 +1079,23 @@ def _order_common_tokens(order):
     """Tokens shared across MOST order lines — typically the colour (e.g. 'Sail Cloth'),
     identical on every line and so useless for telling one product from another. We ignore
     these when name-matching, so a screw doesn't match a board just because both are that
-    colour. Only applied for orders of 3+ lines."""
+    colour. Applied for orders of 2+ lines."""
     from collections import Counter
-    if len(order) < 3:
+    if len(order) < 2:
         return set()
     c = Counter()
     for v in order.values():
         c.update(_title_tokens(v.get("name")))
     thresh = max(2, (len(order) + 1) // 2)   # appears in roughly half the lines or more
     return {t for t, cnt in c.items() if cnt >= thresh}
+
+
+def _names_ok(desc, order_name, common):
+    """A code match must still make name sense: the invoice line and the order line it matched
+    (by an embedded code) must share at least one DISTINCTIVE word (not just the brand/colour).
+    Stops e.g. a 'Hardieplank' board matching a 'Paint' line that only shares a colour code."""
+    shared = _title_tokens(desc) & _title_tokens(order_name)
+    return bool(shared - common)
 
 
 def _name_pair_score(dt, ot, common):
@@ -1634,12 +1642,12 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                    "exactly"))
         else:
             ck = _code_match(sk, order, hit)
-            if ck:
+            if ck and _names_ok(desc, order[ck].get("name"), common):
                 _hit(rec, ck)
                 issues.append(("name", f"matched to order line {order[ck]['sku']} by product "
                                        "code (in our SKU)"))
             else:
-                pending.append(rec)                  # resolve by name after the loop
+                pending.append(rec)                  # no/ambiguous code → resolve by name below
 
     # Carriage/delivery shown in the invoice TOTALS (not as a line) — e.g. Decor8's 'Carriage
     # Net'. Check it against the supplier's expected delivery, unless a delivery line was already
