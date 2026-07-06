@@ -2109,6 +2109,12 @@ def _run_one_invoice(inv, lbsku):
               f"Order {onum}: " + "; ".join(parts) + ".")
 
     sup = inv.get("supplier") or "supplier"
+    is_d8 = _is_decor8(_norm_code(inv.get("supplier")))
+    # Decor8 aren't checked against a cost pricelist — they're checked vs OUR own price less
+    # ~12%. Word the card accordingly (and 'couldn't check' = no Shopify sell price on file).
+    ref = "our price less ~12%" if is_d8 else f"{sup}'s pricelist"
+    nocost_why = ("we don't hold a Shopify sell price for its SKU (Decor8's code may differ "
+                  "from ours)") if is_d8 else "no pricelist cost found"
     if SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {}).get("no_pricelist"):
         pc = ("Price check", "Not checked", "#6b7280", "invoice",
               f"No pricelist held for {sup} — the order margin is the reference (not flagged).")
@@ -2117,18 +2123,20 @@ def _run_one_invoice(inv, lbsku):
         pissues = [l for l in priced if any(t == "price" for t, _ in l["issues"])]
         nopl = [l for l in res["lines"] if any(t == "noprice" for t, _ in l["issues"])]
         if not priced:
-            pc = ("Price check", "No pricelist", "#ea580c", "warn",
-                  f"No {sup} pricelist cost found — price not checked. Add {sup}'s pricelist.")
+            pc = ("Price check", "Not checked", "#ea580c", "warn",
+                  (f"Couldn't check any line vs {ref} — {nocost_why}." if is_d8
+                   else f"No {sup} pricelist cost found — price not checked. Add {sup}'s pricelist."))
         elif pissues:
-            pc = ("Price check", "Over pricelist", "#dc2626", "warn",
-                  f"{len(pissues)} line(s) invoiced above {sup}'s pricelist.")
+            pc = ("Price check", "Over" if not is_d8 else "Under discount", "#dc2626", "warn",
+                  (f"{len(pissues)} line(s) got less than the expected discount off our price."
+                   if is_d8 else f"{len(pissues)} line(s) invoiced above {sup}'s pricelist."))
         elif nopl:
             pc = ("Price check", "Partly checked", "#ea580c", "warn",
-                  f"{len(priced)} line(s) match {sup}'s pricelist, but {len(nopl)} couldn't be "
-                  f"checked — no pricelist cost found. Review those before approving.")
+                  f"{len(priced)} line(s) match {ref}, but {len(nopl)} couldn't be "
+                  f"checked — {nocost_why}. Review those before approving.")
         else:
             pc = ("Price check", "Match", "#16a34a", "check",
-                  f"All {len(priced)} priced line(s) match {sup}'s pricelist.")
+                  f"All {len(priced)} line(s) match {ref}.")
 
     st.markdown('<div style="display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 8px">'
                 + _check_card(*oc) + _check_card(*pc) + "</div>", unsafe_allow_html=True)
