@@ -1715,10 +1715,13 @@ def read_invoice_pdf(pdf_url: str) -> dict:
         '{"supplier":"...","invoice_no":"...","invoice_date":"YYYY-MM-DD",'
         '"lines":[{"sku":"the product/SKU code printed on the line","description":"...",'
         '"qty":<number>,"unit_price":<ex-VAT cost per unit>,"line_total":<ex-VAT line total>}],'
+        '"carriage":<ex-VAT delivery/carriage/shipping/postage charge, or null>,'
         '"subtotal_ex_vat":<number>,"vat":<number>,"total":<number>}\n'
         "All prices are GBP. unit_price and line_total MUST be EX-VAT (the cost before VAT is "
-        "added). Use the product/SKU code exactly as printed on each line. If a value is genuinely "
-        "absent use null. Do not invent or merge lines."
+        "added). Use the product/SKU code exactly as printed on each line. Put any delivery, "
+        "carriage, shipping or postage charge (ex-VAT) in 'carriage' — INCLUDING when it appears "
+        "in the totals/summary section (e.g. 'Carriage Net') rather than the line-item table. If a "
+        "value is genuinely absent use null. Do not invent or merge lines."
     )
     body = {
         "model": INVOICE_MODEL, "max_tokens": 2500,

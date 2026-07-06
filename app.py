@@ -1519,6 +1519,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
     common = _order_common_tokens(order)
     lines, pending, hit = [], [], set()
+    saw_delivery = False
     inv_qty = {}   # order key → TOTAL invoiced qty (a product split across invoice lines sums)
 
     def _hit(rec, k):
@@ -1535,6 +1536,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
         # Delivery / carriage line — check against the supplier's expected charge.
         if _is_delivery(sku_raw) or _is_delivery(desc):
+            saw_delivery = True
             known = _expected_delivery(supplier, delivery_goods, carron_ship)
             zinfo = f" ({_carron_zone_label(carron_ship)})" if _is_carron(supplier) else ""
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
@@ -1638,6 +1640,23 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                        "code (in our SKU)"))
             else:
                 pending.append(rec)                  # resolve by name after the loop
+
+    # Carriage/delivery shown in the invoice TOTALS (not as a line) — e.g. Decor8's 'Carriage
+    # Net'. Check it against the supplier's expected delivery, unless a delivery line was already
+    # seen above (avoid double-counting).
+    carriage = parsed.get("carriage")
+    if isinstance(carriage, (int, float)) and carriage > tol and not saw_delivery:
+        known = _expected_delivery(supplier, delivery_goods, carron_ship)
+        cissues = []
+        if known is not None:
+            if carriage > known + tol:
+                zinfo = f" ({_carron_zone_label(carron_ship)})" if _is_carron(supplier) else ""
+                cissues.append(("delivery", f"carriage £{carriage:,.2f} vs expected "
+                                            f"£{known:,.2f}{zinfo}"))
+        elif not _is_carron(supplier):
+            cissues.append(("delivery", f"carriage £{carriage:,.2f} — no agreed rate on file"))
+        lines.append({"sku": "Carriage", "desc": "Carriage (from invoice totals)", "qty": None,
+                      "unit": carriage, "cost": known, "issues": cissues})
 
     # Resolve deferred name matches: score every (invoice line, unused order line) pair on
     # their distinctive shared words, then assign the strongest pairs first (each order line
