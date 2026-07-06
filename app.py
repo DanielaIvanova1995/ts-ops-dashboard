@@ -1732,9 +1732,16 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                                  "has no price to compare"))
 
     missing = [order[s]["sku"] for s in order if s not in hit]
+    # Order split across several invoices? Then items not on THIS invoice are expected (they're
+    # on the order's other invoices), so they DON'T make this one a discrepancy — the whole-order
+    # coverage is verified across invoices in the detail card instead.
+    multi = (meta.get("n_invoices") or 1) >= 2
     # "name" notes are informational (a successful title fallback), not discrepancies.
-    n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name") + len(missing)
-    return {"lines": lines, "missing": missing, "n_issues": n_issues}
+    n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name")
+    if not multi:
+        n_issues += len(missing)
+    return {"lines": lines, "missing": missing, "n_issues": n_issues, "multi": multi,
+            "covered": set(hit), "order_map": {s: order[s]["sku"] for s in order}}
 
 
 def _verdict(res):
@@ -1746,7 +1753,8 @@ def _verdict(res):
     price_issue = any(t in ("price", "delivery") for l in res["lines"] for t, _ in l["issues"])
     price_unchecked = any(t == "noprice" for l in res["lines"] for t, _ in l["issues"])
     price = False if price_issue else (None if price_unchecked else True)
-    return {"order": not order_issue and not res["missing"], "price": price}
+    miss = [] if res.get("multi") else res["missing"]     # multi-invoice: missing isn't a fail
+    return {"order": not order_issue and not miss, "price": price}
 
 
 def _check_and_store(inv, parsed, lbsku, pidx):
@@ -1760,6 +1768,12 @@ def _check_and_store(inv, parsed, lbsku, pidx):
     v = _verdict(res)
     v["margin"] = round(om["margin"]) if om else None
     st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = v
+    # Record which order lines THIS invoice covers, keyed by order — so multiple invoices for
+    # one order build up a combined picture of what's been invoiced (no re-parsing needed).
+    if inv.get("order_no"):
+        st.session_state.setdefault("inv_cov", {}).setdefault(
+            inv["order_no"], {})[inv["sub_id"]] = (res.get("covered") or set(),
+                                                   res.get("order_map") or {})
     return res, om
 
 
@@ -2112,15 +2126,43 @@ def _run_one_invoice(inv, lbsku):
     onum = inv.get("order_no") or "?"
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
     missing = res.get("missing") or []
-    if not qmiss and not missing:
+    qtxt = (f"{len(qmiss)} invoice line{'s' if len(qmiss) != 1 else ''} "
+            f"{'do not' if len(qmiss) != 1 else 'does not'} match the order (wrong item or quantity)")
+
+    if res.get("multi"):
+        # Multi-invoice order: verify coverage ACROSS the order's checked invoices (combined),
+        # not per-invoice. Items not on any checked invoice = still to find on the rest.
+        cov = st.session_state.get("inv_cov", {}).get(onum, {})
+        total = set().union(*[c for c, _ in cov.values()]) if cov else set(res.get("covered") or [])
+        omap = dict(res.get("order_map") or {})
+        for _c, m in cov.values():
+            omap.update(m)
+        not_yet = [sku for k, sku in omap.items() if k not in total]
+        n_checked = max(len(cov), 1)
+        n_total = inv.get("n_invoices") or n_checked
+        covered_n = len(omap) - len(not_yet)
+        base = (f"Order {onum} is split across {n_total} invoices. Across the {n_checked} you've "
+                f"checked, {covered_n}/{len(omap)} ordered items are invoiced.")
+        if qmiss:
+            oc = ("Order check", "Review", "#dc2626", "warn", f"{qtxt}. {base}")
+        elif not not_yet:
+            oc = ("Order check", "Match", "#16a34a", "check",
+                  f"✅ All {len(omap)} ordered items are covered across the order's invoices.")
+        elif n_checked >= n_total:
+            oc = ("Order check", "Items missing", "#dc2626", "warn",
+                  f"{base} ⚠ {len(not_yet)} item(s) are on NONE of the order's invoices: "
+                  f"{', '.join(not_yet)}.")
+        else:
+            oc = ("Order check", "Part of order", "#ea580c", "warn",
+                  f"{base} The remaining {len(not_yet)} should be on the "
+                  f"{n_total - n_checked} invoice(s) you haven't checked yet — check those too.")
+    elif not qmiss and not missing:
         oc = ("Order check", "Match", "#16a34a", "check",
               f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
     else:
         parts = []
         if qmiss:
-            parts.append(f"{len(qmiss)} invoice line{'s' if len(qmiss) != 1 else ''} "
-                         f"{'do not' if len(qmiss) != 1 else 'does not'} match the order "
-                         "(wrong item or quantity)")
+            parts.append(qtxt)
         if missing:
             parts.append(f"{len(missing)} ordered item{'s' if len(missing) != 1 else ''} "
                          f"not on this invoice: {', '.join(missing)} — may be on a separate "
