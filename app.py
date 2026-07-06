@@ -1463,8 +1463,8 @@ def _expected_delivery(supplier, goods_value, ship=None):
 
 def _is_delivery(text):
     t = (text or "").lower()
-    return any(w in t for w in ("deliver", "carriage", "freight", "shipping",
-                                "postage", "haulage", "transport"))
+    return any(w in t for w in ("deliver", "carriage", "carrier", "courier", "freight",
+                                "shipping", "postage", "haulage", "transport"))
 
 
 def _is_surcharge(text):
