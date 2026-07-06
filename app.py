@@ -1904,29 +1904,17 @@ def _run_one_invoice(inv, lbsku):
             'double-counted.</div>', unsafe_allow_html=True)
         dpend = f"delpend_{sub}"
         if not st.session_state.get(dpend):
-            if st.button("🗑 Delete this duplicate from Monday", key=f"del_{sub}"):
-                st.session_state[dpend] = True
-                st.rerun()
+            st.button("🗑 Delete this duplicate from Monday", key=f"del_{sub}",
+                      on_click=_ss_set, args=(dpend, True))
         else:
             st.warning(f"Permanently delete invoice **{inv.get('invoice_no')}** (this Monday "
                        "subitem)? This can't be undone.")
             dy, dn = st.columns(2)
-            if dy.button("Yes — delete from Monday", key=f"delyes_{sub}", type="primary",
-                         use_container_width=True):
-                try:
-                    data_sources.delete_subitem(sub)
-                    invoices_by_status.clear()
-                    for kk in ("review", "matched", "recent", "discrepancy"):
-                        st.session_state.pop(f"sel_{kk}", None)
-                    st.session_state["inv_flash"] = (
-                        f"Deleted duplicate invoice {inv.get('invoice_no')} from Monday.")
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.session_state.pop(dpend, None)
-                    st.error("Couldn't delete from Monday: " + str(e)[:200])
-            if dn.button("Cancel", key=f"delno_{sub}", use_container_width=True):
-                st.session_state.pop(dpend, None)
-                st.rerun()
+            dy.button("Yes — delete from Monday", key=f"delyes_{sub}", type="primary",
+                      use_container_width=True, on_click=_confirm_delete,
+                      args=(sub, inv.get("invoice_no"), dpend))
+            dn.button("Cancel", key=f"delno_{sub}", use_container_width=True,
+                      on_click=_ss_pop, args=(dpend,))
 
     # Copy-friendly order/invoice numbers. Selecting text from the expander header
     # collapses the panel, so put one-click copy fields here (st.code has a hover
@@ -1939,10 +1927,9 @@ def _run_one_invoice(inv, lbsku):
         st.caption("Invoice number")
         st.code(inv.get("invoice_no") or "—", language=None)
 
-    if st.button("Re-run check", key=f"recheck_btn_{sub}",
-                 help="Reads the invoice PDF again and re-runs the match (a few pence)."):
-        st.session_state[f"recheck_n_{sub}"] = nonce + 1
-        st.rerun()
+    st.button("Re-run check", key=f"recheck_btn_{sub}", on_click=_ss_set,
+              args=(f"recheck_n_{sub}", nonce + 1),
+              help="Reads the invoice PDF again and re-runs the match (a few pence).")
 
     res, om = _check_and_store(inv, parsed, lbsku, _pricelist_index())
     matched = res["n_issues"] == 0
@@ -2247,7 +2234,7 @@ def _run_one_invoice(inv, lbsku):
                         data_sources.set_subitem_text(
                             sub, "text_mm3gh2za", st.session_state[f"enote_{sub}"].strip())
                         data_sources.set_invoice_status(sub, DISCREPANCY_LABEL)
-                        invoices_by_status.clear()
+                        st.session_state.setdefault("inv_gone", set()).add(str(sub))
                         for kk in ("review", "matched", "recent", "discrepancy"):
                             st.session_state.pop(f"sel_{kk}", None)
                         link = f" [Open the draft]({draft_link})" if draft_link else ""
@@ -2261,25 +2248,57 @@ def _run_one_invoice(inv, lbsku):
 
 
 def _queue_action(sub_id, label, inv_no):
-    """Button on_click callback — stash a Push/Matched/Flag action. Callbacks always fire on
+    """Button on_click callback — stash a Push/Matched/Flag action. Callbacks ALWAYS fire on
     click (unlike an 'if st.button(): …' inside the dynamically-rendered detail panel, which
     can miss a click and need pressing twice). Applied at the top of the next render."""
-    st.session_state["inv_action"] = (str(sub_id), label, inv_no)
+    st.session_state["inv_action"] = ("status", str(sub_id), label, inv_no)
+
+
+def _queue_delete(sub_id, inv_no):
+    """on_click callback to delete a (duplicate) subitem from Monday."""
+    st.session_state["inv_action"] = ("delete", str(sub_id), None, inv_no)
+
+
+def _refresh_invoices():
+    """on_click: pull fresh data from Monday — clears the cache and the optimistic-hide set."""
+    invoices_by_status.clear()
+    invoice_count.clear()
+    st.session_state.pop("inv_gone", None)
+
+
+def _ss_set(key, val=True):
+    st.session_state[key] = val
+
+
+def _ss_pop(key):
+    st.session_state.pop(key, None)
+
+
+def _confirm_delete(sub_id, inv_no, pend_key):
+    st.session_state.pop(pend_key, None)
+    _queue_delete(sub_id, inv_no)
 
 
 def _process_pending_action():
-    """Apply a queued action to Monday, at the very top of the Invoice Check render (before
-    the table), so a single click always lands and the queue refreshes cleanly."""
+    """Apply a queued action to Monday at the very top of the Invoice Check render, so a single
+    click always lands. Uses OPTIMISTIC hide (drop the invoice from the view immediately) rather
+    than wiping the whole Monday cache and re-fetching every page — that's what made each action
+    feel slow. The cache still refreshes on its TTL or the manual Refresh button."""
     act = st.session_state.pop("inv_action", None)
     if not act:
         return
-    sub_id, label, inv_no = act
+    kind, sub_id, label, inv_no = act
     try:
-        data_sources.set_invoice_status(sub_id, label)
-        invoices_by_status.clear()                   # refetch queue + logs
+        if kind == "delete":
+            data_sources.delete_subitem(sub_id)
+            msg = f"Deleted duplicate invoice {inv_no} from Monday."
+        else:
+            data_sources.set_invoice_status(sub_id, label)
+            msg = f"Invoice {inv_no} marked “{label}”."
+        st.session_state.setdefault("inv_gone", set()).add(str(sub_id))   # hide instantly
         for kk in ("review", "matched", "recent", "discrepancy"):
-            st.session_state.pop(f"sel_{kk}", None)   # reset row selections
-        st.session_state["inv_flash"] = f"Invoice {inv_no} marked “{label}” on Monday."
+            st.session_state.pop(f"sel_{kk}", None)                       # reset row selections
+        st.session_state["inv_flash"] = msg
     except Exception as e:  # noqa: BLE001
         st.session_state["inv_flash_err"] = "Couldn't update Monday: " + str(e)[:200]
 
@@ -2333,6 +2352,9 @@ def _invoice_tab(key, is_queue):
             st.error(msg[:200])
         return
     invs = data.get("invoices", [])
+    gone = st.session_state.get("inv_gone")            # optimistically hidden (just actioned)
+    if gone:
+        invs = [i for i in invs if str(i.get("sub_id")) not in gone]
     if not invs:
         st.caption("Nothing here right now.")
         return
@@ -2641,11 +2663,12 @@ def _invoice_tab(key, is_queue):
                             except Exception:  # noqa: BLE001
                                 fail += 1
                         prog.progress(n / len(ids))
-                    invoices_by_status.clear()
+                    goneset = st.session_state.setdefault("inv_gone", set())
+                    for sid in ids:
+                        goneset.add(str(sid))                # hide instantly, no refetch
+                        st.session_state.pop(f"pushpick_{key}_{sid}", None)
                     for kk in ("review", "matched", "recent", "discrepancy"):
                         st.session_state.pop(f"sel_{kk}", None)
-                    for sid in ids:
-                        st.session_state.pop(f"pushpick_{key}_{sid}", None)
                     st.session_state["inv_flash"] = (
                         f"Pushed {ok} invoice(s) to QuickBooks."
                         + (f" {fail} failed — check Monday." if fail else ""))
@@ -2701,13 +2724,16 @@ def render_invoice_check():
             return "—"
         return f"{c['count']}{'+' if c.get('more') else ''}"
 
-    for col, (key, label, _q) in zip(st.columns(len(tabs)), tabs):
+    cols = st.columns(len(tabs) + 1)
+    for col, (key, label, _q) in zip(cols, tabs):
         active = st.session_state["inv_tab"] == key
         btn_label = label if key == "recent" else f"{label} ({_count(key)})"
-        if col.button(btn_label, key=f"itab_{key}", use_container_width=True,
-                      type="primary" if active else "secondary"):
-            st.session_state["inv_tab"] = key
-            st.rerun()
+        col.button(btn_label, key=f"itab_{key}", use_container_width=True,
+                   type="primary" if active else "secondary",
+                   on_click=_ss_set, args=("inv_tab", key))
+    cols[-1].button("🔄", key="inv_refresh", use_container_width=True,
+                    help="Refresh from Monday (pick up new invoices / others' changes)",
+                    on_click=_refresh_invoices)
     st.write("")
 
     active = st.session_state["inv_tab"]
