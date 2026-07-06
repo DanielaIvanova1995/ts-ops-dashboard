@@ -1363,6 +1363,15 @@ DELIVERY_CHARGES = {
     "nbp": {"name": "NBP", "flat": 17.0, "free_over": 250.0},
     "upb": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
+    "eurocell": {"name": "Eurocell", "flat": 12.50, "free_over": 100.0},
+}
+
+# Temporary per-supplier surcharge (fraction) applied on top of the pricelist cost, so a
+# line billed at pricelist + surcharge is EXPECTED (not flagged). Eurocell added a temporary
+# 5% surcharge from 1 June 2026 (Middle East supply-chain costs) — remove this line when
+# they drop it.
+SUPPLIER_SURCHARGE = {
+    "eurocell": 0.05,
 }
 
 # --- Carron: zone-based delivery, priced on the DELIVERY POSTCODE (ex-VAT, per pallet).
@@ -1536,10 +1545,20 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 cost, title_note = c2, mt
         if not no_pl:                                 # suppliers with no pricelist: skip price check
             if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
-                if unit > cost + tol:
-                    via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
-                    issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                            f"(+£{unit - cost:,.2f}){via}"))
+                sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)   # e.g. Eurocell temporary 5%
+                allowed = cost * (1 + sur)                    # pricelist + expected surcharge
+                via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
+                if unit > allowed + tol:
+                    if sur:
+                        issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                                f"+{sur * 100:.0f}% surcharge (£{allowed:,.2f}) — "
+                                                f"still over by £{unit - allowed:,.2f}{via}"))
+                    else:
+                        issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                                f"(+£{unit - cost:,.2f}){via}"))
+                elif sur and unit > cost + tol:               # within the surcharge band — expected
+                    issues.append(("name", f"£{unit:,.2f} = pricelist £{cost:,.2f} + "
+                                           f"{sur * 100:.0f}% surcharge{via}"))
                 elif title_note:
                     issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
             elif isinstance(unit, (int, float)) and cost is None:
