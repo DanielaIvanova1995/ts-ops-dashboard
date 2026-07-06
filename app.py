@@ -2125,16 +2125,17 @@ def _run_one_invoice(inv, lbsku):
         f'<div style="font-size:14px;color:var(--ink);margin-top:3px;line-height:1.4">'
         f'{_esc(msg)}</div></div>', unsafe_allow_html=True)
     ca, cb, cc = st.columns(3)
-    if ca.button("Push credit note to QB" if is_cn else "Push to QB",
-                 key=f"push_{inv['sub_id']}", use_container_width=True,
-                 type=("primary" if rec == "push" else "secondary")):
-        _apply_status(inv, push_label)
-    if cb.button("Mark Matched (hold)", key=f"matched_{inv['sub_id']}", use_container_width=True,
-                 type=("primary" if rec == "hold" else "secondary")):
-        _apply_status(inv, MATCHED_LABEL)
-    if cc.button("Flag discrepancy", key=f"disc_{inv['sub_id']}", use_container_width=True,
-                 type=("primary" if rec == "disc" else "secondary")):
-        _apply_status(inv, DISCREPANCY_LABEL)
+    _sid, _no = inv["sub_id"], inv.get("invoice_no")
+    ca.button("Push credit note to QB" if is_cn else "Push to QB",
+              key=f"push_{_sid}", use_container_width=True,
+              type=("primary" if rec == "push" else "secondary"),
+              on_click=_queue_action, args=(_sid, push_label, _no))
+    cb.button("Mark Matched (hold)", key=f"matched_{_sid}", use_container_width=True,
+              type=("primary" if rec == "hold" else "secondary"),
+              on_click=_queue_action, args=(_sid, MATCHED_LABEL, _no))
+    cc.button("Flag discrepancy", key=f"disc_{_sid}", use_container_width=True,
+              type=("primary" if rec == "disc" else "secondary"),
+              on_click=_queue_action, args=(_sid, DISCREPANCY_LABEL, _no))
 
     # Chase the supplier by email (discrepancies only) — saves to Outlook Drafts.
     if res["n_issues"] > 0:
@@ -2194,18 +2195,28 @@ def _run_one_invoice(inv, lbsku):
                                    + str(e)[:180] + " — set the status/note manually if needed.")
 
 
-def _apply_status(inv, label):
-    """Write the Payment Status back to Monday, refresh the queues, and flash."""
-    try:
-        data_sources.set_invoice_status(inv["sub_id"], label)
-    except Exception as e:  # noqa: BLE001
-        st.error("Couldn't update Monday: " + str(e)[:200])
+def _queue_action(sub_id, label, inv_no):
+    """Button on_click callback — stash a Push/Matched/Flag action. Callbacks always fire on
+    click (unlike an 'if st.button(): …' inside the dynamically-rendered detail panel, which
+    can miss a click and need pressing twice). Applied at the top of the next render."""
+    st.session_state["inv_action"] = (str(sub_id), label, inv_no)
+
+
+def _process_pending_action():
+    """Apply a queued action to Monday, at the very top of the Invoice Check render (before
+    the table), so a single click always lands and the queue refreshes cleanly."""
+    act = st.session_state.pop("inv_action", None)
+    if not act:
         return
-    invoices_by_status.clear()                       # refetch queue + logs
-    for kk in ("review", "matched", "recent", "discrepancy"):  # reset row selections
-        st.session_state.pop(f"sel_{kk}", None)
-    st.session_state["inv_flash"] = f"Invoice {inv.get('invoice_no')} marked “{label}” on Monday."
-    st.rerun()
+    sub_id, label, inv_no = act
+    try:
+        data_sources.set_invoice_status(sub_id, label)
+        invoices_by_status.clear()                   # refetch queue + logs
+        for kk in ("review", "matched", "recent", "discrepancy"):
+            st.session_state.pop(f"sel_{kk}", None)   # reset row selections
+        st.session_state["inv_flash"] = f"Invoice {inv_no} marked “{label}” on Monday."
+    except Exception as e:  # noqa: BLE001
+        st.session_state["inv_flash_err"] = "Couldn't update Monday: " + str(e)[:200]
 
 
 def _bulk_check(invs, lbsku):
@@ -2299,11 +2310,16 @@ def _invoice_tab(key, is_queue):
         i["_discount"] = (disc.get(i.get("shopify_order_id")) or {}).get("amount")
 
     # Duplicate detection: the SAME invoice number logged twice on the SAME order = a
-    # duplicate subitem to delete. Counted across ALL fetched (invs), flagged on the shown.
+    # duplicate subitem to delete. Counted across this tab PLUS the Discrepancy queue, so a
+    # copy sitting in Discrepancy is caught even when we're looking at another tab.
     from collections import Counter as _Counter
     def _dupkey(i):
         return (i.get("order_no") or "", (i.get("invoice_no") or "").strip().upper())
-    _dupc = _Counter(_dupkey(i) for i in invs if (i.get("invoice_no") or "").strip())
+    dup_pool = {i["sub_id"]: i for i in invs}
+    if key != "discrepancy":
+        for i in (invoices_by_status("discrepancy").get("invoices") or []):
+            dup_pool.setdefault(i["sub_id"], i)
+    _dupc = _Counter(_dupkey(i) for i in dup_pool.values() if (i.get("invoice_no") or "").strip())
     for i in fil:
         i["_dup"] = _dupc.get(_dupkey(i), 0) >= 2
 
@@ -2573,6 +2589,7 @@ def _invoice_tab(key, is_queue):
 
 
 def render_invoice_check():
+    _process_pending_action()   # apply any queued Push/Matched/Flag before rendering
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
         <span class="sec">Invoice Check</span></span></div>""",
@@ -2600,6 +2617,9 @@ def render_invoice_check():
     flash = st.session_state.pop("inv_flash", None)
     if flash:
         st.success(flash)
+    flash_err = st.session_state.pop("inv_flash_err", None)
+    if flash_err:
+        st.error(flash_err)
 
     # Lightweight counts (id-only) + render ONLY the selected tab — far faster than
     # st.tabs (which builds all four every run) and fetching full data to count.
