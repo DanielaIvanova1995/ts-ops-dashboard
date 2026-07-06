@@ -1169,6 +1169,19 @@ def _pricelist_index():
     return idx
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _sell_index():
+    """{norm_sku: our ex-VAT Shopify sell price} — the reference for Decor8, who invoice us
+    at a % off OUR OWN price rather than from a cost pricelist."""
+    lk = load_lookup()
+    out = {}
+    for it in (lk["items"] if lk else []):
+        sk, s = _norm_code(it.get("sku")), it.get("sell")
+        if sk and s is not None:
+            out[sk] = s
+    return out
+
+
 def _is_code(tok):
     """A token that looks like a product code (so it won't false-match plain words or
     bare pack sizes): letter+digit mix of 3+ chars (VL7, HP3600) or a 5+ digit number
@@ -1364,7 +1377,17 @@ DELIVERY_CHARGES = {
     "upb": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "eurocell": {"name": "Eurocell", "flat": 12.50, "free_over": 100.0},
+    "decor8": {"name": "Decor8", "flat": 5.99, "free_over": 50.0},
 }
+
+# Decor8 don't give us a cost pricelist — they invoice at ~12% OFF OUR OWN sell price. So we
+# check what we paid per unit ≈ (our ex-VAT Shopify sell price − 12%), rather than vs a cost.
+DECOR8_DISCOUNT = 0.12       # expected discount off our own price
+DECOR8_MIN_DISCOUNT = 0.10   # accept 10%+ off; flag if the discount is smaller (we overpaid)
+
+
+def _is_decor8(supplier):
+    return (supplier or "").startswith("decor8") or (supplier or "").startswith("decor")
 
 # Temporary per-supplier surcharge (fraction) applied on top of the pricelist cost, so a
 # line billed at pricelist + surcharge is EXPECTED (not flagged). Eurocell added a temporary
@@ -1556,42 +1579,64 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
         sk = _norm_code(sku_raw)
         issues = []
-        supcosts = pidx.get(sk) or {}
-        cost = supcosts.get(supplier)                 # strictly the SKU's cost for this supplier
+        cost = None
         title_note = None
-        # If this supplier's SKU isn't on our pricelist, first look for THIS SUPPLIER's
-        # own pricelist code printed in the line (e.g. UPB's VL7 in the description) — a
-        # strict code match, the most reliable fallback…
-        if cost is None and not no_pl and cidx:
-            c2, mc = _supplier_code_cost(sku_raw, desc, supplier, cidx)
-            if c2 is not None:
-                cost, title_note = c2, f"code {mc}"
-        # …then fall back to matching THIS SUPPLIER's product title (their codes differ
-        # from ours, but they name products consistently — e.g. UPB). Scoped to one supplier.
-        if cost is None and not no_pl and tidx:
-            c2, mt = _supplier_title_cost(desc, supplier, tidx)
-            if c2 is not None:
-                cost, title_note = c2, mt
-        if not no_pl:                                 # suppliers with no pricelist: skip price check
-            if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
-                sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)   # e.g. Eurocell temporary 5%
-                allowed = cost * (1 + sur)                    # pricelist + expected surcharge
-                via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
-                if unit > allowed + tol:
-                    if sur:
-                        issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                                f"+{sur * 100:.0f}% surcharge (£{allowed:,.2f}) — "
-                                                f"still over by £{unit - allowed:,.2f}{via}"))
-                    else:
-                        issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                                f"(+£{unit - cost:,.2f}){via}"))
-                elif sur and unit > cost + tol:               # within the surcharge band — expected
-                    issues.append(("name", f"£{unit:,.2f} = pricelist £{cost:,.2f} + "
-                                           f"{sur * 100:.0f}% surcharge{via}"))
-                elif title_note:
-                    issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
-            elif isinstance(unit, (int, float)) and cost is None:
-                issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
+        if _is_decor8(supplier):
+            # Decor8 invoice at ~12% off OUR OWN ex-VAT sell price. Check what we paid per unit
+            # ≈ (our price − 12%). 'Paid' is the net line total ÷ qty (falls back to unit price).
+            our_sell = _sell_index().get(sk)
+            paid = None
+            if isinstance(ln.get("line_total"), (int, float)) and isinstance(qty, (int, float)) and qty:
+                paid = ln["line_total"] / qty
+            elif isinstance(unit, (int, float)):
+                paid = unit
+            cost = paid
+            if our_sell and paid is not None:
+                disc = (1 - paid / our_sell) * 100
+                floor = our_sell * (1 - DECOR8_MIN_DISCOUNT)    # must be at least ~10% off
+                if paid > floor + tol:
+                    issues.append(("price", f"paid £{paid:,.2f}/unit vs our price £{our_sell:,.2f} "
+                                            f"— only {disc:.1f}% off (expect ~"
+                                            f"{DECOR8_DISCOUNT * 100:.0f}%)"))
+                else:
+                    issues.append(("name", f"£{paid:,.2f} = our price £{our_sell:,.2f} less "
+                                           f"{disc:.1f}% (≈{DECOR8_DISCOUNT * 100:.0f}% expected)"))
+            elif paid is not None:
+                issues.append(("noprice", "no Shopify sell price found to check Decor8's discount"))
+        else:
+            supcosts = pidx.get(sk) or {}
+            cost = supcosts.get(supplier)             # strictly the SKU's cost for this supplier
+            # If this supplier's SKU isn't on our pricelist, first look for THIS SUPPLIER's own
+            # pricelist code printed in the line (e.g. UPB's VL7 in the description)…
+            if cost is None and not no_pl and cidx:
+                c2, mc = _supplier_code_cost(sku_raw, desc, supplier, cidx)
+                if c2 is not None:
+                    cost, title_note = c2, f"code {mc}"
+            # …then fall back to matching THIS SUPPLIER's product title (e.g. UPB).
+            if cost is None and not no_pl and tidx:
+                c2, mt = _supplier_title_cost(desc, supplier, tidx)
+                if c2 is not None:
+                    cost, title_note = c2, mt
+            if not no_pl:                             # suppliers with no pricelist: skip price check
+                if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
+                    sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)   # e.g. Eurocell temporary 5%
+                    allowed = cost * (1 + sur)                    # pricelist + expected surcharge
+                    via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
+                    if unit > allowed + tol:
+                        if sur:
+                            issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                                    f"+{sur * 100:.0f}% surcharge (£{allowed:,.2f}) — "
+                                                    f"still over by £{unit - allowed:,.2f}{via}"))
+                        else:
+                            issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                                    f"(+£{unit - cost:,.2f}){via}"))
+                    elif sur and unit > cost + tol:               # within surcharge band — expected
+                        issues.append(("name", f"£{unit:,.2f} = pricelist £{cost:,.2f} + "
+                                               f"{sur * 100:.0f}% surcharge{via}"))
+                    elif title_note:
+                        issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
+                elif isinstance(unit, (int, float)) and cost is None:
+                    issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
                "unit": unit, "cost": cost, "issues": issues, "_okey": None}
         lines.append(rec)
