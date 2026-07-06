@@ -880,7 +880,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     item_fields = """
             id name
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
-            parent_item { name
+            parent_item { name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
                 "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j"]) {
                 id text ... on FormulaValue { display_value } } }
@@ -950,6 +950,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
             "supplier_email": (pcv.get("email") or "").strip() or None,
             "status": sv.get("text"), "date": date, "actioned_at": actioned_at,
+            "n_invoices": len(parent.get("subitems") or []),   # invoices/CNs on this order
         }
 
     out, page_size = [], min(limit, 500)

@@ -1906,6 +1906,18 @@ def _run_one_invoice(inv, lbsku):
         st.markdown('<div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 12px">'
                     + "".join(chips) + "</div>", unsafe_allow_html=True)
 
+    # Heads-up when the order is split across several invoices/credit notes — the order
+    # margin below is for the WHOLE order, so don't read this one invoice in isolation.
+    n_inv = inv.get("n_invoices") or 0
+    if n_inv >= 2:
+        st.markdown(
+            f'<div style="display:inline-flex;align-items:center;gap:7px;background:#fff7ed;'
+            f'border:1px solid #fed7aa;color:#9a3412;font-weight:700;font-size:13px;'
+            f'padding:6px 12px;border-radius:999px;margin:2px 0 8px">&#129534; MULTIPLE INVOICES '
+            f'— order {inv.get("order_no") or "?"} has {n_inv} invoices/credit notes. The order '
+            f'margin below covers all of them; check they aren\'t duplicated.</div>',
+            unsafe_allow_html=True)
+
     # Live order margin from Monday (whole order, across all its invoices/credit
     # notes) — the safeguard against approving a duplicate or extra invoice.
     live = inv.get("order_margin_live")
@@ -2302,7 +2314,8 @@ def _invoice_tab(key, is_queue):
             row["Status"] = (_INV_ICON["check"] if (v and v["order"] and v["price"])
                              else _INV_ICON["warn"] if v else None)
         row["Invoice"] = inv.get("invoice_no") or ""
-        row["Order"] = inv.get("order_no") or ""
+        row["Order"] = (inv.get("order_no") or "") + (
+            f"  🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
         row["Supplier"] = inv.get("supplier") or ""
         if is_recent:
             row["Result"] = _recent_result(inv.get("status"))
@@ -2436,9 +2449,10 @@ def _invoice_tab(key, is_queue):
                    "(cached 24h) — only an unchecked invoice or **Re-run check** uses the AI.")
         for inv, expanded in review:
             is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
+            multi = f"   ·   🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else ""
             head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
                     f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
-                    f"   —   {_outcome_tag(inv)}")
+                    f"{multi}   —   {_outcome_tag(inv)}")
             with st.expander(head, expanded=expanded):
                 _run_one_invoice(inv, lbsku)
         if len(flagged) > 15:
