@@ -1508,6 +1508,15 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
     goods_value = sum(_line_total(l) for l in parsed_lines if not _is_charge_line(l))
 
+    # For Decor8, the free-delivery threshold (£50) is on OUR order value (retail), not their
+    # discounted invoice total — so use the Shopify order line prices for that check.
+    delivery_goods = goods_value
+    if _is_decor8(supplier):
+        retail = sum((v.get("price") or 0) * (v.get("qty") or 0) for v in order.values()
+                     if isinstance(v.get("price"), (int, float)))
+        if retail:
+            delivery_goods = retail
+
     common = _order_common_tokens(order)
     lines, pending, hit = [], [], set()
     inv_qty = {}   # order key → TOTAL invoiced qty (a product split across invoice lines sums)
@@ -1526,7 +1535,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
         # Delivery / carriage line — check against the supplier's expected charge.
         if _is_delivery(sku_raw) or _is_delivery(desc):
-            known = _expected_delivery(supplier, goods_value, carron_ship)
+            known = _expected_delivery(supplier, delivery_goods, carron_ship)
             zinfo = f" ({_carron_zone_label(carron_ship)})" if _is_carron(supplier) else ""
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
