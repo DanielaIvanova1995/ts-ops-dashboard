@@ -888,7 +888,9 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1"]) { id value text }
             parent_item { name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
-                "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j"]) {
+                "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
+                "numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+                "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c"]) {
                 id text ... on FormulaValue { display_value } } }
     """
     first_q = ("query ($board: [ID!], $limit: Int!) { boards(ids: $board) { "
@@ -942,9 +944,19 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
         sid = (pcv.get("text_mm04tmac") or "").strip() or None
         agreed_cost = _num(pcv.get("numbers6"))
         to_us = _num(pcv.get("numbers48"))           # Monday '£ to us' (customer paid)
+        # Whole-order invoiced total = sum of the order's per-invoice columns INV1..INV5
+        # plus the extra numeric_mm511b9c, so the "Monday total" tile shows what has been
+        # invoiced across ALL of the order's invoices, not just this single invoice.
+        invoiced_parts = [
+            _num(pcv.get(cid)) for cid in
+            ("numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+             "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c")
+        ]
+        invoiced_parts = [p for p in invoiced_parts if p is not None]
+        order_invoiced_total = round(sum(invoiced_parts), 2) if invoiced_parts else None
         return {
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
-            "to_us": to_us,
+            "to_us": to_us, "order_invoiced_total": order_invoiced_total,
             "asset_id": asset_id, "file_name": file_name,
             "file_url": (cv.get("file_mm38gx3j", {}) or {}).get("text") or None,
             "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),

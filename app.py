@@ -1997,7 +1997,14 @@ def _run_one_invoice(inv, lbsku):
     if links:
         st.markdown(f'<div style="margin:2px 0 6px">{links}</div>', unsafe_allow_html=True)
 
-    it_total, mt = parsed.get("total"), inv.get("total")
+    it_total = parsed.get("total")
+    # 'Monday total' = the whole-order invoiced figure = sum of INV1..INV5 + numeric_mm511b9c
+    # recorded on the order, so it reflects everything invoiced against the order across all
+    # its invoices — not just this single invoice's total. Fall back to this invoice's own
+    # total only if the order-level columns are all blank.
+    mt = inv.get("order_invoiced_total")
+    if not isinstance(mt, (int, float)):
+        mt = inv.get("total")
     # 'Sale total (to us)' = Monday '£ to us' (the customer paid) — Shopify total is
     # wrong for mixed orders, so use the figure recorded on Monday.
     sale_total = inv.get("to_us")
@@ -2019,7 +2026,8 @@ def _run_one_invoice(inv, lbsku):
         chips.append(_tot_chip("Sale total (to us)", f"£{sale_total:,.2f}",
                                "what the customer pays us", "#16a34a"))
     if isinstance(mt, (int, float)):
-        chips.append(_tot_chip("Monday total", f"£{mt:,.2f}", "recorded on the order", "#6b7280"))
+        chips.append(_tot_chip("Monday total", f"£{mt:,.2f}",
+                               "all invoices on the order (INV1–5)", "#6b7280"))
     if chips:
         st.markdown('<div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 12px">'
                     + "".join(chips) + "</div>", unsafe_allow_html=True)
