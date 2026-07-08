@@ -1374,6 +1374,9 @@ DELIVERY_CHARGES = {
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "eurocell": {"name": "Eurocell", "flat": 12.50, "free_over": 100.0},
     "decor8": {"name": "Decor8", "flat": 5.99, "free_over": 50.0},
+    # Chase Hardware: £5 under 2kg, £10 above — but we don't hold weights yet, so accept either
+    # (flat £10 ceiling = anything up to £10 passes; only >£10 flags). Tighten once we have weights.
+    "chasehardware": {"name": "Chase Hardware", "flat": 10.0},
 }
 
 # Decor8 don't give us a cost pricelist — they invoice at ~12% OFF OUR OWN sell price. So we
@@ -1732,29 +1735,25 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                                  "has no price to compare"))
 
     missing = [order[s]["sku"] for s in order if s not in hit]
-    # Order split across several invoices? Then items not on THIS invoice are expected (they're
-    # on the order's other invoices), so they DON'T make this one a discrepancy — the whole-order
-    # coverage is verified across invoices in the detail card instead.
-    multi = (meta.get("n_invoices") or 1) >= 2
-    # "name" notes are informational (a successful title fallback), not discrepancies.
-    n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name")
-    if not multi:
-        n_issues += len(missing)
-    return {"lines": lines, "missing": missing, "n_issues": n_issues, "multi": multi,
+    # Items on the order but not on THIS invoice don't make it a discrepancy — they're expected
+    # on the order's other invoice(s). We call it an INCOMPLETE (not failed) invoice: still
+    # approvable, with a note to expect another. 'name' notes are informational.
+    n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name")   # missing NOT counted
+    incomplete = bool(missing) and n_issues == 0        # own lines all fine, just missing items
+    return {"lines": lines, "missing": missing, "n_issues": n_issues, "incomplete": incomplete,
             "covered": set(hit), "order_map": {s: order[s]["sku"] for s in order}}
 
 
 def _verdict(res):
-    """{order, price} for a check result. 'order' is a pass/fail bool. 'price' is
-    tri-state: True (checked, all OK), False (a price/delivery mismatch), or None
-    (couldn't check — at least one line had no pricelist cost). None must NOT read as a
-    pass, so the table shows a grey '?' rather than a green tick."""
+    """{order, price, incomplete} for a check result. 'order' pass/fail (missing items do NOT
+    fail it — that's 'incomplete', not a discrepancy). 'price' is tri-state: True (all OK),
+    False (a mismatch), None (couldn't check — grey '?'). 'incomplete' = clean but missing
+    some ordered items (expected on another invoice)."""
     order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
     price_issue = any(t in ("price", "delivery") for l in res["lines"] for t, _ in l["issues"])
     price_unchecked = any(t == "noprice" for l in res["lines"] for t, _ in l["issues"])
     price = False if price_issue else (None if price_unchecked else True)
-    miss = [] if res.get("multi") else res["missing"]     # multi-invoice: missing isn't a fail
-    return {"order": not order_issue and not miss, "price": price}
+    return {"order": not order_issue, "price": price, "incomplete": bool(res.get("incomplete"))}
 
 
 def _check_and_store(inv, parsed, lbsku, pidx):
@@ -1767,6 +1766,7 @@ def _check_and_store(inv, parsed, lbsku, pidx):
     om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
     v = _verdict(res)
     v["margin"] = round(om["margin"]) if om else None
+    v["missing"] = res.get("missing") or []          # for the incomplete-invoice note on Monday
     st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = v
     # Record which order lines THIS invoice covers, keyed by order — so multiple invoices for
     # one order build up a combined picture of what's been invoiced (no re-parsing needed).
@@ -1967,7 +1967,13 @@ def _run_one_invoice(inv, lbsku):
     res, om = _check_and_store(inv, parsed, lbsku, _pricelist_index())
     matched = res["n_issues"] == 0
 
-    if matched:
+    if res.get("incomplete"):
+        st.markdown(f'<div style="display:flex;align-items:center;gap:8px;background:#fff7ed;'
+                    f'color:#9a3412;font-weight:700;padding:8px 12px;border-radius:4px;margin:2px 0 8px">'
+                    f'&#9203; INCOMPLETE INVOICE — prices &amp; quantities are correct, but not all '
+                    f'ordered items are on it. Approvable; expect a further invoice.</div>',
+                    unsafe_allow_html=True)
+    elif matched:
         st.markdown(f'<div style="display:flex;align-items:center;gap:8px;background:#dcfce7;'
                     f'color:#166534;font-weight:700;padding:8px 12px;border-radius:4px;margin:2px 0 8px">'
                     f'{_inv_inline("check", 20)} FULLY MATCHED — prices and order all correct</div>',
@@ -2125,48 +2131,43 @@ def _run_one_invoice(inv, lbsku):
     qtxt = (f"{len(qmiss)} invoice line{'s' if len(qmiss) != 1 else ''} "
             f"{'do not' if len(qmiss) != 1 else 'does not'} match the order (wrong item or quantity)")
 
-    if res.get("multi"):
-        # Multi-invoice order: verify coverage ACROSS the order's checked invoices (combined),
-        # not per-invoice. Items not on any checked invoice = still to find on the rest.
+    miss_str = ", ".join(missing)
+    if not qmiss and not missing:
+        oc = ("Order check", "Match", "#16a34a", "check",
+              f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
+    elif qmiss:
+        # A genuine mismatch (wrong item / quantity) — this IS a red discrepancy.
+        parts = [qtxt]
+        if missing:
+            parts.append(f"{len(missing)} ordered item{'s' if len(missing) != 1 else ''} not on "
+                         f"this invoice ({miss_str})")
+        oc = ("Order check", "Review", "#dc2626", "warn", f"Order {onum}: " + "; ".join(parts) + ".")
+    else:
+        # INCOMPLETE (only missing items) — never red. Aggregate coverage across the order's
+        # checked invoices to say whether the rest are already invoiced, still to come, or if
+        # this is the only invoice so far.
         cov = st.session_state.get("inv_cov", {}).get(onum, {})
         total = set().union(*[c for c, _ in cov.values()]) if cov else set(res.get("covered") or [])
         omap = dict(res.get("order_map") or {})
         for _c, m in cov.values():
             omap.update(m)
         not_yet = [sku for k, sku in omap.items() if k not in total]
-        n_checked = max(len(cov), 1)
-        n_total = inv.get("n_invoices") or n_checked
-        covered_n = len(omap) - len(not_yet)
-        base = (f"Order {onum} is split across {n_total} invoices. Across the {n_checked} you've "
-                f"checked, {covered_n}/{len(omap)} ordered items are invoiced.")
-        if qmiss:
-            oc = ("Order check", "Review", "#dc2626", "warn", f"{qtxt}. {base}")
-        elif not not_yet:
-            oc = ("Order check", "Match", "#16a34a", "check",
-                  f"✅ All {len(omap)} ordered items are covered across the order's invoices.")
-        elif n_checked >= n_total:
-            oc = ("Order check", "Items missing", "#dc2626", "warn",
-                  f"{base} ⚠ {len(not_yet)} item(s) are on NONE of the order's invoices: "
-                  f"{', '.join(not_yet)}.")
+        n_total = inv.get("n_invoices") or 1
+        head = (f"Incomplete invoice — {len(missing)} ordered item{'s' if len(missing) != 1 else ''} "
+                f"not on this one ({miss_str}).")
+        if not not_yet:
+            oc = ("Order check", "Complete across invoices", "#16a34a", "check",
+                  f"{head} ✅ but ALL {len(omap)} of order {onum}'s items are invoiced across its "
+                  f"{n_total} invoices.")
+        elif n_total >= 2:
+            oc = ("Order check", "Incomplete — more to come", "#ea580c", "invoice",
+                  f"{head} Order {onum} has {n_total} invoices; {len(not_yet)} item(s) not on any "
+                  f"you've checked yet ({', '.join(not_yet)}) — check the order's other invoice(s). "
+                  "Otherwise fine to approve (expect the rest).")
         else:
-            oc = ("Order check", "Part of order", "#ea580c", "warn",
-                  f"{base} The remaining {len(not_yet)} should be on the "
-                  f"{n_total - n_checked} invoice(s) you haven't checked yet — check those too.")
-    elif not qmiss and not missing:
-        oc = ("Order check", "Match", "#16a34a", "check",
-              f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
-    else:
-        parts = []
-        if qmiss:
-            parts.append(qtxt)
-        if missing:
-            parts.append(f"{len(missing)} ordered item{'s' if len(missing) != 1 else ''} "
-                         f"not on this invoice: {', '.join(missing)} — may be on a separate "
-                         "delivery or invoice")
-        # Missing-only is a softer amber (often legitimate); a real mismatch is red.
-        colour = "#dc2626" if qmiss else "#ea580c"
-        oc = ("Order check", "Review", colour, "warn",
-              f"Order {onum}: " + "; ".join(parts) + ".")
+            oc = ("Order check", "Incomplete — expect another", "#ea580c", "invoice",
+                  f"{head} No other invoice exists yet for order {onum} — approve and expect a "
+                  "further invoice for the rest.")
 
     sup = inv.get("supplier") or "supplier"
     is_d8 = _is_decor8(_norm_code(inv.get("supplier")))
@@ -2340,6 +2341,22 @@ def _confirm_delete(sub_id, inv_no, pend_key):
     _queue_delete(sub_id, inv_no)
 
 
+def _incomplete_note_if_approved(sub_id, label):
+    """When an INCOMPLETE invoice is approved (pushed to QB), record on Monday (text_mm51m8ee)
+    that it's incomplete and which ordered items to expect on a further invoice."""
+    if label not in (APPROVED_QB_LABEL, CN_APPROVED_QB_LABEL):
+        return
+    v = st.session_state.get("inv_verdict", {}).get(str(sub_id)) \
+        or st.session_state.get("inv_verdict", {}).get(sub_id) or {}
+    if v.get("incomplete") and v.get("missing"):
+        try:
+            data_sources.set_subitem_text(
+                sub_id, "text_mm51m8ee",
+                "Incomplete invoice — expect a further invoice for: " + ", ".join(v["missing"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _process_pending_action():
     """Apply a queued action to Monday at the very top of the Invoice Check render, so a single
     click always lands. Uses OPTIMISTIC hide (drop the invoice from the view immediately) rather
@@ -2355,6 +2372,7 @@ def _process_pending_action():
             msg = f"Deleted duplicate invoice {inv_no} from Monday."
         else:
             data_sources.set_invoice_status(sub_id, label)
+            _incomplete_note_if_approved(sub_id, label)
             msg = f"Invoice {inv_no} marked “{label}”."
         st.session_state.setdefault("inv_gone", set()).add(str(sub_id))   # hide instantly
         for kk in ("review", "matched", "recent", "discrepancy"):
@@ -2387,6 +2405,7 @@ def _bulk_check(invs, lbsku):
             if action in ("push", "hold", "flag"):
                 try:
                     data_sources.set_invoice_status(inv["sub_id"], label)
+                    _incomplete_note_if_approved(inv["sub_id"], label)
                     goneset.add(str(inv["sub_id"]))       # hide actioned instantly (no refetch)
                     pushed += action == "push"
                     held += action == "hold"
@@ -2675,6 +2694,8 @@ def _invoice_tab(key, is_queue):
         v = verdicts.get(inv["sub_id"])
         if not v:
             return "▸ not checked yet — opens & checks (a few pence)"
+        if v.get("order") and v.get("price") is not False and v.get("incomplete"):
+            return "⏳ INCOMPLETE — expect another invoice (approvable)"
         if v.get("order") and v.get("price") is True:
             m = v.get("margin")
             return f"✅ MATCHED — ready to approve{f' · {m}% margin' if m is not None else ''}"
@@ -2752,6 +2773,7 @@ def _invoice_tab(key, is_queue):
                             lab = CN_APPROVED_QB_LABEL if is_cn2 else APPROVED_QB_LABEL
                             try:
                                 data_sources.set_invoice_status(sid, lab)
+                                _incomplete_note_if_approved(sid, lab)
                                 ok += 1
                             except Exception:  # noqa: BLE001
                                 fail += 1
