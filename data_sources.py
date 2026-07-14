@@ -1448,7 +1448,10 @@ def extract_quote_items(email_text: str, attachments: list | None = None) -> dic
         '"caveats":["short customer-facing note on any assumption or missing detail to check"],'
         '"cladding":{"is_cladding":true|false,"product":"Hardie Plank|Hardie VL Plank|null",'
         '"gross_area_m2":<number or null>,"openings_m2":<number or null>,"colour":"... or null",'
-        '"wants_trims":true|false,"wants_epdm":true|false,"wants_screws":true|false},'
+        '"wall_height_m":<number or null>,"total_width_m":<number or null>,'
+        '"external_corners":<int or null>,"internal_corners":<int or null>,'
+        '"num_windows":<int or null>,"wants_trims":true|false,"wants_epdm":true|false,'
+        '"wants_screws":true|false,"wants_paint":true|false,"wants_battens":true|false},'
         '"product_range":"the product category in 1-3 words (e.g. Guttering, Fascia & soffit, '
         'Roofing, Cladding, Insulation, Drainage, Doors, Mixed) or Unclear",'
         '"postcode":"UK delivery postcode if mentioned anywhere, else null",'
@@ -1461,8 +1464,13 @@ def extract_quote_items(email_text: str, attachments: list | None = None) -> dic
         "James Hardie Plank / Hardie VL Plank enquiry AND the size is given as an AREA (m², or "
         "width×height dimensions to multiply). Then fill product, gross_area_m2 = the area to clad "
         "INCLUDING windows/doors, openings_m2 = total window/door area to deduct, colour, and "
-        "whether they asked for trims / EPDM tape / screws, and leave items EMPTY (the system "
-        "converts area→boards). For ANY OTHER cladding — a different brand (e.g. Millboard, Cladco, "
+        "whether they asked for trims / EPDM tape / screws / paint / battens, and leave items EMPTY "
+        "(the system converts area→boards and sizes the trim pack). ALSO capture any counts/sizes "
+        "the customer gives so we can size trims: external_corners and internal_corners (if they say "
+        "e.g. 'two external corners per dormer' with 'two dormers', that is 4 external corners), "
+        "num_windows (windows/openings to trim), wall_height_m and total_width_m if stated or "
+        "derivable from dimensions. Fill every one you can; leave null if truly not given. "
+        "For ANY OTHER cladding — a different brand (e.g. Millboard, Cladco, "
         "Durasid, composite), OR when the customer gives a DISCRETE COUNT of boards/lengths/panels "
         "rather than an area — set cladding.is_cladding=false and put each product in items with the "
         "stated quantity. A stated number of lengths/boards/panels/units is ALWAYS the item qty "

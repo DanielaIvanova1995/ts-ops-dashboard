@@ -2962,7 +2962,7 @@ _TRADE_DISCOUNT_NOTE = (
     "you need, how many, and the delivery postcode, and we'll review it and come back to you.")
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 8
+QUOTE_PARSE_VERSION = 9
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3109,40 +3109,107 @@ def _ensure_parsed(emails):
 
 
 def _email_cladding_takeoff(clad):
-    """Turn a Hardie cladding email enquiry (area-based) into board + accessory lines —
-    so '15 m²' becomes the right number of boards, not 15 boards. Returns (raw_lines,
-    caveats). raw_lines: [{description, qty, search}]."""
+    """Turn a James Hardie cladding email (area-based) into a FULL priced take-off:
+    boards + starter/top/corner/window trims + battens + EPDM + screws + paint/edge
+    seal — sizing every accessory from the counts and dimensions given, or from
+    sensible assumptions each flagged as a caveat (we calculate rather than punt).
+    Returns (raw_lines, caveats). raw_lines: [{description, qty, search}]."""
     import math
-    product = clad.get("product") or "Hardie Plank"
-    cov = 0.72 if "vl" in product.lower() else 0.54  # lap HardiePlank = 0.54 m²/board
+    is_vl = "vl" in (clad.get("product") or "").lower()
+    product = clad.get("product") or ("Hardie VL Plank" if is_vl else "Hardie Plank")
+    cov = 0.72 if is_vl else 0.54          # VL Plank ~0.72 m²/board; lap HardiePlank 0.54
     gross = clad.get("gross_area_m2") or 0
     openings = clad.get("openings_m2") or 0
     net = max(0.0, gross - openings)
     if net <= 0:
         return None, None
-    boards = math.ceil(net / cov * 1.10)  # +10% waste
     colour = (clad.get("colour") or "").strip()
-    board_desc = f"{product} cladding" + (f" — {colour}" if colour else "")
+    cav = []
+
+    boards = math.ceil(net / cov * 1.10)   # +10% waste
+    board_desc = f"{product} cladding board" + (f" — {colour}" if colour else "")
     raw = [{"description": board_desc, "qty": boards,
             "search": f"{product} {colour}".strip()}]
+    cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) "
+               f"÷ {cov} m²/board + 10% waste = {boards} boards.")
+    if not colour:
+        cav.append("Colour/finish not confirmed — please let us know which colour you'd like.")
+
+    # Geometry for trim sizing: use stated height/width, else derive from the area with a
+    # sensible height assumption (flagged) so we can still size the starter/top/corner trims.
+    height = clad.get("wall_height_m") or 0
+    width = clad.get("total_width_m") or 0
+    if not height and width:
+        height = net / width if width else 0
+    if not height:
+        height = 2.4
+        cav.append(f"Assumed a cladding height of {height:.1f} m (not stated) to size the trims — "
+                   "confirm the run height and we'll refine.")
+    if not width:
+        width = net / height
+        cav.append(f"Assumed ~{width:.1f} m total run width (area ÷ height) to size the "
+                   "starter/top trims — confirm the elevation widths and we'll refine.")
+
+    def L3(lm):                            # trims come in 3 m lengths, round up
+        return max(1, math.ceil(lm / 3.0))
+
+    if clad.get("wants_trims"):
+        ext = clad.get("external_corners")
+        if ext is None:
+            ext = 4
+            cav.append("Assumed 4 external corner trims (not confirmed) — tell us the exact number "
+                       "of external corners and we'll adjust.")
+        if ext:
+            raw.append({"description": f"{product} external corner trim"
+                                       f"{(' — ' + colour) if colour else ''} "
+                                       f"({ext} corners × {height:.1f} m)",
+                        "qty": L3(ext * height),
+                        "search": f"James Hardie {product} external corner trim {colour}".strip()})
+        intc = clad.get("internal_corners") or 0
+        if intc:
+            raw.append({"description": f"{product} internal corner trim"
+                                       f"{(' — ' + colour) if colour else ''} "
+                                       f"({intc} corners × {height:.1f} m)",
+                        "qty": L3(intc * height),
+                        "search": f"James Hardie {product} internal corner trim {colour}".strip()})
+        raw.append({"description": "James Hardie starter / base vent strip", "qty": L3(width),
+                    "search": "James Hardie starter track vent strip"})
+        raw.append({"description": "James Hardie top vent strip", "qty": L3(width),
+                    "search": "James Hardie top vent strip"})
+        nwin = clad.get("num_windows")
+        if nwin is None and openings > 0:
+            nwin = max(1, round(openings / 1.5))
+            cav.append(f"Assumed {nwin} window/opening(s) to trim (from {openings:.1f} m² of "
+                       "openings) — confirm the number/size and we'll refine.")
+        if nwin:
+            raw.append({"description": f"HardieTrim NT3 window/door trim"
+                                       f"{(' — ' + colour) if colour else ''} ({nwin} opening(s))",
+                        "qty": L3(nwin * 5.0),
+                        "search": f"James Hardie HardieTrim NT3 {colour}".strip()})
+        cav.append("Trim pack sized from the corners, run width and openings above (all 3 m "
+                   "lengths, rounded up). Send exact elevation widths / corner counts to tighten it.")
+
     batten_lm = net / 0.6
+    if clad.get("wants_battens"):
+        raw.append({"description": "Treated timber battens (25×50, per 3 m length)",
+                    "qty": max(1, math.ceil(batten_lm / 3.0)),
+                    "search": "treated timber batten 25 x 50"})
     if clad.get("wants_screws"):
         raw.append({"description": "James Hardie cladding screws (box of 250)",
                     "qty": max(1, math.ceil(boards * 7 / 250)),
-                    "search": "James Hardie cladding fixing screws"})
+                    "search": f"James Hardie cladding fixing screws {colour}".strip()})
     if clad.get("wants_epdm"):
-        raw.append({"description": "EPDM joint tape (20m roll)",
+        raw.append({"description": "EPDM joint tape (20 m roll)",
                     "qty": max(1, math.ceil(batten_lm / 20)),
                     "search": "James Hardie EPDM tape 20m"})
-    cav = [f"Boards worked out from {net:.1f} m² to clad "
-           f"({gross:.1f} m² less {openings:.1f} m² of openings) ÷ {cov} m²/board "
-           f"+ 10% waste = {boards} boards."]
-    if not colour:
-        cav.append("Colour/finish not confirmed — please let us know which colour you'd like.")
-    if clad.get("wants_trims"):
-        cav.append("Trims (starter/top vent, corner and window trims): these are sized from the "
-                   "elevation widths and corner count, which we don't have yet — send those and "
-                   "we'll add the exact trim pack.")
+    if clad.get("wants_paint"):
+        raw.append({"description": f"James Hardie touch-up paint"
+                                   f"{(' — ' + colour) if colour else ''}",
+                    "qty": 1, "search": f"James Hardie touch up paint {colour}".strip()})
+        raw.append({"description": "James Hardie edge sealer (cut edges)", "qty": 1,
+                    "search": "James Hardie edge sealer"})
+        cav.append("Included 1 touch-up paint" + (f" in {colour}" if colour else "")
+                   + " and 1 edge sealer for cut edges — tell us if you need more.")
     return raw, cav
 
 
@@ -3187,6 +3254,14 @@ def _build_quote(email):
     # can price. If we found any priceable item we quote provisionally and flag the gaps.
     has_priceable = any(l.get("match") and l["match"].get("price") is not None
                         for l in parsed["lines"])
+    # Scotland delivery: flag a possible surcharge to confirm before proceeding (shows on the
+    # quote's assumptions and flows into the composed email via the delivery note).
+    if _is_scotland_postcode(parsed.get("postcode")):
+        cav = parsed.get("caveats") or []
+        note = _scotland_delivery_note(parsed.get("postcode"))
+        if note not in cav:
+            cav.append(note)
+        parsed["caveats"] = cav
     # Trade-discount enquiry: note we might offer one, and (if they've been quoted) flag it
     # as something for us to review manually rather than applying anything automatically.
     if parsed.get("trade_discount") and has_priceable:
@@ -3223,9 +3298,26 @@ def _build_quote(email):
     return parsed
 
 
+# Scottish mainland + islands postcode areas — delivery to these often carries a surcharge,
+# so we confirm the delivery cost before proceeding rather than quoting it blind.
+_SCOTLAND_AREAS = {"AB", "DD", "DG", "EH", "FK", "G", "HS", "IV", "KA", "KW", "KY", "ML",
+                   "PA", "PH", "TD", "ZE"}
+
+
+def _is_scotland_postcode(pc):
+    m = re.match(r"\s*([A-Za-z]{1,2})\d", pc or "")
+    return bool(m) and m.group(1).upper() in _SCOTLAND_AREAS
+
+
+def _scotland_delivery_note(pc):
+    return (f"As delivery is to Scotland ({(pc or '').upper()}), there may be a delivery "
+            "surcharge — we'll confirm the exact delivery cost for you. Please let us know if "
+            "you'd like to proceed and we'll firm that up.")
+
+
 def _delivery_note(parsed):
     """Standard stock/delivery-by-postcode note, with the internal-doors caveat when the
-    enquiry involves doors."""
+    enquiry involves doors and a Scotland surcharge note for Scottish postcodes."""
     note = ("Please note that stock availability and delivery charges can vary depending on the "
             "delivery postcode — if you let us know your postcode we'll confirm both.")
     text = " ".join(str(parsed.get(k) or "") for k in ("product_range", "summary")).lower()
@@ -3234,6 +3326,8 @@ def _delivery_note(parsed):
     if "door" in text:
         note += (" Internal doors in particular cannot be quoted for delivery until we have a "
                  "delivery postcode.")
+    if _is_scotland_postcode(parsed.get("postcode")):
+        note += " " + _scotland_delivery_note(parsed.get("postcode"))
     return note
 
 
