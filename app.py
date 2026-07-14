@@ -2953,9 +2953,16 @@ QUOTE_MAILBOX = "hello@tradesuperstoreonline.co.uk"
 QUOTE_FOLDER = "New Orders & Quotes"
 QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is drafted
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
+# Standard reply wording when a customer asks about a trade/bulk discount. We never quote a
+# discount automatically — we say one may be possible and gather what/how many/where so the
+# team can decide manually.
+_TRADE_DISCOUNT_NOTE = (
+    "We may be able to offer a discount depending on the product, the quantities and the "
+    "overall size of the order. To look into that for you, please let us know exactly what "
+    "you need, how many, and the delivery postcode, and we'll review it and come back to you.")
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 7
+QUOTE_PARSE_VERSION = 8
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3000,11 +3007,19 @@ def _parse_one_quote(email, manual_note=None):
     if manual_note:
         thread = (thread + "\n\n[Additional details from our team — treat as authoritative; "
                   "use these products, quantities and specifics]:\n" + manual_note)
+    # If the customer attached a photo / basket screenshot / spec, read it too (vision).
+    attachments = []
+    if email.get("hasAttachments"):
+        try:
+            attachments = data_sources.fetch_message_attachments(QUOTE_MAILBOX, email["id"])
+        except Exception:  # noqa: BLE001 — attachments are a bonus; text still parses
+            attachments = []
     try:
-        parsed = data_sources.extract_quote_items(thread)
+        parsed = data_sources.extract_quote_items(thread, attachments=attachments or None)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
     parsed["thread"] = thread
+    parsed["_had_attachments"] = bool(attachments)
     parsed["_manual_note"] = manual_note or None
     parsed["_v"] = QUOTE_PARSE_VERSION
     # Strict web-form fields ('Name :', 'Email :', …) override AI guesses, and the real
@@ -3172,10 +3187,27 @@ def _build_quote(email):
     # can price. If we found any priceable item we quote provisionally and flag the gaps.
     has_priceable = any(l.get("match") and l["match"].get("price") is not None
                         for l in parsed["lines"])
+    # Trade-discount enquiry: note we might offer one, and (if they've been quoted) flag it
+    # as something for us to review manually rather than applying anything automatically.
+    if parsed.get("trade_discount") and has_priceable:
+        cav = parsed.get("caveats") or []
+        cav.append("You asked about a trade discount — we may be able to offer one depending on "
+                   "the final products, quantities and overall order size; let us know and we'll "
+                   "review it for you.")
+        parsed["caveats"] = cav
     if not has_priceable and "clarify_email" not in parsed:
         qs = parsed.get("questions") or (
             [parsed["missing_info"]] if parsed.get("missing_info") else [])
         qs = [str(x).strip() for x in qs if x and str(x).strip()]
+        # Trade-discount enquiry with nothing to price → ask what / how many / where so we can
+        # review a discount manually, and lead with the "we may be able to offer" line.
+        discount_note = None
+        if parsed.get("trade_discount"):
+            discount_note = _TRADE_DISCOUNT_NOTE
+            for want in ("which products you're after", "how many of each you need",
+                         "the delivery postcode"):
+                if not any(want.split()[1] in q.lower() for q in qs):
+                    qs.append("Could you let us know " + want + "?")
         parsed["questions"] = qs
         # Fallback: search our catalogue for the products the customer described.
         parsed["suggestions"] = _quote_suggestions(parsed)
@@ -3184,7 +3216,8 @@ def _build_quote(email):
             parsed["clarify_email"] = data_sources.compose_customer_email(
                 parsed.get("thread", ""), "clarify",
                 {"customer_name": parsed.get("customer_name"), "questions": qs,
-                 "suggestions": parsed["suggestions"], "delivery_note": parsed["delivery_note"]})
+                 "suggestions": parsed["suggestions"], "delivery_note": parsed["delivery_note"],
+                 "discount_note": discount_note})
         except Exception:  # noqa: BLE001 — no AI key etc.; render falls back to a template
             parsed["clarify_email"] = None
     return parsed
@@ -3252,8 +3285,9 @@ def _quote_clarify_body(q, email):
         sugg_txt = ("\n\nFrom what you've described, these from our range may suit — let us know "
                     "which you'd like:\n" + "\n".join(f"- {s}" for s in sugg))
     note = q.get("delivery_note") or _delivery_note(q)
-    return (f"Hi {name},\n\nThanks for your enquiry. To put your quote together, could you "
-            "please confirm:\n\n" + bullets + sugg_txt +
+    disc = (_TRADE_DISCOUNT_NOTE + "\n\n") if q.get("trade_discount") else ""
+    return (f"Hi {name},\n\nThanks for your enquiry. " + disc +
+            "To put your quote together, could you please confirm:\n\n" + bullets + sugg_txt +
             f"\n\n{note}\n\nOnce we have that we'll send your quote straight over.\n\n"
             "Kind regards,\nTrade Superstore Online")
 
@@ -3304,6 +3338,8 @@ def _render_quote_block(email):
             st.rerun()
     with st.spinner("Reading the conversation and pricing from Shopify…"):
         q = _build_quote(email)
+    if q.get("_had_attachments"):
+        st.caption("📎 Read the customer's attachment(s) as well as the email text.")
     if q.get("error"):
         if "ANTHROPIC_API_KEY" in q["error"]:
             st.info("Add your **ANTHROPIC_API_KEY** in Settings → Secrets to read quote emails.")

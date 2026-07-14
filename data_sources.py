@@ -1215,7 +1215,8 @@ def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 200,
     url = f"{GRAPH}/users/{mailbox}/mailFolders/{f['id']}/messages"
     params = {"$top": "50", "$orderby": "receivedDateTime desc",
               "$filter": f"receivedDateTime ge {cutoff}",
-              "$select": "subject,from,receivedDateTime,bodyPreview,body,categories,isRead"}
+              "$select": "subject,from,receivedDateTime,bodyPreview,body,categories,"
+                         "isRead,hasAttachments"}
     messages, guard = [], 0
     while url and len(messages) < limit and guard < 40:
         guard += 1
@@ -1239,8 +1240,38 @@ def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 200,
                     "received": (m.get("receivedDateTime") or "")[:10],
                     "categories": m.get("categories") or [],
                     "isRead": bool(m.get("isRead")),
+                    "hasAttachments": bool(m.get("hasAttachments")),
                     "preview": (m.get("bodyPreview") or "").strip()[:200],
                     "body": content[:6000]})
+    return out
+
+
+def fetch_message_attachments(mailbox: str, message_id: str, token: str | None = None,
+                              max_items: int = 4, max_bytes: int = 4_500_000) -> list:
+    """Return a message's image/PDF attachments (inline or file) as blocks ready for the
+    Anthropic vision API: [{media_type, data(base64), name}]. Used so the quoter can read
+    a photo or a basket screenshot the customer attached, not just the email text. Skips
+    anything that isn't an image or PDF, and anything over max_bytes."""
+    token = token or ms_token()
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$select": "name,contentType,size,contentBytes,isInline,@odata.type"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    ok = {"image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"}
+    out = []
+    for a in r.json().get("value", []):
+        ctype = (a.get("contentType") or "").split(";")[0].strip().lower()
+        data = a.get("contentBytes")
+        if not data or ctype not in ok:
+            continue
+        if (a.get("size") or 0) > max_bytes:
+            continue
+        out.append({"media_type": ctype, "data": data, "name": a.get("name") or "attachment"})
+        if len(out) >= max_items:
+            break
     return out
 
 
@@ -1355,10 +1386,18 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         if sugg:
             facts += ("\n\nPRODUCTS FROM OUR RANGE THAT MAY MATCH WHAT THEY DESCRIBED (offer these "
                       "as suggestions to confirm):\n" + "\n".join(f"- {s}" for s in sugg))
+        disc = (data.get("discount_note") or "").strip()
+        if disc:
+            facts += ("\n\nTRADE-DISCOUNT NOTE (the customer asked about a discount — open with "
+                      "this, reworded naturally, and do NOT quote a specific discount %): " + disc)
         facts += "\n\nINCLUDE THIS NOTE (reword naturally): " + delivery_note
         task = ("Write a warm, professional email asking the customer for the missing details so "
                 "we can prepare their quote. Acknowledge their enquiry / our previous messages "
-                "using the conversation for context. Ask the questions politely as a short "
+                "using the conversation for context. "
+                + ("If a trade-discount note is provided, lead with it warmly (we may be able to "
+                   "offer a discount depending on product, quantity and order size) WITHOUT "
+                   "committing to a figure. " if disc else "")
+                + "Ask the questions politely as a short "
                 "bulleted list. If suggested products from our range are listed, mention them as "
                 "options and ask the customer to confirm which they'd like. Do NOT restate "
                 "measurements or information they already gave. Include the stock/delivery-by-"
@@ -1385,10 +1424,12 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
     return r.json()["content"][0]["text"].strip()
 
 
-def extract_quote_items(email_text: str) -> dict:
+def extract_quote_items(email_text: str, attachments: list | None = None) -> dict:
     """AI reads a quote-request email/thread and returns one object used for BOTH the
     overview table and the quote build: {customer_name, can_quote, items:[{description,
-    qty, code}], questions, product_range, postcode, summary, urgency}. Raises if no
+    qty, code}], questions, product_range, postcode, summary, urgency, trade_discount}.
+    attachments: optional [{media_type, data(base64)}] image/PDF blocks the customer
+    attached (a photo or basket screenshot) — read for products too. Raises if no
     key/failure."""
     import json as _json
     import re
@@ -1412,7 +1453,10 @@ def extract_quote_items(email_text: str) -> dict:
         'Roofing, Cladding, Insulation, Drainage, Doors, Mixed) or Unclear",'
         '"postcode":"UK delivery postcode if mentioned anywhere, else null",'
         '"summary":"one short line on what they want quoted",'
+        '"trade_discount":true|false,'
         '"urgency":"normal|urgent"}\n'
+        "trade_discount is true if they ask about a trade/business/bulk discount, trade "
+        "account or trade pricing.\n"
         "JAMES HARDIE CLADDING (area-based only): set cladding.is_cladding=true ONLY when this is a "
         "James Hardie Plank / Hardie VL Plank enquiry AND the size is given as an AREA (m², or "
         "width×height dimensions to multiply). Then fill product, gross_area_m2 = the area to clad "
@@ -1436,16 +1480,29 @@ def extract_quote_items(email_text: str) -> dict:
         "RULES for questions: write each as a short, friendly question you could send straight "
         "to the customer. Do NOT restate or analyse what they already told you, do NOT write in "
         "the third person. urgency is 'urgent' only if they say they need it quickly or by a "
-        "date. Never invent products.\n\nEMAIL:\n"
+        "date. Never invent products.\n"
+        + ("The customer ATTACHED one or more images/PDFs (e.g. a photo, a spec sheet, or a "
+           "screenshot of their basket) — these often hold the exact products and quantities. "
+           "READ THE ATTACHMENTS and extract every product and quantity from them as well as "
+           "from the email text.\n" if attachments else "")
+        + "\nEMAIL:\n"
         + (email_text or "")[:6000]
     )
+    content = [{"type": "text", "text": prompt}]
+    for a in (attachments or []):
+        if a.get("media_type") == "application/pdf":
+            content.append({"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf", "data": a["data"]}})
+        else:
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": a["media_type"], "data": a["data"]}})
     r = requests.post(
         ANTHROPIC_API,
         headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
         json={"model": SENTIMENT_MODEL, "max_tokens": 1200,
-              "messages": [{"role": "user", "content": prompt}]},
-        timeout=60,
+              "messages": [{"role": "user", "content": content}]},
+        timeout=90,
     )
     r.raise_for_status()
     txt = r.json()["content"][0]["text"]
