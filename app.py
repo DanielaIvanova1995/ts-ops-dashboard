@@ -3213,6 +3213,52 @@ def _email_cladding_takeoff(clad):
     return raw, cav
 
 
+# Brand / filler tokens that must NOT, on their own, justify a fallback match — so a
+# 'James Hardie top vent strip' can't match a 'James Hardie plank board' just on the brand.
+# Passed as the invoice scorer's `common` set (same role as order-wide colour words there).
+_QUOTE_BRAND_COMMON = {"james", "hardie", "hardieplank", "cedral", "molan", "millboard",
+                       "cladco", "durasid", "eurocell", "marley", "brand", "new"}
+
+
+def _quote_fallback_match(description):
+    """For a requested line the primary matcher couldn't price, search Shopify more broadly
+    and pick the best candidate using the INVOICE CHECKER's token scorer (_name_pair_score:
+    distinctive shared words, length-weighted, credibility-gated) rather than Shopify's own
+    search ranking. Returns a priced variant dict or None — only ever a credible match, so a
+    'no match' stays a 'no match' rather than becoming a wrong one."""
+    desc = (description or "").strip()
+    dt = _title_tokens(desc)
+    if not dt:
+        return None
+    # Two passes: the full phrase, then a key-tokens query (helps when the exact phrase
+    # returns nothing) — deduped by variant id.
+    queries = [desc]
+    key_tokens = " ".join(sorted(dt, key=len, reverse=True)[:5])
+    if key_tokens and key_tokens.lower() != desc.lower():
+        queries.append(key_tokens)
+    seen, cands = set(), []
+    for q in queries:
+        try:
+            for c in data_sources.shopify_search_variants(q, first=15):
+                vid = c.get("variant_id")
+                if vid and vid not in seen:
+                    seen.add(vid)
+                    cands.append(c)
+        except Exception:  # noqa: BLE001
+            pass
+    best, best_key = None, (0.0, False, False)
+    for c in cands:
+        if c.get("price") is None:
+            continue
+        score = _name_pair_score(dt, _title_tokens(c.get("title")), _QUOTE_BRAND_COMMON)
+        if score <= 0:
+            continue
+        key = (score, bool(c.get("available")), True)   # score, then in-stock, then priced
+        if key > best_key:
+            best, best_key = c, key
+    return best
+
+
 def _build_quote(email):
     """Full build for ONE email: reuse the shared parse, then lazily add Shopify
     matching and the composed clarify email (computed once, stored on the parse)."""
@@ -3250,6 +3296,15 @@ def _build_quote(email):
                 lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
                               "match": match})
             parsed["lines"] = lines
+        # Any line the primary matcher couldn't price → retry with the invoice-checker's
+        # token scorer over a broader Shopify search (matches on distinctive shared words).
+        for l in parsed["lines"]:
+            m = l.get("match")
+            if not (m and m.get("price") is not None):
+                fb = _quote_fallback_match(l.get("description"))
+                if fb and fb.get("price") is not None:
+                    l["match"] = fb
+                    l["_fallback"] = True
     # Only fall back to a pure "ask for details" email when there is genuinely nothing we
     # can price. If we found any priceable item we quote provisionally and flag the gaps.
     has_priceable = any(l.get("match") and l["match"].get("price") is not None
@@ -3472,7 +3527,10 @@ def _render_quote_block(email):
     for l in lines:
         m = l["match"]
         if m and m.get("price") is not None:
-            prod = (f'{_esc(m.get("title") or "?")}<div style="color:var(--muted);font-size:11px">'
+            tag = ('<span style="color:#d97706"> · ≈ name match, check</span>'
+                   if l.get("_fallback") else "")
+            prod = (f'{_esc(m.get("title") or "?")}{tag}'
+                    f'<div style="color:var(--muted);font-size:11px">'
                     f'SKU {_esc(m.get("sku") or "—")}</div>')
             unit = f"£{m['price']:,.2f}"
             line = f"£{m['price'] * l['qty']:,.2f}"
