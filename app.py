@@ -2961,7 +2961,8 @@ QUOTE_PARSE_VERSION = 6
 @st.cache_data(ttl=300, show_spinner=False)
 def _quote_emails():
     try:
-        return {"emails": data_sources.fetch_quote_emails(QUOTE_MAILBOX, QUOTE_FOLDER, limit=25)}
+        return {"emails": data_sources.fetch_quote_emails(
+            QUOTE_MAILBOX, QUOTE_FOLDER, days=14, limit=200)}
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 

@@ -1195,25 +1195,38 @@ def create_supplier_draft(mailbox: str, to_email: str, subject: str, body: str,
     return r.json().get("webLink")
 
 
-def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 15,
-                       token: str | None = None) -> list:
+def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 200,
+                       token: str | None = None, days: int = 14) -> list:
     """Full messages in a folder for quoting: [{id, subject, from, from_name,
-    received, preview, body}]. body is plain text (HTML stripped)."""
+    received, preview, body}]. body is plain text (HTML stripped).
+
+    Fetches EVERY message received in the last `days` days (paginating through
+    @odata.nextLink), newest first, capped at `limit` as a safety valve. This is
+    a date WINDOW, not a bare top-N: a busy folder no longer buries older requests
+    off the bottom of the list (that used to drop e.g. 3-day-old quotes once 25+
+    newer emails arrived)."""
     import re as _re
+    from datetime import datetime, timedelta, timezone
     token = token or ms_token()
     f = _find_folder(mailbox, folder_name, token)
     if not f:
         return []
-    r = requests.get(
-        f"{GRAPH}/users/{mailbox}/mailFolders/{f['id']}/messages",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"$top": str(limit), "$orderby": "receivedDateTime desc",
-                "$select": "subject,from,receivedDateTime,bodyPreview,body,categories,isRead"},
-        timeout=30,
-    )
-    r.raise_for_status()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    url = f"{GRAPH}/users/{mailbox}/mailFolders/{f['id']}/messages"
+    params = {"$top": "50", "$orderby": "receivedDateTime desc",
+              "$filter": f"receivedDateTime ge {cutoff}",
+              "$select": "subject,from,receivedDateTime,bodyPreview,body,categories,isRead"}
+    messages, guard = [], 0
+    while url and len(messages) < limit and guard < 40:
+        guard += 1
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"},
+                         params=params if guard == 1 else None, timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+        messages.extend(payload.get("value", []))
+        url = payload.get("@odata.nextLink")          # already carries the query params
     out = []
-    for m in r.json().get("value", []):
+    for m in messages[:limit]:
         body = m.get("body") or {}
         content = body.get("content") or m.get("bodyPreview") or ""
         if body.get("contentType") == "html":
