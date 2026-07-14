@@ -839,7 +839,12 @@ def _ptable(header_cells: str, body_rows: str, note: str = "") -> str:
             f'{body_rows}</table>{note}</div>')
 
 
-_SKU_HEAD = ('<th style="padding:7px 12px">SKU / product</th><th style="padding:7px 12px">Supplier</th>'
+# 'Buy from (cheapest)' = the supplier we ORDER from at the lowest cost. 'Sold as (Shopify
+# vendor)' = the brand the product is LISTED UNDER on our own website. They are not always
+# the same, so both are shown to avoid confusing who we buy from with who we sell it as.
+_SKU_HEAD = ('<th style="padding:7px 12px">SKU / product</th>'
+             '<th style="padding:7px 12px">Buy from (cheapest supplier)</th>'
+             '<th style="padding:7px 12px">Sold as (Shopify vendor)</th>'
              '<th style="padding:7px 12px;text-align:right">Cost</th>'
              '<th style="padding:7px 12px;text-align:right">Sell</th>'
              '<th style="padding:7px 12px;text-align:right">Margin</th>')
@@ -854,12 +859,14 @@ def _sku_rows(items, supplier=None):
         else:
             cost = it.get("cheapest_cost")
             sup = it.get("cheapest")
+        vendor = it.get("vendor")           # who we SELL it as (Shopify vendor)
         sell, m, nm = it.get("sell"), it.get("margin"), (it.get("name") or "")[:55]
         out.append(
             f'<tr style="border-top:1px solid var(--line)">'
             f'<td style="padding:7px 12px"><b>{it["sku"]}</b>'
             f'<div style="color:var(--muted);font-size:11px">{nm}</div></td>'
             f'<td style="padding:7px 12px;font-size:12px">{sup or "—"}</td>'
+            f'<td style="padding:7px 12px;font-size:12px">{vendor or "—"}</td>'
             f'<td style="padding:7px 12px;text-align:right">{"£"+format(cost, ".2f") if cost is not None else "—"}</td>'
             f'<td style="padding:7px 12px;text-align:right">{"£"+format(sell, ".2f") if sell else "—"}</td>'
             f'<td style="padding:7px 12px;text-align:right;font-weight:700;color:{_mcol(m)}">'
@@ -4693,6 +4700,10 @@ def render_pricing():
         st.warning("No pricing data yet. Run the supplier-pricing refresh to create "
                    "`pricing_summary.json`, push it, and it'll appear here.")
         return
+
+    st.caption("**Buy from (cheapest supplier)** = who we order from at the lowest cost · "
+               "**Sold as (Shopify vendor)** = the brand it's listed under on our website. "
+               "These aren't always the same.")
 
     render_product_search()
 
