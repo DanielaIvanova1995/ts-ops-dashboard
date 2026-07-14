@@ -2955,7 +2955,7 @@ QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is 
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 6
+QUOTE_PARSE_VERSION = 7
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -2971,11 +2971,15 @@ _UK_POSTCODE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
 _FOLLOWUP_RE = re.compile(r"^\s*(re|fw|fwd)\s*:", re.I)
 
 
-def _parse_one_quote(email):
+def _parse_one_quote(email, manual_note=None):
     """Thread fetch + ONE AI extraction (the single source of truth for both the
     overview table and the quote build) + postcode backstop. Plain function — calls
     only data_sources (no st.*), so it is safe to run in a worker thread. Returns the
-    parsed dict, or {'error': ...}."""
+    parsed dict, or {'error': ...}.
+
+    manual_note: optional free text typed by our team to add/correct details the AI
+    missed (extra products, quantities, colours). It's appended to the thread as
+    authoritative so the extraction includes it."""
     thread = email.get("body") or ""
     cid = email.get("conversationId")
     if cid:
@@ -2992,11 +2996,16 @@ def _parse_one_quote(email):
                     for m in msgs)
         except Exception:  # noqa: BLE001
             pass
+    manual_note = (manual_note or "").strip()
+    if manual_note:
+        thread = (thread + "\n\n[Additional details from our team — treat as authoritative; "
+                  "use these products, quantities and specifics]:\n" + manual_note)
     try:
         parsed = data_sources.extract_quote_items(thread)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
     parsed["thread"] = thread
+    parsed["_manual_note"] = manual_note or None
     parsed["_v"] = QUOTE_PARSE_VERSION
     # Strict web-form fields ('Name :', 'Email :', …) override AI guesses, and the real
     # customer email comes from the BODY — form emails are sent FROM the form app, not
@@ -3061,16 +3070,24 @@ def _quote_cache():
     return st.session_state.setdefault("quote_parse", {})
 
 
+def _quote_manual():
+    """Per-email free-text our team adds to correct/supplement the AI extraction
+    (extra products, quantities, colours). Keyed by email id, kept for the session."""
+    return st.session_state.setdefault("quote_manual", {})
+
+
 def _ensure_parsed(emails):
     """Parse every email once (uncached ones in parallel). Returns the {id: parsed}
     cache so the table and the build share exactly the same extraction."""
     import concurrent.futures as _cf
     cache = _quote_cache()
+    manual = _quote_manual()          # read in the main thread (no st.* inside workers)
     todo = [e for e in emails if not _parse_is_current(cache.get(e["id"]))]
     if todo:
         with st.spinner(f"Reading {len(todo)} quote email(s)…"):
             with _cf.ThreadPoolExecutor(max_workers=8) as ex:
-                done = list(ex.map(lambda e: (e["id"], _parse_one_quote(e)), todo))
+                done = list(ex.map(
+                    lambda e: (e["id"], _parse_one_quote(e, manual.get(e["id"]))), todo))
         for eid, parsed in done:
             cache[eid] = parsed
     return cache
@@ -3120,7 +3137,7 @@ def _build_quote(email):
     cache = _quote_cache()
     parsed = cache.get(email["id"])
     if not _parse_is_current(parsed):
-        parsed = _parse_one_quote(email)
+        parsed = _parse_one_quote(email, _quote_manual().get(email["id"]))
         cache[email["id"]] = parsed
     if parsed.get("error"):
         return parsed
@@ -3258,6 +3275,33 @@ def _mark_quote_progress(email, category):
 def _render_quote_block(email):
     """Build + render one email's quote: the priced table + create buttons, or a
     clarify draft if we can't quote yet. Safe to call inside a loop/expander."""
+    eid = email["id"]
+    manual = _quote_manual()
+    # Manual add / correct: type extra products, quantities or colours the email didn't
+    # make clear; it's fed to the AI as authoritative and the quote recomputes.
+    with st.expander("✏️ Add or correct details" + (" · applied" if manual.get(eid) else ""),
+                     expanded=bool(manual.get(eid))):
+        txt = st.text_area(
+            "Extra details for this quote", value=manual.get(eid, ""),
+            key=f"qman_txt_{eid}", height=90,
+            placeholder="e.g. 39 lengths Millboard Envello Golden Oak, 4 external corner trims, "
+                        "deliver to LE3 6DA",
+            label_visibility="collapsed")
+        b1, b2 = st.columns(2)
+        if b1.button("Apply & rebuild", key=f"qman_apply_{eid}", type="primary",
+                     use_container_width=True):
+            new = (txt or "").strip()
+            if new:
+                manual[eid] = new
+            else:
+                manual.pop(eid, None)
+            _quote_cache().pop(eid, None)      # force a fresh parse that includes the note
+            st.rerun()
+        if manual.get(eid) and b2.button("Clear", key=f"qman_clear_{eid}",
+                                         use_container_width=True):
+            manual.pop(eid, None)
+            _quote_cache().pop(eid, None)
+            st.rerun()
     with st.spinner("Reading the conversation and pricing from Shopify…"):
         q = _build_quote(email)
     if q.get("error"):

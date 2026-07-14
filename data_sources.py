@@ -1413,13 +1413,16 @@ def extract_quote_items(email_text: str) -> dict:
         '"postcode":"UK delivery postcode if mentioned anywhere, else null",'
         '"summary":"one short line on what they want quoted",'
         '"urgency":"normal|urgent"}\n'
-        "JAMES HARDIE CLADDING: if this is a Hardie Plank / Hardie VL Plank cladding enquiry, set "
-        "cladding.is_cladding=true and fill it: product, gross_area_m2 = the area to clad "
-        "INCLUDING windows/doors (use the stated area; if only width×height dimensions are given, "
-        "multiply them), openings_m2 = total window/door area to deduct, colour, and whether they "
-        "asked for trims / EPDM tape / screws. CRITICAL: cladding is quoted by converting AREA to "
-        "boards (the system does this) — NEVER put an area figure as an item quantity, and leave "
-        "items EMPTY for cladding jobs.\n"
+        "JAMES HARDIE CLADDING (area-based only): set cladding.is_cladding=true ONLY when this is a "
+        "James Hardie Plank / Hardie VL Plank enquiry AND the size is given as an AREA (m², or "
+        "width×height dimensions to multiply). Then fill product, gross_area_m2 = the area to clad "
+        "INCLUDING windows/doors, openings_m2 = total window/door area to deduct, colour, and "
+        "whether they asked for trims / EPDM tape / screws, and leave items EMPTY (the system "
+        "converts area→boards). For ANY OTHER cladding — a different brand (e.g. Millboard, Cladco, "
+        "Durasid, composite), OR when the customer gives a DISCRETE COUNT of boards/lengths/panels "
+        "rather than an area — set cladding.is_cladding=false and put each product in items with the "
+        "stated quantity. A stated number of lengths/boards/panels/units is ALWAYS the item qty "
+        "(e.g. '39 lengths' → qty 39); never treat it as an area.\n"
         "ALWAYS populate items with EVERY product you can identify, even if the request is "
         "incomplete — we prefer to quote for what we can and flag the rest. If a quantity is "
         "missing, assume a sensible quantity and add a caveat saying it was assumed. Only leave "
