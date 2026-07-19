@@ -2969,7 +2969,7 @@ _TRADE_DISCOUNT_NOTE = (
     "you need, how many, and the delivery postcode, and we'll review it and come back to you.")
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 9
+QUOTE_PARSE_VERSION = 10
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -3227,6 +3227,97 @@ _QUOTE_BRAND_COMMON = {"james", "hardie", "hardieplank", "cedral", "molan", "mil
                        "cladco", "durasid", "eurocell", "marley", "brand", "new"}
 
 
+def _email_kerrafront_takeoff(clad):
+    """Vox Kerrafront cladding take-off. Boards (FS-302, 0.97 m²/board) + FS-222 corners
+    (one profile for BOTH internal & external) + FS-211 starter + FS-251 finishing trim +
+    A2 stainless fixings (9/m² double board, 15/m² single) + battens at 400 mm centres.
+    Sizes everything from area and counts, with sensible assumptions each flagged as a
+    caveat. Returns (raw_lines, caveats). raw_lines: [{description, qty, search}]."""
+    import math
+    gross = clad.get("gross_area_m2") or 0
+    openings = clad.get("openings_m2") or 0
+    net = max(0.0, gross - openings)
+    if net <= 0:
+        return None, None
+    colour = (clad.get("colour") or "").strip()
+    cav = []
+
+    COV = 0.97                              # FS-302 double board coverage per panel (Vox spec)
+    boards = math.ceil(net / COV * 1.10)    # +10% waste
+    raw = [{"description": "Kerrafront FS-302 cladding board" + (f" — {colour}" if colour else ""),
+            "qty": boards, "search": f"Kerrafront 302 {colour}".strip()}]
+    cav.append(f"Boards: {net:.1f} m² ÷ 0.97 m²/board (FS-302) + 10% waste = {boards} boards.")
+    if not colour:
+        cav.append("Colour/finish not confirmed — let us know which Kerrafront colour you'd like.")
+
+    height = clad.get("wall_height_m") or 0
+    width = clad.get("total_width_m") or 0
+    if not height and width:
+        height = net / width if width else 0
+    if not height:
+        height = 2.4
+        cav.append(f"Assumed a cladding height of {height:.1f} m (not stated) to size the trims — "
+                   "confirm the run height and we'll refine.")
+    if not width:
+        width = net / height
+        cav.append(f"Assumed ~{width:.1f} m total run width (area ÷ height) to size the "
+                   "starter/finishing trims — confirm the elevation widths and we'll refine.")
+
+    def L3(lm):                             # Kerrafront trims come in 3.0 m lengths, round up
+        return max(1, math.ceil(lm / 3.0))
+
+    if clad.get("wants_trims"):
+        ext = clad.get("external_corners")
+        intc = clad.get("internal_corners") or 0
+        if ext is None:
+            ext = 4
+            cav.append("Assumed 4 corners (not confirmed) — Kerrafront uses one FS-222 profile for "
+                       "both internal and external corners; tell us the exact count to adjust.")
+        corners = (ext or 0) + intc
+        if corners:
+            raw.append({"description": f"Kerrafront FS-222 2-part universal corner"
+                                       f"{(' — ' + colour) if colour else ''} "
+                                       f"({corners} corners × {height:.1f} m)",
+                        "qty": L3(corners * height),
+                        "search": f"Kerrafront FS-222 universal corner {colour}".strip()})
+        raw.append({"description": "Kerrafront FS-211 starter trim (base)", "qty": L3(width),
+                    "search": "Kerrafront FS-211 starter trim"})
+        nwin = clad.get("num_windows")
+        if nwin is None and openings > 0:
+            nwin = max(1, round(openings / 1.5))
+            cav.append(f"Assumed {nwin} opening(s) for finishing trim (from {openings:.1f} m² of "
+                       "openings) — confirm the number/size and we'll refine.")
+        if nwin:
+            raw.append({"description": f"Kerrafront FS-251 universal finishing/edge trim"
+                                       f"{(' — ' + colour) if colour else ''} ({nwin} opening(s))",
+                        "qty": L3(nwin * 5.0),
+                        "search": f"Kerrafront FS-251 universal trim {colour}".strip()})
+        if height > 2.95:
+            cav.append("The run is taller than one 2.95 m board — Kerrafront connectors are needed at "
+                       "the horizontal joins; send the exact heights and we'll add the connector count.")
+        cav.append("Trim pack sized from the corners, run width and openings above (3 m lengths, "
+                   "rounded up). FS-222 covers both internal and external corners.")
+
+    # Fixings — A2 stainless, 9/m² for the double FS-302 board, 15/m² for single boards.
+    if clad.get("wants_screws", True):
+        rate = 15 if clad.get("single_board") else 9
+        boxes = max(1, math.ceil(net * rate / 250))
+        raw.append({"description": f"A2 stainless fixings (box of 250, ~{rate}/m²)"
+                                   + (f" — {colour}" if colour else ""),
+                    "qty": boxes, "search": f"Polytop stainless steel fixing nails {colour}".strip()})
+        cav.append(f"Fixings: {rate}/m² ({'single' if clad.get('single_board') else 'double'} board) "
+                   f"× {net:.1f} m² ≈ {boxes} box(es) of 250. Fix into battens at ≤400 mm centres, in "
+                   "the centre of the slots and left slightly proud so the cladding can move.")
+    if colour and any(d in colour.lower() for d in ("anthracite", "graphite", "black", "grey")):
+        cav.append("For a dark colour leave a ~15 mm expansion gap at board ends (more than a pale "
+                   "colour needs) — Kerrafront moves with temperature.")
+    if clad.get("wants_battens"):
+        raw.append({"description": "Treated timber battens (per 3 m length, ≤400 mm centres)",
+                    "qty": max(1, math.ceil((net / 0.4) / 3.0)),
+                    "search": "treated timber batten 25 x 50"})
+    return raw, cav
+
+
 def _quote_fallback_match(description):
     """For a requested line the primary matcher couldn't price, search Shopify more broadly
     and pick the best candidate using the INVOICE CHECKER's token scorer (_name_pair_score:
@@ -3280,7 +3371,10 @@ def _build_quote(email):
         clad = parsed.get("cladding") or {}
         raw_clad, clad_cav = (None, None)
         if clad.get("is_cladding") and (clad.get("gross_area_m2") or 0) > 0:
-            raw_clad, clad_cav = _email_cladding_takeoff(clad)
+            sys_ = (clad.get("system") or "").lower()
+            is_kerra = sys_ == "kerrafront" or "kerrafront" in (clad.get("product") or "").lower()
+            raw_clad, clad_cav = (_email_kerrafront_takeoff(clad) if is_kerra
+                                  else _email_cladding_takeoff(clad))
         if raw_clad:
             # Cladding: quote by converting area to boards (+ requested accessories).
             lines = []
