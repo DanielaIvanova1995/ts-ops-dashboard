@@ -1410,6 +1410,7 @@ DELIVERY_CHARGES = {
     "upb": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "eurocell": {"name": "Eurocell", "flat": 12.50, "free_over": 100.0},
+    "gap": {"name": "GAP", "flat": 20.83, "free_over": 150.0},   # <£150 net → £20.83 + VAT
     "decor8": {"name": "Decor8", "flat": 5.99, "free_over": 50.0},
     # Chase Hardware: £5 under 2kg, £10 above — but we don't hold weights yet, so accept either
     # (flat £10 ceiling = anything up to £10 passes; only >£10 flags). Tighten once we have weights.
