@@ -1532,6 +1532,34 @@ def _is_surcharge(text):
     return "surcharge" in t or "uplift" in t
 
 
+# Other AGREED supplier charges that legitimately appear on an invoice or returns credit
+# but are never on the Shopify order (so they must not be flagged 'not on the order').
+# 'amount' = the max legitimate ex-VAT £; omit it when the charge is a % we can't verify.
+# Matched BEFORE the delivery rule, so a 'redelivery' line isn't mistaken for carriage.
+SUPPLIER_CHARGES = {
+    "gap": (
+        {"keywords": ("redeliver", "re-deliver", "failed delivery"),
+         "label": "redelivery (failed delivery)", "amount": 45.0},
+        {"keywords": ("collection charge", "carriage collection", "returns collection",
+                      "collection fee"),
+         "label": "returns collection", "amount": 35.0},
+        # 10% of the returned value — we don't reliably know that value, so recognise
+        # the line (don't flag it) rather than guess.
+        {"keywords": ("restock", "re-stock"), "label": "restocking (10%)"},
+    ),
+}
+
+
+def _ancillary_charge(supplier, sku_raw, desc):
+    """Match a line to a known non-carriage supplier charge (redelivery, returns
+    collection, restocking). Returns the rule dict, or None."""
+    t = f"{sku_raw} {desc}".lower()
+    for rule in SUPPLIER_CHARGES.get(supplier, ()):
+        if any(k in t for k in rule["keywords"]):
+            return rule
+    return None
+
+
 def _check_invoice(parsed, meta, pidx, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
     order's SKUs/quantities. Known supplier delivery charges are recognised."""
@@ -1582,6 +1610,21 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         sku_raw = ln.get("sku") or ""
         desc = ln.get("description") or ""
         qty, unit = ln.get("qty"), ln.get("unit_price")
+
+        # Other agreed supplier charge (redelivery / returns collection / restocking).
+        # Legitimate and never on the Shopify order. Checked BEFORE delivery so that a
+        # 'redelivery' line isn't read as carriage and compared to the carriage rate.
+        chg = _ancillary_charge(supplier, sku_raw, desc)
+        if chg:
+            amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
+            cap = chg.get("amount")
+            aissues = []
+            if cap is not None and isinstance(amt, (int, float)) and abs(amt) > cap + tol:
+                aissues.append(("price", f"{chg['label']} £{abs(amt):,.2f} vs agreed "
+                                         f"£{cap:,.2f}"))
+            lines.append({"sku": sku_raw or chg["label"], "desc": desc or chg["label"],
+                          "qty": qty, "unit": unit, "cost": cap, "issues": aissues})
+            continue
 
         # Delivery / carriage line — check against the supplier's expected charge.
         if _is_delivery(sku_raw) or _is_delivery(desc):
