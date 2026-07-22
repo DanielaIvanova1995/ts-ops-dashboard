@@ -1602,14 +1602,15 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
 
     goods_value = sum(_line_total(l) for l in parsed_lines if not _is_charge_line(l))
 
-    # For Decor8, the free-delivery threshold (£50) is on OUR order value (retail), not their
-    # discounted invoice total — so use the Shopify order line prices for that check.
+    # For Decor8, the free-delivery threshold (£50) is on OUR retail value, not their
+    # discounted invoice total. It must be judged on what THIS invoice actually delivered:
+    # on a part-shipment the supplier legitimately charges the £5.99 even when the FULL order
+    # is over £50. Using the whole order's retail over-stated a part delivery and wrongly
+    # flagged a valid carriage line. Their invoice is ~12% off our retail, so gross this
+    # invoice's own goods back up to retail.
     delivery_goods = goods_value
-    if _is_decor8(supplier):
-        retail = sum((v.get("price") or 0) * (v.get("qty") or 0) for v in order.values()
-                     if isinstance(v.get("price"), (int, float)))
-        if retail:
-            delivery_goods = retail
+    if _is_decor8(supplier) and goods_value:
+        delivery_goods = goods_value / max(0.01, 1.0 - DECOR8_DISCOUNT)
 
     common = _order_common_tokens(order)
     lines, pending, hit = [], [], set()
