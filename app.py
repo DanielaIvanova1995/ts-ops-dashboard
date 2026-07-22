@@ -1066,6 +1066,14 @@ def _order_candidates(meta):
             for i, l in enumerate(lines):
                 sku = l.get("sku")
                 key = _norm_code(sku) if sku else f"shop{i}:{_norm_code(l.get('title'))}"
+                # The SAME SKU can appear on several order lines — Shopify variants that
+                # share a SKU (e.g. the 1L and 2.5L pots of one paint). Keyed on SKU alone
+                # the later line OVERWRITES the earlier one and it vanishes from the order,
+                # so its invoice line could never match ('not on the order'). Suffix
+                # duplicates to keep every line; the NAME (variant is folded in) then decides
+                # which is which.
+                if key in out:
+                    key = f"{key}#{i}"
                 out[key] = {"sku": sku or (l.get("title") or "(no SKU)"),
                             "qty": l.get("qty"), "name": l.get("title"),
                             "price": l.get("price")}   # our ex-VAT line price (for Decor8)
@@ -1096,6 +1104,15 @@ PRODUCT_ALIASES = {
     "PJ40WLO1": "GHSIO",     # Eurocell 40mm Panel Joint Irish Oak 5m = our Hollow Soffit H-Trim
 }
 _ALIAS_NORM = {_norm_code(k): _norm_code(v) for k, v in PRODUCT_ALIASES.items()}
+
+
+def _sku_keys(sk, order):
+    """Order keys an invoice SKU could refer to — the plain key plus any '#n' duplicates
+    (the same SKU on several order lines, e.g. 1L and 2.5L variants sharing a SKU)."""
+    if not sk:
+        return []
+    pre = sk + "#"
+    return [k for k in order if k == sk or k.startswith(pre)]
 
 
 def _order_common_tokens(order):
@@ -1721,14 +1738,19 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         # needs. Exact SKU does NOT consume the order line — the same product can appear on
         # several invoice lines and we sum their quantities (checked after the loop).
         al = _ALIAS_NORM.get(sk)
+        skc = _sku_keys(sk, order)
         if al and al in order:
             _hit(rec, al)
             issues.append(("name", f"matched to order line {order[al]['sku']} — known product "
                                    "equivalence (supplier calls it something else)"))
-        elif sk in order:
-            _hit(rec, sk)
-            issues.append(("name", f"matched to order line {order[sk]['sku']} — SKU matches "
+        elif len(skc) == 1:
+            _hit(rec, skc[0])
+            issues.append(("name", f"matched to order line {order[skc[0]]['sku']} — SKU matches "
                                    "exactly"))
+        elif len(skc) > 1:
+            # One SKU, several order lines (variants sharing a SKU) — the SKU alone can't say
+            # which, so defer to the name match below where the size/variant decides.
+            pending.append(rec)
         else:
             ck = _code_match(sk, order, hit)
             if ck and _names_ok(desc, order[ck].get("name"), common):
