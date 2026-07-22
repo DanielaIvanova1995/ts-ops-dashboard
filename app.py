@@ -1025,7 +1025,11 @@ def _title_tokens(s):
     out = set()
     for w in re.findall(r"[a-z0-9]+", s):
         for part in _TOK_ABBREV.get(w, w).split():
-            if part in _TOK_STOP or len(part) < 2:
+            # Keep single DIGITS — on painting/cladding orders the size is often the only
+            # difference between two otherwise identical products ('4" roller' vs '9"
+            # roller'), and dropping it made them impossible to tell apart. Single letters
+            # are still dropped as noise.
+            if part in _TOK_STOP or (len(part) < 2 and not part.isdigit()):
                 continue
             out.add(part)
     return out
@@ -1082,6 +1086,18 @@ def _code_match(sk, order, used):
     return None
 
 
+# Known product equivalences: SUPPLIER'S invoice code -> OUR Shopify SKU. Some suppliers
+# use a completely different name AND code for the identical product, so no amount of name
+# matching will ever link them — e.g. Eurocell's "40MM PANEL JOINT IRISH OAK X 5"
+# (PJ40WLO1) is our "Irish Oak Hollow Soffit H-Trim (5m)" (GHSIO): the only shared words
+# are the colour. Add a pair here whenever one of these turns up and it will match from
+# then on. Checked BEFORE the exact-SKU and name matching.
+PRODUCT_ALIASES = {
+    "PJ40WLO1": "GHSIO",     # Eurocell 40mm Panel Joint Irish Oak 5m = our Hollow Soffit H-Trim
+}
+_ALIAS_NORM = {_norm_code(k): _norm_code(v) for k, v in PRODUCT_ALIASES.items()}
+
+
 def _order_common_tokens(order):
     """Tokens shared across MOST order lines — typically the colour (e.g. 'Sail Cloth'),
     identical on every line and so useless for telling one product from another. We ignore
@@ -1114,12 +1130,26 @@ def _name_pair_score(dt, ot, common):
     if not dt or not ot:
         return 0.0
     shared = dt & ot
+    if not shared:
+        return 0.0
     distinctive = shared - common
-    if len(distinctive) < 2 and not (len(distinctive) == 1 and len(next(iter(distinctive))) >= 8):
-        return 0.0
-    if len(shared) / min(len(dt), len(ot)) < 0.4:
-        return 0.0
-    return float(sum(len(t) for t in distinctive))
+    # How alike are the two names overall (1.0 = identical token sets)?
+    overlap = len(shared) / max(len(dt), len(ot))
+    # NEAR-IDENTICAL NAMES ALWAYS MATCH. On an order of near-identical products (e.g. four
+    # Hamilton rollers/frames) almost every word is 'common' across the order, which used to
+    # leave nothing distinctive and scored even a character-for-character identical
+    # description as 0 ('not on the order'). When the two names are >=80% the same tokens,
+    # skip the distinctive-word requirement — the colour-collision risk it guards against
+    # can't apply to names this alike.
+    if overlap < 0.8:
+        if len(distinctive) < 2 and not (len(distinctive) == 1
+                                         and len(next(iter(distinctive))) >= 8):
+            return 0.0
+        if len(shared) / min(len(dt), len(ot)) < 0.4:
+            return 0.0
+    # Length-weighted distinctive words, plus an exactness bonus so the CLOSEST name wins
+    # (an exact '4"' line beats the otherwise identical '9"' line).
+    return float(sum(len(t) for t in distinctive)) + 12.0 * overlap
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1646,7 +1676,12 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         # strongest first, so a weak colour-only overlap can't steal a line the right line
         # needs. Exact SKU does NOT consume the order line — the same product can appear on
         # several invoice lines and we sum their quantities (checked after the loop).
-        if sk in order:
+        al = _ALIAS_NORM.get(sk)
+        if al and al in order:
+            _hit(rec, al)
+            issues.append(("name", f"matched to order line {order[al]['sku']} — known product "
+                                   "equivalence (supplier calls it something else)"))
+        elif sk in order:
             _hit(rec, sk)
             issues.append(("name", f"matched to order line {order[sk]['sku']} — SKU matches "
                                    "exactly"))
