@@ -1553,6 +1553,10 @@ SUPPLIER_EMAILS = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
+    # Toolbank runs on thin margins — anything over 6% is fine to approve (we still
+    # price-check against their pricelist; this only lowers the approve floor and stops a
+    # good margin being flagged as 'unusually high').
+    "toolbank": {"name": "Toolbank", "push_min": 6.0, "flag_high": False},
 }
 
 
