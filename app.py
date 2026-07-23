@@ -1094,16 +1094,19 @@ def _code_match(sk, order, used):
     return None
 
 
-# Known product equivalences: SUPPLIER'S invoice code -> OUR Shopify SKU. Some suppliers
-# use a completely different name AND code for the identical product, so no amount of name
-# matching will ever link them — e.g. Eurocell's "40MM PANEL JOINT IRISH OAK X 5"
-# (PJ40WLO1) is our "Irish Oak Hollow Soffit H-Trim (5m)" (GHSIO): the only shared words
-# are the colour. Add a pair here whenever one of these turns up and it will match from
-# then on. Checked BEFORE the exact-SKU and name matching.
-PRODUCT_ALIASES = {
-    "PJ40WLO1": "GHSIO",     # Eurocell 40mm Panel Joint Irish Oak 5m = our Hollow Soffit H-Trim
-}
-_ALIAS_NORM = {_norm_code(k): _norm_code(v) for k, v in PRODUCT_ALIASES.items()}
+# Known product equivalences — force-match a supplier's invoice line to our order line when
+# they can't be linked automatically: the supplier uses a different NAME *and* a different
+# CODE (so name matching finds only the colour in common, and SKU matching finds nothing).
+# Each rule matches the INVOICE line (by SKU and/or name fragments) and the ORDER line (by
+# our SKU and/or name fragments — needed when the order line has no SKU). Add one whenever a
+# genuine rename turns up. Checked BEFORE SKU and name matching. All fragments are ANDed.
+PRODUCT_EQUIV = [
+    # Eurocell '40MM PANEL JOINT IRISH OAK' (PJ40WLO1) = our 'Hollow Soffit H-Trim' (GHSIO)
+    {"inv_sku": "PJ40WLO1", "order_sku": "GHSIO"},
+    # UPB 'Hardiepanel Screws (Timber)' (5300303) = our 'James Hardie VL ... Fixing Screws'
+    # (the order line carries no SKU, so target it by name).
+    {"supplier": "upb", "inv_sku": "5300303", "order_name_has": ["fixing", "screws"]},
+]
 
 
 def _sku_keys(sk, order):
@@ -1113,6 +1116,35 @@ def _sku_keys(sk, order):
         return []
     pre = sk + "#"
     return [k for k in order if k == sk or k.startswith(pre)]
+
+
+def _equiv_match(supplier, sk, desc, order, hit):
+    """Order key an invoice line is a KNOWN equivalent of (deterministic supplier-rename
+    table, PRODUCT_EQUIV), or None. Works even when the order line has no SKU (targets it by
+    name). Skips an order line that's already been matched."""
+    dl = (desc or "").lower()
+    for r in PRODUCT_EQUIV:
+        if r.get("supplier") and r["supplier"] != supplier:
+            continue
+        if not (r.get("inv_sku") or r.get("inv_name_has")):
+            continue
+        if r.get("inv_sku") and _norm_code(r["inv_sku"]) != sk:
+            continue
+        if r.get("inv_name_has") and not all(w.lower() in dl for w in r["inv_name_has"]):
+            continue
+        # invoice side matched → find the order line
+        if r.get("order_sku"):
+            for k in _sku_keys(_norm_code(r["order_sku"]), order):
+                if k not in hit:
+                    return k
+        for frags in ([r["order_name_has"]] if r.get("order_name_has") else []):
+            for k, v in order.items():
+                if k in hit:
+                    continue
+                nm = (v.get("name") or "").lower()
+                if all(w.lower() in nm for w in frags):
+                    return k
+    return None
 
 
 def _order_common_tokens(order):
@@ -1738,12 +1770,12 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         # strongest first, so a weak colour-only overlap can't steal a line the right line
         # needs. Exact SKU does NOT consume the order line — the same product can appear on
         # several invoice lines and we sum their quantities (checked after the loop).
-        al = _ALIAS_NORM.get(sk)
+        eq = _equiv_match(supplier, sk, desc, order, hit)
         skc = _sku_keys(sk, order)
-        if al and al in order:
-            _hit(rec, al)
-            issues.append(("name", f"matched to order line {order[al]['sku']} — known product "
-                                   "equivalence (supplier calls it something else)"))
+        if eq:
+            _hit(rec, eq)
+            issues.append(("name", f"matched to order line {order[eq]['sku']} — known product "
+                                   "equivalence (supplier names it differently)"))
         elif len(skc) == 1:
             _hit(rec, skc[0])
             issues.append(("name", f"matched to order line {order[skc[0]]['sku']} — SKU matches "
