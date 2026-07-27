@@ -1460,6 +1460,7 @@ DELIVERY_CHARGES = {
     "up": {"name": "UPB", "flat": 15.0, "free_over": 100.0},
     "eurocell": {"name": "Eurocell", "flat": 12.50, "free_over": 100.0},
     "gap": {"name": "GAP", "flat": 20.83, "free_over": 150.0},   # <£150 net → £20.83 + VAT
+    "deanta": {"name": "Deanta", "flat": 8.0},                   # £8 carriage (confirmed)
     "decor8": {"name": "Decor8", "flat": 5.99, "free_over": 50.0},
     # Chase Hardware: £5 under 2kg, £10 above — but we don't hold weights yet, so accept either
     # (flat £10 ceiling = anything up to £10 passes; only >£10 flags). Tighten once we have weights.
@@ -3018,8 +3019,57 @@ def render_matched_weekly():
     for r in rows:
         w.writerow([r["invoice_no"], r["order_no"], r["supplier"], r["total"],
                     r["marked_at"], r["marked_by"], r["current_status"]])
-    st.download_button("⬇ Download CSV", buf.getvalue(),
-                       file_name=f"matched_last_{days}_days.csv", mime="text/csv")
+    dl, em = st.columns(2)
+    dl.download_button("⬇ Download CSV", buf.getvalue(),
+                       file_name=f"matched_last_{days}_days.csv", mime="text/csv",
+                       use_container_width=True)
+    # Email it to the signed-in user. This creates a DRAFT in their Outlook (Mail.ReadWrite,
+    # which works where send is blocked) — they review and press send.
+    to_addr = _signed_in_email()
+    if em.button(f"📧 Email this list to {to_addr}", use_container_width=True,
+                 disabled=not to_addr):
+        try:
+            subj = f"Matched (TradeHub) — last {days} days: {len(rows)} invoices, £{tot:,.2f}"
+            link = data_sources.create_supplier_draft(to_addr, to_addr, subj,
+                                                       _matched_email_body(rows, days, tot))
+            st.success(f"Draft created in {to_addr}'s Outlook — open **Drafts**, review and "
+                       "send it.")
+            if link:
+                st.markdown(f"[Open the draft in Outlook]({link})")
+        except Exception as e:  # noqa: BLE001
+            st.error("Couldn't create the draft: " + str(e)[:200])
+
+
+def _signed_in_email():
+    """Email of the signed-in user (from the auth config), for the 'email me this' action."""
+    try:
+        u = (config.get("credentials", {}).get("usernames", {}).get(username, {}) or {})
+        return (u.get("email") or "").strip() or "daniela@tradesuperstoreonline.co.uk"
+    except Exception:  # noqa: BLE001
+        return "daniela@tradesuperstoreonline.co.uk"
+
+
+def _matched_email_body(rows, days, tot):
+    """Plain-text body listing the marked-Matched invoices, for the email draft."""
+    still = sum(1 for r in rows if "Matched" in (r.get("current_status") or ""))
+    lines = [
+        f"Invoices marked 'Matched (TradeHub)' in the last {days} days.",
+        f"{len(rows)} invoice(s) · £{tot:,.2f} to suppliers · "
+        f"{len(rows) - still} already moved on to Approved, {still} still Matched.",
+        "These fully match the order and pricelist and are due to be paid.",
+        "",
+        f"{'Invoice':<20}{'Order':<9}{'Supplier':<16}{'£ to sup':>9}  {'Marked':<13}"
+        f"{'By':<14}Current status",
+        "-" * 96,
+    ]
+    for r in rows:
+        amt = f"£{r['total']:,.2f}" if isinstance(r.get("total"), (int, float)) else "—"
+        lines.append(
+            f"{str(r.get('invoice_no') or '—')[:19]:<20}{str(r.get('order_no') or '—')[:8]:<9}"
+            f"{str(r.get('supplier') or '—')[:15]:<16}{amt:>9}  {str(r.get('marked_at') or ''):<13}"
+            f"{str(r.get('marked_by') or '—')[:13]:<14}{r.get('current_status') or ''}")
+    lines += ["", "— Sent from Trade Hub · Invoice Check › Matched (weekly)"]
+    return "\n".join(lines)
 
 
 def render_invoice_check():
