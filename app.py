@@ -2946,6 +2946,82 @@ def _invoice_tab(key, is_queue):
                     st.rerun()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _matched_weekly(days):
+    try:
+        return {"rows": data_sources.fetch_matched_marked(days=days)}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def render_matched_weekly():
+    """List every invoice/CN MARKED 'Matched (TradeHub)' in the window — from Monday's
+    activity log, so it stays listed even after a colleague moves it on to Approved."""
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Matched — weekly</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Everything marked **Matched (TradeHub)** in the window, read from Monday's "
+               "activity log — so it's still here even after it's been moved on to "
+               "**Approved (To QB)**. These fully match the order and pricelist and are due "
+               "to be paid.")
+    c1, c2 = st.columns([4, 1])
+    days = c1.radio("Window", [7, 14, 30], horizontal=True,
+                    format_func=lambda d: f"Last {d} days", label_visibility="collapsed")
+    if c2.button("↻ Refresh", use_container_width=True):
+        _matched_weekly.clear()
+        st.rerun()
+
+    d = _matched_weekly(days)
+    if d.get("error"):
+        st.warning("Couldn't read the activity log: " + d["error"][:200])
+        return
+    rows = d["rows"]
+    if not rows:
+        st.success(f"Nothing marked Matched (TradeHub) in the last {days} days.")
+        return
+    tot = sum(r["total"] for r in rows if isinstance(r.get("total"), (int, float)))
+    still = sum(1 for r in rows if "Matched" in (r.get("current_status") or ""))
+    st.markdown(f"**{len(rows)}** invoice(s) marked · **£{tot:,.2f}** to suppliers · "
+                f"{len(rows) - still} already moved on, {still} still Matched")
+
+    def _pill(s):
+        s = s or ""
+        col = "#16a34a" if "Approved" in s else "#ea580c" if "Matched" in s else "#6b7280"
+        return f'<span style="color:{col};font-weight:600">{_esc(s or "—")}</span>'
+
+    body = "".join(
+        '<tr style="border-top:1px solid var(--line)">'
+        f'<td style="padding:7px 12px"><b>{_esc(r["invoice_no"] or "—")}</b></td>'
+        f'<td style="padding:7px 12px">{_esc(r["order_no"] or "—")}</td>'
+        f'<td style="padding:7px 12px">{_esc(r["supplier"] or "—")}</td>'
+        f'<td style="padding:7px 12px;text-align:right">'
+        f'{("£"+format(r["total"], ",.2f")) if isinstance(r.get("total"), (int, float)) else "—"}</td>'
+        f'<td style="padding:7px 12px;font-size:12px">{_esc(r["marked_at"])}</td>'
+        f'<td style="padding:7px 12px;font-size:12px">{_esc(r["marked_by"])}</td>'
+        f'<td style="padding:7px 12px">{_pill(r["current_status"])}</td></tr>'
+        for r in rows)
+    head = ('<th style="padding:7px 12px">Invoice</th><th style="padding:7px 12px">Order</th>'
+            '<th style="padding:7px 12px">Supplier</th>'
+            '<th style="padding:7px 12px;text-align:right">£ to supplier</th>'
+            '<th style="padding:7px 12px">Marked</th><th style="padding:7px 12px">By</th>'
+            '<th style="padding:7px 12px">Current status</th>')
+    st.markdown(_ptable(head, body), unsafe_allow_html=True)
+
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["Invoice", "Order", "Supplier", "£ to supplier", "Marked", "By",
+                "Current status"])
+    for r in rows:
+        w.writerow([r["invoice_no"], r["order_no"], r["supplier"], r["total"],
+                    r["marked_at"], r["marked_by"], r["current_status"]])
+    st.download_button("⬇ Download CSV", buf.getvalue(),
+                       file_name=f"matched_last_{days}_days.csv", mime="text/csv")
+
+
 def render_invoice_check():
     _process_pending_action()   # apply any queued Push/Matched/Flag before rendering
     st.markdown(
@@ -5056,6 +5132,9 @@ with st.sidebar:
         if _m == "Pricing" and st.session_state.module == "Pricing":
             st.radio("Pricing view", ["Pricing", "Supplier rules"],
                      key="pricing_view", label_visibility="collapsed")
+        if _m == "Invoice Check" and st.session_state.module == "Invoice Check":
+            st.radio("Invoice Check view", ["Check invoices", "Matched (weekly)"],
+                     key="ic_view", label_visibility="collapsed")
     module = st.session_state.module
 
     st.write("")
@@ -5118,7 +5197,10 @@ if module == "Quotes":
     st.stop()
 
 if module == "Invoice Check":
-    render_invoice_check()
+    if st.session_state.get("ic_view") == "Matched (weekly)":
+        render_matched_weekly()
+    else:
+        render_invoice_check()
     st.stop()
 
 if module == "Finance":

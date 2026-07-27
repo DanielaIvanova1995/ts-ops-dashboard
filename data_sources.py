@@ -441,7 +441,7 @@ def fetch_board_activity(board_id: int, from_iso: str, to_iso: str,
     query = """
     query ($b: [ID!], $f: ISO8601DateTime, $t: ISO8601DateTime, $p: Int, $l: Int) {
       boards(ids: $b) {
-        activity_logs(from: $f, to: $t, page: $p, limit: $l) { event user_id data }
+        activity_logs(from: $f, to: $t, page: $p, limit: $l) { event user_id data created_at }
       }
     }
     """
@@ -867,7 +867,133 @@ def research_competitors(title: str, code: str | None, vendor: str | None,
 # ---------------------------------------------------------------------------
 SUBITEMS_BOARD_ID = 3547638043
 NEEDS_REVIEW_LABEL_ID = 3            # status7__1 "Needs Review" (Monday label id)
+MATCHED_STATUS_TEXT = "Matched (TradeHub)"   # status7__1 label text for a held/matched invoice
 INVOICE_MODEL = "claude-sonnet-4-6"  # reads the PDF (documents need a capable model)
+
+
+def _mk_marked_time(ts):
+    """Format a Monday activity_logs created_at (microseconds-since-epoch string, or ISO)
+    as 'DD Mon HH:MM' UK local time. '' if unparseable."""
+    from datetime import datetime, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/London")
+    except Exception:  # noqa: BLE001
+        tz = timezone.utc
+    s = str(ts or "").strip()
+    if not s:
+        return ""
+    try:
+        if s.isdigit():
+            n = int(s)
+            if len(s) >= 16:      # microseconds
+                n /= 1_000_000
+            elif len(s) >= 13:    # milliseconds
+                n /= 1_000
+            return datetime.fromtimestamp(n, timezone.utc).astimezone(tz).strftime("%d %b %H:%M")
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(tz).strftime("%d %b %H:%M")
+    except Exception:  # noqa: BLE001
+        return s[:16].replace("T", " ")
+
+
+def _fetch_subitem_details(sub_ids, token):
+    """{sub_id(str): {invoice_no, current_status, total, order_no, supplier}} for the given
+    subitem ids (their CURRENT state + parent order/supplier). Batched by 100."""
+    import re as _re
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    q = ("query ($ids:[ID!]) { items(ids:$ids) { id name "
+         'column_values(ids:["status7__1","numbers4"]) { id text } '
+         "parent_item { name "
+         'column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd"]) { id text } } } }')
+
+    def _num(v):
+        if v in (None, ""):
+            return None
+        t = _re.sub(r"[^0-9.\-]", "", str(v))
+        try:
+            return float(t) if t not in ("", "-", ".", "-.") else None
+        except ValueError:
+            return None
+
+    out = {}
+    ids = [str(i) for i in sub_ids]
+    for i in range(0, len(ids), 100):
+        chunk = ids[i:i + 100]
+        r = requests.post(MONDAY_API, json={"query": q, "variables": {"ids": chunk}},
+                          headers=headers, timeout=30)
+        r.raise_for_status()
+        for it in (r.json().get("data", {}).get("items") or []):
+            cv = {c["id"]: c.get("text") for c in (it.get("column_values") or [])}
+            p = it.get("parent_item") or {}
+            pcv = {c["id"]: c.get("text") for c in (p.get("column_values") or [])}
+            out[str(it["id"])] = {
+                "invoice_no": it.get("name"),
+                "current_status": cv.get("status7__1") or "",
+                "total": _num(cv.get("numbers4")),
+                "order_no": pcv.get("text_mkv6z0nt") or p.get("name"),
+                "supplier": pcv.get("dropdown_mkyqdeqd"),
+            }
+    return out
+
+
+def fetch_matched_marked(days: int = 7, token: str | None = None) -> list:
+    """Invoices/CNs MARKED 'Matched (TradeHub)' on the Subitems board in the last `days`
+    days — read from the activity log, so it still catches them after a colleague has since
+    moved them on to 'Approved (To QB)'. Each row carries the marking (when/who) plus the
+    item's CURRENT status, total and its order/supplier. Newest marking first.
+    [{sub_id, invoice_no, marked_at, marked_by, order_no, supplier, total, current_status}]."""
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    to_dt = datetime.now(timezone.utc)
+    from_dt = to_dt - timedelta(days=days)
+    logs = fetch_board_activity(
+        SUBITEMS_BOARD_ID,
+        from_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        to_dt.strftime("%Y-%m-%dT%H:%M:%SZ"), token=token)
+
+    marked = {}   # sub_id -> latest marking event
+    for lg in logs:
+        if lg.get("event") != "update_column_value":
+            continue
+        try:
+            d = _json.loads(lg.get("data") or "{}")
+        except Exception:  # noqa: BLE001
+            continue
+        if d.get("column_id") != "status7__1":
+            continue
+        if (((d.get("value") or {}).get("label") or {}).get("text")) != MATCHED_STATUS_TEXT:
+            continue
+        sid = str(d.get("pulse_id"))
+        at = str(lg.get("created_at") or "")
+        cur = marked.get(sid)
+        if not cur or at > cur["at"]:
+            marked[sid] = {"at": at, "user_id": lg.get("user_id"),
+                           "invoice_no": d.get("pulse_name")}
+    if not marked:
+        return []
+
+    names = fetch_user_names([m["user_id"] for m in marked.values() if m.get("user_id")], token)
+    details = _fetch_subitem_details(list(marked.keys()), token)
+
+    rows = []
+    for sid, m in marked.items():
+        det = details.get(sid, {})
+        rows.append({
+            "sub_id": sid,
+            "invoice_no": det.get("invoice_no") or m.get("invoice_no"),
+            "marked_at": _mk_marked_time(m["at"]),
+            "_at_raw": m["at"],
+            "marked_by": names.get(str(m.get("user_id")), "—"),
+            "order_no": det.get("order_no") or "",
+            "supplier": det.get("supplier") or "",
+            "total": det.get("total"),
+            "current_status": det.get("current_status") or "",
+        })
+    rows.sort(key=lambda r: r.get("_at_raw") or "", reverse=True)
+    return rows
 
 
 def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = None) -> dict:
