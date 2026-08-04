@@ -2022,6 +2022,26 @@ def _discrepancy_note(inv, res):
     return f"{head} — invoice {inv.get('invoice_no')}, order {inv.get('order_no')}: {reason}."
 
 
+def _discrepancy_reason(inv, res):
+    """One-line reason for the Discrepancy LOG (saved to Monday on flag, so the log can show
+    what was wrong later without re-checking the invoice). No 'awaiting credit note' wording
+    — that's only added once the supplier has actually been queried."""
+    reasons, seen = [], set()
+    for l in res["lines"]:
+        sku = l.get("sku") or "item"
+        for t, _m in l["issues"]:
+            r = ({"price": f"{sku} overcharged", "delivery": "delivery overcharged",
+                  "notorder": f"{sku} not on order", "qty": f"{sku} qty wrong"}).get(t)
+            if r and r not in seen:
+                seen.add(r)
+                reasons.append(r)
+    txt = "; ".join(reasons[:6]) or "see invoice"
+    credit = _expected_credit(res)
+    if credit > 0:
+        txt += f" (expected credit £{credit:,.2f})"
+    return "TradeHub: " + txt
+
+
 def _discrepancy_email(inv, res):
     """(subject, body) for a supplier chase email built from the discrepancy."""
     lines = []
@@ -2403,7 +2423,7 @@ def _run_one_invoice(inv, lbsku):
               on_click=_queue_action, args=(_sid, MATCHED_LABEL, _no))
     cc.button("Flag discrepancy", key=f"disc_{_sid}", use_container_width=True,
               type=("primary" if rec == "disc" else "secondary"),
-              on_click=_queue_action, args=(_sid, DISCREPANCY_LABEL, _no))
+              on_click=_flag_discrepancy, args=(_sid, _no, _discrepancy_reason(inv, res)))
 
     # Chase the supplier by email (discrepancies only) — saves to Outlook Drafts.
     if res["n_issues"] > 0:
@@ -2449,6 +2469,15 @@ def _run_one_invoice(inv, lbsku):
                     try:
                         data_sources.set_subitem_text(
                             sub, "text_mm3gh2za", st.session_state[f"enote_{sub}"].strip())
+                        # Mark it 'sent out' — the Action column records the supplier was queried,
+                        # so the Discrepancy log can separate queried from still-to-send.
+                        try:
+                            data_sources.set_subitem_text(
+                                sub, "text_mm3gjrap",
+                                f"Queried {inv.get('supplier') or 'supplier'} "
+                                f"{datetime.now(UK_TZ):%d %b %Y}")
+                        except Exception:  # noqa: BLE001
+                            pass
                         data_sources.set_invoice_status(sub, DISCREPANCY_LABEL)
                         st.session_state.setdefault("inv_gone", set()).add(str(sub))
                         for kk in ("review", "matched", "recent", "discrepancy"):
@@ -2473,6 +2502,13 @@ def _queue_action(sub_id, label, inv_no):
 def _queue_delete(sub_id, inv_no):
     """on_click callback to delete a (duplicate) subitem from Monday."""
     st.session_state["inv_action"] = ("delete", str(sub_id), None, inv_no)
+
+
+def _flag_discrepancy(sub_id, inv_no, reason):
+    """on_click: flag as Discrepancy AND persist the reason to Monday so the Discrepancy log
+    can show it later without re-checking the invoice."""
+    st.session_state["inv_action"] = ("status", str(sub_id), DISCREPANCY_LABEL, inv_no)
+    st.session_state["inv_disc_note"] = (str(sub_id), reason)
 
 
 def _refresh_invoices():
@@ -2517,6 +2553,7 @@ def _process_pending_action():
     than wiping the whole Monday cache and re-fetching every page — that's what made each action
     feel slow. The cache still refreshes on its TTL or the manual Refresh button."""
     act = st.session_state.pop("inv_action", None)
+    disc = st.session_state.pop("inv_disc_note", None)
     if not act:
         return
     kind, sub_id, label, inv_no = act
@@ -2527,6 +2564,12 @@ def _process_pending_action():
         else:
             data_sources.set_invoice_status(sub_id, label)
             _incomplete_note_if_approved(sub_id, label)
+            # Persist the discrepancy reason so the Discrepancy log shows it without a re-check.
+            if disc and disc[0] == str(sub_id) and disc[1]:
+                try:
+                    data_sources.set_subitem_text(sub_id, "text_mm3gh2za", disc[1][:1500])
+                except Exception:  # noqa: BLE001
+                    pass
             msg = f"Invoice {inv_no} marked “{label}”."
         st.session_state.setdefault("inv_gone", set()).add(str(sub_id))   # hide instantly
         for kk in ("review", "matched", "recent", "discrepancy"):
@@ -3070,6 +3113,102 @@ def _matched_email_body(rows, days, tot):
             f"{str(r.get('marked_by') or '—')[:13]:<14}{r.get('current_status') or ''}")
     lines += ["", "— Sent from Trade Hub · Invoice Check › Matched (weekly)"]
     return "\n".join(lines)
+
+
+def render_discrepancy_log():
+    """A durable list of every invoice TradeHub flagged as a Discrepancy, with the reason
+    saved on Monday — so open discrepancies can be worked without re-checking each invoice.
+    'Not sent' = the supplier hasn't been queried yet (no Action recorded)."""
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Discrepancies — log</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("Every invoice flagged as a **Discrepancy**, with the reason saved — so you can "
+               "see what was wrong **without re-checking**. **Not sent** = the supplier hasn't "
+               "been queried yet; **Queried** = a chase email has been drafted.")
+    if st.button("↻ Refresh", key="disc_refresh"):
+        invoices_by_status.clear()
+        st.rerun()
+    data = invoices_by_status("discrepancy")
+    if data.get("error"):
+        st.warning("Couldn't read discrepancies: " + data["error"][:200])
+        return
+    gone = st.session_state.get("inv_gone", set())
+    rows = [r for r in (data.get("invoices") or []) if str(r.get("sub_id")) not in gone]
+    if not rows:
+        st.success("No open discrepancies. 🎉")
+        return
+    not_sent = [r for r in rows if not (r.get("action_note") or "").strip()]
+    sent = [r for r in rows if (r.get("action_note") or "").strip()]
+    tot_ns = sum(r["total"] for r in not_sent if isinstance(r.get("total"), (int, float)))
+
+    def _rowhtml(r, with_action):
+        reason = (r.get("query_note") or "").strip() or \
+            '<span style="color:var(--muted)">(reason not saved — open the invoice to see)</span>'
+        amt = (f"£{r['total']:,.2f}" if isinstance(r.get("total"), (int, float)) else "—")
+        cells = [
+            f'<td style="padding:7px 12px"><b>{_esc(r.get("invoice_no") or "—")}</b></td>',
+            f'<td style="padding:7px 12px">{_esc(r.get("order_no") or "—")}</td>',
+            f'<td style="padding:7px 12px">{_esc(r.get("supplier") or "—")}</td>',
+            f'<td style="padding:7px 12px;text-align:right">{amt}</td>',
+            f'<td style="padding:7px 12px;font-size:12px">'
+            f'{reason if reason.startswith("<") else _esc(reason)}</td>',
+            f'<td style="padding:7px 12px;font-size:12px">'
+            f'{_esc(_fmt_actioned(r.get("actioned_at")))}</td>',
+        ]
+        if with_action:
+            cells.append(f'<td style="padding:7px 12px;font-size:12px;color:#16a34a">'
+                         f'{_esc((r.get("action_note") or "").strip())}</td>')
+        return '<tr style="border-top:1px solid var(--line)">' + "".join(cells) + "</tr>"
+
+    base_head = ('<th style="padding:7px 12px">Invoice</th><th style="padding:7px 12px">Order</th>'
+                 '<th style="padding:7px 12px">Supplier</th>'
+                 '<th style="padding:7px 12px;text-align:right">£</th>'
+                 '<th style="padding:7px 12px">Reason</th><th style="padding:7px 12px">Flagged</th>')
+
+    st.markdown(f"### ⚠️ Not sent to supplier yet — {len(not_sent)} · £{tot_ns:,.2f}")
+    if not_sent:
+        st.markdown(_ptable(base_head, "".join(_rowhtml(r, False) for r in not_sent)),
+                    unsafe_allow_html=True)
+        import csv as _csv
+        import io as _io
+        buf = _io.StringIO()
+        w = _csv.writer(buf)
+        w.writerow(["Invoice", "Order", "Supplier", "£", "Reason", "Flagged"])
+        for r in not_sent:
+            w.writerow([r.get("invoice_no"), r.get("order_no"), r.get("supplier"),
+                        r.get("total"), r.get("query_note"), _fmt_actioned(r.get("actioned_at"))])
+        dl, em = st.columns(2)
+        dl.download_button("⬇ Download CSV", buf.getvalue(), file_name="discrepancies_to_send.csv",
+                           mime="text/csv", use_container_width=True)
+        to_addr = _signed_in_email()
+        if em.button(f"📧 Email this list to {to_addr}", use_container_width=True,
+                     disabled=not to_addr, key="disc_email"):
+            try:
+                body = ["Discrepancies TradeHub found that have NOT been sent to the supplier yet.",
+                        f"{len(not_sent)} invoice(s) · £{tot_ns:,.2f}.", ""]
+                for r in not_sent:
+                    a = (f"£{r['total']:,.2f}" if isinstance(r.get("total"), (int, float)) else "—")
+                    body.append(f"- {r.get('invoice_no')} (order {r.get('order_no')}, "
+                                f"{r.get('supplier')}, {a}): {r.get('query_note') or 'see invoice'}")
+                link = data_sources.create_supplier_draft(
+                    to_addr, to_addr, f"Discrepancies to send — {len(not_sent)} (£{tot_ns:,.2f})",
+                    "\n".join(body))
+                st.success(f"Draft created in {to_addr}'s Outlook — review and send from Drafts.")
+                if link:
+                    st.markdown(f"[Open the draft in Outlook]({link})")
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't create the draft: " + str(e)[:200])
+    else:
+        st.caption("Everything flagged has been queried with the supplier. 🎉")
+
+    with st.expander(f"Already queried — {len(sent)}"):
+        if sent:
+            st.markdown(_ptable(base_head + '<th style="padding:7px 12px">Sent</th>',
+                                "".join(_rowhtml(r, True) for r in sent)), unsafe_allow_html=True)
+        else:
+            st.caption("None queried yet.")
 
 
 def render_invoice_check():
@@ -5183,7 +5322,8 @@ with st.sidebar:
             st.radio("Pricing view", ["Pricing", "Supplier rules"],
                      key="pricing_view", label_visibility="collapsed")
         if _m == "Invoice Check" and st.session_state.module == "Invoice Check":
-            st.radio("Invoice Check view", ["Check invoices", "Matched (weekly)"],
+            st.radio("Invoice Check view",
+                     ["Check invoices", "Matched (weekly)", "Discrepancy log"],
                      key="ic_view", label_visibility="collapsed")
     module = st.session_state.module
 
@@ -5247,8 +5387,11 @@ if module == "Quotes":
     st.stop()
 
 if module == "Invoice Check":
-    if st.session_state.get("ic_view") == "Matched (weekly)":
+    _ic_view = st.session_state.get("ic_view")
+    if _ic_view == "Matched (weekly)":
         render_matched_weekly()
+    elif _ic_view == "Discrepancy log":
+        render_discrepancy_log()
     else:
         render_invoice_check()
     st.stop()
