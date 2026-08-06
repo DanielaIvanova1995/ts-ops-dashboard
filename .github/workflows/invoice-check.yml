@@ -1,0 +1,44 @@
+name: Invoice auto-check
+
+# HOW THIS ROLLS OUT SAFELY
+#  1. It starts as a MANUAL button only ("Run workflow"), defaulting to DRY RUN (writes
+#     nothing — just logs what it WOULD do). Run it a few times and read the logs.
+#  2. When the dry-run logs look right, run it once with "dry_run = false" to let it write.
+#  3. Only then uncomment the `schedule:` block below to let it run automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log only, write nothing to Monday)"
+        type: boolean
+        default: true
+  # --- enable this AFTER you've verified a dry run, to run automatically ---
+  # schedule:
+  #   - cron: "*/30 6-18 * * 1-5"   # every 30 min, ~7am-7pm UK, Mon-Fri (times are UTC)
+
+concurrency:
+  group: invoice-auto-check      # never let two runs overlap
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Run invoice auto-check
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Scheduled runs have no input, so default to DRY RUN unless a manual run says otherwise.
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'false' && '0' || '1' }}
+        run: python run_invoice_check.py
