@@ -2072,6 +2072,20 @@ def _discrepancy_note(inv, res):
     return f"{head} — invoice {inv.get('invoice_no')}, order {inv.get('order_no')}: {reason}."
 
 
+def _duplicate_email(inv, other_no):
+    """(subject, body) telling the supplier's accounts team they've invoiced one order twice."""
+    amt = inv.get("total")
+    amt_txt = f"£{amt:,.2f}" if isinstance(amt, (int, float)) else "the same amount"
+    subject = f"Duplicate invoice — order {inv.get('order_no')} appears to have been billed twice"
+    body = (f"Hi,\n\nWe've received two invoices charging {amt_txt} for the same order "
+            f"({inv.get('order_no')}):\n\n"
+            f"- Invoice {inv.get('invoice_no')}\n- Invoice {other_no}\n\n"
+            "These look like a duplicate — the order has been invoiced twice. Please could you "
+            "confirm and cancel one / issue a credit note for the duplicate?\n\n"
+            "Many thanks,\nTrade Superstore Online")
+    return subject, body
+
+
 def _discrepancy_reason(inv, res):
     """One-line reason for the Discrepancy LOG (saved to Monday on flag, so the log can show
     what was wrong later without re-checking the invoice). No 'awaiting credit note' wording
@@ -2147,15 +2161,54 @@ def _run_one_invoice(inv, lbsku):
     # under a different number). Amber warning; the user decides (numbers differ, so not deleted).
     _amt = inv.get("total")
     _cols = [v for v in (inv.get("inv_columns") or {}).values() if isinstance(v, (int, float))]
-    if isinstance(_amt, (int, float)) and sum(1 for v in _cols if abs(v - _amt) <= 0.01) >= 2 \
-            and not inv.get("_dup"):
+    _amt_dup = bool(inv.get("_dup_amt")) or (
+        isinstance(_amt, (int, float)) and sum(1 for v in _cols if abs(v - _amt) <= 0.01) >= 2)
+    if _amt_dup and not inv.get("_dup"):
+        _other = inv.get("_dup_amt") or "the other invoice on this order"
         st.markdown(
             '<div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;'
             'font-weight:700;font-size:14px;padding:9px 14px;border-radius:6px;margin:2px 0 8px">'
             f'&#9888; POSSIBLE DUPLICATE — £{_amt:,.2f} appears twice on order '
-            f'{inv.get("order_no") or "?"}. The supplier may have invoiced this order twice under '
-            'different numbers — check you are not paying twice before approving.</div>',
-            unsafe_allow_html=True)
+            f'{inv.get("order_no") or "?"} (this invoice and invoice {_other}). The supplier may '
+            'have billed this order twice — check before approving.</div>', unsafe_allow_html=True)
+        _dsub = inv["sub_id"]
+        if st.toggle("Email the supplier that they've charged twice", key=f"duptog_{_dsub}"):
+            dsubj, dbody = _duplicate_email(inv, _other)
+            _dto = (SUPPLIER_EMAILS.get(_norm_code(inv.get("supplier")))
+                    or inv.get("supplier_email") or "")
+            st.session_state.setdefault(f"dto_{_dsub}", _dto)
+            st.session_state.setdefault(f"dsub_{_dsub}", dsubj)
+            st.session_state.setdefault(f"dbod_{_dsub}", dbody)
+            st.text_input("To", key=f"dto_{_dsub}")
+            st.text_input("Subject", key=f"dsub_{_dsub}")
+            st.text_area("Message", key=f"dbod_{_dsub}", height=200)
+            st.caption(f"Sends from {SUPPLIER_FROM_MAILBOX} (falls back to a draft if sending "
+                       "isn't enabled yet). Delete the duplicate copy from Monday separately.")
+            if st.button("Send duplicate query", key=f"dupsend_{_dsub}", type="primary",
+                         disabled=not st.session_state.get(f"dto_{_dsub}", "").strip()):
+                to = st.session_state[f"dto_{_dsub}"].strip()
+                subj, body = st.session_state[f"dsub_{_dsub}"], st.session_state[f"dbod_{_dsub}"]
+                pdf_url = (data_sources.monday_asset_url(inv["asset_id"])
+                           if inv.get("asset_id") else None)
+                sent = drafted = False
+                dlink = None
+                try:
+                    data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, to, subj, body,
+                                                     pdf_url=pdf_url)
+                    sent = True
+                except Exception:  # noqa: BLE001
+                    try:
+                        dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, to, subj,
+                                                                   body, pdf_url=pdf_url)
+                        drafted = True
+                    except Exception as e:  # noqa: BLE001
+                        st.error("Couldn't send or draft: " + str(e)[:200])
+                if sent or drafted:
+                    link = f" [Open the draft]({dlink})" if dlink else ""
+                    st.session_state["inv_flash"] = (
+                        f"Duplicate query {'sent to' if sent else 'drafted for'} {to}"
+                        + ("" if sent else " (sending needs Mail.Send)") + "." + link)
+                    st.rerun()
 
     # Duplicate invoice — same invoice number logged more than once on this order. Flag it
     # red and offer to delete THIS subitem from Monday (destructive → confirm first).
@@ -2873,8 +2926,11 @@ def _invoice_tab(key, is_queue):
         for i in (invoices_by_status("discrepancy").get("invoices") or []):
             dup_pool.setdefault(i["sub_id"], i)
     _dupc = _Counter(_dupkey(i) for i in dup_pool.values() if (i.get("invoice_no") or "").strip())
+    _amtdup = _amount_dup_ids(list(dup_pool.values()))   # same order + same £, different number
     for i in fil:
         i["_dup"] = _dupc.get(_dupkey(i), 0) >= 2
+        # amount-duplicate (the other invoice's number), unless it's already an exact duplicate
+        i["_dup_amt"] = None if i["_dup"] else _amtdup.get(str(i.get("sub_id")))
 
     verdicts = st.session_state.get("inv_verdict", {})
 
