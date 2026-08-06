@@ -2112,7 +2112,7 @@ def _run_one_invoice(inv, lbsku):
             dy, dn = st.columns(2)
             dy.button("Yes — delete from Monday", key=f"delyes_{sub}", type="primary",
                       use_container_width=True, on_click=_confirm_delete,
-                      args=(sub, inv.get("invoice_no"), dpend))
+                      args=(sub, inv.get("invoice_no"), dpend, inv))
             dn.button("Cancel", key=f"delno_{sub}", use_container_width=True,
                       on_click=_ss_pop, args=(dpend,))
 
@@ -2527,9 +2527,14 @@ def _ss_pop(key):
     st.session_state.pop(key, None)
 
 
-def _confirm_delete(sub_id, inv_no, pend_key):
+def _confirm_delete(sub_id, inv_no, pend_key, inv=None):
     st.session_state.pop(pend_key, None)
     _queue_delete(sub_id, inv_no)
+    # Also blank the duplicate's amount from the order's INV1..INV5 columns (like the bulk
+    # dedup) so the order total isn't double-counted after the subitem is deleted.
+    if inv and inv.get("order_item_id") and isinstance(inv.get("total"), (int, float)):
+        st.session_state["inv_del_clear"] = (
+            inv["order_item_id"], inv["total"], dict(inv.get("inv_columns") or {}))
 
 
 def _incomplete_note_if_approved(sub_id, label):
@@ -2555,13 +2560,25 @@ def _process_pending_action():
     feel slow. The cache still refreshes on its TTL or the manual Refresh button."""
     act = st.session_state.pop("inv_action", None)
     disc = st.session_state.pop("inv_disc_note", None)
+    del_clear = st.session_state.pop("inv_del_clear", None)
     if not act:
         return
     kind, sub_id, label, inv_no = act
     try:
         if kind == "delete":
             data_sources.delete_subitem(sub_id)
-            msg = f"Deleted duplicate invoice {inv_no} from Monday."
+            extra = ""
+            if del_clear:
+                pid, amt, cols = del_clear
+                col = next((c for c, v in cols.items()
+                            if isinstance(v, (int, float)) and abs(v - amt) <= 0.01), None)
+                if col:
+                    try:
+                        data_sources.set_order_number(pid, col, None)
+                        extra = " and cleared its INV column"
+                    except Exception:  # noqa: BLE001
+                        pass
+            msg = f"Deleted duplicate invoice {inv_no} from Monday{extra}."
         else:
             data_sources.set_invoice_status(sub_id, label)
             _incomplete_note_if_approved(sub_id, label)
@@ -2580,10 +2597,55 @@ def _process_pending_action():
         st.session_state["inv_flash_err"] = "Couldn't update Monday: " + str(e)[:200]
 
 
+def _auto_dedup(invs, tol=0.01):
+    """Remove duplicate invoices before checking (Eurocell send two copies of each). When
+    2+ subitems on the SAME order share the SAME invoice number, keep the first and DELETE
+    the rest from Monday — AND blank the duplicate's amount from the order's INV1..INV5
+    columns so the order total isn't double-counted. Returns (kept, n_deleted, n_cleared)."""
+    seen, kept, dups = {}, [], []
+    for i in invs:
+        no = (i.get("invoice_no") or "").strip().upper()
+        k = (i.get("order_no") or "", no)
+        if no and k in seen:
+            dups.append(i)                 # a later copy of an already-seen invoice number
+        else:
+            if no:
+                seen[k] = i
+            kept.append(i)
+    if not dups:
+        return invs, 0, 0
+    gone = st.session_state.setdefault("inv_gone", set())
+    order_state, deleted, cleared = {}, 0, 0
+    for d in dups:
+        try:
+            data_sources.delete_subitem(d.get("sub_id"))
+        except Exception:  # noqa: BLE001
+            continue
+        deleted += 1
+        gone.add(str(d.get("sub_id")))
+        # Clear ONE INV column on the parent that holds this duplicate's amount (leaving the
+        # original's copy intact). Track per-order so a 3rd copy clears a different column.
+        pid, amt = d.get("order_item_id"), d.get("total")
+        if pid and isinstance(amt, (int, float)):
+            cols = order_state.setdefault(pid, dict(d.get("inv_columns") or {}))
+            col = next((c for c, v in cols.items()
+                        if isinstance(v, (int, float)) and abs(v - amt) <= tol), None)
+            if col:
+                try:
+                    data_sources.set_order_number(pid, col, None)
+                    cols[col] = None
+                    cleared += 1
+                except Exception:  # noqa: BLE001
+                    pass
+    return kept, deleted, cleared
+
+
 def _bulk_check(invs, lbsku):
-    """Read + 3-way check every invoice (cached), then auto-process: fully matched
-    with order margin ≥5% → pushed to QB; matched but below 5% → held as Matched;
-    discrepancies left for review. Reruns when done."""
+    """De-duplicate (delete Eurocell's second copy + clear its INV column), then read +
+    3-way check every remaining invoice (cached) and auto-process: fully matched with order
+    margin ≥5% → pushed to QB; matched but below 5% → held as Matched; discrepancies left
+    for review. Reruns when done."""
+    invs, n_dup, n_col = _auto_dedup(invs)
     pidx = _pricelist_index()
     n = len(invs)
     _, hi = _thresholds()
@@ -2614,8 +2676,13 @@ def _bulk_check(invs, lbsku):
                 unmatched += 1
         prog.progress(i / n, text=f"Processed {i}/{n}")
     prog.empty()
+    dupmsg = ""
+    if n_dup:
+        dupmsg = (f"Deleted {n_dup} duplicate invoice(s)"
+                  + (f" and cleared {n_col} INV column(s)" if n_col else "") + ". ")
     st.session_state["inv_flash"] = (
-        f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, flagged {flagged} "
+        dupmsg
+        + f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, flagged {flagged} "
         f"(margin >{hi:.0f}%), {unmatched} left for manual review"
         + (f", {fail} unreadable" if fail else "") + ".")
     st.rerun()

@@ -1013,7 +1013,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             id name created_at
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1",
               "text_mm3gh2za", "text_mm3gjrap", "date_mm3d1ear"]) { id value text }
-            parent_item { name subitems { id }
+            parent_item { id name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
                 "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
                 "numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
@@ -1079,9 +1079,14 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             ("numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
              "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c")
         ]
-        invoiced_parts = [p for p in invoiced_parts if p is not None]
+        inv_col_ids = ("numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+                       "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c")
+        inv_columns = {cid: _num(pcv.get(cid)) for cid in inv_col_ids}
+        invoiced_parts = [inv_columns[c] for c in inv_col_ids if inv_columns[c] is not None]
         order_invoiced_total = round(sum(invoiced_parts), 2) if invoiced_parts else None
         return {
+            "order_item_id": parent.get("id"),   # parent (Orders board) item id — for INV columns
+            "inv_columns": inv_columns,           # {INV1..INV5,extra col id: value}
             "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
             "to_us": to_us, "order_invoiced_total": order_invoiced_total,
             "asset_id": asset_id, "file_name": file_name,
@@ -2022,6 +2027,29 @@ def set_subitem_text(sub_id, column_id: str, text: str, token: str | None = None
     payload = r.json()
     if "errors" in payload:
         raise RuntimeError(f"Monday rejected note write: {payload['errors']}")
+    return True
+
+
+def set_order_number(item_id, column_id: str, value, token: str | None = None) -> bool:
+    """Set (or clear, with value=None/'' ) a numbers column on a parent ORDER item (Orders
+    board) — e.g. blanking an INV1..INV5 column when a duplicate invoice is removed so the
+    order total isn't double-counted. Uses change_simple_column_value. Raises on API failure."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    val = "" if value in (None, "") else str(value)
+    query = ("mutation ($board: ID!, $item: ID!, $col: String!, $val: String!) {"
+             " change_simple_column_value(board_id: $board, item_id: $item,"
+             " column_id: $col, value: $val) { id } }")
+    r = requests.post(
+        MONDAY_API,
+        json={"query": query, "variables": {"board": str(ORDERS_BOARD_ID),
+                                            "item": str(item_id), "col": column_id, "val": val}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday rejected order number write: {payload['errors']}")
     return True
 
 
