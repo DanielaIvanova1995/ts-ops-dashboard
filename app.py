@@ -1555,20 +1555,39 @@ SUPPLIER_EMAILS = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
-    # Toolbank runs on thin margins — anything over 6% is fine to approve (we still
-    # price-check against their pricelist; this only lowers the approve floor and stops a
-    # good margin being flagged as 'unusually high').
-    "toolbank": {"name": "Toolbank", "push_min": 6.0, "flag_high": False},
-    # Decor8 auto-approve floor is 5% (everyone else is the 10% default).
+    # Decor8 auto-approve floor is 5% (everyone else — incl. Toolbank — is the 10% default).
     "decor8": {"name": "Decor8", "push_min": 5.0},
 }
 
 
+# Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
+# (BT postcodes) £13 under £250 (free over). Priced on the delivery postcode, like Carron.
+CTIE_UK = {"flat": 7.0, "free_over": 100.0}
+CTIE_NI = {"flat": 13.0, "free_over": 250.0}
+
+
+def _is_ctie(supplier):
+    return (supplier or "").startswith("ctie")
+
+
+def _ctie_expected(goods_value, ship):
+    pc = re.sub(r"[^A-Z0-9]", "", ((ship or {}).get("postcode") or "").upper())
+    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
+    country = ((ship or {}).get("country") or "").strip().upper()
+    is_ni = area == "BT" or country in ("GB-NIR", "NORTHERN IRELAND")
+    rule = CTIE_NI if is_ni else CTIE_UK
+    if goods_value is not None and goods_value >= rule["free_over"]:
+        return 0.0
+    return rule["flat"]
+
+
 def _expected_delivery(supplier, goods_value, ship=None):
     """Expected (max legitimate) ex-VAT delivery charge for a supplier given the order's
-    goods value (and, for Carron, the delivery address). None if there's no rule on file."""
+    goods value (and, for Carron/Ctie, the delivery address). None if no rule on file."""
     if _is_carron(supplier):
         return _carron_expected(goods_value, ship)
+    if _is_ctie(supplier):
+        return _ctie_expected(goods_value, ship)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
@@ -1626,9 +1645,10 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     cidx = _supplier_code_index() if not no_pl else None
     order = _order_candidates(meta)
     parsed_lines = parsed.get("lines") or []
-    # Carron delivery is priced by the delivery postcode's zone — fetch it once.
+    # Carron & Ctie delivery is priced by the delivery postcode — fetch it once.
     carron_ship = (_shopify_order_ship(meta["shopify_order_id"])
-                   if _is_carron(supplier) and meta.get("shopify_order_id") else None)
+                   if (_is_carron(supplier) or _is_ctie(supplier))
+                   and meta.get("shopify_order_id") else None)
 
     def _line_total(l):
         if isinstance(l.get("line_total"), (int, float)):

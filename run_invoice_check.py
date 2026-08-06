@@ -138,7 +138,8 @@ def main():
             lines = None
         order = core.order_candidates(lines, inv.get("order_items"))
         ship = None
-        if core.is_carron(core.norm_code(sup)) and sid:
+        sup_n = core.norm_code(sup)
+        if (core.is_carron(sup_n) or core.is_ctie(sup_n)) and sid:   # zone-priced delivery
             try:
                 ship = ds.fetch_order_shipping(sid)
             except Exception:  # noqa: BLE001

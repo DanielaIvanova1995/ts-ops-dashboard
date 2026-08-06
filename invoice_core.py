@@ -53,7 +53,6 @@ CARRON_AREA_ZONE = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
-    "toolbank": {"name": "Toolbank", "push_min": 6.0, "flag_high": False},
     "decor8": {"name": "Decor8", "push_min": 5.0},
 }
 SUPPLIER_EMAILS = {
@@ -303,6 +302,27 @@ def is_carron(supplier):
     return (supplier or "").startswith("carron")
 
 
+# Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
+# (BT postcodes) £13 under £250 (free over). Priced on the delivery postcode.
+CTIE_UK = {"flat": 7.0, "free_over": 100.0}
+CTIE_NI = {"flat": 13.0, "free_over": 250.0}
+
+
+def is_ctie(supplier):
+    return (supplier or "").startswith("ctie")
+
+
+def ctie_expected(goods_value, ship):
+    pc = re.sub(r"[^A-Z0-9]", "", ((ship or {}).get("postcode") or "").upper())
+    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
+    country = ((ship or {}).get("country") or "").strip().upper()
+    is_ni = area == "BT" or country in ("GB-NIR", "NORTHERN IRELAND")
+    rule = CTIE_NI if is_ni else CTIE_UK
+    if goods_value is not None and goods_value >= rule["free_over"]:
+        return 0.0
+    return rule["flat"]
+
+
 def carron_zone(ship):
     if not ship:
         return 1
@@ -331,6 +351,8 @@ def carron_expected(goods_value, ship):
 def expected_delivery(supplier, goods_value, ship=None):
     if is_carron(supplier):
         return carron_expected(goods_value, ship)
+    if is_ctie(supplier):
+        return ctie_expected(goods_value, ship)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
