@@ -111,8 +111,10 @@ def main():
     except Exception as e:  # noqa: BLE001
         log("ERROR: couldn't fetch Needs Review from Monday —", e)
         return 1
-    invs = data.get("invoices", [])
-    log(f"Needs Review: {len(invs)} invoice(s)")
+    invs = [i for i in data.get("invoices", []) if not core.is_excluded_supplier(i.get("supplier"))]
+    skipped = len(data.get("invoices", [])) - len(invs)
+    log(f"Needs Review: {len(invs)} invoice(s)"
+        + (f" ({skipped} excluded supplier(s) skipped)" if skipped else ""))
     if not invs:
         log("Nothing to do.")
         return 0

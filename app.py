@@ -1366,11 +1366,25 @@ def _push_decision(matched, is_cn, live_margin, supplier=None):
     return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
 
 
+# Suppliers to skip in the invoice checker entirely (substrings of the normalised supplier
+# name). MB Decor is paid in advance, so nothing needs checking — remove from here to switch
+# it back on.
+EXCLUDED_SUPPLIER_KEYS = ("mbdecor",)
+
+
+def _is_excluded_supplier(supplier):
+    s = _norm_code(supplier)
+    return any(x in s for x in EXCLUDED_SUPPLIER_KEYS)
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def invoices_by_status(key):
     label_ids, lim = INVOICE_STATUS[key]
     try:
-        return data_sources.fetch_invoices_by_status(label_ids, limit=lim)
+        data = data_sources.fetch_invoices_by_status(label_ids, limit=lim)
+        data["invoices"] = [i for i in (data.get("invoices") or [])
+                            if not _is_excluded_supplier(i.get("supplier"))]
+        return data
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 

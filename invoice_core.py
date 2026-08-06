@@ -294,6 +294,17 @@ def supplier_code_index(pidx):
 
 
 # ---- delivery / carron / charges ------------------------------------------------------
+# Suppliers to skip in the invoice checker entirely (substrings of the normalised supplier
+# name) — e.g. MB Decor, which is paid in advance. Remove to switch back on. Kept in step
+# with app.py's EXCLUDED_SUPPLIER_KEYS.
+EXCLUDED_SUPPLIER_KEYS = ("mbdecor",)
+
+
+def is_excluded_supplier(supplier):
+    s = norm_code(supplier)
+    return any(x in s for x in EXCLUDED_SUPPLIER_KEYS)
+
+
 def is_decor8(supplier):
     return (supplier or "").startswith("decor8") or (supplier or "").startswith("decor")
 
