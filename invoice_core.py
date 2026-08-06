@@ -568,6 +568,31 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
         _hit(pending[idx], k)
         pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} by "
                                                "product name (invoice SKU differs)"))
+    # Decor8 have NO SKUs, so a line is name-only and essentially always on the order. Any
+    # Decor8 line still unmatched gets a lenient leftover pass: pair it to the remaining order
+    # line with the most shared words, so we don't falsely say 'not on the order'.
+    if is_decor8(supplier):
+        lscored = []
+        for idx in range(len(pending)):
+            if idx in done:
+                continue
+            dt = title_tokens(pending[idx]["desc"])
+            for k, v in order.items():
+                if k in hit:
+                    continue
+                shared = dt & title_tokens(v.get("name"))
+                # Needs a real shared WORD (4+ chars), not just a size digit like '5' (5L vs
+                # 2.5L) which must never link two unrelated products.
+                if any(len(t) >= 4 for t in shared):
+                    lscored.append((len(shared), idx, k))
+        lscored.sort(key=lambda x: (-x[0], x[1]))
+        for ov, idx, k in lscored:
+            if idx in done or k in hit:
+                continue
+            done.add(idx)
+            _hit(pending[idx], k)
+            pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} by "
+                                                   "name (Decor8 — no SKU, so name-matched)"))
     for idx, rec in enumerate(pending):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
