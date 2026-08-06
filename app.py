@@ -1546,6 +1546,7 @@ SUPPLIER_EMAILS = {
     "up": "janetwitt@upbuildingproducts.com",
     "upbuildingproducts": "janetwitt@upbuildingproducts.com",
     "pjh": "accounts@pjh.uk",
+    "gap": "carrie.morris@gap.uk.com",
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
