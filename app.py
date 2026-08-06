@@ -2684,18 +2684,22 @@ def _bulk_check(invs, lbsku):
             is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
             label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
                                            inv.get("supplier"))
-            if action in ("push", "hold", "flag"):
+            # Only auto-APPROVE or auto-HOLD. Never auto-mark Discrepancy — a discrepancy is
+            # set by hand, after YOU'VE reviewed it and emailed the supplier. So a high-margin
+            # 'flag' and any real mismatch are LEFT in Needs Review for you to check.
+            if action in ("push", "hold"):
                 try:
                     data_sources.set_invoice_status(inv["sub_id"], label)
                     _incomplete_note_if_approved(inv["sub_id"], label)
                     goneset.add(str(inv["sub_id"]))       # hide actioned instantly (no refetch)
                     pushed += action == "push"
                     held += action == "hold"
-                    flagged += action == "flag"
                 except Exception:  # noqa: BLE001
                     pass
+            elif action == "flag":
+                flagged += 1                              # high margin — left in Needs Review
             else:
-                unmatched += 1
+                unmatched += 1                            # a mismatch — left in Needs Review
         prog.progress(i / n, text=f"Processed {i}/{n}")
     prog.empty()
     dupmsg = ""
@@ -2704,9 +2708,11 @@ def _bulk_check(invs, lbsku):
                   + (f" and cleared {n_col} INV column(s)" if n_col else "") + ". ")
     st.session_state["inv_flash"] = (
         dupmsg
-        + f"Processed {n}: pushed {pushed} to QB, held {held} as Matched, flagged {flagged} "
-        f"(margin >{hi:.0f}%), {unmatched} left for manual review"
-        + (f", {fail} unreadable" if fail else "") + ".")
+        + f"Processed {n}: pushed {pushed} to QB, held {held} as Matched. "
+        f"{flagged + unmatched} left in Needs Review for you ({flagged} high margin >{hi:.0f}%, "
+        f"{unmatched} to check)"
+        + (f", {fail} unreadable" if fail else "")
+        + ". Nothing was auto-marked Discrepancy — flag those yourself after emailing the supplier.")
     st.rerun()
 
 

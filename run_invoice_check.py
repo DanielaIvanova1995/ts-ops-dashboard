@@ -151,27 +151,28 @@ def main():
                                             sup, LO, HI)
         m = inv.get("order_margin_live")
         verb = "would set" if DRY_RUN else "set"
-        log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s), "
-            f"margin {m if m is not None else '—'} -> "
-            + (f"{verb} {label}" if action else "left for review"))
+        # Only auto-APPROVE or auto-HOLD. Never auto-mark Discrepancy — that's set by hand
+        # after review + emailing the supplier. High-margin 'flag' and real mismatches are
+        # LEFT in Needs Review.
         if action == "push":
             pushed += 1
         elif action == "hold":
             held += 1
         elif action == "flag":
             flagged += 1
+            log(f"  {no} ({sup}, order {inv.get('order_no')}): matched, margin {m} > {HI:.0f}% "
+                "-> left in Needs Review (high margin — check for a missing invoice)")
+            continue
         else:
             review += 1
+            log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s) "
+                "-> left in Needs Review for you to check")
             continue
+        log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s), "
+            f"margin {m if m is not None else '—'} -> {verb} {label}")
         if not DRY_RUN:
             try:
                 ds.set_invoice_status(inv["sub_id"], label)
-                if action == "flag":
-                    try:
-                        ds.set_subitem_text(inv["sub_id"], "text_mm3gh2za",
-                                            core.discrepancy_reason(res))
-                    except Exception:  # noqa: BLE001
-                        pass
             except Exception as e:  # noqa: BLE001
                 log("     status write failed:", str(e)[:120])
         time.sleep(0.2)
