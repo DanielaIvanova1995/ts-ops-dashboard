@@ -2142,6 +2142,21 @@ def _run_one_invoice(inv, lbsku):
             st.error("Couldn't read the invoice: " + parsed["error"][:200])
         return
 
+    # Possible duplicate by AMOUNT — the same £ appears in 2+ of the order's INV columns, i.e.
+    # another invoice on this order has the same total (the supplier may have billed it twice
+    # under a different number). Amber warning; the user decides (numbers differ, so not deleted).
+    _amt = inv.get("total")
+    _cols = [v for v in (inv.get("inv_columns") or {}).values() if isinstance(v, (int, float))]
+    if isinstance(_amt, (int, float)) and sum(1 for v in _cols if abs(v - _amt) <= 0.01) >= 2 \
+            and not inv.get("_dup"):
+        st.markdown(
+            '<div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;'
+            'font-weight:700;font-size:14px;padding:9px 14px;border-radius:6px;margin:2px 0 8px">'
+            f'&#9888; POSSIBLE DUPLICATE — £{_amt:,.2f} appears twice on order '
+            f'{inv.get("order_no") or "?"}. The supplier may have invoiced this order twice under '
+            'different numbers — check you are not paying twice before approving.</div>',
+            unsafe_allow_html=True)
+
     # Duplicate invoice — same invoice number logged more than once on this order. Flag it
     # red and offer to delete THIS subitem from Monday (destructive → confirm first).
     if inv.get("_dup"):
@@ -2699,12 +2714,35 @@ def _auto_dedup(invs, tol=0.01):
     return kept, deleted, cleared
 
 
+def _amount_dup_ids(invs):
+    """sub_ids of invoices that share the SAME order + SAME total as another invoice with a
+    DIFFERENT invoice number — a likely double-invoice (e.g. Decor8 billing one order twice
+    under two numbers). NOT auto-deleted (different numbers ⇒ could rarely be legit, so it's
+    flagged for a human). Returns {sub_id: other_invoice_no}."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for i in invs:
+        t = i.get("total")
+        if isinstance(t, (int, float)) and (i.get("order_no") or "").strip():
+            groups[(i.get("order_no"), round(t, 2))].append(i)
+    out = {}
+    for g in groups.values():
+        nums = {(x.get("invoice_no") or "").strip().upper() for x in g if x.get("invoice_no")}
+        if len(g) >= 2 and len(nums) >= 2:            # 2+ invoices, same £, different numbers
+            for x in g:
+                others = [y.get("invoice_no") for y in g if y.get("sub_id") != x.get("sub_id")]
+                out[str(x["sub_id"])] = next((o for o in others if o), "another invoice")
+    return out
+
+
 def _bulk_check(invs, lbsku):
     """De-duplicate (delete Eurocell's second copy + clear its INV column), then read +
     3-way check every remaining invoice (cached) and auto-process: fully matched with order
     margin ≥5% → pushed to QB; matched but below 5% → held as Matched; discrepancies left
     for review. Reruns when done."""
     invs, n_dup, n_col = _auto_dedup(invs)
+    amt_dups = _amount_dup_ids(invs)                  # same order + same £, different inv no
+    dupflag = 0
     pidx = _pricelist_index()
     n = len(invs)
     _, hi = _thresholds()
@@ -2712,6 +2750,21 @@ def _bulk_check(invs, lbsku):
     goneset = st.session_state.setdefault("inv_gone", set())
     pushed = held = flagged = unmatched = fail = 0
     for i, inv in enumerate(invs, 1):
+        # Suspected double-invoice (same order + same £ as another invoice, different number).
+        # Never auto-approve/hold it — leave it in Needs Review with a note so you can check
+        # you're not paying the same order twice.
+        if str(inv["sub_id"]) in amt_dups:
+            dupflag += 1
+            try:
+                data_sources.set_subitem_text(
+                    inv["sub_id"], "text_mm3gh2za",
+                    f"POSSIBLE DUPLICATE — same £{inv.get('total')} as invoice "
+                    f"{amt_dups[str(inv['sub_id'])]} on this order (different invoice number). "
+                    "Check you're not paying twice before approving.")
+            except Exception:  # noqa: BLE001
+                pass
+            prog.progress(i / n, text=f"Processed {i}/{n}")
+            continue
         parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
         if parsed.get("error"):
             fail += 1
@@ -2743,8 +2796,10 @@ def _bulk_check(invs, lbsku):
     if n_dup:
         dupmsg = (f"Deleted {n_dup} duplicate invoice(s)"
                   + (f" and cleared {n_col} INV column(s)" if n_col else "") + ". ")
+    dupwarn = (f"⚠ {dupflag} possible duplicate(s) (same £ invoiced twice on an order) held for "
+               "you to check. ") if dupflag else ""
     st.session_state["inv_flash"] = (
-        dupmsg
+        dupmsg + dupwarn
         + f"Processed {n}: pushed {pushed} to QB, held {held} as Matched. "
         f"{flagged + unmatched} left in Needs Review for you ({flagged} high margin >{hi:.0f}%, "
         f"{unmatched} to check)"

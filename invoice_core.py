@@ -679,6 +679,26 @@ def dedup_plan(invs):
     return kept, dups
 
 
+def amount_dup_ids(invs):
+    """{sub_id: other_invoice_no} for invoices sharing the SAME order + SAME total as another
+    invoice with a DIFFERENT number — a likely double-invoice (Decor8 billing one order twice
+    under two numbers). Flagged, not deleted (numbers differ ⇒ could rarely be legit)."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for i in invs:
+        t = i.get("total")
+        if isinstance(t, (int, float)) and (i.get("order_no") or "").strip():
+            groups[(i.get("order_no"), round(t, 2))].append(i)
+    out = {}
+    for g in groups.values():
+        nums = {(x.get("invoice_no") or "").strip().upper() for x in g if x.get("invoice_no")}
+        if len(g) >= 2 and len(nums) >= 2:
+            for x in g:
+                others = [y.get("invoice_no") for y in g if y.get("sub_id") != x.get("sub_id")]
+                out[str(x["sub_id"])] = next((o for o in others if o), "another invoice")
+    return out
+
+
 def discrepancy_reason(res):
     """One-line reason for the log/note (no 'awaiting credit note' wording)."""
     reasons, seen = [], set()

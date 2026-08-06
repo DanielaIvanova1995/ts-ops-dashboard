@@ -118,11 +118,27 @@ def main():
         return 0
 
     invs = _dedup(invs)
+    amt_dups = core.amount_dup_ids(invs)          # same order + same £, different inv number
 
-    n = pushed = held = flagged = review = fail = 0
+    n = pushed = held = flagged = review = dupflag = fail = 0
     for inv in invs[:MAX_INVOICES]:
         n += 1
         no, sup, sid = inv.get("invoice_no"), inv.get("supplier"), inv.get("shopify_order_id")
+        # Suspected double-invoice → never auto-approve; leave in Needs Review with a note.
+        if str(inv.get("sub_id")) in amt_dups:
+            dupflag += 1
+            log(f"  {no} ({sup}, order {inv.get('order_no')}): POSSIBLE DUPLICATE — same £ as "
+                f"invoice {amt_dups[str(inv['sub_id'])]} -> left in Needs Review")
+            if not DRY_RUN:
+                try:
+                    ds.set_subitem_text(
+                        inv["sub_id"], "text_mm3gh2za",
+                        f"POSSIBLE DUPLICATE — same £{inv.get('total')} as invoice "
+                        f"{amt_dups[str(inv['sub_id'])]} on this order (different number). "
+                        "Check you're not paying twice.")
+                except Exception:  # noqa: BLE001
+                    pass
+            continue
         if not inv.get("asset_id"):
             review += 1
             log(f"  {no} ({sup}): no PDF attached — left for review")
@@ -178,7 +194,7 @@ def main():
         time.sleep(0.2)
 
     log(f"=== done · checked {n} · push {pushed} · hold {held} · flag {flagged} · "
-        f"review {review} · unreadable {fail} ===")
+        f"review {review} · possible-dup {dupflag} · unreadable {fail} ===")
     if DRY_RUN:
         log("DRY RUN — nothing was written to Monday. Set DRY_RUN=0 to go live.")
     return 0
