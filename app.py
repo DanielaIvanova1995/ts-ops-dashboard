@@ -2932,6 +2932,24 @@ def _invoice_tab(key, is_queue):
         # amount-duplicate (the other invoice's number), unless it's already an exact duplicate
         i["_dup_amt"] = None if i["_dup"] else _amtdup.get(str(i.get("sub_id")))
 
+    # One-click clean-up: exact-duplicate copies (same invoice number logged more than once on
+    # an order) can be deleted in one go — keeps one of each, deletes the extras and clears
+    # their INV amount. (Bulk-check does this automatically; this is for ones checked one-by-one.)
+    _extras = sum(c - 1 for c in _dupc.values() if c >= 2)
+    if _extras:
+        cda, cdb = st.columns([1, 2])
+        if cda.button(f"🗑 Delete {_extras} duplicate cop{'y' if _extras == 1 else 'ies'}",
+                      key=f"deldups_{key}", type="primary", use_container_width=True):
+            _, ndel, ncol = _auto_dedup(list(dup_pool.values()))
+            invoices_by_status.clear()
+            invoice_count.clear()
+            st.session_state["inv_flash"] = (
+                f"Deleted {ndel} duplicate cop{'y' if ndel == 1 else 'ies'} from Monday"
+                + (f" and cleared {ncol} INV column(s)" if ncol else "") + ".")
+            st.rerun()
+        cdb.caption("Removes the extra copy of any invoice logged twice on its order (keeping "
+                    "one) and clears its amount from the order total.")
+
     verdicts = st.session_state.get("inv_verdict", {})
 
     def _icon_pass(b):  # True → check, False → cross, None → blank
