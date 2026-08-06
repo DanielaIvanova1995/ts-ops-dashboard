@@ -2788,6 +2788,18 @@ def _amount_dup_ids(invs):
     return out
 
 
+def _read_pdf_plain(asset_id):
+    """Read + parse an invoice PDF with NO Streamlit cache — safe to call from worker threads
+    (st.cache_data isn't). Bulk-check uses this to read many PDFs in parallel."""
+    try:
+        url = data_sources.monday_asset_url(asset_id)
+        if not url:
+            return {"error": "Couldn't get a download link for the PDF."}
+        return data_sources.read_invoice_pdf(url)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 def _bulk_check(invs, lbsku):
     """De-duplicate (delete Eurocell's second copy + clear its INV column), then read +
     3-way check every remaining invoice (cached) and auto-process: fully matched with order
@@ -2799,8 +2811,20 @@ def _bulk_check(invs, lbsku):
     pidx = _pricelist_index()
     n = len(invs)
     _, hi = _thresholds()
-    prog = st.progress(0.0, text="Reading, checking & processing invoices…")
     goneset = st.session_state.setdefault("inv_gone", set())
+    # Read the invoice PDFs in PARALLEL up front (the slow AI step) — the big speed-up vs
+    # reading one at a time. Cached per session by asset id, so a re-run is instant.
+    pcache = st.session_state.setdefault("_inv_pdf_cache", {})
+    need = [inv for inv in invs if str(inv["sub_id"]) not in amt_dups
+            and inv.get("asset_id") and inv["asset_id"] not in pcache]
+    if need:
+        import concurrent.futures as _cf
+        with st.spinner(f"Reading {len(need)} invoice(s) in parallel…"):
+            with _cf.ThreadPoolExecutor(max_workers=6) as _ex:
+                for _aid, _p in _ex.map(
+                        lambda iv: (iv["asset_id"], _read_pdf_plain(iv["asset_id"])), need):
+                    pcache[_aid] = _p
+    prog = st.progress(0.0, text="Checking & processing…")
     pushed = held = flagged = unmatched = fail = 0
     for i, inv in enumerate(invs, 1):
         # Suspected double-invoice (same order + same £ as another invoice, different number).
@@ -2818,7 +2842,7 @@ def _bulk_check(invs, lbsku):
                 pass
             prog.progress(i / n, text=f"Processed {i}/{n}")
             continue
-        parsed = _read_invoice(inv["asset_id"], inv["sub_id"])
+        parsed = pcache.get(inv.get("asset_id")) or {"error": "no PDF attached"}
         if parsed.get("error"):
             fail += 1
         else:
@@ -3096,13 +3120,20 @@ def _invoice_tab(key, is_queue):
             # COLLAPSED with an accurate matched/discrepancy header, rather than all blowing
             # open at once. The user opens the ones they want to inspect.
             pidx = _pricelist_index()
-            with st.spinner(f"Checking {len(picked_ids)} invoice(s)…"):
-                for sid in picked_ids:
-                    iv = next((i for i in fil if i["sub_id"] == sid), None)
-                    if iv and iv.get("asset_id"):
-                        parsed = _read_invoice(iv["asset_id"], iv["sub_id"])
-                        if not parsed.get("error"):
-                            _check_and_store(iv, parsed, lbsku, pidx)
+            sel_invs = [i for i in fil if i["sub_id"] in picked_ids and i.get("asset_id")]
+            pcache = st.session_state.setdefault("_inv_pdf_cache", {})
+            need = [iv for iv in sel_invs if iv["asset_id"] not in pcache]
+            with st.spinner(f"Checking {len(sel_invs)} invoice(s)…"):
+                if need:
+                    import concurrent.futures as _cf
+                    with _cf.ThreadPoolExecutor(max_workers=6) as _ex:
+                        for _aid, _p in _ex.map(
+                                lambda iv: (iv["asset_id"], _read_pdf_plain(iv["asset_id"])), need):
+                            pcache[_aid] = _p
+                for iv in sel_invs:
+                    parsed = pcache.get(iv["asset_id"])
+                    if parsed and not parsed.get("error"):
+                        _check_and_store(iv, parsed, lbsku, pidx)
             st.session_state[show_key] = picked_ids
             st.session_state.pop(f"sel_{key}", None)   # clear the ticks now they're opened
             st.rerun()
