@@ -3000,10 +3000,11 @@ def _invoice_tab(key, is_queue):
         checkable = [i for i in fil if i.get("asset_id")]
         pend = f"bulk_pending_{key}"
         bc1, bc2 = st.columns([1, 2])
+        lo0, hi0 = _thresholds()
         if bc1.button(f"Bulk-check & process {len(checkable)}", key=f"bulk_{key}",
                       disabled=not checkable, use_container_width=True,
-                      help="Checks every invoice shown, then pushes matched (≥5% margin) to QB and "
-                           "holds the rest as Matched."):
+                      help=f"Checks every invoice shown, then pushes matched invoices (order "
+                           f"margin {lo0:.0f}–{hi0:.0f}%) to QB and holds the rest as Matched."):
             st.session_state[pend] = True
         done = [i for i in fil if i["sub_id"] in verdicts]
         if done:
@@ -3013,6 +3014,37 @@ def _invoice_tab(key, is_queue):
                          f"<b>{len(done)}</b>/{len(fil)} &nbsp;·&nbsp; {_inv_inline('check', 16)} "
                          f"{mt} matched &nbsp;·&nbsp; {_inv_inline('warn', 16)} "
                          f"{len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
+            # Push the ALREADY-CHECKED matched, in-band ones straight to QB (no re-check needed).
+            # A green tick just means 'checked & matches' — this is what actually approves them.
+            pushable = []
+            for i in done:
+                v = verdicts[i["sub_id"]]
+                _matched = bool(v.get("order") and v.get("price"))
+                _is_cn = isinstance(i.get("total"), (int, float)) and i["total"] < 0
+                _lbl, _act = _push_decision(_matched, _is_cn, i.get("order_margin_live"),
+                                            i.get("supplier"))
+                if _act == "push":
+                    pushable.append((i, _lbl))
+            if pushable and st.button(
+                    f"✅ Push {len(pushable)} matched invoice(s) to QuickBooks",
+                    key=f"pushmatched_{key}", type="primary", use_container_width=True):
+                goneset = st.session_state.setdefault("inv_gone", set())
+                pn = 0
+                for i, lbl in pushable:
+                    try:
+                        data_sources.set_invoice_status(i["sub_id"], lbl)
+                        _incomplete_note_if_approved(i["sub_id"], lbl)
+                        goneset.add(str(i["sub_id"]))
+                        pn += 1
+                    except Exception:  # noqa: BLE001
+                        pass
+                st.session_state["inv_flash"] = f"Pushed {pn} matched invoice(s) to QuickBooks."
+                st.rerun()
+            _heldback = mt - len(pushable)
+            if _heldback > 0:
+                st.caption(f"{len(pushable)} of the {mt} matched are within the {lo0:.0f}–{hi0:.0f}% "
+                           f"margin band and can be pushed; the other {_heldback} sit outside it "
+                           "(too low → hold as Matched, or too high → check for a missing invoice).")
         if st.session_state.get(pend):
             n = len(checkable)
             lo, hi = _thresholds()
