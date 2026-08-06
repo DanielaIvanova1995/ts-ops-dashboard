@@ -1,0 +1,32 @@
+name: Invoice daily report
+
+# Posts a once-a-day digest to Monday: what was Approved (To QB) and Matched (held) in the
+# last 24h. Starts as a manual button in DRY RUN (logs only). When the log looks right, run
+# once with dry_run=false to post to Monday, then uncomment the daily `schedule:` below.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log only, don't post to Monday)"
+        type: boolean
+        default: true
+  # --- enable AFTER a verified dry run ---
+  # schedule:
+  #   - cron: "0 17 * * 1-5"   # 17:00 UTC ~ 6pm UK, Mon-Fri
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Post daily invoice report
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'false' && '0' || '1' }}
+        run: python run_invoice_check.py --report

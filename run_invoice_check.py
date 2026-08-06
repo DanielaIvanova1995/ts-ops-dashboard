@@ -183,5 +183,85 @@ def main():
     return 0
 
 
+REPORT_BOARD_NAME = "TradeHub — Invoice Auto-check Reports"
+
+
+def report_run(hours=24):
+    """Daily digest: read the subitems activity log for the last `hours`, list what was moved
+    to Approved (To QB) and Matched (TradeHub), and POST it to a Monday board (created on first
+    run). DRY_RUN just logs it."""
+    from datetime import datetime, timezone, timedelta
+    to_dt = datetime.now(timezone.utc)
+    from_dt = to_dt - timedelta(hours=hours)
+    token = ds.get_token()
+    try:
+        logs = ds.fetch_board_activity(
+            ds.SUBITEMS_BOARD_ID, from_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            to_dt.strftime("%Y-%m-%dT%H:%M:%SZ"), token=token)
+    except Exception as e:  # noqa: BLE001
+        log("ERROR fetching activity log:", e)
+        return 1
+    APPROVED = {"Approved (To QB)", "CN Approved (To QB)"}
+    approved, matched = {}, {}
+    for lg in logs:
+        if lg.get("event") != "update_column_value":
+            continue
+        try:
+            d = json.loads(lg.get("data") or "{}")
+        except Exception:  # noqa: BLE001
+            continue
+        if d.get("column_id") != "status7__1":
+            continue
+        new = (((d.get("value") or {}).get("label") or {}).get("text"))
+        sid = str(d.get("pulse_id"))
+        if new in APPROVED:
+            approved[sid] = d.get("pulse_name")
+            matched.pop(sid, None)
+        elif new == "Matched (TradeHub)" and sid not in approved:
+            matched[sid] = d.get("pulse_name")
+
+    ids = list(set(approved) | set(matched))
+    details = ds._fetch_subitem_details(ids, token) if ids else {}
+
+    def _amt(sid):
+        v = (details.get(sid) or {}).get("total")
+        return v if isinstance(v, (int, float)) else 0.0
+
+    def _fmt(group):
+        rows = []
+        for sid, no in group.items():
+            det = details.get(sid) or {}
+            a = f"£{_amt(sid):,.2f}" if _amt(sid) else "—"
+            rows.append(f"- {det.get('invoice_no') or no}  ·  order {det.get('order_no') or '?'}"
+                        f"  ·  {det.get('supplier') or '?'}  ·  {a}")
+        return rows or ["- none"]
+
+    today = to_dt.astimezone().strftime("%d %b %Y")
+    ap_tot = sum(_amt(s) for s in approved)
+    mt_tot = sum(_amt(s) for s in matched)
+    body = "\n".join(
+        [f"Invoice auto-check — {today} (last {hours}h)", "",
+         f"APPROVED TO QB: {len(approved)}  (£{ap_tot:,.2f})"] + _fmt(approved)
+        + ["", f"MATCHED — held for review: {len(matched)}  (£{mt_tot:,.2f})"] + _fmt(matched))
+    title = f"Auto-check {today} — {len(approved)} approved, {len(matched)} matched"
+    log("=== daily report ===")
+    log(body)
+    if DRY_RUN:
+        log("\nDRY RUN — not posting to Monday.")
+        return 0
+    try:
+        board = ds.monday_find_or_create_board(REPORT_BOARD_NAME, token)
+        item = ds.monday_create_item(board, title, token)
+        ds.monday_post_update(item, body, token)
+        log(f"\nPosted to Monday board '{REPORT_BOARD_NAME}' (item {item}).")
+    except Exception as e:  # noqa: BLE001
+        log("ERROR posting report to Monday:", e)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
+    if "--report" in sys.argv:
+        sys.exit(report_run(int(os.environ.get("REPORT_HOURS", "24"))))
     sys.exit(main())
+

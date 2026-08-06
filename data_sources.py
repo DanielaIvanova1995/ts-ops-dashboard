@@ -2030,6 +2030,54 @@ def set_subitem_text(sub_id, column_id: str, text: str, token: str | None = None
     return True
 
 
+def _monday_gql(query, variables=None, token=None):
+    """Minimal Monday GraphQL POST → data dict. Raises on API error."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    r = requests.post(MONDAY_API, json={"query": query, "variables": variables or {}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=40)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    return payload.get("data") or {}
+
+
+def monday_find_or_create_board(name: str, token: str | None = None):
+    """Return the id of the active board called `name`, creating it (public) if it doesn't
+    exist. Used for the auto-check daily-report board so there's nothing to set up by hand."""
+    token = token or get_token()
+    for page in range(1, 11):
+        data = _monday_gql("query ($p: Int!) { boards(limit: 100, page: $p) { id name state } }",
+                           {"p": page}, token)
+        boards = data.get("boards") or []
+        for b in boards:
+            if (b.get("name") == name) and (b.get("state") == "active"):
+                return b["id"]
+        if len(boards) < 100:
+            break
+    data = _monday_gql(
+        "mutation ($n: String!) { create_board(board_name: $n, board_kind: public) { id } }",
+        {"n": name}, token)
+    return (data.get("create_board") or {}).get("id")
+
+
+def monday_create_item(board_id, name: str, token: str | None = None):
+    """Create an item on a board; returns its id."""
+    data = _monday_gql(
+        "mutation ($b: ID!, $n: String!) { create_item(board_id: $b, item_name: $n) { id } }",
+        {"b": str(board_id), "n": name[:255]}, token)
+    return (data.get("create_item") or {}).get("id")
+
+
+def monday_post_update(item_id, body: str, token: str | None = None) -> bool:
+    """Post an update (the rich note/comment) onto a Monday item."""
+    _monday_gql("mutation ($i: ID!, $b: String!) { create_update(item_id: $i, body: $b) { id } }",
+                {"i": str(item_id), "b": body}, token)
+    return True
+
+
 def set_order_number(item_id, column_id: str, value, token: str | None = None) -> bool:
     """Set (or clear, with value=None/'' ) a numbers column on a parent ORDER item (Orders
     board) — e.g. blanking an INV1..INV5 column when a duplicate invoice is removed so the
