@@ -1314,8 +1314,8 @@ MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
 CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
 DISCREPANCY_LABEL = "Discrepancy"
-MARGIN_PUSH_MIN = 5.0           # defaults — editable in the Invoice Check settings box
-MARGIN_PUSH_MAX = 35.0
+MARGIN_PUSH_MIN = 10.0          # default lowest margin to auto-approve (Decor8 overridden to 5%
+MARGIN_PUSH_MAX = 35.0          # in SUPPLIER_RULES) — editable in the Invoice Check settings box
 
 
 def _thresholds():
@@ -1559,6 +1559,8 @@ SUPPLIER_RULES = {
     # price-check against their pricelist; this only lowers the approve floor and stops a
     # good margin being flagged as 'unusually high').
     "toolbank": {"name": "Toolbank", "push_min": 6.0, "flag_high": False},
+    # Decor8 auto-approve floor is 5% (everyone else is the 10% default).
+    "decor8": {"name": "Decor8", "push_min": 5.0},
 }
 
 

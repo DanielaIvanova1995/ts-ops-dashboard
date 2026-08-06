@@ -14,7 +14,7 @@ MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
 CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
 DISCREPANCY_LABEL = "Discrepancy"
-MARGIN_PUSH_MIN = 5.0
+MARGIN_PUSH_MIN = 10.0          # default lowest margin to auto-approve (Decor8 -> 5% below)
 MARGIN_PUSH_MAX = 35.0
 
 # ---- Supplier delivery / carriage (ex-VAT £) ------------------------------------------
@@ -54,6 +54,7 @@ SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
     "toolbank": {"name": "Toolbank", "push_min": 6.0, "flag_high": False},
+    "decor8": {"name": "Decor8", "push_min": 5.0},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",
