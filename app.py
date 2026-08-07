@@ -150,6 +150,34 @@ CSS = """
      border-radius:4px !important; background:#fff !important;}
   .stTextInput div[data-baseweb="input"]:focus-within{border-color:var(--brand) !important;
      box-shadow:0 0 0 2px rgba(242,106,33,.15) !important;}
+  /* ---- Squared, polished look (edgy corners everywhere, no pills) ---- */
+  .stButton>button{border-radius:2px !important;}
+  [data-testid="stExpander"]{border-radius:2px !important;}
+  [data-testid="stExpander"] details{border-radius:2px !important;}
+  [data-baseweb="select"]>div{border-radius:2px !important;}
+  [data-baseweb="input"]{border-radius:2px !important;}
+  .stTextInput div[data-baseweb="input"]{border-radius:2px !important;}
+  [data-testid="stDataFrame"],[data-testid="stTable"]{border-radius:2px !important;}
+  [data-testid="stVerticalBlockBorderWrapper"]{border-radius:2px !important;}
+  .ts-brandbar,.ts-card,.ts-action,.ts-mod{border-radius:2px !important;}
+  .ts-pill,.stCheckbox{border-radius:2px;}
+  /* ---- Invoice grid (inline expandable rows) ---- */
+  .thg-head{background:#F6F7F8;border:1px solid var(--line);border-bottom:none;
+     font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);
+     font-weight:700;padding:7px 4px;}
+  .thg-cell{font-size:12.5px;color:var(--ink);line-height:1.3;padding:3px 0;
+     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .thg-cell b{font-weight:700;}
+  .thg-sub{color:var(--muted);}
+  .thg-badge{display:inline-block;height:19px;vertical-align:-4px;margin-right:5px;}
+  .thg-mg-hi{color:var(--green);font-weight:700;}
+  .thg-mg-lo{color:#EA580C;font-weight:700;}
+  .thg-mg-vh{color:var(--red);font-weight:700;}
+  .thg-mg-na{color:#AAB0B8;}
+  .thg-open{border-left:3px solid var(--brand);background:#FCFDFC;padding:2px 0 12px 16px;
+     margin:0 0 6px;}
+  .thg-dupe{background:var(--red);color:#fff;font-size:9.5px;font-weight:700;padding:1px 5px;
+     border-radius:2px;margin-left:6px;letter-spacing:.5px;}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -2908,6 +2936,279 @@ def _bulk_check(invs, lbsku):
     st.rerun()
 
 
+# ---------------------------------------------------------------------------
+# Invoice grid — inline expandable rows (chevron opens the check under the row),
+# a tick per row, and per-row Check / Push / Check & push. Replaces the old table
+# + separate review panels so the check opens in place.
+# ---------------------------------------------------------------------------
+_GRID_PAGE = 25
+
+
+def _grid_check(invs, lbsku):
+    """Check a list of invoices with cached parallel PDF reads; store verdicts. No pushing.
+    Reads are cached 24h, so re-checking an already-seen invoice is free."""
+    pidx = _pricelist_index()
+    pcache = st.session_state.setdefault("_inv_pdf_cache", {})
+    todo = [iv for iv in invs if iv.get("asset_id")]
+    need = [iv for iv in todo if iv["asset_id"] not in pcache]
+    if need:
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=6) as _ex:
+            for _aid, _p in _ex.map(
+                    lambda iv: (iv["asset_id"], _read_pdf_plain(iv["asset_id"])), need):
+                pcache[_aid] = _p
+    n = 0
+    for iv in todo:
+        parsed = pcache.get(iv["asset_id"])
+        if parsed and not parsed.get("error"):
+            _check_and_store(iv, parsed, lbsku, pidx)
+            n += 1
+    return n
+
+
+def _grid_is_matched(sid):
+    v = st.session_state.get("inv_verdict", {}).get(sid)
+    return bool(v and v.get("order") and v.get("price"))
+
+
+def _grid_push(inv):
+    """Push one already-checked, matched invoice to QuickBooks (Approved / CN Approved)."""
+    is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
+    lbl = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
+    data_sources.set_invoice_status(inv["sub_id"], lbl)
+    _incomplete_note_if_approved(inv["sub_id"], lbl)
+    st.session_state.setdefault("inv_gone", set()).add(str(inv["sub_id"]))
+
+
+def _grid_margin_html(m):
+    if m is None:
+        return '<span class="thg-mg-na">—</span>'
+    cls = "thg-mg-vh" if m > 35 else "thg-mg-hi" if m >= 10 else "thg-mg-lo"
+    return f'<span class="{cls}">{m:.0f}%</span>'
+
+
+def _grid_checks_html(v):
+    """Two status symbols: order match, then price match (grey ? = couldn't price-check)."""
+    if not v:
+        return '<span style="color:#C9CED4">—</span>'
+    o = _inv_inline("check", 16) if v.get("order") else _inv_inline("warn", 16)
+    p = (_inv_inline("check", 16) if v.get("price") is True
+         else _inv_inline("qmark", 16) if v.get("price") is None
+         else _inv_inline("cross", 16))
+    return f'<span style="display:inline-flex;gap:4px;justify-content:center">{o}{p}</span>'
+
+
+def _grid_bulk_bar(picked, key, lbsku):
+    """Actions for the ticked rows: Check / Push / Check & push (with confirm)."""
+    ids = [i["sub_id"] for i in picked]
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:8px;margin:2px 0 4px">'
+        f'<span style="width:12px;height:12px;background:var(--brand);border-radius:2px;'
+        f'display:inline-block"></span><b style="font-size:13px">{len(picked)} selected</b></div>',
+        unsafe_allow_html=True)
+    b = st.columns([1, 1, 1.3, 2.4])
+    if b[0].button("Check selected", key=f"bchk_{key}", use_container_width=True):
+        with st.spinner(f"Checking {len(picked)}…"):
+            _grid_check(picked, lbsku)
+        st.rerun()
+    if b[1].button("Push selected", key=f"bpush_{key}", use_container_width=True):
+        st.session_state[f"bpushpend_{key}"] = ids
+    if b[2].button("Check & push selected", key=f"bcp_{key}", type="primary",
+                   use_container_width=True):
+        st.session_state[f"bcppend_{key}"] = ids
+
+    if st.session_state.get(f"bpushpend_{key}"):
+        st.warning(f"Push the matched ones among **{len(ids)}** selected to QuickBooks? Any not "
+                   "yet checked are checked first (cached reads are free); only clean matches "
+                   "are pushed.")
+        y, n = st.columns(2)
+        if y.button("Yes — push matched", key=f"bpushyes_{key}", type="primary",
+                    use_container_width=True):
+            st.session_state.pop(f"bpushpend_{key}", None)
+            with st.spinner("Checking and pushing…"):
+                _grid_check(picked, lbsku)
+                pn = 0
+                for i in picked:
+                    if _grid_is_matched(i["sub_id"]):
+                        try:
+                            _grid_push(i)
+                            pn += 1
+                        except Exception:  # noqa: BLE001
+                            pass
+            for i in picked:
+                st.session_state.pop(f"pick_{key}_{i['sub_id']}", None)
+            st.session_state["inv_flash"] = (
+                f"Pushed {pn} matched invoice(s) to QuickBooks."
+                + (f" {len(picked) - pn} weren't clean matches and were left for review."
+                   if pn < len(picked) else ""))
+            st.rerun()
+        if n.button("Cancel", key=f"bpushno_{key}", use_container_width=True):
+            st.session_state.pop(f"bpushpend_{key}", None)
+            st.rerun()
+
+    if st.session_state.get(f"bcppend_{key}"):
+        lo, hi = _thresholds()
+        st.warning(f"Check **{len(ids)}** selected and auto-push matched ones (order margin "
+                   f"{lo:.0f}–{hi:.0f}%) to QuickBooks? Under {lo:.0f}% held as Matched, over "
+                   f"{hi:.0f}% flagged, mismatches left for review.")
+        y, n = st.columns(2)
+        if y.button("Yes — check & push", key=f"bcpyes_{key}", type="primary",
+                    use_container_width=True):
+            st.session_state.pop(f"bcppend_{key}", None)
+            for i in picked:
+                st.session_state.pop(f"pick_{key}_{i['sub_id']}", None)
+            _bulk_check([i for i in picked if i.get("asset_id")], lbsku)   # this reruns
+        if n.button("Cancel", key=f"bcpno_{key}", use_container_width=True):
+            st.session_state.pop(f"bcppend_{key}", None)
+            st.rerun()
+
+
+def _grid_row(inv, key, is_queue, is_recent, lbsku, verdicts, ratios):
+    sid = inv["sub_id"]
+    is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
+    badge = _INV_ICON["crn_badge" if is_cn else "inv_badge"]
+    inv_no = inv.get("invoice_no") or "—"
+    order_no = inv.get("order_no") or "—"
+    supplier = inv.get("supplier") or "—"
+    dup = ('<span class="thg-dupe">DUPLICATE</span>' if inv.get("_dup")
+           else f'<span class="thg-sub"> · ×{inv["n_invoices"]}</span>'
+           if (inv.get("n_invoices") or 0) >= 2 else "")
+    amt = inv.get("total")
+    amt_txt = f"£{amt:,.2f}" if isinstance(amt, (int, float)) else "—"
+    main_html = (f'<div class="thg-cell"><img class="thg-badge" src="{badge}">'
+                 f'<b>{_esc(inv_no)}</b><span class="thg-sub"> · order {_esc(order_no)} · '
+                 f'{_esc(supplier)}</span>{dup}</div>')
+    pdf_html = (f'<a href="{inv["file_url"]}" target="_blank" title="Open the PDF">'
+                f'{_inv_inline("file_o", 18)}</a>' if inv.get("file_url") else "")
+
+    if is_recent:
+        c = st.columns(ratios)
+        c[0].markdown(main_html, unsafe_allow_html=True)
+        c[1].markdown(f'<div class="thg-cell" style="text-align:right">{amt_txt}</div>',
+                      unsafe_allow_html=True)
+        c[2].markdown(f'<div class="thg-cell">{_esc(_recent_result(inv.get("status")))}</div>',
+                      unsafe_allow_html=True)
+        c[3].markdown(f'<div class="thg-cell thg-sub">{_esc(_fmt_actioned(inv.get("actioned_at")))}'
+                      f'</div>', unsafe_allow_html=True)
+        c[4].markdown(f'<div style="text-align:center">{pdf_html}</div>', unsafe_allow_html=True)
+        st.markdown('<hr style="margin:2px 0;border:none;border-top:1px solid #EEF0F2">',
+                    unsafe_allow_html=True)
+        return
+
+    v = verdicts.get(sid)
+    exp_key = f"exp_{key}_{sid}"
+    expanded = bool(st.session_state.get(exp_key))
+    c = st.columns(ratios)
+    if c[0].button("▾" if expanded else "▸", key=f"chev_{key}_{sid}",
+                   help="Open / close the check for this invoice", use_container_width=True):
+        st.session_state[exp_key] = not expanded
+        if not expanded and not v:
+            with st.spinner("Checking…"):
+                _grid_check([inv], lbsku)
+        st.rerun()
+    c[1].checkbox("select", key=f"pick_{key}_{sid}", label_visibility="collapsed")
+    c[2].markdown(main_html, unsafe_allow_html=True)
+    c[3].markdown(f'<div class="thg-cell" style="text-align:right">{amt_txt}</div>',
+                  unsafe_allow_html=True)
+    c[4].markdown(f'<div class="thg-cell" style="text-align:right">'
+                  f'{_grid_margin_html(inv.get("order_margin_live"))}</div>', unsafe_allow_html=True)
+    c[5].markdown(f'<div class="thg-cell" style="text-align:center">{_grid_checks_html(v)}</div>',
+                  unsafe_allow_html=True)
+    matched = bool(v and v.get("order") and v.get("price"))
+    a = c[6].columns([1, 1, 1.4])
+    if a[0].button("Check", key=f"chk_{key}_{sid}", use_container_width=True,
+                   type=("secondary" if v else "primary")):
+        with st.spinner("Checking…"):
+            _grid_check([inv], lbsku)
+        st.rerun()
+    if a[1].button("Push", key=f"push_{key}_{sid}", use_container_width=True,
+                   type=("primary" if matched else "secondary"),
+                   help="Approve straight to QuickBooks. Checks first if needed (cached = free)."):
+        if not v:
+            with st.spinner("Checking…"):
+                _grid_check([inv], lbsku)
+            matched = _grid_is_matched(sid)
+        if matched:
+            _grid_push(inv)
+            st.session_state["inv_flash"] = f"Pushed invoice {inv_no} to QuickBooks."
+        else:
+            st.session_state[exp_key] = True
+            st.session_state["inv_flash"] = (f"Invoice {inv_no} isn't a clean match — "
+                                             "opened it below for review.")
+        st.rerun()
+    if a[2].button("Check & push", key=f"cp_{key}_{sid}", use_container_width=True):
+        with st.spinner("Checking…"):
+            _grid_check([inv], lbsku)
+        if _grid_is_matched(sid):
+            _grid_push(inv)
+            st.session_state["inv_flash"] = f"Checked and pushed invoice {inv_no} to QuickBooks."
+        else:
+            st.session_state[exp_key] = True
+            st.session_state["inv_flash"] = (f"Invoice {inv_no} isn't a clean match — "
+                                             "opened it below for review.")
+        st.rerun()
+    c[7].markdown(f'<div style="text-align:center;padding-top:2px">{pdf_html}</div>',
+                  unsafe_allow_html=True)
+
+    if st.session_state.get(exp_key):
+        try:
+            _cont = st.container(border=True)
+        except TypeError:      # older Streamlit without the border arg
+            _cont = st.container()
+        with _cont:
+            _run_one_invoice(inv, lbsku)
+    else:
+        st.markdown('<hr style="margin:2px 0;border:none;border-top:1px solid #EEF0F2">',
+                    unsafe_allow_html=True)
+
+
+def _invoice_grid(fil, key, is_queue, is_recent, lbsku, verdicts):
+    """Render the invoice list as inline-expandable rows with per-row actions + pagination."""
+    if not is_recent:
+        picked = [i for i in fil if st.session_state.get(f"pick_{key}_{i['sub_id']}")]
+        if picked:
+            _grid_bulk_bar(picked, key, lbsku)
+
+    total = len(fil)
+    pg_key = f"pg_{key}"
+    maxpage = max(0, (total - 1) // _GRID_PAGE)
+    page = min(int(st.session_state.get(pg_key, 0)), maxpage)
+    st.session_state[pg_key] = page
+    start = page * _GRID_PAGE
+    page_items = fil[start:start + _GRID_PAGE]
+
+    if is_recent:
+        ratios = [4.2, 1.0, 2.2, 1.3, 0.6]
+        heads = ["Invoice · order · supplier", "Inv £", "Result", "When", "PDF"]
+    else:
+        ratios = [0.4, 0.4, 3.8, 0.9, 0.85, 0.95, 3.4, 0.5]
+        heads = ["", "", "Invoice · order · supplier", "Inv £", "Margin", "Checks",
+                 "Actions", "PDF"]
+    hc = st.columns(ratios)
+    for col, h in zip(hc, heads):
+        align = "left" if h.startswith("Invoice") or h == "Result" else "center"
+        col.markdown(f'<div class="thg-head" style="text-align:{align}">{h}</div>',
+                     unsafe_allow_html=True)
+
+    for inv in page_items:
+        _grid_row(inv, key, is_queue, is_recent, lbsku, verdicts, ratios)
+
+    if maxpage > 0:
+        pc = st.columns([1, 3, 1])
+        if pc[0].button("‹ Prev", key=f"pgprev_{key}", disabled=page <= 0,
+                        use_container_width=True):
+            st.session_state[pg_key] = page - 1
+            st.rerun()
+        pc[1].markdown(
+            f"<div style='text-align:center;color:var(--muted);font-size:12.5px;padding-top:7px'>"
+            f"Showing {start + 1}–{min(start + _GRID_PAGE, total)} of {total} · "
+            f"page {page + 1} of {maxpage + 1}</div>", unsafe_allow_html=True)
+        if pc[2].button("Next ›", key=f"pgnext_{key}", disabled=page >= maxpage,
+                        use_container_width=True):
+            st.session_state[pg_key] = page + 1
+            st.rerun()
+
+
 def _invoice_tab(key, is_queue):
     data = invoices_by_status(key)
     if data.get("error"):
@@ -2950,7 +3251,8 @@ def _invoice_tab(key, is_queue):
                    "newest first. Search above to find a specific one.")
     else:
         st.caption(f"{len(fil)} of {len(invs)}{'+' if data.get('more') else ''} invoices "
-                   "— click a row to see its summary and check results.")
+                   "— click the ▸ arrow on a row to open its check, or use the per-row "
+                   "Check / Push buttons.")
     if not fil:
         st.info("No invoices match that filter/search.")
         return
@@ -3004,56 +3306,18 @@ def _invoice_tab(key, is_queue):
 
     lbsku = _lookup_by_sku()
 
-    # Bulk-check & auto-process (To-check tab only; writes to QB, so always confirm).
+    # Bulk-check & auto-process the WHOLE queue (To-check tab only; writes to QB, so confirm).
+    # Per-row and ticked-selection actions live in the grid below — this is the "do it all" button.
     if key == "review":
         checkable = [i for i in fil if i.get("asset_id")]
         pend = f"bulk_pending_{key}"
-        bc1, bc2 = st.columns([1, 2])
         lo0, hi0 = _thresholds()
-        if bc1.button(f"Bulk-check & process {len(checkable)}", key=f"bulk_{key}",
-                      disabled=not checkable, use_container_width=True,
-                      help=f"Checks every invoice shown, then pushes matched invoices (order "
-                           f"margin {lo0:.0f}–{hi0:.0f}%) to QB and holds the rest as Matched."):
+        if st.button(f"Bulk-check & auto-process all {len(checkable)}", key=f"bulk_{key}",
+                     disabled=not checkable, use_container_width=True,
+                     help=f"Checks every invoice shown, then pushes matched invoices (order "
+                          f"margin {lo0:.0f}–{hi0:.0f}%) to QuickBooks and holds the rest as "
+                          "Matched. Or use the per-row buttons below for full control."):
             st.session_state[pend] = True
-        done = [i for i in fil if i["sub_id"] in verdicts]
-        if done:
-            mt = sum(1 for i in done
-                     if verdicts[i["sub_id"]]["order"] and verdicts[i["sub_id"]]["price"])
-            bc2.markdown(f"<div style='padding-top:7px;font-size:13px'>Checked "
-                         f"<b>{len(done)}</b>/{len(fil)} &nbsp;·&nbsp; {_inv_inline('check', 16)} "
-                         f"{mt} matched &nbsp;·&nbsp; {_inv_inline('warn', 16)} "
-                         f"{len(done) - mt} discrepancy</div>", unsafe_allow_html=True)
-            # Push the ALREADY-CHECKED matched, in-band ones straight to QB (no re-check needed).
-            # A green tick just means 'checked & matches' — this is what actually approves them.
-            pushable = []
-            for i in done:
-                v = verdicts[i["sub_id"]]
-                _matched = bool(v.get("order") and v.get("price"))
-                _is_cn = isinstance(i.get("total"), (int, float)) and i["total"] < 0
-                _lbl, _act = _push_decision(_matched, _is_cn, i.get("order_margin_live"),
-                                            i.get("supplier"))
-                if _act == "push":
-                    pushable.append((i, _lbl))
-            if pushable and st.button(
-                    f"✅ Push {len(pushable)} matched invoice(s) to QuickBooks",
-                    key=f"pushmatched_{key}", type="primary", use_container_width=True):
-                goneset = st.session_state.setdefault("inv_gone", set())
-                pn = 0
-                for i, lbl in pushable:
-                    try:
-                        data_sources.set_invoice_status(i["sub_id"], lbl)
-                        _incomplete_note_if_approved(i["sub_id"], lbl)
-                        goneset.add(str(i["sub_id"]))
-                        pn += 1
-                    except Exception:  # noqa: BLE001
-                        pass
-                st.session_state["inv_flash"] = f"Pushed {pn} matched invoice(s) to QuickBooks."
-                st.rerun()
-            _heldback = mt - len(pushable)
-            if _heldback > 0:
-                st.caption(f"{len(pushable)} of the {mt} matched are within the {lo0:.0f}–{hi0:.0f}% "
-                           f"margin band and can be pushed; the other {_heldback} sit outside it "
-                           "(too low → hold as Matched, or too high → check for a missing invoice).")
         if st.session_state.get(pend):
             n = len(checkable)
             lo, hi = _thresholds()
@@ -3071,271 +3335,7 @@ def _invoice_tab(key, is_queue):
                 st.session_state.pop(pend, None)
                 st.rerun()
 
-    rows = []
-    for inv in fil:
-        v = verdicts.get(inv["sub_id"]) if is_queue else None
-        is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
-        row = {"Type": _INV_ICON["crn_badge"] if is_cn else _INV_ICON["inv_badge"]}
-        if is_queue:
-            row["Status"] = (_INV_ICON["check"] if (v and v["order"] and v["price"])
-                             else _INV_ICON["warn"] if v else None)
-        row["Invoice"] = inv.get("invoice_no") or ""
-        omark = ("  ⛔ DUPLICATE" if inv.get("_dup")
-                 else f"  🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
-        row["Order"] = (inv.get("order_no") or "") + omark
-        row["Supplier"] = inv.get("supplier") or ""
-        if is_recent:
-            row["Result"] = _recent_result(inv.get("status"))
-        row["Date"] = inv.get("created") or ""       # invoice date (logged on Monday)
-        row["Inv £"] = inv.get("total")
-        if is_queue:
-            row["Invoice margin"] = (v or {}).get("margin")
-        row["Order margin"] = inv.get("order_margin_live")
-        row["Discount"] = inv.get("_discount") if inv.get("_discount") else None
-        if is_queue:
-            row["vs Shopify"] = _icon_pass(v["order"]) if v else None
-            # price is tri-state: None = couldn't check → grey '?', never a green tick.
-            row["vs Pricelist"] = (None if not v else _INV_ICON["qmark"]
-                                   if v["price"] is None else _icon_pass(v["price"]))
-        if is_recent:
-            row["When"] = _fmt_actioned(inv.get("actioned_at"))
-        row["PDF"] = inv.get("file_url")
-        rows.append(row)
-
-    colcfg = {
-        "Type": st.column_config.ImageColumn("Type", width="small",
-                                             help="Invoice or credit note"),
-        "Date": st.column_config.TextColumn("Date", width="small",
-                                            help="Invoice date — when it was logged on Monday"),
-        "Inv £": st.column_config.NumberColumn(format="£%.2f", width="small"),
-        "Order margin": st.column_config.NumberColumn(
-            format="%.1f%%", width="small",
-            help="OVERALL margin for this whole order from Monday — across ALL invoices and "
-                 "credit notes relating to the order. Use this to be sure the order is profitable "
-                 "before approving (catches duplicate/extra invoices)."),
-        "Discount": st.column_config.NumberColumn(
-            format="£%.2f", width="small",
-            help="Customer discount used on the Shopify order (reduces margin). Blank = none. "
-                 "Check this when the margin is low."),
-        "PDF": st.column_config.LinkColumn(
-            "PDF", display_text="OPEN", width="small", help="Open the invoice PDF"),
-    }
-    if is_recent:
-        colcfg["Result"] = st.column_config.TextColumn(
-            "Result", width="medium", help="What Trade Hub last did with this invoice")
-        colcfg["When"] = st.column_config.TextColumn(
-            "When", width="small", help="When this invoice was last actioned")
-    if is_queue:
-        colcfg["Status"] = st.column_config.ImageColumn("Status", width="small",
-                                                        help="Matched or discrepancy")
-        colcfg["Invoice margin"] = st.column_config.NumberColumn(
-            format="%d%%", width="small",
-            help="Margin on THIS individual invoice (its own lines vs your ex-VAT sell price). "
-                 "Shows once the invoice has been checked.")
-        colcfg["vs Shopify"] = st.column_config.ImageColumn(
-            "vs Shopify", width="small", help="SKUs & quantities match the order")
-        colcfg["vs Pricelist"] = st.column_config.ImageColumn(
-            "vs Pricelist", width="small",
-            help="Green tick = all line prices checked and match the pricelist. Red cross = a "
-                 "price is wrong. Grey ? = couldn't check (no pricelist cost matched) — treat as "
-                 "a discrepancy to review, NOT a pass.")
-
-    df = pd.DataFrame(rows)
-    for c in ("Inv £", "Invoice margin", "Order margin", "Discount"):  # None → blank
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # Selection via a real checkbox column (st.data_editor) — ticks accumulate reliably and
-    # feel instant, unlike st.dataframe row-selection which could drop ticks on fast clicks.
-    # NOTHING runs on a tick; the user then presses "Check & open selected" to read/open them.
-    df.insert(0, "✓", False)
-    colcfg["✓"] = st.column_config.CheckboxColumn(
-        "Select", width="small", help="Tick invoices, then click Check & open selected below")
-    edited = st.data_editor(
-        df, hide_index=True, use_container_width=True, key=f"sel_{key}",
-        column_config=colcfg, disabled=[c for c in df.columns if c != "✓"])
-    ticks = edited["✓"] if "✓" in edited.columns else []
-    picked_ids = [fil[i]["sub_id"] for i in range(len(fil)) if bool(ticks.iloc[i])]
-    show_key = f"inv_show_{key}"
-
-    if picked_ids:
-        n_uncheck = sum(1 for sid in picked_ids if sid not in verdicts)
-        if n_uncheck:
-            lbl = f"Check & open selected ({len(picked_ids)})"
-            hlp = (f"{n_uncheck} not checked yet — reads those PDFs now "
-                   f"(~£{n_uncheck * 0.01:.2f}–£{n_uncheck * 0.04:.2f}). "
-                   "Already-checked ones are free (cached).")
-        else:
-            lbl = f"Open selected ({len(picked_ids)})"
-            hlp = "All selected are already checked — opening them is free (cached)."
-        c_open, c_push = st.columns(2)
-        if c_open.button(lbl, key=f"opensel_{key}", type="secondary", help=hlp,
-                         use_container_width=True):
-            # Run each check now (cached reads) so verdicts exist — the panels then open
-            # COLLAPSED with an accurate matched/discrepancy header, rather than all blowing
-            # open at once. The user opens the ones they want to inspect.
-            pidx = _pricelist_index()
-            sel_invs = [i for i in fil if i["sub_id"] in picked_ids and i.get("asset_id")]
-            pcache = st.session_state.setdefault("_inv_pdf_cache", {})
-            need = [iv for iv in sel_invs if iv["asset_id"] not in pcache]
-            with st.spinner(f"Checking {len(sel_invs)} invoice(s)…"):
-                if need:
-                    import concurrent.futures as _cf
-                    with _cf.ThreadPoolExecutor(max_workers=6) as _ex:
-                        for _aid, _p in _ex.map(
-                                lambda iv: (iv["asset_id"], _read_pdf_plain(iv["asset_id"])), need):
-                            pcache[_aid] = _p
-                for iv in sel_invs:
-                    parsed = pcache.get(iv["asset_id"])
-                    if parsed and not parsed.get("error"):
-                        _check_and_store(iv, parsed, lbsku, pidx)
-            st.session_state[show_key] = picked_ids
-            st.session_state.pop(f"sel_{key}", None)   # clear the ticks now they're opened
-            st.rerun()
-        # Direct push — check the selected and push matched ones to QB, no detail window needed.
-        pushpend = f"pushsel_pending_{key}"
-        if c_push.button(f"Check & push selected ({len(picked_ids)})", key=f"pushsel_{key}",
-                         type="primary", use_container_width=True,
-                         help="Checks the ticked invoices and pushes fully-matched ones straight "
-                              "to QuickBooks — no need to open each one."):
-            st.session_state[pushpend] = picked_ids
-        if st.session_state.get(pushpend):
-            ids = st.session_state[pushpend]
-            lo, hi = _thresholds()
-            st.warning(f"Check **{len(ids)}** selected invoice(s) and push the fully-matched ones "
-                       f"(order margin {lo:.0f}–{hi:.0f}%) straight to QuickBooks? Under {lo:.0f}% "
-                       f"are held as Matched, over {hi:.0f}% flagged, mismatches left for review. "
-                       "Already-checked reads are free.")
-            yc, nc = st.columns(2)
-            if yc.button(f"Yes — check & push {len(ids)}", key=f"pushselyes_{key}", type="primary",
-                         use_container_width=True):
-                st.session_state.pop(pushpend, None)
-                st.session_state.pop(f"sel_{key}", None)
-                sel_invs = [i for i in fil if i["sub_id"] in ids and i.get("asset_id")]
-                _bulk_check(sel_invs, lbsku)
-            if nc.button("Cancel", key=f"pushselno_{key}", use_container_width=True,
-                         on_click=_ss_pop, args=(pushpend,)):
-                pass
-    else:
-        st.caption("Tick invoices above, then **Check & push selected** to push matched ones "
-                   "straight to QuickBooks, or **Check & open selected** to review them first — "
-                   "nothing runs (or costs) until you press a button.")
-
-    show_ids = [sid for sid in st.session_state.get(show_key, [])
-                if any(i["sub_id"] == sid for i in fil)]  # drop any that left this queue
-
-    def _is_disc(sid):
-        v = verdicts.get(sid)
-        return bool(v) and not (v.get("order") and v.get("price"))
-
-    chosen = [i for i in fil if i["sub_id"] in show_ids]
-    flagged = [i for i in fil if is_queue and _is_disc(i["sub_id"]) and i["sub_id"] not in show_ids]
-    # Open a single pick for convenience; keep a batch of picks (and all flagged) CLOSED so
-    # the screen stays readable — the header tells you which is which; open what you want.
-    solo = len(chosen) == 1 and not flagged
-    review = [(i, solo) for i in chosen] + [(i, False) for i in flagged[:15]]
-
-    def _outcome_tag(inv):
-        v = verdicts.get(inv["sub_id"])
-        if not v:
-            return "▸ not checked yet — opens & checks (a few pence)"
-        if v.get("order") and v.get("price") is not False and v.get("incomplete"):
-            return "⏳ INCOMPLETE — expect another invoice (approvable)"
-        if v.get("order") and v.get("price") is True:
-            m = v.get("margin")
-            return f"✅ MATCHED — ready to approve{f' · {m}% margin' if m is not None else ''}"
-        if v.get("order") and v.get("price") is None:
-            return "❓ PRICE NOT CHECKED — review (no pricelist cost)"
-        return "⚠ DISCREPANCY — review"
-
-    if review:
-        st.markdown("##### Review — checked invoices (closed; open the ones you want)")
-        st.caption("Each line shows its result in the title: ✅ matched & ready to approve, "
-                   "⚠ discrepancy, or ❓ price couldn't be checked. Opening a checked one is free "
-                   "(cached 24h) — only an unchecked invoice or **Re-run check** uses the AI.")
-        for inv, expanded in review:
-            sid = inv["sub_id"]
-            # Keep the panel OPEN across reruns while you're mid-action inside it (drafting the
-            # email or confirming a delete), otherwise toggling the email collapses the box.
-            expanded = (expanded or bool(st.session_state.get(f"emailtog_{sid}"))
-                        or bool(st.session_state.get(f"delpend_{sid}")))
-            is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
-            mark = ("   ·   ⛔ DUPLICATE" if inv.get("_dup")
-                    else f"   ·   🧾×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
-            head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
-                    f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
-                    f"{mark}   —   {_outcome_tag(inv)}")
-            with st.expander(head, expanded=expanded):
-                _run_one_invoice(inv, lbsku)
-        if len(flagged) > 15:
-            st.caption(f"+{len(flagged) - 15} more discrepancies — filter by supplier to narrow.")
-
-        # Bulk-approve: push the checked, fully-matched invoices to QuickBooks together —
-        # no need to open each and click Push. Discrepancies and not-fully-checked ones are
-        # excluded (they need review first). Each is pre-ticked only if it's within the
-        # auto-push margin range; the rest are shown but left for you to tick deliberately.
-        pushable = [i for i in chosen
-                    if (verdicts.get(i["sub_id"]) or {}).get("order")
-                    and (verdicts.get(i["sub_id"]) or {}).get("price") is True]
-        if pushable:
-            st.markdown("---")
-            st.markdown("##### Approve matched invoices → push to QuickBooks in bulk")
-            for i in pushable:
-                sidp = i["sub_id"]
-                is_cn = isinstance(i.get("total"), (int, float)) and i["total"] < 0
-                om = i.get("order_margin_live")
-                _, action = _push_decision(True, is_cn, om, i.get("supplier"))
-                note = ("" if action == "push"
-                        else " — below target, review" if action == "hold"
-                        else " — margin high, review" if action == "flag" else "")
-                st.session_state.setdefault(f"pushpick_{key}_{sidp}", action == "push")
-                st.checkbox(
-                    f"{'CRN' if is_cn else 'INV'} {i.get('invoice_no')} · "
-                    f"{i.get('supplier') or '—'} · order {i.get('order_no') or '—'}"
-                    + (f" · order margin {om:.0f}%" if isinstance(om, (int, float)) else "")
-                    + note,
-                    key=f"pushpick_{key}_{sidp}")
-            ticked = [i for i in pushable if st.session_state.get(f"pushpick_{key}_{i['sub_id']}")]
-            pend = f"bulkpush_pending_{key}"
-            if st.button(f"Push {len(ticked)} to QuickBooks", key=f"bulkpushbtn_{key}",
-                         type="primary", disabled=not ticked):
-                st.session_state[pend] = [i["sub_id"] for i in ticked]
-            if st.session_state.get(pend):
-                ids = st.session_state[pend]
-                st.warning(f"Push **{len(ids)}** matched invoice(s) to QuickBooks? This marks each "
-                           "**Approved (To QB)** (credit notes → **CN Approved (To QB)**) on Monday.")
-                yc, nc = st.columns(2)
-                if yc.button("Yes — push to QuickBooks", key=f"bulkpushyes_{key}", type="primary",
-                             use_container_width=True):
-                    st.session_state.pop(pend, None)
-                    byid = {i["sub_id"]: i for i in pushable}
-                    ok = fail = 0
-                    prog = st.progress(0.0, text="Pushing to QuickBooks…")
-                    for n, sid in enumerate(ids, 1):
-                        inv2 = byid.get(sid)
-                        if inv2:
-                            is_cn2 = isinstance(inv2.get("total"), (int, float)) and inv2["total"] < 0
-                            lab = CN_APPROVED_QB_LABEL if is_cn2 else APPROVED_QB_LABEL
-                            try:
-                                data_sources.set_invoice_status(sid, lab)
-                                _incomplete_note_if_approved(sid, lab)
-                                ok += 1
-                            except Exception:  # noqa: BLE001
-                                fail += 1
-                        prog.progress(n / len(ids))
-                    goneset = st.session_state.setdefault("inv_gone", set())
-                    for sid in ids:
-                        goneset.add(str(sid))                # hide instantly, no refetch
-                        st.session_state.pop(f"pushpick_{key}_{sid}", None)
-                    for kk in ("review", "matched", "recent", "discrepancy"):
-                        st.session_state.pop(f"sel_{kk}", None)
-                    st.session_state["inv_flash"] = (
-                        f"Pushed {ok} invoice(s) to QuickBooks."
-                        + (f" {fail} failed — check Monday." if fail else ""))
-                    st.rerun()
-                if nc.button("Cancel", key=f"bulkpushno_{key}", use_container_width=True):
-                    st.session_state.pop(pend, None)
-                    st.rerun()
+    _invoice_grid(fil, key, is_queue, is_recent, lbsku, verdicts)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
