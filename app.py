@@ -2546,16 +2546,25 @@ def _run_one_invoice(inv, lbsku):
         f'{_esc(msg)}</div></div>', unsafe_allow_html=True)
     ca, cb, cc = st.columns(3)
     _sid, _no = inv["sub_id"], inv.get("invoice_no")
+    # The Push button is ALWAYS available for a fully-matched invoice, even when the margin is
+    # below the auto-push floor (rec == "hold"). Holding is only a *suggestion* — the final call
+    # is yours, so a matched invoice always gets the clear green Push button.
+    push_primary = rec == "push" or (matched and rec != "disc")
     ca.button("Push credit note to QB" if is_cn else "Push to QB",
               key=f"push_{_sid}", use_container_width=True,
-              type=("primary" if rec == "push" else "secondary"),
-              on_click=_queue_action, args=(_sid, push_label, _no))
+              type=("primary" if push_primary else "secondary"),
+              on_click=_queue_action, args=(_sid, push_label, _no),
+              help="Approves this invoice and pushes it to QuickBooks. Always available for a "
+                   "matched invoice — the HOLD/FLAG note above is only advice, not a lock.")
     cb.button("Mark Matched (hold)", key=f"matched_{_sid}", use_container_width=True,
               type=("primary" if rec == "hold" else "secondary"),
               on_click=_queue_action, args=(_sid, MATCHED_LABEL, _no))
     cc.button("Flag discrepancy", key=f"disc_{_sid}", use_container_width=True,
               type=("primary" if rec == "disc" else "secondary"),
               on_click=_flag_discrepancy, args=(_sid, _no, _discrepancy_reason(inv, res)))
+    if matched and rec != "push":
+        st.caption("↑ This invoice matches the order and pricelist, so you can **Push to QB** "
+                   "whenever you're happy with it — even if the margin note suggests holding.")
 
     # Chase the supplier by email (discrepancies only) — saves to Outlook Drafts.
     if res["n_issues"] > 0:
