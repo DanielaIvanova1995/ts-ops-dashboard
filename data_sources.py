@@ -1264,6 +1264,18 @@ def fetch_invoice_count(label_ids, cap: int = 2000, token: str | None = None) ->
     return {"count": n, "more": bool(cursor)}
 
 
+def _to_recipients(to_email: str) -> list:
+    """Split a 'a@x, b@y; c@z' recipient string into Graph toRecipients (dedup, order-kept)."""
+    import re as _re
+    seen, out = set(), []
+    for addr in _re.split(r"[;,]", to_email or ""):
+        addr = addr.strip()
+        if addr and addr.lower() not in seen:
+            seen.add(addr.lower())
+            out.append({"emailAddress": {"address": addr}})
+    return out
+
+
 def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
                         pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
                         token: str | None = None) -> bool:
@@ -1274,7 +1286,7 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
     if not (to_email or "").strip():
         raise RuntimeError("No recipient email address.")
     msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
-           "toRecipients": [{"emailAddress": {"address": to_email.strip()}}]}
+           "toRecipients": _to_recipients(to_email)}
     if pdf_url:
         # Best-effort attachment: if the PDF can't be fetched (expired link, auth),
         # still send the email rather than failing the whole chase.
@@ -1309,7 +1321,7 @@ def create_supplier_draft(mailbox: str, to_email: str, subject: str, body: str,
     if not (to_email or "").strip():
         raise RuntimeError("No recipient email address.")
     msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
-           "toRecipients": [{"emailAddress": {"address": to_email.strip()}}]}
+           "toRecipients": _to_recipients(to_email)}
     if pdf_url:
         try:  # best-effort attach — don't lose the draft over a bad PDF link
             pdf = requests.get(pdf_url, timeout=40)
@@ -1946,6 +1958,7 @@ def read_invoice_pdf(pdf_url: str) -> dict:
         "Read this supplier invoice carefully and extract the line items and totals. "
         "Reply with ONLY a JSON object, no other text:\n"
         '{"supplier":"...","invoice_no":"...","invoice_date":"YYYY-MM-DD",'
+        '"branch_email":"any contact/branch/depot email address printed on the invoice, or null",'
         '"lines":[{"sku":"the product/SKU code printed on the line","description":"...",'
         '"qty":<number>,"unit_price":<ex-VAT cost per unit>,"line_total":<ex-VAT line total>}],'
         '"carriage":<ex-VAT delivery/carriage/shipping/postage charge, or null>,'

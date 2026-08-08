@@ -1590,6 +1590,7 @@ SUPPLIER_EMAILS = {
     "pjh": "accounts@pjh.uk",
     "gap": "carrie.morris@gap.uk.com",
     "decor8": "amanda.clarkson@decor8northern.co.uk",   # Amanda Clarkson
+    "eurocell": "karla.turner@eurocell.co.uk",          # Karla Turner (+ branch email from invoice)
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
@@ -2766,8 +2767,14 @@ def _run_one_invoice(inv, lbsku):
         sub = inv["sub_id"]
         if st.toggle("Email the supplier about this", key=f"emailtog_{sub}"):
             subj0, body0 = _discrepancy_email(inv, res)
-            default_to = (SUPPLIER_EMAILS.get(_norm_code(inv.get("supplier")))
-                          or inv.get("supplier_email") or "")
+            _supn = _norm_code(inv.get("supplier"))
+            _mapped = SUPPLIER_EMAILS.get(_supn)
+            if _supn == "eurocell":
+                # Eurocell: the branch that raised the invoice + Karla Turner (area contact).
+                _branch = (parsed.get("branch_email") or inv.get("supplier_email") or "").strip()
+                default_to = ", ".join(dict.fromkeys([e for e in (_branch, _mapped) if e]))
+            else:
+                default_to = _mapped or inv.get("supplier_email") or ""
             st.session_state.setdefault(f"eto_{sub}", default_to)
             st.session_state.setdefault(f"esub_{sub}", subj0)
             st.session_state.setdefault(f"ebod_{sub}", body0)
