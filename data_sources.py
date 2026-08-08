@@ -388,6 +388,41 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     return out
 
 
+def fetch_order_fulfillment_split(order_id, token: str | None = None) -> dict:
+    """For orders split across suppliers (Shopify drop-ship), map each order line's SKU to the
+    name of the fulfilment LOCATION it's assigned to: {sku: location_name}. Empty dict if the
+    order isn't split, has no SKUs, or fulfilment orders can't be read (needs a Shopify token
+    with fulfilment/locations read scope). Raises on transport error (caller catches)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    query = ("query ($id: ID!) { order(id: $id) { fulfillmentOrders(first: 25) { edges { node { "
+             "assignedLocation { name } lineItems(first: 100) { edges { node { "
+             "lineItem { sku } } } } } } } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"id": gid}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    order = (payload.get("data") or {}).get("order") or {}
+    out = {}
+    for foe in ((order.get("fulfillmentOrders") or {}).get("edges") or []):
+        node = foe.get("node") or {}
+        loc = ((node.get("assignedLocation") or {}).get("name") or "").strip()
+        if not loc:
+            continue
+        for le in ((node.get("lineItems") or {}).get("edges") or []):
+            sku = (((le.get("node") or {}).get("lineItem") or {}).get("sku") or "").strip()
+            if sku:
+                out[sku] = loc
+    return out
+
+
 def shopify_variant_barcode(sku: str) -> str | None:
     """The product's barcode/EAN on Shopify (tries bare SKU then 'TSO' prefix),
     used to match the exact product at competitors. None if not found."""

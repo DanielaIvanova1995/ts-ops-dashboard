@@ -1082,6 +1082,24 @@ def _shopify_order_ship(order_id):
         return None
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _shopify_fulfillment_split(order_id):
+    """{norm_sku: fulfilment location name} for split (multi-supplier drop-ship) orders.
+    Empty if the order isn't split or fulfilment orders aren't readable."""
+    try:
+        raw = data_sources.fetch_order_fulfillment_split(order_id)
+        return {_norm_code(k): v for k, v in (raw or {}).items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _loc_matches_supplier(loc, supplier):
+    """Whether a Shopify fulfilment location name refers to this supplier (e.g. location
+    'Eurocell' ↔ supplier 'eurocell'). Substring both ways to tolerate 'Eurocell Dropship'."""
+    s = _norm_code(loc)
+    return bool(supplier) and bool(s) and (supplier in s or s in supplier)
+
+
 def _order_candidates(meta):
     """The order lines to check the invoice against. Prefers the LIVE Shopify order (the
     source of truth — Monday's cached order list can be stale or miss lines), and falls
@@ -1693,6 +1711,21 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     tidx = _supplier_title_index() if not no_pl else None
     cidx = _supplier_code_index() if not no_pl else None
     order = _order_candidates(meta)
+    # Split orders (Shopify drop-ship across suppliers, e.g. part Eurocell / part GAP): hold THIS
+    # invoice's supplier responsible ONLY for the lines assigned to its fulfilment location. Lines
+    # fulfilled by another supplier's location aren't 'missing' from this invoice, so they don't
+    # trigger a false under-delivery. Only filters when the order is genuinely split AND we can
+    # identify this supplier's location; otherwise the full order is used (safe fallback).
+    _sid = meta.get("shopify_order_id")
+    if _sid and order:
+        _fsplit = _shopify_fulfillment_split(_sid)
+        _locs = set(_fsplit.values())
+        if len(_locs) >= 2:
+            _sup_locs = {L for L in _locs if _loc_matches_supplier(L, supplier)}
+            if _sup_locs:
+                order = {k: v for k, v in order.items()
+                         if (_fsplit.get(_norm_code(v.get("sku"))) or _fsplit.get(k)) is None
+                         or (_fsplit.get(_norm_code(v.get("sku"))) or _fsplit.get(k)) in _sup_locs}
     parsed_lines = parsed.get("lines") or []
     # Carron & Ctie delivery is priced by the delivery postcode — fetch it once.
     carron_ship = (_shopify_order_ship(meta["shopify_order_id"])
