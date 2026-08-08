@@ -1602,6 +1602,11 @@ SUPPLIER_RULES = {
     "decor8": {"name": "Decor8", "push_min": 5.0},
 }
 
+# Suppliers that re-code the same product, so their invoice SKU often differs slightly from ours.
+# For these we match on the exact SKU FIRST, then fall back to a lenient name/code match (rather
+# than saying 'not on the order'). Decor8 is handled separately — it has no SKUs at all.
+LENIENT_NAME_SUPPLIERS = ("eurocell", "gap")
+
 
 # Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
 # (BT postcodes) £13 under £250 (free over). Priced on the delivery postcode, like Carron.
@@ -1902,33 +1907,52 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         _hit(pending[idx], k)
         pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} by "
                                                "product name (invoice SKU differs)"))
-    # Decor8 have NO SKUs, so a line is name-only — and it's essentially always on the order.
-    # Any Decor8 line still unmatched gets a lenient leftover pass: pair it to the remaining
-    # order line with the most shared words (a lower bar than the strict matcher, and common
-    # colour words are allowed to carry it), so we don't falsely say 'not on the order'.
-    if _is_decor8(supplier):
+    # Lenient leftover pass for suppliers whose invoice SKU often differs from ours: Decor8 (no
+    # SKUs at all) and Eurocell/GAP (they re-code the same product). Exact SKU is always tried
+    # FIRST (above); this only runs on what's left, pairing each still-unmatched invoice line to
+    # the remaining order line it most resembles — by shared distinctive product words OR a long
+    # shared SKU prefix — so we don't falsely say 'not on the order'.
+    if _is_decor8(supplier) or supplier in LENIENT_NAME_SUPPLIERS:
+        d8 = _is_decor8(supplier)
         lscored = []
         for idx in range(len(pending)):
             if idx in done:
                 continue
             dt = _title_tokens(pending[idx]["desc"])
+            isk = _norm_code(pending[idx].get("sku"))
             for k, v in order.items():
                 if k in hit:
                     continue
                 shared = dt & _title_tokens(v.get("name"))
-                # Needs a real shared WORD (4+ chars) — not just a size digit like '5' (5L vs
-                # 2.5L), which must never link two unrelated products. Total overlap ranks them
-                # so a shared size still decides between two same-family sizes.
-                if any(len(t) >= 4 for t in shared):
-                    lscored.append((len(shared), idx, k))
+                # Real shared WORDS (4+ chars) — not a size digit like '5' (5L vs 2.5L), which
+                # must never link two unrelated products.
+                longsh = [t for t in shared if len(t) >= 4]
+                # Code similarity: a long shared SKU prefix (SILILMNRO vs SILILMN...) or one code
+                # fully contained in the other. Strong, distinctive signal for re-coded products.
+                osk = _norm_code(v.get("sku"))
+                pfx = 0
+                if isk and osk:
+                    m = min(len(isk), len(osk))
+                    while pfx < m and isk[pfx] == osk[pfx]:
+                        pfx += 1
+                code_ok = pfx >= 5 or (isk and osk and min(len(isk), len(osk)) >= 5
+                                       and (isk in osk or osk in isk))
+                # Decor8 (no SKU): a single shared 4+ word is enough. Eurocell/GAP have SKUs, so
+                # ask for a stronger name signal (a 5+ word or two 4+ words) OR a code match.
+                name_ok = (bool(longsh) if d8
+                           else any(len(t) >= 5 for t in longsh) or len(longsh) >= 2)
+                if name_ok or code_ok:
+                    lscored.append((len(longsh) * 2 + pfx, idx, k))
         lscored.sort(key=lambda x: (-x[0], x[1]))
-        for ov, idx, k in lscored:
+        for _ov, idx, k in lscored:
             if idx in done or k in hit:
                 continue
             done.add(idx)
             _hit(pending[idx], k)
-            pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} by "
-                                                   "name (Decor8 — no SKU, so name-matched)"))
+            why = ("Decor8 — no SKU, so name-matched" if d8
+                   else "invoice SKU differs slightly — matched by product name/code")
+            pending[idx]["issues"].append(
+                ("name", f"matched to order line {order[k]['sku']} — {why}"))
     for idx, rec in enumerate(pending):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
