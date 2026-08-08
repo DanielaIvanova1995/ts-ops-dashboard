@@ -1396,17 +1396,24 @@ def _fmt_actioned(iso):
         return str(iso)[:16].replace("T", " ")
 
 
-def _push_decision(matched, is_cn, live_margin, supplier=None):
+def _push_decision(matched, is_cn, live_margin, supplier=None, has_discount=False):
     """(label, action) for a checked invoice. action: 'push' | 'hold' | 'flag' | None.
-    Supplier rules can override the push floor and the high-margin flag."""
+    Supplier rules can override the push floor (a lower floor when the customer used a discount
+    code), the high-margin flag, and whether a below-floor margin is held or flagged for review."""
     lo, hi = _thresholds()
     rule = SUPPLIER_RULES.get(_norm_code(supplier), {}) if supplier else {}
     lo = rule.get("push_min", lo)
+    if has_discount and rule.get("push_min_discount") is not None:
+        lo = rule["push_min_discount"]       # customer used a discount code → lower floor allowed
     flag_high = rule.get("flag_high", True)
     if not matched:
         return None, None
     if live_margin is None or live_margin < lo:
-        return MATCHED_LABEL, "hold"          # low / unknown margin → hold for review
+        # Below the floor: most suppliers hold as Matched for review; some (Toolbank) want it
+        # left in Needs Review as a discrepancy to check rather than silently held.
+        if rule.get("flag_below"):
+            return DISCREPANCY_LABEL, "flag"
+        return MATCHED_LABEL, "hold"
     if flag_high and live_margin > hi:
         return DISCREPANCY_LABEL, "flag"      # suspiciously high → flag for review
     return (CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL), "push"
@@ -1682,9 +1689,19 @@ SUPPLIER_EMAILS = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 10.0, "flag_high": False},
-    # Decor8 auto-approve floor is 5% (everyone else — incl. Toolbank — is the 10% default).
+    # Decor8 auto-approve floor is 5%.
     "decor8": {"name": "Decor8", "push_min": 5.0},
+    # Toolbank: no agreed delivery rate, so the ORDER MARGIN is the safeguard. Approve a matched
+    # invoice (right products at the right prices) when order margin ≥ 12% — or ≥ 8% if the
+    # customer used a discount code. Below that → leave for review (don't silently hold), and
+    # don't flag a high margin (approve at 12%+ regardless of ceiling).
+    "toolbank": {"name": "Toolbank", "push_min": 12.0, "push_min_discount": 8.0,
+                 "flag_high": False, "flag_below": True},
 }
+
+
+def _is_toolbank(supplier):
+    return (supplier or "").startswith("toolbank")
 
 # Suppliers that re-code the same product, so their invoice SKU often differs slightly from ours.
 # For these we match on the exact SKU FIRST, then fall back to a lenient name/code match (rather
@@ -1875,6 +1892,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 elif _is_jbkind(supplier):
                     dissues.append(("name", f"delivery £{amt:,.2f} — JB Kind POA postcode / door "
                                             "count unclear; not auto-checked"))
+                elif _is_toolbank(supplier):
+                    dissues.append(("name", f"delivery £{amt:,.2f} — Toolbank (no set rate; "
+                                            "checked via the order margin instead)"))
                 else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
@@ -1995,6 +2015,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         elif _is_jbkind(supplier):
             cissues.append(("name", f"carriage £{carriage:,.2f} — JB Kind POA postcode / door "
                                     "count unclear; not auto-checked"))
+        elif _is_toolbank(supplier):
+            cissues.append(("name", f"carriage £{carriage:,.2f} — Toolbank (no set rate; "
+                                    "checked via the order margin instead)"))
         elif not _is_carron(supplier):
             cissues.append(("delivery", f"carriage £{carriage:,.2f} — no agreed rate on file"))
         lines.append({"sku": "Carriage", "desc": "Carriage (from invoice totals)", "qty": None,
@@ -2782,17 +2805,27 @@ def _run_one_invoice(inv, lbsku):
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     push_label = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
     rule = SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {})
+    has_disc = bool(inv.get("_discount"))
     lo = rule.get("push_min", _thresholds()[0])
+    if has_disc and rule.get("push_min_discount") is not None:
+        lo = rule["push_min_discount"]
     hi = _thresholds()[1]
-    _label, action = _push_decision(matched, is_cn, live, inv.get("supplier"))
+    _label, action = _push_decision(matched, is_cn, live, inv.get("supplier"),
+                                    has_discount=has_disc)
     livetxt = f"{live:.1f}%" if live is not None else "—"
+    disc_note = (" (discount code used → floor lowered)"
+                 if has_disc and rule.get("push_min_discount") is not None else "")
     if action == "push":
         rec, head, col = "push", "READY TO APPROVE", "#16a34a"
         msg = f"Fully matched and order margin {livetxt} — ready to push to QuickBooks."
-    elif action == "flag":
+    elif action == "flag" and live is not None and live > hi:
         rec, head, col = "disc", "FLAG — CHECK FIRST", "#dc2626"
         msg = (f"Matched, but order margin {livetxt} is unusually high (>{hi:.0f}%) — likely a "
                "missing invoice or credit note. Flag it and check before pushing.")
+    elif action == "flag":
+        rec, head, col = "disc", "REVIEW — BELOW MARGIN", "#dc2626"
+        msg = (f"Matched, but order margin {livetxt} is below the {lo:.0f}% floor{disc_note} — "
+               "review as a discrepancy before approving.")
     elif action == "hold":
         rec, head, col = "hold", "HOLD — REVIEW", "#ea580c"
         if rule.get("no_pricelist"):
@@ -3199,7 +3232,7 @@ def _bulk_check(invs, lbsku):
         matched = res["n_issues"] == 0 and v.get("order") is not False   # reconciled over → not matched
         is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
         label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
-                                       inv.get("supplier"))
+                                       inv.get("supplier"), has_discount=bool(inv.get("_discount")))
         if action in ("push", "hold"):
             try:
                 data_sources.set_invoice_status(inv["sub_id"], label)
