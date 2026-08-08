@@ -1525,7 +1525,72 @@ DELIVERY_CHARGES = {
     # Chase Hardware: £5 under 2kg, £10 above — but we don't hold weights yet, so accept either
     # (flat £10 ceiling = anything up to £10 passes; only >£10 flags). Tighten once we have weights.
     "chasehardware": {"name": "Chase Hardware", "flat": 10.0},
+    # JB Kind delivery is by NUMBER OF DOORS, not goods value — handled separately below.
 }
+
+# --- JB Kind: delivery priced by the number of DOORS in the consignment (ex-VAT). Each split
+# delivery is a separate consignment priced on its own door count, so this works per-invoice.
+# Ironmongery-only delivery is £15. Excluded (POA) postcodes can't be priced. From May 2026.
+JBKIND_DOOR_DELIVERY = {1: 42.0, 2: 47.0, 3: 52.0, 4: 57.0}     # 5+ doors → £62
+JBKIND_5PLUS = 62.0
+JBKIND_IRONMONGERY = 15.0
+# JB Kind lines that are NOT a door (so they don't inflate the door count).
+_JBKIND_IRONMONGERY_WORDS = (
+    "hinge", "handle", "latch", "knob", "pull", "bolt", "escutcheon", "spindle", "screw",
+    "fixing", "lock", "catch", "stay", "hook", "numeral", "letterplate", "letter plate",
+    "doorstop", "door stop", "tubular", "mortice", "cylinder", "keep", "strike", "ironmongery")
+# POA (price-on-application) postcode areas + district ranges — delivery not in standard pricing.
+_JBKIND_EXCLUDED_AREAS = {"BT", "GY", "HS", "IM", "IV", "JE", "KW", "ZE"}
+_JBKIND_EXCLUDED_RANGES = {"KA": (27, 28), "PA": (20, 80), "PH": (39, 44),
+                           "PO": (30, 41), "TR": (21, 25)}
+
+
+def _is_jbkind(supplier):
+    return (supplier or "").startswith("jbkind")
+
+
+def _jbkind_excluded(ship):
+    """True if the delivery postcode is a JB Kind POA (excluded) area — can't be priced."""
+    pc = ((ship or {}).get("postcode") or "").upper().strip()
+    m = re.match(r"([A-Z]{1,2})(\d{1,2})", pc)
+    if not m:
+        return False
+    area, dist = m.group(1), int(m.group(2))
+    if area in _JBKIND_EXCLUDED_AREAS:
+        return True
+    if area in _JBKIND_EXCLUDED_RANGES:
+        lo, hi = _JBKIND_EXCLUDED_RANGES[area]
+        return lo <= dist <= hi
+    return False
+
+
+def _jbkind_doors(lines):
+    """(door_count, has_ironmongery) on the invoice. Doors = total qty of product lines that
+    aren't ironmongery/carriage; ironmongery lines are counted separately (for the £15 rate)."""
+    doors, iron = 0, False
+    for l in (lines or []):
+        s, d = l.get("sku") or "", l.get("description") or ""
+        if _is_delivery(s) or _is_delivery(d) or _is_surcharge(s) or _is_surcharge(d):
+            continue
+        q = l.get("qty") if isinstance(l.get("qty"), (int, float)) else 1
+        if any(w in d.lower() for w in _JBKIND_IRONMONGERY_WORDS):
+            iron = True
+        else:
+            doors += q
+    return int(round(doors)), iron
+
+
+def _jbkind_expected(lines, ship=None):
+    """Expected ex-VAT JB Kind carriage from the door count. None = POA postcode or can't tell
+    (so the caller leaves it as an un-checked note rather than a false discrepancy)."""
+    if ship and _jbkind_excluded(ship):
+        return None
+    doors, iron = _jbkind_doors(lines)
+    if doors <= 0:
+        return JBKIND_IRONMONGERY if iron else None
+    if doors >= 5:
+        return JBKIND_5PLUS
+    return JBKIND_DOOR_DELIVERY.get(doors)
 
 # Decor8 don't give us a cost pricelist — they invoice at ~12% OFF OUR OWN sell price. So we
 # check what we paid per unit ≈ (our ex-VAT Shopify sell price − 12%), rather than vs a cost.
@@ -1648,13 +1713,16 @@ def _ctie_expected(goods_value, ship):
     return rule["flat"]
 
 
-def _expected_delivery(supplier, goods_value, ship=None):
-    """Expected (max legitimate) ex-VAT delivery charge for a supplier given the order's
-    goods value (and, for Carron/Ctie, the delivery address). None if no rule on file."""
+def _expected_delivery(supplier, goods_value, ship=None, lines=None):
+    """Expected (max legitimate) ex-VAT delivery charge for a supplier given the order's goods
+    value (Carron/Ctie use the delivery address; JB Kind uses the door count from `lines`).
+    None if no rule on file / can't be priced."""
     if _is_carron(supplier):
         return _carron_expected(goods_value, ship)
     if _is_ctie(supplier):
         return _ctie_expected(goods_value, ship)
+    if _is_jbkind(supplier):
+        return _jbkind_expected(lines, ship)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
@@ -1729,7 +1797,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     parsed_lines = parsed.get("lines") or []
     # Carron & Ctie delivery is priced by the delivery postcode — fetch it once.
     carron_ship = (_shopify_order_ship(meta["shopify_order_id"])
-                   if (_is_carron(supplier) or _is_ctie(supplier))
+                   if (_is_carron(supplier) or _is_ctie(supplier) or _is_jbkind(supplier))
                    and meta.get("shopify_order_id") else None)
 
     def _line_total(l):
@@ -1789,8 +1857,11 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         # Delivery / carriage line — check against the supplier's expected charge.
         if _is_delivery(sku_raw) or _is_delivery(desc):
             saw_delivery = True
-            known = _expected_delivery(supplier, delivery_goods, carron_ship)
+            known = _expected_delivery(supplier, delivery_goods, carron_ship, parsed_lines)
             zinfo = f" ({_carron_zone_label(carron_ship)})" if _is_carron(supplier) else ""
+            if _is_jbkind(supplier):
+                _dn, _ = _jbkind_doors(parsed_lines)
+                zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
             if isinstance(amt, (int, float)):
@@ -1801,6 +1872,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 elif _is_carron(supplier):
                     dissues.append(("delivery", f"delivery £{amt:,.2f} —{zinfo} rate is TBC, "
                                                 "can't check"))
+                elif _is_jbkind(supplier):
+                    dissues.append(("name", f"delivery £{amt:,.2f} — JB Kind POA postcode / door "
+                                            "count unclear; not auto-checked"))
                 else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
@@ -1908,13 +1982,19 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     # seen above (avoid double-counting).
     carriage = parsed.get("carriage")
     if isinstance(carriage, (int, float)) and carriage > tol and not saw_delivery:
-        known = _expected_delivery(supplier, delivery_goods, carron_ship)
+        known = _expected_delivery(supplier, delivery_goods, carron_ship, parsed_lines)
         cissues = []
         if known is not None:
             if carriage > known + tol:
                 zinfo = f" ({_carron_zone_label(carron_ship)})" if _is_carron(supplier) else ""
+                if _is_jbkind(supplier):
+                    _dn, _ = _jbkind_doors(parsed_lines)
+                    zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
                 cissues.append(("delivery", f"carriage £{carriage:,.2f} vs expected "
                                             f"£{known:,.2f}{zinfo}"))
+        elif _is_jbkind(supplier):
+            cissues.append(("name", f"carriage £{carriage:,.2f} — JB Kind POA postcode / door "
+                                    "count unclear; not auto-checked"))
         elif not _is_carron(supplier):
             cissues.append(("delivery", f"carriage £{carriage:,.2f} — no agreed rate on file"))
         lines.append({"sku": "Carriage", "desc": "Carriage (from invoice totals)", "qty": None,
