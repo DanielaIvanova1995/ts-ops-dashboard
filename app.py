@@ -1689,7 +1689,7 @@ SUPPLIER_RULES = {
 # Suppliers that re-code the same product, so their invoice SKU often differs slightly from ours.
 # For these we match on the exact SKU FIRST, then fall back to a lenient name/code match (rather
 # than saying 'not on the order'). Decor8 is handled separately — it has no SKUs at all.
-LENIENT_NAME_SUPPLIERS = ("eurocell", "gap")
+LENIENT_NAME_SUPPLIERS = ("eurocell", "gap", "jbkind")
 
 
 # Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
