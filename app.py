@@ -1599,6 +1599,38 @@ def _jbkind_expected(lines, ship=None):
         return JBKIND_5PLUS
     return JBKIND_DOOR_DELIVERY.get(doors)
 
+
+# --- Southern Sheeting: delivery priced by the delivery postcode's colour ZONE (ex-VAT):
+# White/Purple £50, Blue £80, Green/Orange £115. The full postcode→zone map (1,469 outward
+# codes) is bundled as southern_zones.json {outward: £}. We hold the MAX zone price per postcode
+# across their product sheets, so charging that or LESS is fine — only an over-charge flags.
+@st.cache_data(show_spinner=False)
+def _southern_zones():
+    try:
+        with open(BASE / "southern_zones.json", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _is_southern(supplier):
+    return (supplier or "").startswith("southern")
+
+
+def _southern_expected(ship):
+    """Expected (max legit) ex-VAT Southern Sheeting carriage for the delivery postcode's zone.
+    None if the postcode isn't in their zone list (then it's noted, not flagged)."""
+    pc = ((ship or {}).get("postcode") or "").upper().strip()
+    if not pc:
+        return None
+    if " " in pc:                       # 'AL1 2BC' → outward 'AL1'
+        outward = pc.split(" ")[0]
+    elif len(pc) > 3:                    # 'AL12BC' → drop the 3-char inward code
+        outward = pc[:-3]
+    else:
+        outward = pc
+    return _southern_zones().get(outward.strip())
+
 # Decor8 don't give us a cost pricelist — they invoice at ~12% OFF OUR OWN sell price. So we
 # check what we paid per unit ≈ (our ex-VAT Shopify sell price − 12%), rather than vs a cost.
 DECOR8_DISCOUNT = 0.12       # expected discount off our own price
@@ -1740,6 +1772,8 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         return _ctie_expected(goods_value, ship)
     if _is_jbkind(supplier):
         return _jbkind_expected(lines, ship)
+    if _is_southern(supplier):
+        return _southern_expected(ship)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
@@ -1814,7 +1848,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     parsed_lines = parsed.get("lines") or []
     # Carron & Ctie delivery is priced by the delivery postcode — fetch it once.
     carron_ship = (_shopify_order_ship(meta["shopify_order_id"])
-                   if (_is_carron(supplier) or _is_ctie(supplier) or _is_jbkind(supplier))
+                   if (_is_carron(supplier) or _is_ctie(supplier) or _is_jbkind(supplier)
+                       or _is_southern(supplier))
                    and meta.get("shopify_order_id") else None)
 
     def _line_total(l):
@@ -1879,6 +1914,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             if _is_jbkind(supplier):
                 _dn, _ = _jbkind_doors(parsed_lines)
                 zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
+            elif _is_southern(supplier) and known is not None:
+                zinfo = f" ({(carron_ship or {}).get('postcode', '')} zone)"
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
             if isinstance(amt, (int, float)):
@@ -1895,6 +1932,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 elif _is_toolbank(supplier):
                     dissues.append(("name", f"delivery £{amt:,.2f} — Toolbank (no set rate; "
                                             "checked via the order margin instead)"))
+                elif _is_southern(supplier):
+                    dissues.append(("name", f"delivery £{amt:,.2f} — Southern Sheeting postcode "
+                                            "not in the zone list; not auto-checked"))
                 else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
@@ -2010,6 +2050,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 if _is_jbkind(supplier):
                     _dn, _ = _jbkind_doors(parsed_lines)
                     zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
+                elif _is_southern(supplier):
+                    zinfo = f" ({(carron_ship or {}).get('postcode', '')} zone)"
                 cissues.append(("delivery", f"carriage £{carriage:,.2f} vs expected "
                                             f"£{known:,.2f}{zinfo}"))
         elif _is_jbkind(supplier):
@@ -2018,6 +2060,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         elif _is_toolbank(supplier):
             cissues.append(("name", f"carriage £{carriage:,.2f} — Toolbank (no set rate; "
                                     "checked via the order margin instead)"))
+        elif _is_southern(supplier):
+            cissues.append(("name", f"carriage £{carriage:,.2f} — Southern Sheeting postcode "
+                                    "not in the zone list; not auto-checked"))
         elif not _is_carron(supplier):
             cissues.append(("delivery", f"carriage £{carriage:,.2f} — no agreed rate on file"))
         lines.append({"sku": "Carriage", "desc": "Carriage (from invoice totals)", "qty": None,
