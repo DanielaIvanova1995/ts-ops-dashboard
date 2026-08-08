@@ -1933,17 +1933,24 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
 
-    # Quantity check on the TOTAL invoiced per order line — a product split across two
-    # invoice lines that sums to the ordered qty is NOT flagged. One note per order line.
+    # Quantity check on the TOTAL invoiced per order line. A product split across invoice lines
+    # that sums to the ordered qty is fine. A SHORTFALL (invoiced < ordered) is NOT a discrepancy
+    # on its own — the rest may be on the order's other invoice(s); it's recorded in `short` and
+    # reconciled across the order's invoices later. Only an OVER-invoice (invoiced > ordered) on a
+    # single invoice is a hard quantity discrepancy here. One note per order line.
+    short = {}   # order key → (invoiced_here, ordered)  when this invoice is short on that line
     for k in hit:
         exp, tot = order[k]["qty"], inv_qty.get(k)
         if exp is None or tot is None or int(round(tot)) == exp:
             continue
         recs = [r for r in lines if r.get("_okey") == k]
-        if recs:
-            td = int(tot) if float(tot).is_integer() else tot
-            extra = f" (across {len(recs)} invoice lines)" if len(recs) > 1 else ""
-            recs[0]["issues"].append(("qty", f"invoiced {td}{extra} vs order {exp}"))
+        td = int(tot) if float(tot).is_integer() else tot
+        if tot > exp:                                    # over-invoiced → real discrepancy
+            if recs:
+                extra = f" (across {len(recs)} invoice lines)" if len(recs) > 1 else ""
+                recs[0]["issues"].append(("qty", f"invoiced {td}{extra} vs order {exp}"))
+        else:                                            # short → reconcile across invoices
+            short[k] = (tot, exp)
 
     # Decor8 price check (deferred): they have no SKUs/cost pricelist, so use OUR OWN price —
     # the ex-VAT line price from the Shopify order line they matched by NAME — less ~12%. Also
@@ -1974,13 +1981,16 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                                                  "has no price to compare"))
 
     missing = [order[s]["sku"] for s in order if s not in hit]
-    # Items on the order but not on THIS invoice don't make it a discrepancy — they're expected
-    # on the order's other invoice(s). We call it an INCOMPLETE (not failed) invoice: still
-    # approvable, with a note to expect another. 'name' notes are informational.
+    # Items on the order but not on THIS invoice (or short on it) don't make it a discrepancy —
+    # they're expected on the order's other invoice(s). We call it an INCOMPLETE (not failed)
+    # invoice: still approvable, reconciled across the order's invoices. 'name' notes are info.
     n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name")   # missing NOT counted
-    incomplete = bool(missing) and n_issues == 0        # own lines all fine, just missing items
+    incomplete = (bool(missing) or bool(short)) and n_issues == 0   # under (missing/short), else fine
     return {"lines": lines, "missing": missing, "n_issues": n_issues, "incomplete": incomplete,
-            "covered": set(hit), "order_map": {s: order[s]["sku"] for s in order}}
+            "covered": set(hit), "order_map": {s: order[s]["sku"] for s in order},
+            "inv_qty": {k: inv_qty.get(k) for k in hit},          # invoiced qty per line, THIS invoice
+            "ord_qty": {s: order[s].get("qty") for s in order},   # ordered qty per order line
+            "short": short}
 
 
 def _verdict(res):
@@ -2007,13 +2017,76 @@ def _check_and_store(inv, parsed, lbsku, pidx):
     v["margin"] = round(om["margin"]) if om else None
     v["missing"] = res.get("missing") or []          # for the incomplete-invoice note on Monday
     st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = v
-    # Record which order lines THIS invoice covers, keyed by order — so multiple invoices for
-    # one order build up a combined picture of what's been invoiced (no re-parsing needed).
+    # Record what THIS invoice covers of the order — covered lines AND invoiced quantity per line —
+    # keyed by order, so the order's invoices build a combined picture with no re-parsing.
     if inv.get("order_no"):
-        st.session_state.setdefault("inv_cov", {}).setdefault(
-            inv["order_no"], {})[inv["sub_id"]] = (res.get("covered") or set(),
-                                                   res.get("order_map") or {})
+        st.session_state.setdefault("inv_cov", {}).setdefault(inv["order_no"], {})[inv["sub_id"]] = {
+            "covered": res.get("covered") or set(),
+            "omap": res.get("order_map") or {},
+            "inv_qty": res.get("inv_qty") or {},
+            "ord_qty": res.get("ord_qty") or {},
+            "n": inv.get("n_invoices") or 1,
+        }
+        _reconcile_and_adjust(inv["order_no"])
     return res, om
+
+
+def _order_reconcile(order_no):
+    """Aggregate invoiced quantity per order line across the order's CHECKED invoices.
+    Returns (status, detail) where status is 'exact' | 'under' | 'over' | 'none', and detail is
+    {line_key: {"sku", "ordered", "invoiced", "short"}}. 'over' = some line invoiced beyond the
+    order across invoices (a real discrepancy); 'exact' = every line met; 'under' = still short."""
+    cov = st.session_state.get("inv_cov", {}).get(order_no, {})
+    if not cov:
+        return "none", {}
+    agg, ordq, skus = {}, {}, {}
+    for rec in cov.values():
+        for k, m in (rec.get("omap") or {}).items():
+            skus[k] = m
+        for k, q in (rec.get("inv_qty") or {}).items():
+            if q is not None:
+                agg[k] = agg.get(k, 0) + q
+        for k, q in (rec.get("ord_qty") or {}).items():
+            if q is not None:
+                ordq[k] = q
+    detail = {}
+    over = under = False
+    for k, oq in ordq.items():
+        iv = agg.get(k, 0)
+        detail[k] = {"sku": skus.get(k, k), "ordered": oq, "invoiced": iv,
+                     "short": max(0, oq - iv)}
+        if iv > oq + 0.001:
+            over = True
+        elif int(round(iv)) < oq:
+            under = True
+    status = "over" if over else ("under" if under else "exact")
+    return status, detail
+
+
+def _reconcile_and_adjust(order_no):
+    """After (re)checking an invoice on a multi-invoice order, reconcile the whole order and
+    update every checked invoice's verdict: over→discrepancy, exact→matched, under→approvable."""
+    status, _detail = _order_reconcile(order_no)
+    cov = st.session_state.get("inv_cov", {}).get(order_no, {})
+    verds = st.session_state.get("inv_verdict", {})
+    for sid in cov:
+        v = verds.get(sid)
+        if not v or v.get("price") is False:
+            continue                     # a price/charge problem is a discrepancy regardless
+        # A line genuinely not on the order (notorder) or over-invoiced on THIS invoice already
+        # set order=False in _verdict; only relax/adjust the quantity picture here.
+        if status == "over":
+            v["order"] = False
+            v["reconciled"] = False
+            v["under"] = False
+        elif status == "exact":
+            v["reconciled"] = True
+            v["under"] = False
+            v["incomplete"] = False
+        elif status == "under":
+            v["reconciled"] = False
+            v["under"] = True
+    return status
 
 
 # Professional inline SVG icons (no emojis) for the Invoice Check views.
@@ -2068,6 +2141,28 @@ def _inv_inline(name, size=18):
 
 
 SUPPLIER_FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"  # supplier chases sent from here
+HELLO_MAILBOX = "hello@tradesuperstoreonline.co.uk"            # internal team inbox (chase deliveries)
+
+
+def _underdelivery_email(inv, rec_detail, n_total):
+    """Internal note to the team (hello@) that an order has been under-delivered so far, listing
+    what's still outstanding, so they can chase the supplier for the rest."""
+    onum = inv.get("order_no") or "?"
+    sup = inv.get("supplier") or "the supplier"
+    shorts = [d for d in rec_detail.values() if d["short"] > 0]
+    body = [f"Order {onum} ({sup}) has been under-delivered so far."]
+    if n_total >= 2:
+        body.append(f"This is a further delivery — {n_total} invoices have come in for this order "
+                    "and together they are still short of what was ordered:")
+    else:
+        body.append("This invoice covers fewer items than were ordered:")
+    body.append("")
+    for d in shorts:
+        body.append(f"  - {d['sku']}: ordered {d['ordered']}, invoiced "
+                    f"{int(round(d['invoiced']))} so far, {d['short']} still to come")
+    body.append("")
+    body.append(f"Please chase {sup} for the outstanding items.")
+    return f"Order {onum} under-delivered — please chase {sup}", "\n".join(body)
 
 
 def _expected_credit(res):
@@ -2463,46 +2558,51 @@ def _run_one_invoice(inv, lbsku):
     onum = inv.get("order_no") or "?"
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
     missing = res.get("missing") or []
+    short = res.get("short") or {}
+    n_total = inv.get("n_invoices") or 1
     qtxt = (f"{len(qmiss)} invoice line{'s' if len(qmiss) != 1 else ''} "
-            f"{'do not' if len(qmiss) != 1 else 'does not'} match the order (wrong item or quantity)")
-
+            f"{'do not' if len(qmiss) != 1 else 'does not'} match the order (wrong item or over-quantity)")
     miss_str = ", ".join(missing)
-    if not qmiss and not missing:
-        oc = ("Order check", "Match", "#16a34a", "check",
-              f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
-    elif qmiss:
-        # A genuine mismatch (wrong item / quantity) — this IS a red discrepancy.
+
+    # Reconcile invoiced quantities across ALL of the order's checked invoices (split deliveries).
+    rec_status, rec_detail = _order_reconcile(onum)
+    still_short = [f"{d['sku']} (invoiced {int(round(d['invoiced']))} of {d['ordered']})"
+                   for d in rec_detail.values() if d["short"] > 0]
+
+    if qmiss:
+        # Wrong item, or over-invoiced on THIS invoice → a real discrepancy.
         parts = [qtxt]
         if missing:
             parts.append(f"{len(missing)} ordered item{'s' if len(missing) != 1 else ''} not on "
                          f"this invoice ({miss_str})")
         oc = ("Order check", "Review", "#dc2626", "warn", f"Order {onum}: " + "; ".join(parts) + ".")
+    elif rec_status == "over":
+        # Across the order's invoices you've been billed for MORE than was ordered.
+        overs = [f"{d['sku']} (invoiced {int(round(d['invoiced']))} vs order {d['ordered']})"
+                 for d in rec_detail.values() if d["invoiced"] > d["ordered"] + 0.001]
+        oc = ("Order check", "Over-invoiced across invoices", "#dc2626", "warn",
+              f"Order {onum}: across its {n_total} invoices you've been invoiced MORE than ordered "
+              f"— {', '.join(overs)}. Review.")
+    elif not missing and not short:
+        oc = ("Order check", "Match", "#16a34a", "check",
+              f"All {len(order)} order line(s) match order {onum} on SKU & quantity.")
+    elif rec_status == "exact":
+        # Missing/short on THIS invoice, but the order's invoices TOGETHER cover it exactly.
+        oc = ("Order check", "Complete across invoices", "#16a34a", "check",
+              f"This invoice is partial, but ALL of order {onum}'s items and quantities are "
+              f"invoiced across its {n_total} invoices — reconciled, fine to approve.")
     else:
-        # INCOMPLETE (only missing items) — never red. Aggregate coverage across the order's
-        # checked invoices to say whether the rest are already invoiced, still to come, or if
-        # this is the only invoice so far.
-        cov = st.session_state.get("inv_cov", {}).get(onum, {})
-        total = set().union(*[c for c, _ in cov.values()]) if cov else set(res.get("covered") or [])
-        omap = dict(res.get("order_map") or {})
-        for _c, m in cov.values():
-            omap.update(m)
-        not_yet = [sku for k, sku in omap.items() if k not in total]
-        n_total = inv.get("n_invoices") or 1
-        head = (f"Incomplete invoice — {len(missing)} ordered item{'s' if len(missing) != 1 else ''} "
-                f"not on this one ({miss_str}).")
-        if not not_yet:
-            oc = ("Order check", "Complete across invoices", "#16a34a", "check",
-                  f"{head} ✅ but ALL {len(omap)} of order {onum}'s items are invoiced across its "
-                  f"{n_total} invoices.")
-        elif n_total >= 2:
-            oc = ("Order check", "Incomplete — more to come", "#ea580c", "invoice",
-                  f"{head} Order {onum} has {n_total} invoices; {len(not_yet)} item(s) not on any "
-                  f"you've checked yet ({', '.join(not_yet)}) — check the order's other invoice(s). "
-                  "Otherwise fine to approve (expect the rest).")
+        # UNDER-delivered — nothing wrong, just short of the order (email hello@ to chase).
+        sh = "; ".join(still_short) if still_short else (miss_str or "some items")
+        if n_total >= 2:
+            oc = ("Order check", "Under-delivered (reconciled)", "#ea580c", "invoice",
+                  f"Order {onum}'s {n_total} invoices together are still SHORT of the order — {sh}. "
+                  "Nothing over-invoiced or wrong, so approvable; email hello@ so the team can chase "
+                  "the rest (this is a further delivery).")
         else:
-            oc = ("Order check", "Incomplete — expect another", "#ea580c", "invoice",
-                  f"{head} No other invoice exists yet for order {onum} — approve and expect a "
-                  "further invoice for the rest.")
+            oc = ("Order check", "Under-delivered — chase rest", "#ea580c", "invoice",
+                  f"This invoice is short of order {onum} — {sh}. Prices are right, so approve for "
+                  "what's been delivered and email hello@ so the team can chase the rest.")
 
     sup = inv.get("supplier") or "supplier"
     is_d8 = _is_decor8(_norm_code(inv.get("supplier")))
@@ -2594,6 +2694,48 @@ def _run_one_invoice(inv, lbsku):
     if matched and rec != "push":
         st.caption("↑ This invoice matches the order and pricelist, so you can **Push to QB** "
                    "whenever you're happy with it — even if the margin note suggests holding.")
+
+    # Under-delivered order → tell the team (hello@) to chase the rest. Not a supplier query,
+    # and it does NOT flag the invoice — the invoice stays approvable.
+    if rec_status == "under":
+        subh = inv["sub_id"]
+        if st.toggle("Email hello@ that this order is under-delivered (chase the rest)",
+                     key=f"udtog_{subh}"):
+            usubj, ubody = _underdelivery_email(inv, rec_detail, n_total)
+            st.session_state.setdefault(f"udto_{subh}", HELLO_MAILBOX)
+            st.session_state.setdefault(f"udsub_{subh}", usubj)
+            st.session_state.setdefault(f"udbod_{subh}", ubody)
+            st.text_input("To", key=f"udto_{subh}")
+            st.text_input("Subject", key=f"udsub_{subh}")
+            st.text_area("Message", key=f"udbod_{subh}", height=200)
+            st.caption(f"Sends from {SUPPLIER_FROM_MAILBOX} to the team so they can chase the "
+                       "outstanding items. Falls back to a draft if sending isn't enabled yet. "
+                       "This does NOT flag the invoice — it stays approvable.")
+            if st.button("Send to hello@", key=f"udsend_{subh}", type="primary",
+                         disabled=not st.session_state.get(f"udto_{subh}", "").strip()):
+                to = st.session_state[f"udto_{subh}"].strip()
+                subj, body = st.session_state[f"udsub_{subh}"], st.session_state[f"udbod_{subh}"]
+                pdf_url = (data_sources.monday_asset_url(inv["asset_id"])
+                           if inv.get("asset_id") else None)
+                sent = drafted = False
+                dlink = None
+                try:
+                    data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, to, subj, body,
+                                                     pdf_url=pdf_url)
+                    sent = True
+                except Exception:  # noqa: BLE001
+                    try:
+                        dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, to, subj,
+                                                                   body, pdf_url=pdf_url)
+                        drafted = True
+                    except Exception as e:  # noqa: BLE001
+                        st.error("Couldn't send or draft: " + str(e)[:200])
+                if sent or drafted:
+                    link = f" [Open the draft]({dlink})" if dlink else ""
+                    st.session_state["inv_flash"] = (
+                        f"Under-delivery note {'sent to' if sent else 'drafted for'} {to}"
+                        + ("" if sent else " (sending needs Mail.Send)") + "." + link)
+                    st.rerun()
 
     # Chase the supplier by email (discrepancies only) — saves to Outlook Drafts.
     if res["n_issues"] > 0:
@@ -2876,12 +3018,15 @@ def _bulk_check(invs, lbsku):
                 for _aid, _p in _ex.map(
                         lambda iv: (iv["asset_id"], _read_pdf_plain(iv["asset_id"])), need):
                     pcache[_aid] = _p
-    prog = st.progress(0.0, text="Checking & processing…")
+    prog = st.progress(0.0, text="Checking…")
     pushed = held = flagged = unmatched = fail = 0
+    # Pass 1 — read + 3-way check EVERYTHING first, so a multi-invoice order is fully reconciled
+    # across its invoices before any push decision is made (a split delivery that sums to the
+    # order is matched; one that sums to MORE is caught as over-invoiced).
+    checked = []
     for i, inv in enumerate(invs, 1):
         # Suspected double-invoice (same order + same £ as another invoice, different number).
-        # Never auto-approve/hold it — leave it in Needs Review with a note so you can check
-        # you're not paying the same order twice.
+        # Never auto-approve/hold it — leave it in Needs Review with a note.
         if str(inv["sub_id"]) in amt_dups:
             dupflag += 1
             try:
@@ -2892,34 +3037,36 @@ def _bulk_check(invs, lbsku):
                     "Check you're not paying twice before approving.")
             except Exception:  # noqa: BLE001
                 pass
-            prog.progress(i / n, text=f"Processed {i}/{n}")
             continue
         parsed = pcache.get(inv.get("asset_id")) or {"error": "no PDF attached"}
         if parsed.get("error"):
             fail += 1
+            continue
+        res, _om = _check_and_store(inv, parsed, lbsku, pidx)
+        checked.append((inv, parsed, res))
+        prog.progress(i / n, text=f"Checked {i}/{n}")
+    # Pass 2 — decide with the FINAL reconciled verdicts. Only auto-APPROVE or auto-HOLD; never
+    # auto-mark Discrepancy (that's set by hand after you've emailed the supplier).
+    verds = st.session_state.get("inv_verdict", {})
+    for inv, parsed, res in checked:
+        v = verds.get(inv["sub_id"], {})
+        matched = res["n_issues"] == 0 and v.get("order") is not False   # reconciled over → not matched
+        is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+        label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
+                                       inv.get("supplier"))
+        if action in ("push", "hold"):
+            try:
+                data_sources.set_invoice_status(inv["sub_id"], label)
+                _incomplete_note_if_approved(inv["sub_id"], label)
+                goneset.add(str(inv["sub_id"]))
+                pushed += action == "push"
+                held += action == "hold"
+            except Exception:  # noqa: BLE001
+                pass
+        elif action == "flag":
+            flagged += 1
         else:
-            res, _om = _check_and_store(inv, parsed, lbsku, pidx)
-            matched = res["n_issues"] == 0
-            is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
-            label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
-                                           inv.get("supplier"))
-            # Only auto-APPROVE or auto-HOLD. Never auto-mark Discrepancy — a discrepancy is
-            # set by hand, after YOU'VE reviewed it and emailed the supplier. So a high-margin
-            # 'flag' and any real mismatch are LEFT in Needs Review for you to check.
-            if action in ("push", "hold"):
-                try:
-                    data_sources.set_invoice_status(inv["sub_id"], label)
-                    _incomplete_note_if_approved(inv["sub_id"], label)
-                    goneset.add(str(inv["sub_id"]))       # hide actioned instantly (no refetch)
-                    pushed += action == "push"
-                    held += action == "hold"
-                except Exception:  # noqa: BLE001
-                    pass
-            elif action == "flag":
-                flagged += 1                              # high margin — left in Needs Review
-            else:
-                unmatched += 1                            # a mismatch — left in Needs Review
-        prog.progress(i / n, text=f"Processed {i}/{n}")
+            unmatched += 1
     prog.empty()
     dupmsg = ""
     if n_dup:
