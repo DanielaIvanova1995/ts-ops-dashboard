@@ -2099,6 +2099,8 @@ def _order_reconcile(order_no):
         return "none", {}
     agg, ordq, skus = {}, {}, {}
     for rec in cov.values():
+        if not isinstance(rec, dict):
+            continue          # stale pre-upgrade entry (old tuple format) — refreshed on re-check
         for k, m in (rec.get("omap") or {}).items():
             skus[k] = m
         for k, q in (rec.get("inv_qty") or {}).items():
