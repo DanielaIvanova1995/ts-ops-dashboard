@@ -3142,17 +3142,27 @@ def _process_pending_action():
         st.session_state["inv_flash_err"] = "Couldn't update Monday: " + str(e)[:200]
 
 
+def _dup_identity(i):
+    """Identity for exact-duplicate detection: the SAME supplier + invoice number + total is the
+    same invoice logged twice — a duplicate — WHATEVER order it's filed under (the number no
+    longer has to share an order). Including the total protects a genuine invoice that spans two
+    orders (same number, but a different amount on each) from being treated as a duplicate."""
+    no = (i.get("invoice_no") or "").strip().upper()
+    t = i.get("total")
+    return (_norm_code(i.get("supplier")), no, round(t, 2) if isinstance(t, (int, float)) else None)
+
+
 def _auto_dedup(invs, tol=0.01):
-    """Remove duplicate invoices before checking (Eurocell send two copies of each). When
-    2+ subitems on the SAME order share the SAME invoice number, keep the first and DELETE
-    the rest from Monday — AND blank the duplicate's amount from the order's INV1..INV5
-    columns so the order total isn't double-counted. Returns (kept, n_deleted, n_cleared)."""
+    """Remove duplicate invoices before checking (Eurocell send two copies of each). When 2+
+    subitems share the SAME supplier + invoice number + total, keep the first and DELETE the
+    rest from Monday — AND blank the duplicate's amount from the order's INV1..INV5 columns so
+    the order total isn't double-counted. Returns (kept, n_deleted, n_cleared)."""
     seen, kept, dups = {}, [], []
     for i in invs:
         no = (i.get("invoice_no") or "").strip().upper()
-        k = (i.get("order_no") or "", no)
+        k = _dup_identity(i)
         if no and k in seen:
-            dups.append(i)                 # a later copy of an already-seen invoice number
+            dups.append(i)                 # a later copy of an already-seen invoice
         else:
             if no:
                 seen[k] = i
@@ -3424,7 +3434,7 @@ def _invoice_tab(key, is_queue):
     # copy sitting in Discrepancy is caught even when we're looking at another tab.
     from collections import Counter as _Counter
     def _dupkey(i):
-        return (i.get("order_no") or "", (i.get("invoice_no") or "").strip().upper())
+        return _dup_identity(i)
     dup_pool = {i["sub_id"]: i for i in invs}
     if key != "discrepancy":
         for i in (invoices_by_status("discrepancy").get("invoices") or []):
