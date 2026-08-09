@@ -5965,6 +5965,17 @@ def _change_password_dialog():
         st.warning(str(e))
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _server_ip():
+    """Trade Hub's current outbound/server IP — shown in the sidebar for the QuickBooks app
+    profile's 'where your app is hosted' field."""
+    import urllib.request
+    try:
+        return urllib.request.urlopen("https://api.ipify.org", timeout=5).read().decode().strip()
+    except Exception:  # noqa: BLE001
+        return "unavailable"
+
+
 with st.sidebar:
     if _logo:
         st.markdown(
@@ -6007,6 +6018,11 @@ with st.sidebar:
 
     # --- Data & connections (one collapsible) ---
     with st.expander("Data & connections"):
+        _ip = _server_ip()
+        st.markdown(f"**Server IP** (for QuickBooks setup): `{_ip}`")
+        st.caption("Paste this into Intuit's “where your app is hosted” IP box · Country: "
+                   "United States · Single IP address.")
+        st.divider()
         if data.get("_lazy"):
             st.caption("Live connection status loads on the **Daily Ops** page (kept off other "
                        "pages for speed).")
