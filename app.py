@@ -5639,12 +5639,54 @@ def _month_label(m):
         return m
 
 
+def _render_qbo_panel():
+    """QuickBooks connection (read-only) — Connect / status / Disconnect. Used by Finance."""
+    flash = st.session_state.pop("qbo_flash", None)
+    if flash:
+        st.success(flash)
+    ferr = st.session_state.pop("qbo_flash_err", None)
+    if ferr:
+        st.error(ferr)
+    try:
+        connected = data_sources.qbo_is_connected()
+    except Exception as e:  # noqa: BLE001
+        st.warning("Couldn't reach the QuickBooks token store on Monday: " + str(e)[:160])
+        return
+    if connected:
+        co = data_sources.qbo_company_name()
+        st.success(f"QuickBooks is connected{f' — **{co}**' if co else ''} · read-only.")
+        if st.button("Disconnect QuickBooks"):
+            try:
+                data_sources.qbo_disconnect()
+                st.session_state["qbo_flash"] = "Disconnected from QuickBooks."
+            except Exception as e:  # noqa: BLE001
+                st.session_state["qbo_flash_err"] = str(e)[:200]
+            st.rerun()
+        return
+    import secrets as _secrets
+    try:
+        state = st.session_state.get("qbo_state") or _secrets.token_urlsafe(24)
+        st.session_state["qbo_state"] = state
+        url = data_sources.qbo_auth_url(state)
+        st.markdown(
+            f'<a href="{url}" target="_self" style="display:inline-block;background:#2CA01C;'
+            f'color:#fff;font-weight:700;padding:10px 20px;border-radius:2px;text-decoration:none">'
+            f'Connect QuickBooks</a>', unsafe_allow_html=True)
+        st.caption("Read-only. You'll sign in to QuickBooks, choose your company and approve — then "
+                   "you're brought back here. Needed for statement reconciliation & payment planning.")
+    except Exception as e:  # noqa: BLE001
+        st.warning(str(e)[:200] + "  · Add QBO_CLIENT_ID and QBO_CLIENT_SECRET in "
+                   "Settings → Secrets, then reload.")
+
+
 def render_finance():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
         <span class="sec">Finance</span></span></div>""",
         unsafe_allow_html=True,
     )
+    with st.expander("QuickBooks connection (read-only)", expanded=True):
+        _render_qbo_panel()
     st.caption("Live actual margin from the Orders board **Paid & Delivered** group(s) — per "
                "month, per supplier, with loss-making, missing-invoice and anomaly flags. "
                "Admin only.")
@@ -6062,6 +6104,21 @@ if role == "office":
     module = "Daily Ops"
 elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance"):
     module = "Daily Ops"
+
+# --- QuickBooks OAuth callback: Intuit redirects back to the app with ?code&state&realmId ---
+_qp = st.query_params
+if _qp.get("code") and _qp.get("realmId"):
+    _stored = st.session_state.get("qbo_state")
+    try:
+        if _stored and _qp.get("state") != _stored:      # verify state when the session kept it
+            raise RuntimeError("Security check failed (state mismatch) — click Connect again.")
+        data_sources.qbo_exchange_code(_qp.get("code"), _qp.get("realmId"))
+        st.session_state["qbo_flash"] = "✅ QuickBooks connected."
+    except Exception as _qe:  # noqa: BLE001
+        st.session_state["qbo_flash_err"] = "QuickBooks connect failed: " + str(_qe)[:300]
+    st.session_state.module = "Finance"
+    st.query_params.clear()
+    st.rerun()
 
 if module == "Pricing":
     if st.session_state.get("pricing_view") == "Supplier rules":

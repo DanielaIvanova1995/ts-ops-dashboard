@@ -2331,3 +2331,192 @@ def analyze_customer_mood(emails: list) -> dict:
     if not match:
         raise RuntimeError("AI returned no JSON")
     return _json.loads(match.group(0))
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online (READ-ONLY) — OAuth2 + durable token storage + a small
+# query client. Scope: Accounting (read). Refresh tokens ROTATE, and Streamlit
+# Cloud can't write its own secrets, so the latest tokens are persisted (base64)
+# on a private Monday "TradeHub Config" item. intuit_tid is logged on errors.
+# ---------------------------------------------------------------------------
+QBO_SCOPE = "com.intuit.quickbooks.accounting"
+QBO_REDIRECT_URI = "https://tradesuperstoreonline.streamlit.app/"
+QBO_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2"
+QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+QBO_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
+QBO_API_BASE = "https://quickbooks.api.intuit.com"
+QBO_DISCOVERY = "https://developer.api.intuit.com/.well-known/openid_configuration"
+QBO_CONFIG_BOARD = "TradeHub Config"
+QBO_CONFIG_ITEM = "QuickBooks OAuth"
+
+
+def _qbo_creds():
+    cid = get_secret("QBO_CLIENT_ID")
+    csec = get_secret("QBO_CLIENT_SECRET")
+    if not cid or not csec:
+        raise RuntimeError("QuickBooks keys missing - set QBO_CLIENT_ID and QBO_CLIENT_SECRET "
+                           "in Streamlit Secrets.")
+    return cid, csec
+
+
+def qbo_endpoints():
+    """Auth / token / revoke endpoints from Intuit's OpenID discovery doc (defaults on failure)."""
+    try:
+        d = requests.get(QBO_DISCOVERY, timeout=15).json()
+        return (d.get("authorization_endpoint") or QBO_AUTH_URL,
+                d.get("token_endpoint") or QBO_TOKEN_URL,
+                d.get("revocation_endpoint") or QBO_REVOKE_URL)
+    except Exception:  # noqa: BLE001
+        return QBO_AUTH_URL, QBO_TOKEN_URL, QBO_REVOKE_URL
+
+
+# ---- durable token store (a private Monday config item; base64 in an update) ----
+def _qbo_config_item(token=None):
+    token = token or get_token()
+    board_id = monday_find_or_create_board(QBO_CONFIG_BOARD, token)
+    data = _monday_gql("query($b:[ID!]){boards(ids:$b){items_page(limit:10){items{id name}}}}",
+                       {"b": [str(board_id)]}, token)
+    items = (((data.get("boards") or [{}])[0].get("items_page") or {}).get("items") or [])
+    for it in items:
+        if it.get("name") == QBO_CONFIG_ITEM:
+            return it["id"]
+    return monday_create_item(board_id, QBO_CONFIG_ITEM, token)
+
+
+def qbo_store_tokens(tokens: dict, token=None):
+    import base64 as _b64
+    import json as _json
+    token = token or get_token()
+    item_id = _qbo_config_item(token)
+    blob = _b64.b64encode(_json.dumps(tokens).encode()).decode()
+    monday_post_update(item_id, blob, token)
+
+
+def qbo_load_tokens(token=None):
+    import base64 as _b64
+    import json as _json
+    import re as _re
+    token = token or get_token()
+    item_id = _qbo_config_item(token)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:1){body}}}",
+                       {"i": [str(item_id)]}, token)
+    ups = (((data.get("items") or [{}])[0]).get("updates") or [])
+    if not ups:
+        return None
+    b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
+    try:
+        out = _json.loads(_b64.b64decode(b64).decode())
+        return out or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def qbo_is_connected() -> bool:
+    try:
+        t = qbo_load_tokens()
+        return bool(t and t.get("refresh_token") and t.get("realm_id"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ---- OAuth flow ----
+def qbo_auth_url(state: str) -> str:
+    import urllib.parse
+    cid, _ = _qbo_creds()
+    auth, _t, _r = qbo_endpoints()
+    q = urllib.parse.urlencode({"client_id": cid, "response_type": "code", "scope": QBO_SCOPE,
+                                "redirect_uri": QBO_REDIRECT_URI, "state": state})
+    return f"{auth}?{q}"
+
+
+def _qbo_token_request(form: dict) -> dict:
+    import base64 as _b64
+    import time as _t
+    cid, csec = _qbo_creds()
+    _a, tokurl, _r = qbo_endpoints()
+    basic = _b64.b64encode(f"{cid}:{csec}".encode()).decode()
+    hdrs = {"Authorization": "Basic " + basic, "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded"}
+    for attempt in range(4):
+        try:
+            r = requests.post(tokurl, data=form, headers=hdrs, timeout=30)
+            if r.status_code == 400:                 # invalid_grant etc - don't retry
+                raise RuntimeError(f"QuickBooks auth rejected: {r.text[:200]}")
+            r.raise_for_status()
+            return r.json()
+        except RuntimeError:
+            raise
+        except Exception:  # noqa: BLE001
+            if attempt == 3:
+                raise
+            _t.sleep(1.5 * (attempt + 1))
+    raise RuntimeError("QuickBooks token request failed after retries")
+
+
+def qbo_exchange_code(code: str, realm_id: str) -> dict:
+    """Swap the authorization code for tokens and persist them."""
+    import time as _t
+    j = _qbo_token_request({"grant_type": "authorization_code", "code": code,
+                            "redirect_uri": QBO_REDIRECT_URI})
+    tokens = {"refresh_token": j["refresh_token"], "access_token": j.get("access_token"),
+              "access_expiry": int(_t.time()) + int(j.get("expires_in", 3600)) - 60,
+              "realm_id": str(realm_id)}
+    qbo_store_tokens(tokens)
+    return tokens
+
+
+def qbo_valid_access():
+    """(access_token, realm_id), refreshing the access token if it has expired. Raises if not
+    connected. The refresh token rotates, so the new one is re-persisted."""
+    import time as _t
+    t = qbo_load_tokens()
+    if not t or not t.get("refresh_token") or not t.get("realm_id"):
+        raise RuntimeError("QuickBooks isn't connected yet.")
+    if t.get("access_token") and int(t.get("access_expiry", 0)) > int(_t.time()):
+        return t["access_token"], t["realm_id"]
+    j = _qbo_token_request({"grant_type": "refresh_token", "refresh_token": t["refresh_token"]})
+    t["access_token"] = j.get("access_token")
+    t["access_expiry"] = int(_t.time()) + int(j.get("expires_in", 3600)) - 60
+    t["refresh_token"] = j.get("refresh_token", t["refresh_token"])
+    qbo_store_tokens(t)
+    return t["access_token"], t["realm_id"]
+
+
+def qbo_query(sql: str) -> dict:
+    """Run a read-only QuickBooks query. Logs intuit_tid on error. Returns QueryResponse."""
+    import urllib.parse
+    access, realm = qbo_valid_access()
+    url = (f"{QBO_API_BASE}/v3/company/{realm}/query?query="
+           + urllib.parse.quote(sql) + "&minorversion=70")
+    r = requests.get(url, headers={"Authorization": "Bearer " + access,
+                                   "Accept": "application/json"}, timeout=30)
+    tid = r.headers.get("intuit_tid")
+    if r.status_code >= 400:
+        print(f"[QBO] query error {r.status_code} intuit_tid={tid}: {r.text[:300]}")
+        raise RuntimeError(f"QuickBooks API error {r.status_code} (ref {tid}): {r.text[:200]}")
+    return ((r.json() or {}).get("QueryResponse") or {})
+
+
+def qbo_company_name():
+    try:
+        rows = qbo_query("select * from CompanyInfo")
+        return ((rows.get("CompanyInfo") or [{}])[0]).get("CompanyName")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def qbo_disconnect():
+    """Revoke the refresh token at Intuit and clear the stored tokens."""
+    import base64 as _b64
+    t = qbo_load_tokens()
+    if t and t.get("refresh_token"):
+        try:
+            cid, csec = _qbo_creds()
+            _a, _tk, rev = qbo_endpoints()
+            basic = _b64.b64encode(f"{cid}:{csec}".encode()).decode()
+            requests.post(rev, json={"token": t["refresh_token"]},
+                          headers={"Authorization": "Basic " + basic, "Accept": "application/json",
+                                   "Content-Type": "application/json"}, timeout=20)
+        except Exception:  # noqa: BLE001
+            pass
+    qbo_store_tokens({})
