@@ -5668,12 +5668,10 @@ def _render_qbo_panel():
         state = st.session_state.get("qbo_state") or _secrets.token_urlsafe(24)
         st.session_state["qbo_state"] = state
         url = data_sources.qbo_auth_url(state)
-        st.markdown(
-            f'<a href="{url}" target="_top" style="display:inline-block;background:#2CA01C;'
-            f'color:#fff;font-weight:700;padding:10px 20px;border-radius:2px;text-decoration:none">'
-            f'Connect QuickBooks</a>', unsafe_allow_html=True)
+        st.link_button("Connect QuickBooks", url, type="primary", use_container_width=False)
         st.caption("Read-only. You'll sign in to QuickBooks, choose your company and approve — then "
                    "you're brought back here. Needed for statement reconciliation & payment planning.")
+        st.caption(f"If the button does nothing, open this link directly: {url}")
     except Exception as e:  # noqa: BLE001
         st.warning(str(e)[:200] + "  · Add QBO_CLIENT_ID and QBO_CLIENT_SECRET in "
                    "Settings → Secrets, then reload.")
