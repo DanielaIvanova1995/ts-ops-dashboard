@@ -5669,7 +5669,7 @@ def _render_qbo_panel():
         st.session_state["qbo_state"] = state
         url = data_sources.qbo_auth_url(state)
         st.markdown(
-            f'<a href="{url}" target="_self" style="display:inline-block;background:#2CA01C;'
+            f'<a href="{url}" target="_top" style="display:inline-block;background:#2CA01C;'
             f'color:#fff;font-weight:700;padding:10px 20px;border-radius:2px;text-decoration:none">'
             f'Connect QuickBooks</a>', unsafe_allow_html=True)
         st.caption("Read-only. You'll sign in to QuickBooks, choose your company and approve — then "
