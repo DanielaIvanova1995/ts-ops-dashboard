@@ -6106,8 +6106,10 @@ elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance")
     module = "Daily Ops"
 
 # --- QuickBooks OAuth callback: Intuit redirects back to the app with ?code&state&realmId ---
+# One-shot (guarded) so it never re-processes the code and spins a redirect/rerun loop.
 _qp = st.query_params
-if _qp.get("code") and _qp.get("realmId"):
+if _qp.get("code") and _qp.get("realmId") and not st.session_state.get("_qbo_cb_done"):
+    st.session_state["_qbo_cb_done"] = True
     _stored = st.session_state.get("qbo_state")
     try:
         if _stored and _qp.get("state") != _stored:      # verify state when the session kept it
@@ -6117,8 +6119,11 @@ if _qp.get("code") and _qp.get("realmId"):
     except Exception as _qe:  # noqa: BLE001
         st.session_state["qbo_flash_err"] = "QuickBooks connect failed: " + str(_qe)[:300]
     st.session_state.module = "Finance"
-    st.query_params.clear()
-    st.rerun()
+    try:
+        st.query_params.clear()
+    except Exception:  # noqa: BLE001
+        pass
+    module = "Finance"
 
 if module == "Pricing":
     if st.session_state.get("pricing_view") == "Supplier rules":
