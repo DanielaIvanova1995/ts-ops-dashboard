@@ -2924,12 +2924,19 @@ def fetch_statement_attachment(mailbox: str, message_id: str, attachment_id: str
     """Download one attachment's bytes → (name, bytes). For reconciling a pulled statement."""
     import base64 as _b64
     token = token or ms_token()
+    # No $select: contentBytes lives on the fileAttachment subtype, and selecting it on the base
+    # attachment type 400s. The default response for a file attachment already includes it.
     r = requests.get(
         f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments/{attachment_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        params={"$select": "name,contentBytes,contentType"}, timeout=60,
+        headers={"Authorization": f"Bearer {token}"}, timeout=60,
     )
     r.raise_for_status()
     a = r.json()
     data = a.get("contentBytes")
-    return a.get("name"), (_b64.b64decode(data) if data else b"")
+    if not data:   # not a file attachment (e.g. item/reference) — pull the raw bytes instead
+        rv = requests.get(
+            f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments/{attachment_id}/$value",
+            headers={"Authorization": f"Bearer {token}"}, timeout=60)
+        rv.raise_for_status()
+        return a.get("name"), rv.content
+    return a.get("name"), _b64.b64decode(data)
