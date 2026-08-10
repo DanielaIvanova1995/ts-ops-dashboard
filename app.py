@@ -5785,6 +5785,21 @@ def _due_label(due_str):
     return f"in {days} day{'s' if days != 1 else ''}"
 
 
+def _review_reminder_email(sup, action_rows):
+    """Body of the 'please review these' nudge to a colleague, for a statement's unapproved lines."""
+    tot = sum(r["amt"] for r in action_rows if isinstance(r["amt"], (int, float)))
+    lines = [f"  - {r['inv']}"
+             + (f"  (order {r['order']})" if r["order"] else "")
+             + (f"  £{r['amt']:,.2f}" if isinstance(r["amt"], (int, float)) else "")
+             for r in action_rows]
+    body = (f"Hi,\n\nThese {sup} invoices are on the latest statement but still need reviewing on "
+            "Monday (they haven't been approved to QuickBooks yet). Please review each one and "
+            "either approve it or raise a query, ASAP, so they're ready for payment:\n\n"
+            + "\n".join(lines)
+            + f"\n\nTotal: £{tot:,.2f}\n\nThanks")
+    return f"{sup}: {len(action_rows)} invoice(s) need reviewing on Monday", body
+
+
 def _statement_file_text(up):
     """Extract text from an Excel/CSV statement so the AI can parse it like a PDF."""
     if up.name.lower().endswith(".csv"):
@@ -5903,7 +5918,7 @@ def _render_statement_recon():
         if b["doc_no"]:
             bill_by_doc.setdefault(b["doc_no"].upper(), b)
 
-    rows = []
+    rows, action_rows = [], []
     n_pay = n_paid = n_missing = n_disc = n_action = 0
     to_pay = paid_total = disc_total = missing_total = action_total = stmt_total = 0.0
     used = set()
@@ -5938,6 +5953,7 @@ def _render_statement_recon():
             elif _k in action_nos:
                 status, n_action = "🟠 On Monday, not yet approved — review/approve ASAP", n_action + 1
                 action_total += val
+                action_rows.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": amt})
             else:
                 status, n_missing = "🔴 Missing from Monday — not input yet", n_missing + 1
                 missing_total += val
@@ -5981,6 +5997,37 @@ def _render_statement_recon():
     if n_action:
         st.info(f"🟠 {n_action} invoice(s) are on Monday but not yet approved to QuickBooks — "
                 "review and approve (or query) these ASAP so they're ready to pay.")
+        subh = _norm_code(sup)
+        if st.toggle("✉ Email a colleague to review these", key=f"revtog_{subh}"):
+            rsubj, rbody = _review_reminder_email(sup, action_rows)
+            st.session_state.setdefault(f"rto_{subh}", "")
+            st.session_state.setdefault(f"rsub_{subh}", rsubj)
+            st.session_state.setdefault(f"rbod_{subh}", rbody)
+            st.text_input("To (colleague's email)", key=f"rto_{subh}")
+            st.text_input("Subject", key=f"rsub_{subh}")
+            st.text_area("Message", key=f"rbod_{subh}", height=200)
+            st.caption(f"Sends from {SUPPLIER_FROM_MAILBOX}. Falls back to a draft if sending isn't "
+                       "enabled yet.")
+            if st.button("Send reminder", key=f"rsend_{subh}", type="primary",
+                         disabled=not st.session_state.get(f"rto_{subh}", "").strip()):
+                to = st.session_state[f"rto_{subh}"].strip()
+                subj, body = st.session_state[f"rsub_{subh}"], st.session_state[f"rbod_{subh}"]
+                sent = drafted = False
+                dlink = None
+                try:
+                    data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, to, subj, body)
+                    sent = True
+                except Exception:  # noqa: BLE001
+                    try:
+                        dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, to, subj,
+                                                                   body)
+                        drafted = True
+                    except Exception as e:  # noqa: BLE001
+                        st.error("Couldn't send or draft: " + str(e)[:200])
+                if sent or drafted:
+                    link = f" [Open the draft]({dlink})" if dlink else ""
+                    st.success(f"Review reminder {'sent to' if sent else 'drafted for'} {to}"
+                               + ("" if sent else " (sending needs Mail.Send)") + "." + link)
 
 
 def _render_payables_live():
