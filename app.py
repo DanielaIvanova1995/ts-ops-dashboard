@@ -5718,16 +5718,41 @@ def _render_statement_recon():
     st.markdown(f"**{_esc(sup)}** · statement {stmt.get('statement_date') or ''} · "
                 f"outstanding **£{(stmt.get('balance') or 0):,.2f}**")
 
+    # Pick the QuickBooks vendor — auto-match by name, but let you override (names often differ).
+    try:
+        vres = data_sources.qbo_query("select Id, DisplayName from Vendor MAXRESULTS 1000")
+        vendors = sorted([(v.get("DisplayName"), v.get("Id"))
+                          for v in (vres.get("Vendor") or []) if v.get("DisplayName")])
+    except Exception as e:  # noqa: BLE001
+        st.error("Couldn't read QuickBooks vendors: " + str(e)[:200])
+        return
+    if not vendors:
+        st.warning("No vendors found in QuickBooks.")
+        return
+    names = [n for n, _ in vendors]
+    auto = data_sources.qbo_find_vendor(sup)
+    default_i = next((i for i, (n, vid) in enumerate(vendors) if auto and vid == auto["id"]), 0)
+    picked = st.selectbox(f"QuickBooks vendor (statement says “{sup}”)", names, index=default_i,
+                          key="stmt_vendor")
+    vid = {n: i for n, i in vendors}[picked]
     with st.spinner("Reading QuickBooks bills…"):
         try:
-            vendor = data_sources.qbo_find_vendor(sup)
-            bills = data_sources.qbo_vendor_bills(vendor["id"]) if vendor else []
+            bills = data_sources.qbo_vendor_bills(vid)
         except Exception as e:  # noqa: BLE001
-            st.error("Couldn't read QuickBooks: " + str(e)[:200])
+            st.error("Couldn't read QuickBooks bills: " + str(e)[:200])
             return
-    if not vendor:
-        st.warning(f"Couldn't find a QuickBooks supplier matching '{sup}'. Tell me the exact "
-                   "QuickBooks vendor name and I'll map it. Showing the statement lines only:")
+
+    with st.expander(f"🔍 What QuickBooks returned for {picked} ({len(bills)} bills)"):
+        if bills:
+            st.dataframe(pd.DataFrame([{"Bill no (DocNumber)": b["doc_no"], "Date": b["date"],
+                                        "Total": b["total"], "Balance": b["balance"]}
+                                       for b in bills[:25]]), hide_index=True,
+                         use_container_width=True)
+            st.caption("If the **Bill no** column doesn't match the statement's invoice numbers, "
+                       "tell me what it holds instead and I'll match on that.")
+        else:
+            st.caption("No bills came back for this vendor — pick a different vendor above, or the "
+                       "bills may be under a different vendor name.")
 
     bill_by_doc = {}
     for b in bills:
