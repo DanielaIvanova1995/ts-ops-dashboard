@@ -2791,3 +2791,40 @@ def recon_upload_statement(file_bytes: bytes, filename: str, token=None):
     if not assets:
         return None
     return max(assets, key=lambda a: int(a.get("id") or 0)).get("id")
+
+
+def qbo_create(entity: str, body: dict) -> dict:
+    """Create an object in QuickBooks (a WRITE). Logs intuit_tid. Returns the created object."""
+    access, realm = qbo_valid_access()
+    url = f"{QBO_API_BASE}/v3/company/{realm}/{entity}?minorversion=70"
+    r = requests.post(url, headers={"Authorization": "Bearer " + access, "Accept": "application/json",
+                                    "Content-Type": "application/json"}, json=body, timeout=30)
+    tid = r.headers.get("intuit_tid")
+    if r.status_code >= 400:
+        print(f"[QBO] create {entity} error {r.status_code} intuit_tid={tid}: {r.text[:400]}")
+        raise RuntimeError(f"QuickBooks write error {r.status_code} (ref {tid}): {r.text[:220]}")
+    return r.json()
+
+
+def qbo_bank_accounts():
+    """QuickBooks bank accounts → [{id, name}] for the 'pay from' picker."""
+    rows = qbo_query("select Id, Name from Account where AccountType = 'Bank' MAXRESULTS 100")
+    return [{"id": a.get("Id"), "name": a.get("Name")} for a in (rows.get("Account") or [])]
+
+
+def qbo_pay_bills(vendor_id, bank_account_id, lines, memo="", date=None):
+    """Create a QuickBooks BillPayment that settles the given bills (marks them paid).
+    lines = [{bill_id, amount}]. memo goes in the payment's PrivateNote (the remittance ref)."""
+    total = round(sum(float(l["amount"]) for l in lines), 2)
+    body = {
+        "VendorRef": {"value": str(vendor_id)},
+        "PayType": "Check",
+        "CheckPayment": {"BankAccountRef": {"value": str(bank_account_id)}},
+        "TotalAmt": total,
+        "PrivateNote": memo or "",
+        "Line": [{"Amount": round(float(l["amount"]), 2),
+                  "LinkedTxn": [{"TxnId": str(l["bill_id"]), "TxnType": "Bill"}]} for l in lines],
+    }
+    if date:
+        body["TxnDate"] = date
+    return qbo_create("billpayment", body)

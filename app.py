@@ -3612,13 +3612,13 @@ def _invoice_tab(key, is_queue):
         "Type": st.column_config.ImageColumn("Type", width="small", help="Invoice or credit note"),
         "Date": st.column_config.TextColumn("Date", width="small",
                                             help="Invoice date — when it was logged on Monday"),
-        "Inv £": st.column_config.NumberColumn(format="£%.2f", width="small"),
+        "Inv £": st.column_config.TextColumn("Inv £", width="small"),
         "Order margin": st.column_config.NumberColumn(
             format="%.1f%%", width="small",
             help="OVERALL margin for this whole order from Monday — across ALL invoices and credit "
                  "notes relating to the order (catches duplicate/extra invoices)."),
-        "Discount": st.column_config.NumberColumn(
-            format="£%.2f", width="small",
+        "Discount": st.column_config.TextColumn(
+            "Discount", width="small",
             help="Customer discount used on the Shopify order (reduces margin). Blank = none."),
         "PDF": st.column_config.LinkColumn("PDF", display_text="OPEN", width="small",
                                            help="Open the invoice PDF"),
@@ -3642,9 +3642,12 @@ def _invoice_tab(key, is_queue):
                  "Grey ? = couldn't check — treat as a discrepancy to review, NOT a pass.")
 
     df = pd.DataFrame(rows)
-    for c in ("Inv £", "Invoice margin", "Order margin", "Discount"):
+    for c in ("Invoice margin", "Order margin"):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
+    for c in ("Inv £", "Discount"):        # money → thousands-separated text
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").map(_gbp)
     df.insert(0, "✓", False)
     colcfg["✓"] = st.column_config.CheckboxColumn(
         "Select", width="small", help="Tick invoices, then use Check / Push selected above or below")
@@ -5785,6 +5788,13 @@ def _due_label(due_str):
     return f"in {days} day{'s' if days != 1 else ''}"
 
 
+def _gbp(x):
+    """Money as a string with thousands separators, e.g. 1000 -> '£1,000.00'. Blank passes through."""
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return x if x not in (None, "") else ""
+    return f"£{x:,.2f}"
+
+
 def _remittance_text(sup, lines, total, ref):
     """Plain-text remittance advice for the selected invoices."""
     body = [f"  {p['inv']}"
@@ -5855,8 +5865,11 @@ def _render_statement_recon():
                 if snap.get("summary"):
                     st.markdown(snap["summary"])
                 if snap.get("rows"):
-                    st.dataframe(pd.DataFrame(snap["rows"]), hide_index=True,
-                                 use_container_width=True)
+                    _sdf = pd.DataFrame(snap["rows"])
+                    for _c in ("Amount", "Unpaid"):
+                        if _c in _sdf.columns:
+                            _sdf[_c] = _sdf[_c].map(_gbp)
+                    st.dataframe(_sdf, hide_index=True, use_container_width=True)
         st.markdown("---")
 
     up = st.file_uploader("Upload a supplier statement (PDF, Excel or CSV)",
@@ -5937,7 +5950,7 @@ def _render_statement_recon():
     with st.expander(f"🔍 What QuickBooks returned for {picked} ({len(bills)} bills)"):
         if bills:
             st.dataframe(pd.DataFrame([{"Bill no (DocNumber)": b["doc_no"], "Date": b["date"],
-                                        "Total": b["total"], "Balance": b["balance"]}
+                                        "Total": _gbp(b["total"]), "Balance": _gbp(b["balance"])}
                                        for b in bills[:25]]), hide_index=True,
                          use_container_width=True)
             st.caption("If the **Bill no** column doesn't match the statement's invoice numbers, "
@@ -6022,9 +6035,9 @@ def _render_statement_recon():
     st.markdown(" · ".join(parts))
     if rows:
         df = pd.DataFrame(rows)
-        st.dataframe(df, hide_index=True, use_container_width=True, column_config={
-            "Amount": st.column_config.NumberColumn(format="£%.2f"),
-            "Unpaid": st.column_config.NumberColumn(format="£%.2f")})
+        for _c in ("Amount", "Unpaid"):
+            df[_c] = df[_c].map(_gbp)
+        st.dataframe(df, hide_index=True, use_container_width=True)
 
     st.markdown("---")
     t1, t2, t3 = st.columns(3)
@@ -6049,12 +6062,11 @@ def _render_statement_recon():
         _pk = _norm_code(sup)
         st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
         pdf = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
-                             "Amount": p["amt"], "Due": p["due"]} for p in pay_lines])
+                             "Amount": _gbp(p["amt"]), "Due": p["due"]} for p in pay_lines])
         edited = st.data_editor(
             pdf, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
             disabled=[c for c in pdf.columns if c != "Pay"],
-            column_config={"Pay": st.column_config.CheckboxColumn("Pay"),
-                           "Amount": st.column_config.NumberColumn(format="£%.2f")})
+            column_config={"Pay": st.column_config.CheckboxColumn("Pay")})
         try:
             ticks = edited["Pay"]
             picked_lines = [pay_lines[i] for i in range(len(pay_lines)) if bool(ticks.iloc[i])]
@@ -6090,12 +6102,42 @@ def _render_statement_recon():
                 link = f" [Open the draft]({dlink})" if dlink else ""
                 st.success(f"Remittance {'sent to' if sent else 'drafted for'} "
                            f"{rem_to.strip()}." + link)
-        st.button("Mark these paid in QuickBooks", key=f"markpaid_{_pk}", disabled=True,
-                  help="Writes a bill payment back to QuickBooks — needs QB write access enabled "
-                       "and your bank account. Tell me to set it up.")
-        st.caption("‘Mark paid in QuickBooks’ is off for now: it *writes* to QuickBooks, and we set "
-                   "the connection up read-only. Say the word (and which bank account you pay from) "
-                   "and I'll enable it.")
+        # ---- Mark paid in QuickBooks (writes a BillPayment). Confirmed, never automatic. ----
+        st.markdown("**Mark paid in QuickBooks**")
+        try:
+            banks = data_sources.qbo_bank_accounts()
+        except Exception as e:  # noqa: BLE001
+            banks = []
+            st.caption("Couldn't read your QuickBooks bank accounts: " + str(e)[:150])
+        if banks:
+            bmap = {b["name"]: b["id"] for b in banks}
+            bank = st.selectbox("Pay from (QuickBooks bank account)", list(bmap.keys()),
+                                key=f"bank_{_pk}")
+            mpend = f"markpend_{_pk}"
+            if st.button(f"Mark {len(picked_lines)} paid in QuickBooks", key=f"markpaid_{_pk}",
+                         disabled=not picked_lines):
+                st.session_state[mpend] = True
+            if st.session_state.get(mpend):
+                st.warning(f"Record a **£{rem_total:,.2f}** bill payment in QuickBooks from "
+                           f"**{bank}**, settling **{len(picked_lines)}** invoice(s), reference "
+                           f"**{ref}**? This writes to QuickBooks and marks them paid. You still "
+                           "pay the money via your bank separately.")
+                yy, nn = st.columns(2)
+                if yy.button("Yes — mark paid in QuickBooks", key=f"markyes_{_pk}", type="primary"):
+                    st.session_state.pop(mpend, None)
+                    try:
+                        data_sources.qbo_pay_bills(
+                            vid, bmap[bank],
+                            [{"bill_id": p["bill_id"], "amount": p["amt"]} for p in picked_lines],
+                            memo=ref, date=now_uk().strftime("%Y-%m-%d"))
+                        st.success(f"✅ Marked {len(picked_lines)} invoice(s) paid in QuickBooks "
+                                   f"(ref {ref}). Now pay £{rem_total:,.2f} via your bank.")
+                        st.session_state.pop("_stmt_bills_cache", None)
+                    except Exception as e:  # noqa: BLE001
+                        st.error("Couldn't mark paid: " + str(e)[:250])
+                if nn.button("Cancel", key=f"markno_{_pk}"):
+                    st.session_state.pop(mpend, None)
+                    st.rerun()
 
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
@@ -6231,10 +6273,12 @@ def _render_payables_live():
     rows.sort(key=lambda r: (-(r["Overdue"] or 0), -((r["% of limit"] or 0))))
     st.markdown(f"**{len(rows)} suppliers** owing · total **£{tot_owed:,.2f}** · overdue "
                 f"**£{tot_over:,.2f}**")
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True, column_config={
-        "Owed": st.column_config.NumberColumn(format="£%.2f"),
-        "Overdue": st.column_config.NumberColumn(format="£%.2f"),
-        "Credit limit": st.column_config.NumberColumn(format="£%.0f"),
+    pdf = pd.DataFrame(rows)
+    for _c in ("Owed", "Overdue"):
+        pdf[_c] = pdf[_c].map(_gbp)
+    pdf["Credit limit"] = pdf["Credit limit"].map(
+        lambda v: f"£{v:,.0f}" if isinstance(v, (int, float)) else "")
+    st.dataframe(pdf, hide_index=True, use_container_width=True, column_config={
         "% of limit": st.column_config.NumberColumn(format="%d%%")})
     st.caption("Live from QuickBooks open bills · overdue = past due date · % of limit uses the "
                "credit limits on your Monday Suppliers board · sorted by overdue, then nearest limit.")
