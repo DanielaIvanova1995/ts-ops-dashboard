@@ -5971,14 +5971,101 @@ def _render_statement_recon():
                    "supplier-chase draft coming next.)")
 
 
+def _render_payables_live():
+    """Live all-suppliers payables from QuickBooks open bills + Monday credit limits."""
+    if not _qbo_connected_quiet():
+        with st.expander("QuickBooks connection (read-only)", expanded=True):
+            _render_qbo_panel()
+        return
+    if st.button("↻ Refresh", key="pay_refresh"):
+        st.session_state.pop("_payables", None)
+    data = st.session_state.get("_payables")
+    if data is None:
+        with st.spinner("Reading QuickBooks open bills…"):
+            try:
+                vres = data_sources.qbo_query(
+                    "select Id, DisplayName, Balance from Vendor MAXRESULTS 1000")
+                vendors = {v.get("Id"): {"name": v.get("DisplayName"), "balance": v.get("Balance")}
+                           for v in (vres.get("Vendor") or [])}
+                bres = data_sources.qbo_query(
+                    "select VendorRef, DueDate, Balance from Bill MAXRESULTS 1000")
+                bills = bres.get("Bill") or []
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't read QuickBooks: " + str(e)[:200])
+                return
+            try:
+                raw_limits = data_sources.fetch_supplier_credit_limits()
+            except Exception:  # noqa: BLE001
+                raw_limits = {}
+            data = {"vendors": vendors, "bills": bills, "limits": raw_limits}
+            st.session_state["_payables"] = data
+
+    from datetime import date
+    vendors, bills = data["vendors"], data["bills"]
+    limits = {_norm_code(k): v for k, v in (data["limits"] or {}).items()}
+    today = now_uk().date()
+    per = {}
+    for b in bills:
+        bal = b.get("Balance")
+        if not (isinstance(bal, (int, float)) and bal > 0.005):
+            continue
+        vid = (b.get("VendorRef") or {}).get("value")
+        p = per.setdefault(vid, {"overdue": 0.0, "next": None})
+        due = b.get("DueDate")
+        if due:
+            try:
+                dd = date.fromisoformat(str(due)[:10])
+            except Exception:  # noqa: BLE001
+                dd = None
+            if dd:
+                if dd < today:
+                    p["overdue"] += bal
+                if p["next"] is None or dd < p["next"]:
+                    p["next"] = dd
+
+    rows, tot_owed, tot_over = [], 0.0, 0.0
+    for vid, v in vendors.items():
+        owed = v.get("balance")
+        if not (isinstance(owed, (int, float)) and owed > 0.005):
+            continue
+        p = per.get(vid, {})
+        lim = limits.get(_norm_code(v.get("name")))
+        nd = p.get("next")
+        rows.append({"Supplier": v.get("name"), "Owed": round(owed, 2),
+                     "Overdue": round(p.get("overdue", 0.0), 2),
+                     "Next due": (_due_label(nd.isoformat()) if nd else ""),
+                     "Credit limit": lim,
+                     "% of limit": (round(owed / lim * 100) if lim else None)})
+        tot_owed += owed
+        tot_over += p.get("overdue", 0.0)
+
+    if not rows:
+        st.info("No open supplier bills in QuickBooks right now.")
+        return
+    rows.sort(key=lambda r: (-(r["Overdue"] or 0), -((r["% of limit"] or 0))))
+    st.markdown(f"**{len(rows)} suppliers** owing · total **£{tot_owed:,.2f}** · overdue "
+                f"**£{tot_over:,.2f}**")
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True, column_config={
+        "Owed": st.column_config.NumberColumn(format="£%.2f"),
+        "Overdue": st.column_config.NumberColumn(format="£%.2f"),
+        "Credit limit": st.column_config.NumberColumn(format="£%.0f"),
+        "% of limit": st.column_config.NumberColumn(format="%d%%")})
+    st.caption("Live from QuickBooks open bills · overdue = past due date · % of limit uses the "
+               "credit limits on your Monday Suppliers board · sorted by overdue, then nearest limit.")
+
+
 def render_finance():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
         <span class="sec">Finance</span></span></div>""",
         unsafe_allow_html=True,
     )
-    # Two separate views (sidebar toggle): Statement reconciliation vs the margin dashboard.
-    if st.session_state.get("fin_view") == "Statement reconciliation":
+    # Views chosen from the sidebar toggle.
+    _fv = st.session_state.get("fin_view")
+    if _fv == "Payables (live)":
+        _render_payables_live()
+        return
+    if _fv in ("Statements (per supplier)", "Statement reconciliation"):
         with st.expander("QuickBooks connection (read-only)",
                          expanded=not _qbo_connected_quiet()):
             _render_qbo_panel()
@@ -6352,7 +6439,8 @@ with st.sidebar:
                      ["Check invoices", "Matched (weekly)", "Discrepancy log"],
                      key="ic_view", label_visibility="collapsed")
         if _m == "Finance" and st.session_state.module == "Finance":
-            st.radio("Finance view", ["Margins", "Statement reconciliation"],
+            st.radio("Finance view",
+                     ["Margins", "Statements (per supplier)", "Payables (live)"],
                      key="fin_view", label_visibility="collapsed")
     module = st.session_state.module
 

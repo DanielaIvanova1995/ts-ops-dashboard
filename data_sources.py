@@ -2692,3 +2692,27 @@ def qbo_vendor_map_save(supplier_key: str, vendor_id, vendor_name: str, token=No
     m[supplier_key] = {"id": str(vendor_id), "name": vendor_name}
     item_id = _config_item_named(QBO_VENDORMAP_ITEM, token)
     monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
+
+
+def fetch_supplier_credit_limits(token=None):
+    """{supplier/account name: credit limit (£)} from the 'Suppliers and Contacts' board
+    (9826930125), Credit Limit column numeric_mkxckems. Keyed by both the group (supplier)
+    name and the item name so either can be matched to a QuickBooks vendor."""
+    token = token or get_token()
+    data = _monday_gql(
+        'query { boards(ids: 9826930125) { groups { title } items_page(limit: 500) { items { '
+        'name group { title } column_values(ids: ["numeric_mkxckems"]) { text } } } } }', {}, token)
+    boards = data.get("boards") or []
+    items = (((boards[0] if boards else {}).get("items_page") or {}).get("items") or [])
+    out = {}
+    for it in items:
+        cv = it.get("column_values") or []
+        txt = (cv[0].get("text") if cv else "") or ""
+        try:
+            lim = float(txt.replace(",", "").replace("£", "").strip())
+        except (ValueError, AttributeError):
+            continue
+        for key in ((it.get("group") or {}).get("title"), it.get("name")):
+            if key:
+                out[key] = lim
+    return out
