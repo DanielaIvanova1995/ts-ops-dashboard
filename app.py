@@ -6070,6 +6070,8 @@ def _bulk_reconcile_one(s, limits):
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": val,
                      "Paid under": paid_ref, "vs QuickBooks": status})
     cl = limits.get(_norm_code(sup)) or (limits.get(_norm_code(mp["name"])) if mp else None)
+    stated = stmt.get("balance")
+    on_stmt = stated if isinstance(stated, (int, float)) and stated > 0 else stmt_total
     parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
     if n_missing:
         parts.append(f"**{n_missing}** not in QuickBooks")
@@ -6077,7 +6079,7 @@ def _bulk_reconcile_one(s, limits):
         parts.append(f"{n_paid} paid")
     snap = {"supplier": sup, "vid": vid, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
             "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
-            "to_pay": round(to_pay, 2), "stmt_total": round(stmt_total, 2), "credit_limit": cl,
+            "to_pay": round(to_pay, 2), "stmt_total": round(on_stmt, 2), "credit_limit": cl,
             "rows": rows, "pay_lines": pay_lines, "statement_asset": None}
     try:
         snap["statement_asset"] = data_sources.recon_upload_statement(by, nm or s["attachment_name"])
@@ -6387,21 +6389,28 @@ def _render_statement_recon():
             df[_c] = df[_c].map(_gbp)
         st.dataframe(df, hide_index=True, use_container_width=True)
 
+    # "On the statement" = the balance the statement itself states (what we actually owe), NOT the
+    # sum of every invoice line — a full/aged statement lists already-paid items too, which would
+    # over-count. Fall back to the line-sum only if the statement gives no balance.
+    stated = stmt.get("balance")
+    on_stmt = stated if isinstance(stated, (int, float)) and stated > 0 else stmt_total
     st.markdown("---")
     t1, t2, t3 = st.columns(3)
-    t1.metric("On the statement", f"£{stmt_total:,.2f}")
+    t1.metric("On the statement", f"£{on_stmt:,.2f}")
     t2.metric("Ready to pay in QuickBooks", f"£{to_pay:,.2f}")
-    t3.metric("Not yet payable", f"£{stmt_total - to_pay:,.2f}")
+    t3.metric("Not yet payable", f"£{max(on_stmt - to_pay, 0):,.2f}")
     st.caption(
-        f"Not yet payable = £{action_total:,.2f} to review/approve ({n_action}) + £{disc_total:,.2f} "
-        f"awaiting credit note ({n_disc}) + £{missing_total:,.2f} missing from Monday ({n_missing}) "
-        f"+ £{paid_total:,.2f} already paid ({n_paid}). "
-        f"Statement's own stated balance: £{(stmt.get('balance') or 0):,.2f}.")
+        f"‘On the statement’ is the balance the statement itself states. The invoice lines I read "
+        f"add up to £{stmt_total:,.2f} (higher when the statement also lists already-paid or aged "
+        f"items). What I matched: £{to_pay:,.2f} ready to pay ({n_pay}), £{action_total:,.2f} to "
+        f"review/approve ({n_action}), £{disc_total:,.2f} awaiting credit note ({n_disc}), "
+        f"£{missing_total:,.2f} missing from Monday ({n_missing}), £{paid_total:,.2f} already "
+        f"paid ({n_paid}).")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Statement date", stmt.get("statement_date") or "—")
     c2.metric("Credit limit", f"£{credit_limit:,.0f}" if credit_limit else "—")
-    c3.metric("Available credit", f"£{credit_limit - stmt_total:,.2f}" if credit_limit else "—")
+    c3.metric("Available credit", f"£{credit_limit - on_stmt:,.2f}" if credit_limit else "—")
     if not credit_limit:
         st.caption("No credit limit found for this supplier on the Monday Suppliers board.")
 
@@ -6413,7 +6422,7 @@ def _render_statement_recon():
     # back in a day or two and pay off it without re-uploading. ----
     snap = {"supplier": sup, "vid": vid, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
             "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
-            "to_pay": round(to_pay, 2), "stmt_total": round(stmt_total, 2),
+            "to_pay": round(to_pay, 2), "stmt_total": round(on_stmt, 2),
             "credit_limit": credit_limit, "rows": rows, "pay_lines": pay_lines,
             "statement_asset": None}
     _saved_set = st.session_state.setdefault("_recon_autosaved", {})
