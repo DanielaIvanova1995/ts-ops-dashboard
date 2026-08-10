@@ -5785,6 +5785,17 @@ def _due_label(due_str):
     return f"in {days} day{'s' if days != 1 else ''}"
 
 
+def _remittance_text(sup, lines, total, ref):
+    """Plain-text remittance advice for the selected invoices."""
+    body = [f"  {p['inv']}"
+            + (f"  (order {p['order']})" if p.get("order") else "")
+            + (f"  £{p['amt']:,.2f}" if isinstance(p.get("amt"), (int, float)) else "")
+            for p in lines]
+    return (f"REMITTANCE ADVICE\n\nTo: {sup}\nReference: {ref}\n\n"
+            "Please find below the invoices included in this payment:\n\n" + "\n".join(body)
+            + f"\n\nTotal paid: £{total:,.2f}\n\nKind regards,\nTrade Superstore Online\nAccounts")
+
+
 def _review_reminder_email(sup, action_rows):
     """Body of the 'please review these' nudge to a colleague, for a statement's unapproved lines."""
     tot = sum(r["amt"] for r in action_rows if isinstance(r["amt"], (int, float)))
@@ -5916,6 +5927,12 @@ def _render_statement_recon():
             paymap = data_sources.qbo_vendor_payments(vid)   # bill id → {ref, date}
         except Exception:  # noqa: BLE001
             paymap = {}
+        try:
+            _cl = {_norm_code(k): v
+                   for k, v in (data_sources.fetch_supplier_credit_limits() or {}).items()}
+            credit_limit = _cl.get(_norm_code(sup)) or _cl.get(_norm_code(picked))
+        except Exception:  # noqa: BLE001
+            credit_limit = None
 
     with st.expander(f"🔍 What QuickBooks returned for {picked} ({len(bills)} bills)"):
         if bills:
@@ -5944,7 +5961,7 @@ def _render_statement_recon():
         if b["doc_no"]:
             bill_by_doc.setdefault(b["doc_no"].upper(), b)
 
-    rows, action_rows = [], []
+    rows, action_rows, pay_lines = [], [], []
     n_pay = n_paid = n_missing = n_disc = n_action = 0
     to_pay = paid_total = disc_total = missing_total = action_total = stmt_total = 0.0
     used = set()
@@ -5986,6 +6003,8 @@ def _render_statement_recon():
         else:
             status, n_pay = "✅ Approved — ready for payment", n_pay + 1
             to_pay += val
+            pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
+                              "bill_id": b["id"], "due": _due_label(b.get("due"))})
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
                      "Due": (_due_label(b.get("due")) if b and not b["paid"] else ""),
@@ -6017,6 +6036,67 @@ def _render_statement_recon():
         f"awaiting credit note ({n_disc}) + £{missing_total:,.2f} missing from Monday ({n_missing}) "
         f"+ £{paid_total:,.2f} already paid ({n_paid}). "
         f"Statement's own stated balance: £{(stmt.get('balance') or 0):,.2f}.")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Statement date", stmt.get("statement_date") or "—")
+    c2.metric("Credit limit", f"£{credit_limit:,.0f}" if credit_limit else "—")
+    c3.metric("Available credit", f"£{credit_limit - stmt_total:,.2f}" if credit_limit else "—")
+    if not credit_limit:
+        st.caption("No credit limit found for this supplier on the Monday Suppliers board.")
+
+    # ---- Build a remittance from the ready-to-pay invoices, email it, (later) mark paid in QB ----
+    if pay_lines:
+        _pk = _norm_code(sup)
+        st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
+        pdf = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
+                             "Amount": p["amt"], "Due": p["due"]} for p in pay_lines])
+        edited = st.data_editor(
+            pdf, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
+            disabled=[c for c in pdf.columns if c != "Pay"],
+            column_config={"Pay": st.column_config.CheckboxColumn("Pay"),
+                           "Amount": st.column_config.NumberColumn(format="£%.2f")})
+        try:
+            ticks = edited["Pay"]
+            picked_lines = [pay_lines[i] for i in range(len(pay_lines)) if bool(ticks.iloc[i])]
+        except Exception:  # noqa: BLE001
+            picked_lines = list(pay_lines)
+        rem_total = sum(p["amt"] for p in picked_lines if isinstance(p["amt"], (int, float)))
+        st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
+        ref = st.text_input("Remittance reference", key=f"remref_{_pk}",
+                            value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
+        remit = _remittance_text(sup, picked_lines, rem_total, ref)
+        st.text_area("Remittance advice (preview)", remit, height=200, disabled=True,
+                     key=f"remprev_{_pk}")
+        e1, e2 = st.columns([2, 1])
+        rem_to = e1.text_input("Send remittance to (supplier accounts email)",
+                               value=SUPPLIER_EMAILS.get(_pk, ""), key=f"remto_{_pk}")
+        if e2.button("✉ Send remittance", key=f"remsend_{_pk}", type="primary",
+                     use_container_width=True,
+                     disabled=not (rem_to.strip() and picked_lines)):
+            subj = f"Remittance advice — {ref}"
+            sent = drafted = False
+            dlink = None
+            try:
+                data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, rem_to.strip(), subj, remit)
+                sent = True
+            except Exception:  # noqa: BLE001
+                try:
+                    dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, rem_to.strip(),
+                                                               subj, remit)
+                    drafted = True
+                except Exception as e:  # noqa: BLE001
+                    st.error("Couldn't send or draft: " + str(e)[:200])
+            if sent or drafted:
+                link = f" [Open the draft]({dlink})" if dlink else ""
+                st.success(f"Remittance {'sent to' if sent else 'drafted for'} "
+                           f"{rem_to.strip()}." + link)
+        st.button("Mark these paid in QuickBooks", key=f"markpaid_{_pk}", disabled=True,
+                  help="Writes a bill payment back to QuickBooks — needs QB write access enabled "
+                       "and your bank account. Tell me to set it up.")
+        st.caption("‘Mark paid in QuickBooks’ is off for now: it *writes* to QuickBooks, and we set "
+                   "the connection up read-only. Say the word (and which bank account you pay from) "
+                   "and I'll enable it.")
+
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
                    "they've never been input. (Mailbox search + supplier-chase draft coming next.)")
