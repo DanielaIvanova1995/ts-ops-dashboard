@@ -6063,13 +6063,16 @@ def _render_payables_live():
     vendors, bills = data["vendors"], data["bills"]
     limits = {_norm_code(k): v for k, v in (data["limits"] or {}).items()}
     today = now_uk().date()
+    # Owed per supplier is derived straight from the OPEN bills (Balance > 0) — more reliable than
+    # the Vendor.Balance field, which QuickBooks often returns as 0 in a query.
     per = {}
     for b in bills:
         bal = b.get("Balance")
         if not (isinstance(bal, (int, float)) and bal > 0.005):
             continue
         vid = (b.get("VendorRef") or {}).get("value")
-        p = per.setdefault(vid, {"overdue": 0.0, "next": None})
+        p = per.setdefault(vid, {"owed": 0.0, "overdue": 0.0, "next": None})
+        p["owed"] += bal
         due = b.get("DueDate")
         if due:
             try:
@@ -6082,15 +6085,15 @@ def _render_payables_live():
                 if p["next"] is None or dd < p["next"]:
                     p["next"] = dd
 
+    st.caption(f"{len(vendors)} QuickBooks vendors · {len(bills)} bills pulled · "
+               f"{len(per)} supplier(s) with an open balance.")
     rows, tot_owed, tot_over = [], 0.0, 0.0
-    for vid, v in vendors.items():
-        owed = v.get("balance")
-        if not (isinstance(owed, (int, float)) and owed > 0.005):
-            continue
-        p = per.get(vid, {})
-        lim = limits.get(_norm_code(v.get("name")))
+    for vid, p in per.items():
+        owed = p["owed"]
+        name = (vendors.get(vid) or {}).get("name") or f"Vendor {vid}"
+        lim = limits.get(_norm_code(name))
         nd = p.get("next")
-        rows.append({"Supplier": v.get("name"), "Owed": round(owed, 2),
+        rows.append({"Supplier": name, "Owed": round(owed, 2),
                      "Overdue": round(p.get("overdue", 0.0), 2),
                      "Next due": (_due_label(nd.isoformat()) if nd else ""),
                      "Credit limit": lim,
@@ -6099,7 +6102,9 @@ def _render_payables_live():
         tot_over += p.get("overdue", 0.0)
 
     if not rows:
-        st.info("No open supplier bills in QuickBooks right now.")
+        st.info("No open supplier bills came back from QuickBooks. If you know there are unpaid "
+                "bills, they may be beyond the first 1,000 pulled — tell me and I'll page through "
+                "all of them.")
         return
     rows.sort(key=lambda r: (-(r["Overdue"] or 0), -((r["% of limit"] or 0))))
     st.markdown(f"**{len(rows)} suppliers** owing · total **£{tot_owed:,.2f}** · overdue "
