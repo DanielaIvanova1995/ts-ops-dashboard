@@ -2751,3 +2751,43 @@ def recon_save(supplier_key: str, snapshot: dict, token=None):
     m[supplier_key] = snapshot
     item_id = _config_item_named(QBO_RECON_ITEM, token)
     monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
+
+
+def _config_file_column(token=None):
+    """(board_id, file_column_id) for a 'Statement' file column on the TradeHub Config board;
+    created if it doesn't exist."""
+    token = token or get_token()
+    board_id = monday_find_or_create_board(QBO_CONFIG_BOARD, token)
+    data = _monday_gql("query($b:[ID!]){boards(ids:$b){columns{id title type}}}",
+                       {"b": [str(board_id)]}, token)
+    cols = ((data.get("boards") or [{}])[0]).get("columns") or []
+    for c in cols:
+        if c.get("type") == "file" and c.get("title") == "Statement":
+            return board_id, c["id"]
+    cd = _monday_gql(
+        'mutation($b:ID!){create_column(board_id:$b,title:"Statement",column_type:file){id}}',
+        {"b": str(board_id)}, token)
+    return board_id, (cd.get("create_column") or {}).get("id")
+
+
+def recon_upload_statement(file_bytes: bytes, filename: str, token=None):
+    """Upload a statement file to the reconciliation config item; return its Monday asset id
+    (use monday_asset_url(asset_id) to get a fresh download link later)."""
+    token = token or get_token()
+    _board, col = _config_file_column(token)
+    item_id = _config_item_named(QBO_RECON_ITEM, token)
+    q = ('mutation ($file: File!) { add_file_to_column (item_id: %s, column_id: "%s", file: $file) '
+         '{ assets { id created_at } } }' % (item_id, col))
+    r = requests.post("https://api.monday.com/v2/file",
+                      headers={"Authorization": token},
+                      data={"query": q, "map": '{"file":"variables.file"}'},
+                      files={"file": (filename or "statement.pdf", file_bytes,
+                                      "application/octet-stream")}, timeout=180)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday file upload error: {payload['errors']}")
+    assets = (((payload.get("data") or {}).get("add_file_to_column") or {}).get("assets") or [])
+    if not assets:
+        return None
+    return max(assets, key=lambda a: int(a.get("id") or 0)).get("id")

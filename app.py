@@ -5834,6 +5834,13 @@ def _render_statement_recon():
                                reverse=True):
             with st.expander(f"{snap.get('supplier', '?')} · saved {snap.get('saved_at', '')} · "
                              f"ready to pay £{snap.get('to_pay', 0):,.2f}"):
+                if snap.get("statement_asset"):
+                    try:
+                        _surl = data_sources.monday_asset_url(snap["statement_asset"])
+                        if _surl:
+                            st.link_button("📄 Open statement", _surl)
+                    except Exception:  # noqa: BLE001
+                        pass
                 if snap.get("summary"):
                     st.markdown(snap["summary"])
                 if snap.get("rows"):
@@ -6014,13 +6021,18 @@ def _render_statement_recon():
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
                    "they've never been input. (Mailbox search + supplier-chase draft coming next.)")
     if st.button("💾 Save this reconciliation", key=f"savrec_{_norm_code(sup)}",
-                 help="Saves it so it shows at the top here next time you log in."):
+                 help="Saves it (with the statement) so it shows at the top here next time."):
         snap = {"supplier": sup, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
                 "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
-                "to_pay": round(to_pay, 2), "rows": rows}
+                "to_pay": round(to_pay, 2), "rows": rows, "statement_asset": None}
+        try:
+            with st.spinner("Saving the statement file…"):
+                snap["statement_asset"] = data_sources.recon_upload_statement(up.getvalue(), up.name)
+        except Exception:  # noqa: BLE001
+            pass    # save the reconciliation even if the file upload fails
         try:
             data_sources.recon_save(_norm_code(sup), snap)
-            st.success("Saved — it'll show at the top here next time you log in.")
+            st.success("Saved — it'll show at the top here (with the statement) next time you log in.")
         except Exception as e:  # noqa: BLE001
             st.error("Couldn't save: " + str(e)[:150])
 
