@@ -5768,12 +5768,30 @@ def _qbo_connected_quiet():
         return False
 
 
+def _statement_file_text(up):
+    """Extract text from an Excel/CSV statement so the AI can parse it like a PDF."""
+    if up.name.lower().endswith(".csv"):
+        return up.getvalue().decode("utf-8", "ignore")
+    import io
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(up.getvalue()), data_only=True, read_only=True)
+    out = []
+    for ws in wb.worksheets:
+        out.append(f"=== SHEET: {ws.title} ===")
+        for row in ws.iter_rows(values_only=True):
+            cells = ["" if c is None else str(c) for c in row]
+            if any(c.strip() for c in cells):
+                out.append(" | ".join(cells))
+    return "\n".join(out)
+
+
 def _render_statement_recon():
     """Upload a supplier statement → match every invoice line against QuickBooks bills."""
     if not data_sources.qbo_is_connected():
         st.info("Connect QuickBooks above first — reconciliation reads your bills from it.")
         return
-    up = st.file_uploader("Upload a supplier statement (PDF)", type=["pdf"], key="stmt_pdf")
+    up = st.file_uploader("Upload a supplier statement (PDF, Excel or CSV)",
+                          type=["pdf", "xlsx", "xls", "csv"], key="stmt_pdf")
     if not up:
         st.caption("Upload a supplier's statement of account and I'll match every line against "
                    "QuickBooks — what's entered, paid, still owing, or missing.")
@@ -5783,7 +5801,10 @@ def _render_statement_recon():
     if sig not in cache:
         with st.spinner("Reading the statement…"):
             try:
-                cache[sig] = data_sources.read_statement_pdf(pdf_bytes=up.getvalue())
+                if up.name.lower().endswith(".pdf"):
+                    cache[sig] = data_sources.read_statement_pdf(pdf_bytes=up.getvalue())
+                else:
+                    cache[sig] = data_sources.read_statement_pdf(text=_statement_file_text(up))
             except Exception as e:  # noqa: BLE001
                 st.error("Couldn't read the statement: " + str(e)[:200])
                 return
