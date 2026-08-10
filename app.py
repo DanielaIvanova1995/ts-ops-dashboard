@@ -5804,11 +5804,29 @@ def _render_statement_recon():
         st.warning("No vendors found in QuickBooks.")
         return
     names = [n for n, _ in vendors]
-    auto = data_sources.qbo_find_vendor(sup)
-    default_i = next((i for i, (n, vid) in enumerate(vendors) if auto and vid == auto["id"]), 0)
+    # Prefer a previously-learned mapping for this supplier; else auto-match by name.
+    sup_key = _norm_code(sup)
+    try:
+        vmap = data_sources.qbo_vendor_map_load()
+    except Exception:  # noqa: BLE001
+        vmap = {}
+    mapped = vmap.get(sup_key)
+    if mapped:
+        default_i = next((i for i, (n, vid) in enumerate(vendors) if vid == mapped["id"]), 0)
+    else:
+        auto = data_sources.qbo_find_vendor(sup)
+        default_i = next((i for i, (n, vid) in enumerate(vendors) if auto and vid == auto["id"]), 0)
+    if mapped:
+        st.caption(f"Auto-selected **{mapped['name']}** (remembered for “{sup}”).")
     picked = st.selectbox(f"QuickBooks vendor (statement says “{sup}”)", names, index=default_i,
                           key="stmt_vendor")
     vid = {n: i for n, i in vendors}[picked]
+    # Learn/refresh the mapping whenever the chosen vendor differs from what's stored.
+    if not mapped or mapped.get("id") != vid:
+        try:
+            data_sources.qbo_vendor_map_save(sup_key, vid, picked)
+        except Exception:  # noqa: BLE001
+            pass
     with st.spinner("Reading QuickBooks bills…"):
         try:
             bills = data_sources.qbo_vendor_bills(vid)

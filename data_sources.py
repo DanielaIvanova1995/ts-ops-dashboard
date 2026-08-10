@@ -2624,3 +2624,50 @@ def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
             "ref": (b.get("PrivateNote") or "").strip(),
         })
     return out
+
+
+# ---- Statement supplier -> QuickBooks vendor mapping (learned once, remembered). Stored (base64)
+# on a Monday "Statement Vendor Map" item so it survives restarts. ----
+QBO_VENDORMAP_ITEM = "Statement Vendor Map"
+
+
+def _config_item_named(item_name, token=None):
+    token = token or get_token()
+    board_id = monday_find_or_create_board(QBO_CONFIG_BOARD, token)
+    data = _monday_gql("query($b:[ID!]){boards(ids:$b){items_page(limit:20){items{id name}}}}",
+                       {"b": [str(board_id)]}, token)
+    items = (((data.get("boards") or [{}])[0].get("items_page") or {}).get("items") or [])
+    for it in items:
+        if it.get("name") == item_name:
+            return it["id"]
+    return monday_create_item(board_id, item_name, token)
+
+
+def qbo_vendor_map_load(token=None):
+    """{normalised supplier name: {id, name}} of learned statement->QuickBooks vendor mappings."""
+    import base64 as _b64
+    import json as _json
+    import re as _re
+    token = token or get_token()
+    item_id = _config_item_named(QBO_VENDORMAP_ITEM, token)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:1){body}}}",
+                       {"i": [str(item_id)]}, token)
+    ups = (((data.get("items") or [{}])[0]).get("updates") or [])
+    if not ups:
+        return {}
+    b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
+    try:
+        return _json.loads(_b64.b64decode(b64).decode()) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def qbo_vendor_map_save(supplier_key: str, vendor_id, vendor_name: str, token=None):
+    """Remember that a statement supplier maps to this QuickBooks vendor."""
+    import base64 as _b64
+    import json as _json
+    token = token or get_token()
+    m = qbo_vendor_map_load(token)
+    m[supplier_key] = {"id": str(vendor_id), "name": vendor_name}
+    item_id = _config_item_named(QBO_VENDORMAP_ITEM, token)
+    monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
