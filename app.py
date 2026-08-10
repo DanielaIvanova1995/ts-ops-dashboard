@@ -5789,9 +5789,11 @@ def _due_label(due_str):
 
 
 def _gbp(x):
-    """Money as a string with thousands separators, e.g. 1000 -> '£1,000.00'. Blank passes through."""
+    """Money as a string with thousands separators, e.g. 1000 -> '£1,000.00'. Blank/NaN -> ''."""
     if isinstance(x, bool) or not isinstance(x, (int, float)):
         return x if x not in (None, "") else ""
+    if x != x:            # NaN (e.g. a missing value pandas turned into NaN) -> blank, not '£nan'
+        return ""
     return f"£{x:,.2f}"
 
 
@@ -6350,7 +6352,6 @@ def _render_payables_live():
                      "Credit limit": lim,
                      "Available credit": (round(lim - owed, 2) if isinstance(lim, (int, float))
                                           else None),
-                     "% of limit": (round(owed / lim * 100) if lim else None),
                      "_due": nd or date.max, "_vid": vid})
         tot_owed += owed
         tot_over += p.get("overdue", 0.0)
@@ -6364,15 +6365,32 @@ def _render_payables_live():
     st.markdown(f"**{len(rows)} suppliers** owing · total **£{tot_owed:,.2f}** · overdue "
                 f"**£{tot_over:,.2f}**")
     pdf = pd.DataFrame(rows).drop(columns=["_due", "_vid"])
-    for _c in ("Owed", "Overdue", "Available credit"):
-        pdf[_c] = pdf[_c].map(_gbp)
-    pdf["Credit limit"] = pdf["Credit limit"].map(
-        lambda v: f"£{v:,.0f}" if isinstance(v, (int, float)) else "")
-    st.dataframe(pdf, hide_index=True, use_container_width=True, column_config={
-        "% of limit": st.column_config.NumberColumn(format="%d%%")})
-    st.caption("Live from QuickBooks open bills · overdue = past due date · % of limit uses the "
-               "credit limits on your Monday Suppliers board · **sorted oldest-first** (earliest "
-               "due date at the top). Statement date shows if you've reconciled their statement.")
+
+    def _avail_colour(row):
+        # Green = plenty of headroom, amber = getting close, red = at/over the credit limit.
+        # Worked out from how much of the credit limit is used (Owed ÷ Credit limit).
+        styles = [""] * len(row)
+        lim, owed = row.get("Credit limit"), row.get("Owed")
+        if (isinstance(lim, (int, float)) and lim == lim and lim > 0
+                and isinstance(owed, (int, float)) and owed == owed):
+            pct = owed / lim * 100
+            if pct >= 90:
+                css = "background-color:#fbe3e4;color:#8a1c1c;font-weight:600"   # red
+            elif pct >= 75:
+                css = "background-color:#fff4d6;color:#7a5b00;font-weight:600"   # amber
+            else:
+                css = "background-color:#e3f4e4;color:#125b1a;font-weight:600"   # green
+            styles[row.index.get_loc("Available credit")] = css
+        return styles
+
+    fmt = {"Owed": _gbp, "Overdue": _gbp, "Available credit": _gbp,
+           "Credit limit": lambda v: f"£{v:,.0f}" if isinstance(v, (int, float)) and v == v else ""}
+    styled = pdf.style.apply(_avail_colour, axis=1).format(fmt)
+    st.dataframe(styled, hide_index=True, use_container_width=True)
+    st.caption("Live from QuickBooks open bills · overdue = past due date · credit limits come from "
+               "your Monday Suppliers board · **sorted oldest-first** (earliest due date at the "
+               "top). Statement date shows if you've reconciled their statement. **Available "
+               "credit** is 🟢 plenty · 🟠 getting close (75%+ used) · 🔴 at/over the limit (90%+).")
 
     # ---- Jump straight into paying off a supplier whose statement you've reconciled ----
     jumpable = []
