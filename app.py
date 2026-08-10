@@ -1762,9 +1762,71 @@ def _ctie_expected(goods_value, ship):
     return rule["flat"]
 
 
+# --- Nuie/Roxor: delivery priced by the delivery postcode ZONE and the product's shipping
+# category (Parcel / Oversized Parcel / A-Frame / Pallet / Double Pallet). One charge per
+# consignment = the BIGGEST item's rate. Rates below ALREADY include Nuie's +10%. The SKU→
+# category map is bundled as nuie_ship.json (7,148 SKUs; 'Multi Carton' = Pallet). ---
+NUIE_RATES = {                       # category: (Zone 1 mainland, Zone 2 offshore) — inc. +10%
+    "parcel": (16.50, 16.50),
+    "os_parcel": (30.80, 44.00),
+    "aframe": (59.95, 110.00),
+    "pallet": (59.95, 110.00),       # includes 'Multi Carton'
+    "dbl_pallet": (110.00, 192.50),
+}
+
+
+@st.cache_data(show_spinner=False)
+def _nuie_ship_map():
+    try:
+        with open(BASE / "nuie_ship.json", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _is_nuie(supplier):
+    return (supplier or "").startswith("nuie")
+
+
+def _nuie_zone(ship):
+    """1 (UK mainland) or 2 (offshore islands/Highlands) for the delivery postcode. None if no
+    postcode is known."""
+    pc = ((ship or {}).get("postcode") or "").upper().strip()
+    if not pc:
+        return None
+    out = pc.split(" ")[0] if " " in pc else (pc[:-3] if len(pc) > 3 else pc)
+    m = re.match(r"([A-Z]{1,2})(\d+)", out.strip())
+    if not m:
+        return 1
+    area, dist = m.group(1), int(m.group(2))
+    if area in ("BT", "IM", "IV", "HS", "KW", "ZE"):
+        return 2
+    z2 = ((area == "AB" and (31 <= dist <= 38 or 41 <= dist <= 56))
+          or (area == "KA" and dist in (27, 28))
+          or (area == "PA" and 20 <= dist <= 78)
+          or (area == "PH" and 15 <= dist <= 99)
+          or (area == "PO" and 30 <= dist <= 41)
+          or (area == "TR" and (21 <= dist <= 25 or 3 <= dist <= 6 or 10 <= dist <= 20)))
+    return 2 if z2 else 1
+
+
+def _nuie_expected(lines, ship):
+    """Expected ex-VAT Nuie carriage — the BIGGEST item's rate for the delivery zone. None if none
+    of the invoice's SKUs are in the shipping map (then it's noted, not flagged). Unknown postcode
+    → Zone 2 (the higher rate) so we never false-flag."""
+    zone = _nuie_zone(ship)
+    idx = 0 if zone == 1 else 1            # zone None -> Zone 2 ceiling
+    smap = _nuie_ship_map()
+    cats = {smap.get(_norm_code(l.get("sku"))) for l in (lines or [])}
+    cats = {c for c in cats if c in NUIE_RATES}
+    if not cats:
+        return None
+    return max(NUIE_RATES[c][idx] for c in cats)
+
+
 def _expected_delivery(supplier, goods_value, ship=None, lines=None):
     """Expected (max legitimate) ex-VAT delivery charge for a supplier given the order's goods
-    value (Carron/Ctie use the delivery address; JB Kind uses the door count from `lines`).
+    value (Carron/Ctie/Nuie use the delivery address; JB Kind uses the door count from `lines`).
     None if no rule on file / can't be priced."""
     if _is_carron(supplier):
         return _carron_expected(goods_value, ship)
@@ -1774,6 +1836,8 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         return _jbkind_expected(lines, ship)
     if _is_southern(supplier):
         return _southern_expected(ship)
+    if _is_nuie(supplier):
+        return _nuie_expected(lines, ship)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
@@ -1849,7 +1913,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     # Carron & Ctie delivery is priced by the delivery postcode — fetch it once.
     carron_ship = (_shopify_order_ship(meta["shopify_order_id"])
                    if (_is_carron(supplier) or _is_ctie(supplier) or _is_jbkind(supplier)
-                       or _is_southern(supplier))
+                       or _is_southern(supplier) or _is_nuie(supplier))
                    and meta.get("shopify_order_id") else None)
 
     def _line_total(l):
@@ -1916,6 +1980,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
             elif _is_southern(supplier) and known is not None:
                 zinfo = f" ({(carron_ship or {}).get('postcode', '')} zone)"
+            elif _is_nuie(supplier) and known is not None:
+                zinfo = f" (Zone {_nuie_zone(carron_ship) or '?'})"
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
             if isinstance(amt, (int, float)):
@@ -1935,6 +2001,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 elif _is_southern(supplier):
                     dissues.append(("name", f"delivery £{amt:,.2f} — Southern Sheeting postcode "
                                             "not in the zone list; not auto-checked"))
+                elif _is_nuie(supplier):
+                    dissues.append(("name", f"delivery £{amt:,.2f} — Nuie: no shipping category "
+                                            "for these SKUs; not auto-checked"))
                 else:
                     dissues.append(("delivery", f"delivery £{amt:,.2f} — no agreed rate on file"))
             lines.append({"sku": sku_raw or "Delivery", "desc": desc, "qty": qty,
@@ -2052,6 +2121,8 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                     zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
                 elif _is_southern(supplier):
                     zinfo = f" ({(carron_ship or {}).get('postcode', '')} zone)"
+                elif _is_nuie(supplier):
+                    zinfo = f" (Zone {_nuie_zone(carron_ship) or '?'})"
                 cissues.append(("delivery", f"carriage £{carriage:,.2f} vs expected "
                                             f"£{known:,.2f}{zinfo}"))
         elif _is_jbkind(supplier):
@@ -2063,6 +2134,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         elif _is_southern(supplier):
             cissues.append(("name", f"carriage £{carriage:,.2f} — Southern Sheeting postcode "
                                     "not in the zone list; not auto-checked"))
+        elif _is_nuie(supplier):
+            cissues.append(("name", f"carriage £{carriage:,.2f} — Nuie: no shipping category for "
+                                    "these SKUs; not auto-checked"))
         elif not _is_carron(supplier):
             cissues.append(("delivery", f"carriage £{carriage:,.2f} — no agreed rate on file"))
         lines.append({"sku": "Carriage", "desc": "Carriage (from invoice totals)", "qty": None,
