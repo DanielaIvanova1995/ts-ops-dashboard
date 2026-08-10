@@ -1313,16 +1313,22 @@ def _to_recipients(to_email: str) -> list:
 
 def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
                         pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
-                        token: str | None = None) -> bool:
-    """Send an email from `mailbox` to to_email (optionally attaching the PDF at
-    pdf_url). Sends immediately and saves to Sent Items. Needs Mail.Send. Raises."""
+                        pdf_bytes: bytes | None = None, token: str | None = None) -> bool:
+    """Send an email from `mailbox` to to_email (optionally attaching a PDF — either raw
+    pdf_bytes or one fetched from pdf_url). Sends immediately and saves to Sent Items.
+    Needs Mail.Send. Raises."""
     import base64
     token = token or ms_token()
     if not (to_email or "").strip():
         raise RuntimeError("No recipient email address.")
     msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
            "toRecipients": _to_recipients(to_email)}
-    if pdf_url:
+    if pdf_bytes:
+        msg["attachments"] = [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": pdf_name, "contentType": "application/pdf",
+            "contentBytes": base64.b64encode(pdf_bytes).decode()}]
+    elif pdf_url:
         # Best-effort attachment: if the PDF can't be fetched (expired link, auth),
         # still send the email rather than failing the whole chase.
         try:
@@ -1346,18 +1352,24 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
 
 def create_supplier_draft(mailbox: str, to_email: str, subject: str, body: str,
                           pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
-                          token: str | None = None) -> str | None:
+                          pdf_bytes: bytes | None = None, token: str | None = None) -> str | None:
     """Create a DRAFT email in `mailbox` (lands in Drafts, addressed to to_email, PDF
-    attached). The user reviews it in Outlook and presses send. Uses Mail.ReadWrite —
-    which works where sendMail's Mail.Send is blocked — and keeps a human in the loop
-    before anything reaches a supplier. Returns the draft's webLink. Raises on failure."""
+    attached — either raw pdf_bytes or fetched from pdf_url). The user reviews it in Outlook
+    and presses send. Uses Mail.ReadWrite — which works where sendMail's Mail.Send is blocked —
+    and keeps a human in the loop before anything reaches a supplier. Returns the draft's
+    webLink. Raises on failure."""
     import base64
     token = token or ms_token()
     if not (to_email or "").strip():
         raise RuntimeError("No recipient email address.")
     msg = {"subject": subject, "body": {"contentType": "Text", "content": body},
            "toRecipients": _to_recipients(to_email)}
-    if pdf_url:
+    if pdf_bytes:
+        msg["attachments"] = [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": pdf_name, "contentType": "application/pdf",
+            "contentBytes": base64.b64encode(pdf_bytes).decode()}]
+    elif pdf_url:
         try:  # best-effort attach — don't lose the draft over a bad PDF link
             pdf = requests.get(pdf_url, timeout=40)
             pdf.raise_for_status()
@@ -2940,3 +2952,93 @@ def fetch_statement_attachment(mailbox: str, message_id: str, attachment_id: str
         rv.raise_for_status()
         return a.get("name"), rv.content
     return a.get("name"), _b64.b64decode(data)
+
+
+# ---------------------------------------------------------------------------
+# Remittance advice PDF — a QuickBooks-style document to attach to the email
+# sent to a supplier's accounts team, instead of a plain typed-up message.
+# ---------------------------------------------------------------------------
+REMIT_COMPANY = [
+    "Trade Superstore Online",
+    "Unit 8",
+    "Derby  DE21 4ED GBR",
+    "daniela@tradesuperstoreonline.co.uk",
+    "www.tradesuperstoreonline.co.uk",
+]
+
+
+def _remit_ddmmyyyy(s):
+    s = (s or "")[:10]
+    try:
+        y, m, d = s.split("-")
+        return f"{d}/{m}/{y}"
+    except (ValueError, AttributeError):
+        return s or ""
+
+
+def _remit_money(x):
+    try:
+        return f"{float(x):,.2f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def build_remittance_pdf(supplier, ref, date_str, lines, total, memo="", company=None):
+    """A remittance-advice PDF (bytes) matching the QuickBooks layout: company block, title,
+    Payment To / Date / Reference, a Bill Number/Bill Date/Due Date/Original/Balance/Payment
+    table, then Memo, Total and a signature line. `lines` = [{bill_no, bill_date, due_date,
+    original, balance, payment}]."""
+    from fpdf import FPDF
+    company = company or REMIT_COMPANY
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    # Company block (top-left)
+    for i, line in enumerate(company):
+        pdf.set_font("Helvetica", "B" if i == 0 else "", 12 if i == 0 else 9)
+        pdf.cell(0, 5.2, line, ln=1)
+    # Title
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.cell(0, 11, "Remittance Advice", ln=1)
+    pdf.ln(1)
+    # Payment To (left) + Date / Reference (right)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(120, 6, "Payment To", ln=0)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"Date: {date_str}", ln=1)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(120, 6, str(supplier or ""), ln=0)
+    pdf.cell(0, 6, f"Reference No: {ref}", ln=1)
+    pdf.ln(4)
+    # Table
+    cols = [("Bill Number", 32, "L"), ("Bill Date", 25, "L"), ("Due Date", 25, "L"),
+            ("Original Amount", 35, "R"), ("Balance", 26, "R"), ("Payment", 27, "R")]
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(238, 238, 238)
+    for name, w, align in cols:
+        pdf.cell(w, 7, name, border=1, align=align, fill=True)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 9)
+    for L in lines:
+        vals = [str(L.get("bill_no") or ""), _remit_ddmmyyyy(L.get("bill_date")),
+                _remit_ddmmyyyy(L.get("due_date")), _remit_money(L.get("original")),
+                _remit_money(L.get("balance")), _remit_money(L.get("payment"))]
+        for (name, w, align), v in zip(cols, vals):
+            pdf.cell(w, 6.5, v, border="LR", align=align)
+        pdf.ln()
+    pdf.cell(sum(w for _, w, _ in cols), 0, "", border="T", ln=1)
+    pdf.ln(5)
+    # Memo + Total
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(120, 6, f"Memo: {memo}", ln=0)
+    pdf.set_font("Helvetica", "B", 12)
+    try:
+        pdf.cell(0, 6, f"Total: £{float(total):,.2f}", align="R", ln=1)
+    except (TypeError, ValueError):
+        pdf.cell(0, 6, f"Total: {total}", align="R", ln=1)
+    pdf.ln(10)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, "Signature: --------------------------", ln=1)
+    out = pdf.output()
+    return bytes(out)

@@ -5896,12 +5896,20 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
         return
     _pk = key
     st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
-    pdf = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
-                         "Amount": _gbp(p["amt"]), "Due": p.get("due", "")} for p in pay_lines])
+    pay_df = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
+                            "Amount": _gbp(p["amt"]), "Due": p.get("due", ""),
+                            "Approved": "✅ Approved" if p.get("bill_id") else "⚠ NOT approved"}
+                           for p in pay_lines])
     edited = st.data_editor(
-        pdf, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
-        disabled=[c for c in pdf.columns if c != "Pay"],
-        column_config={"Pay": st.column_config.CheckboxColumn("Pay")})
+        pay_df, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
+        disabled=[c for c in pay_df.columns if c != "Pay"],
+        column_config={"Pay": st.column_config.CheckboxColumn("Pay"),
+                       "Approved": st.column_config.TextColumn(
+                           "Approved",
+                           help="Approved & entered in QuickBooks. Only approved invoices reach "
+                                "this list — this column is just a safety check.")})
+    if any(not p.get("bill_id") for p in pay_lines):
+        st.warning("⚠ Something here isn't approved in QuickBooks — untick it before paying.")
     try:
         ticks = edited["Pay"]
         picked_lines = [pay_lines[i] for i in range(len(pay_lines)) if bool(ticks.iloc[i])]
@@ -5911,31 +5919,51 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
     st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
     ref = st.text_input("Remittance reference", key=f"remref_{_pk}",
                         value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
-    remit = _remittance_text(sup, picked_lines, rem_total, ref)
-    st.text_area("Remittance advice (preview)", remit, height=200, disabled=True,
-                 key=f"remprev_{_pk}")
+    # Build the remittance-advice PDF the supplier receives (QuickBooks-style document).
+    pdf_lines = [{"bill_no": p.get("bill_no") or p.get("inv"), "bill_date": p.get("bill_date"),
+                  "due_date": p.get("due_date"),
+                  "original": p.get("original") if p.get("original") is not None else p.get("amt"),
+                  "balance": p.get("balance") if p.get("balance") is not None else p.get("amt"),
+                  "payment": p.get("amt")} for p in picked_lines]
+    pdf_bytes = None
+    if picked_lines:
+        try:
+            pdf_bytes = data_sources.build_remittance_pdf(
+                sup, ref, now_uk().strftime("%d/%m/%Y"), pdf_lines, rem_total)
+        except Exception as e:  # noqa: BLE001
+            st.caption("Couldn't build the remittance PDF: " + str(e)[:160])
+    pdf_name = ("Remittance_Advice_" + re.sub(r"[^A-Za-z0-9]+", "_", ref).strip("_")
+                + "_from_Trade_Superstore_Online.pdf")
+    if pdf_bytes:
+        st.download_button("⬇ Preview / download remittance PDF", pdf_bytes, file_name=pdf_name,
+                           mime="application/pdf", key=f"rempdf_{_pk}")
+    cover = (f"Hi,\n\nPlease find attached our remittance advice ({ref}) for a total of "
+             f"£{rem_total:,.2f}.\n\nKind regards,\nTrade Superstore Online\nAccounts")
     e1, e2 = st.columns([2, 1])
     rem_to = e1.text_input("Send remittance to (supplier accounts email)",
                            value=SUPPLIER_EMAILS.get(_norm_code(sup), ""), key=f"remto_{_pk}")
     if e2.button("✉ Send remittance", key=f"remsend_{_pk}", type="primary",
                  use_container_width=True,
                  disabled=not (rem_to.strip() and picked_lines)):
-        subj = f"Remittance advice — {ref}"
+        subj = f"Remittance Advice — {ref}"
         sent = drafted = False
         dlink = None
         try:
-            data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, rem_to.strip(), subj, remit)
+            data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, rem_to.strip(), subj, cover,
+                                             pdf_bytes=pdf_bytes, pdf_name=pdf_name)
             sent = True
         except Exception:  # noqa: BLE001
             try:
                 dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, rem_to.strip(),
-                                                           subj, remit)
+                                                           subj, cover, pdf_bytes=pdf_bytes,
+                                                           pdf_name=pdf_name)
                 drafted = True
             except Exception as e:  # noqa: BLE001
                 st.error("Couldn't send or draft: " + str(e)[:200])
         if sent or drafted:
             link = f" [Open the draft]({dlink})" if dlink else ""
-            st.success(f"Remittance {'sent to' if sent else 'drafted for'} {rem_to.strip()}." + link)
+            st.success(f"Remittance PDF {'sent to' if sent else 'drafted for'} "
+                       f"{rem_to.strip()}." + link)
     # ---- Mark paid in QuickBooks (writes a BillPayment). Confirmed, never automatic. ----
     st.markdown("**Mark paid in QuickBooks**")
     try:
@@ -6219,7 +6247,10 @@ def _render_statement_recon():
             status, n_pay = "✅ Approved — ready for payment", n_pay + 1
             to_pay += val
             pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
-                              "bill_id": b["id"], "due": _due_label(b.get("due"))})
+                              "bill_id": b["id"], "due": _due_label(b.get("due")),
+                              "bill_no": b.get("doc_no") or inv, "bill_date": b.get("date"),
+                              "due_date": b.get("due"), "original": b.get("total"),
+                              "balance": b.get("balance")})
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
                      "Due": (_due_label(b.get("due")) if b and not b["paid"] else ""),
