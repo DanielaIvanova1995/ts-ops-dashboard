@@ -5796,15 +5796,21 @@ def _gbp(x):
 
 
 def _subnav(key, options):
-    """Slick sidebar sub-menu (segmented control instead of radio bubbles). Always keeps a
-    selection, defaulting to the first option, and mirrors it onto st.session_state[key] so the
-    rest of the app reads the choice exactly as it did with st.radio."""
+    """Slick sidebar sub-menu — vertical full-width buttons (one per line), matching the main
+    nav. Highlights the active view and mirrors the choice onto st.session_state[key] so the rest
+    of the app reads it exactly as it did with st.radio."""
     cur = st.session_state.get(key)
     if cur not in options:
         cur = options[0]
-    sel = st.segmented_control(key, options, key=f"_sc_{key}", default=cur,
-                               label_visibility="collapsed")
-    st.session_state[key] = sel if sel in options else cur
+        st.session_state[key] = cur
+    for opt in options:
+        _pad, _btn = st.columns([0.06, 0.94])
+        with _btn:
+            if st.button(opt, key=f"_sb_{key}_{opt}", use_container_width=True,
+                         type=("primary" if cur == opt else "secondary")):
+                if opt != cur:
+                    st.session_state[key] = opt
+                    st.rerun()
 
 
 def _remittance_text(sup, lines, total, ref):
