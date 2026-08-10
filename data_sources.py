@@ -2629,6 +2629,24 @@ def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
     return out
 
 
+def qbo_vendor_payments(vendor_id: str, limit: int = 1000):
+    """Map each PAID Bill id → the remittance/payment it was settled under:
+    {bill_id: {"ref": "<payment reference e.g. Storm B100826>", "date": "YYYY-MM-DD"}}.
+    ref = the BillPayment's reference no (DocNumber), else its memo (PrivateNote)."""
+    vid = str(vendor_id).replace("'", "''")
+    rows = qbo_query(f"select * from BillPayment where VendorRef = '{vid}' "
+                     f"MAXRESULTS {int(limit)}")
+    out = {}
+    for p in (rows.get("BillPayment") or []):
+        ref = (p.get("DocNumber") or p.get("PrivateNote") or "").strip()
+        date = p.get("TxnDate")
+        for line in (p.get("Line") or []):
+            for lk in (line.get("LinkedTxn") or []):
+                if lk.get("TxnType") == "Bill" and lk.get("TxnId"):
+                    out[str(lk["TxnId"])] = {"ref": ref, "date": date}
+    return out
+
+
 # ---- Statement supplier -> QuickBooks vendor mapping (learned once, remembered). Stored (base64)
 # on a Monday "Statement Vendor Map" item so it survives restarts. ----
 QBO_VENDORMAP_ITEM = "Statement Vendor Map"

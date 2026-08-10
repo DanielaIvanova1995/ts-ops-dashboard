@@ -5848,12 +5848,16 @@ def _render_statement_recon():
             data_sources.qbo_vendor_map_save(sup_key, vid, picked)
         except Exception:  # noqa: BLE001
             pass
-    with st.spinner("Reading QuickBooks bills…"):
+    with st.spinner("Reading QuickBooks bills & payments…"):
         try:
             bills = data_sources.qbo_vendor_bills(vid)
         except Exception as e:  # noqa: BLE001
             st.error("Couldn't read QuickBooks bills: " + str(e)[:200])
             return
+        try:
+            paymap = data_sources.qbo_vendor_payments(vid)   # bill id → {ref, date}
+        except Exception:  # noqa: BLE001
+            paymap = {}
 
     with st.expander(f"🔍 What QuickBooks returned for {picked} ({len(bills)} bills)"):
         if bills:
@@ -5867,12 +5871,19 @@ def _render_statement_recon():
             st.caption("No bills came back for this vendor — pick a different vendor above, or the "
                        "bills may be under a different vendor name.")
 
+    # Missing-from-QB invoices: cross-check Monday — a Discrepancy there = awaiting a credit note.
+    try:
+        _disc = invoices_by_status("discrepancy").get("invoices") or []
+        disc_nos = {_norm_code(i.get("invoice_no")) for i in _disc if i.get("invoice_no")}
+    except Exception:  # noqa: BLE001
+        disc_nos = set()
+
     bill_by_doc = {}
     for b in bills:
         if b["doc_no"]:
             bill_by_doc.setdefault(b["doc_no"].upper(), b)
 
-    rows, n_pay, n_paid, n_missing, to_pay = [], 0, 0, 0, 0.0
+    rows, n_pay, n_paid, n_missing, n_disc, to_pay = [], 0, 0, 0, 0, 0.0
     used = set()
     for ln in (stmt.get("lines") or []):
         if (ln.get("type") or "").lower() != "invoice":
@@ -5886,28 +5897,42 @@ def _render_statement_recon():
                       and abs(x["total"] - amt) < 0.01), None)
         if b:
             used.add(b["id"])
+        paid_ref = ""
         if b and b["paid"]:
-            n_paid += 1                 # already paid in QB → ignore (nothing to do, don't clutter)
-            continue
-        if not b:
-            status, n_missing = "🔴 Not in QuickBooks", n_missing + 1
+            # On the statement but already paid in QB — keep it (supplier may not have cleared it).
+            paid_ref = (paymap.get(b["id"]) or {}).get("ref") or ""
+            status = (f"🔵 Paid in QB — under payment {paid_ref}" if paid_ref
+                      else "🔵 Marked paid in QB")
+            n_paid += 1
+        elif not b:
+            if _norm_code(inv) in disc_nos:
+                status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
+            else:
+                status, n_missing = "🔴 Not in QuickBooks", n_missing + 1
         else:
             status, n_pay = "✅ Approved — ready for payment", n_pay + 1
             to_pay += unpaid if isinstance(unpaid, (int, float)) else (amt or 0)
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
-                     "vs QuickBooks": status})
+                     "Paid under": paid_ref, "vs QuickBooks": status})
 
-    st.markdown(f"**{n_pay}** approved & ready to pay (£{to_pay:,.2f}) · **{n_missing}** not in "
-                f"QuickBooks" + (f" · {n_paid} already paid (ignored)" if n_paid else ""))
+    parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
+    if n_missing:
+        parts.append(f"**{n_missing}** not in QuickBooks")
+    if n_disc:
+        parts.append(f"**{n_disc}** awaiting credit note")
+    if n_paid:
+        parts.append(f"{n_paid} paid")
+    st.markdown(" · ".join(parts))
     if rows:
         df = pd.DataFrame(rows)
         st.dataframe(df, hide_index=True, use_container_width=True, column_config={
             "Amount": st.column_config.NumberColumn(format="£%.2f"),
             "Unpaid": st.column_config.NumberColumn(format="£%.2f")})
     if n_missing:
-        st.warning(f"⚠ {n_missing} invoice(s) on the statement aren't in QuickBooks — the ones to "
-                   "chase up or enter. (I'll add the mailbox search + supplier-chase draft next.)")
+        st.warning(f"⚠ {n_missing} invoice(s) on the statement aren't in QuickBooks and aren't a "
+                   "known Monday discrepancy — the ones to chase up or enter. (Mailbox search + "
+                   "supplier-chase draft coming next.)")
 
 
 def render_finance():
