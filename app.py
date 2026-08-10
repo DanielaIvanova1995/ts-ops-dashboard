@@ -5788,6 +5788,18 @@ def _due_label(due_str):
     return f"in {days} day{'s' if days != 1 else ''}"
 
 
+class _PulledFile:
+    """Minimal stand-in for a Streamlit uploaded file, so a statement pulled from the accounts@
+    inbox flows through the exact same reconcile pipeline as a manual upload."""
+    def __init__(self, name, data):
+        self.name = name or "statement.pdf"
+        self._data = data or b""
+        self.size = len(self._data)
+
+    def getvalue(self):
+        return self._data
+
+
 def _gbp(x):
     """Money as a string with thousands separators, e.g. 1000 -> '£1,000.00'. Blank/NaN -> ''."""
     if isinstance(x, bool) or not isinstance(x, (int, float)):
@@ -6019,11 +6031,53 @@ def _render_statement_recon():
                                "(it was saved before that feature existed).")
         st.markdown("---")
 
-    up = st.file_uploader("Upload a supplier statement (PDF, Excel or CSV)",
+    # ---- Pull the latest statement per supplier straight from the accounts@ inbox ----
+    with st.expander("📥 Pull latest statements from your accounts@ inbox"):
+        st.caption(f"Reads **{SUPPLIER_FROM_MAILBOX}** and finds the most recent statement email "
+                   "from each supplier (last ~4 months). Nothing is sent — it just fetches them so "
+                   "you can reconcile. Hit **Reconcile** on one to run it through below.")
+        if st.button("Fetch latest statements", key="pull_stmts"):
+            with st.spinner("Reading the accounts@ inbox…"):
+                try:
+                    st.session_state["_pulled_list"] = \
+                        data_sources.fetch_supplier_statements(SUPPLIER_FROM_MAILBOX)
+                except Exception as e:  # noqa: BLE001
+                    st.error("Couldn't read the inbox: " + str(e)[:220])
+        plist = st.session_state.get("_pulled_list")
+        if plist == []:
+            st.info("No statement-looking emails found in the last few months. (I look for PDF/Excel "
+                    "attachments whose name or subject mentions ‘statement’, ‘SOA’, etc.)")
+        elif plist:
+            for i, s in enumerate(plist):
+                c1, c2 = st.columns([4, 1])
+                c1.markdown(
+                    f"**{_esc(s['supplier'])}** · {s['received']} · {_esc(s['attachment_name'])}  \n"
+                    f"<span style='color:#7a7d85;font-size:12px'>{_esc(s['subject'])[:110]}</span>",
+                    unsafe_allow_html=True)
+                if c2.button("Reconcile", key=f"recpull_{i}", use_container_width=True):
+                    with st.spinner("Fetching the statement…"):
+                        try:
+                            nm, by = data_sources.fetch_statement_attachment(
+                                SUPPLIER_FROM_MAILBOX, s["message_id"], s["attachment_id"])
+                            st.session_state["_pulled_stmt"] = {"name": nm or s["attachment_name"],
+                                                                "data": by}
+                            st.rerun()
+                        except Exception as e:  # noqa: BLE001
+                            st.error("Couldn't fetch that statement: " + str(e)[:200])
+
+    up = st.file_uploader("…or upload a supplier statement (PDF, Excel or CSV)",
                           type=["pdf", "xlsx", "xls", "csv"], key="stmt_pdf")
+    pulled = st.session_state.get("_pulled_stmt")
+    if up is None and pulled:
+        up = _PulledFile(pulled["name"], pulled["data"])
+        pc1, pc2 = st.columns([4, 1])
+        pc1.info(f"📥 Reconciling **{pulled['name']}** pulled from accounts@.")
+        if pc2.button("Use a different file", key="clear_pulled", use_container_width=True):
+            st.session_state.pop("_pulled_stmt", None)
+            st.rerun()
     if not up:
-        st.caption("Upload a supplier's statement of account and I'll match every line against "
-                   "QuickBooks — what's entered, paid, still owing, or missing.")
+        st.caption("Pull a statement from the inbox above, or upload one, and I'll match every line "
+                   "against QuickBooks — what's entered, paid, still owing, or missing.")
         return
     sig = f"{up.name}:{up.size}"
     cache = st.session_state.setdefault("_stmt_cache", {})

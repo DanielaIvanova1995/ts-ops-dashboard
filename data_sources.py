@@ -2828,3 +2828,77 @@ def qbo_pay_bills(vendor_id, bank_account_id, lines, memo="", date=None):
     if date:
         body["TxnDate"] = date
     return qbo_create("billpayment", body)
+
+
+# ---------------------------------------------------------------------------
+# Pull supplier STATEMENTS straight from the accounts@ inbox — find the most
+# recent statement email from each supplier so they can be reconciled without
+# hunting through the mailbox. Reading only (Mail.Read); nothing is sent.
+# ---------------------------------------------------------------------------
+_STATEMENT_EXT = (".pdf", ".xlsx", ".xls", ".csv")
+_STATEMENT_HINTS = ("statement", "stmt", "soa", "s.o.a", "aged", "s/a")
+
+
+def _looks_like_statement(att_name: str, subject: str) -> bool:
+    n = (att_name or "").lower()
+    if not n.endswith(_STATEMENT_EXT):
+        return False
+    blob = n + " " + (subject or "").lower()
+    return any(k in blob for k in _STATEMENT_HINTS)
+
+
+def fetch_supplier_statements(mailbox: str, since_days: int = 120, max_msgs: int = 150,
+                              token: str | None = None) -> list:
+    """Scan a mailbox's Inbox for statement emails and return the LATEST one per supplier:
+    [{supplier, from_email, domain, subject, received, message_id, attachment_id,
+      attachment_name, attachment_ctype}]. Groups by sender domain; messages are read newest
+    first so the first hit per domain is the latest. Attachment bytes are NOT downloaded here."""
+    from datetime import datetime, timedelta, timezone
+    token = token or ms_token()
+    since = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/mailFolders/inbox/messages",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$top": str(max_msgs),
+                "$select": "subject,from,receivedDateTime,hasAttachments",
+                "$expand": "attachments($select=id,name,contentType,size)",
+                "$orderby": "receivedDateTime desc",
+                "$filter": f"hasAttachments eq true and receivedDateTime ge {since}"},
+        timeout=45,
+    )
+    r.raise_for_status()
+    seen: dict = {}
+    for m in r.json().get("value", []):
+        frm = ((m.get("from") or {}).get("emailAddress") or {})
+        addr = (frm.get("address") or "").lower()
+        domain = addr.split("@")[-1] if "@" in addr else addr
+        subj = m.get("subject") or ""
+        key = domain or addr
+        if key in seen:
+            continue
+        for a in (m.get("attachments") or []):
+            if _looks_like_statement(a.get("name"), subj):
+                seen[key] = {"supplier": frm.get("name") or domain or addr,
+                             "from_email": addr, "domain": domain, "subject": subj.strip(),
+                             "received": (m.get("receivedDateTime") or "")[:10],
+                             "message_id": m.get("id"), "attachment_id": a.get("id"),
+                             "attachment_name": a.get("name"),
+                             "attachment_ctype": (a.get("contentType") or "")}
+                break
+    return sorted(seen.values(), key=lambda d: d["received"], reverse=True)
+
+
+def fetch_statement_attachment(mailbox: str, message_id: str, attachment_id: str,
+                               token: str | None = None):
+    """Download one attachment's bytes → (name, bytes). For reconciling a pulled statement."""
+    import base64 as _b64
+    token = token or ms_token()
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments/{attachment_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$select": "name,contentBytes,contentType"}, timeout=60,
+    )
+    r.raise_for_status()
+    a = r.json()
+    data = a.get("contentBytes")
+    return a.get("name"), (_b64.b64decode(data) if data else b"")
