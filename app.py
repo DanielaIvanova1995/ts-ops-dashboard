@@ -5886,19 +5886,20 @@ def _render_statement_recon():
                       and abs(x["total"] - amt) < 0.01), None)
         if b:
             used.add(b["id"])
+        if b and b["paid"]:
+            n_paid += 1                 # already paid in QB → ignore (nothing to do, don't clutter)
+            continue
         if not b:
             status, n_missing = "🔴 Not in QuickBooks", n_missing + 1
-        elif b["paid"]:
-            status, n_paid = "🟠 Paid in QB (not on statement yet)", n_paid + 1
         else:
-            status, n_pay = "✅ Entered — to pay", n_pay + 1
+            status, n_pay = "✅ Approved — ready for payment", n_pay + 1
             to_pay += unpaid if isinstance(unpaid, (int, float)) else (amt or 0)
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
                      "vs QuickBooks": status})
 
-    st.markdown(f"**{n_pay}** entered & to pay (£{to_pay:,.2f}) · **{n_paid}** already paid in QB · "
-                f"**{n_missing}** not in QuickBooks")
+    st.markdown(f"**{n_pay}** approved & ready to pay (£{to_pay:,.2f}) · **{n_missing}** not in "
+                f"QuickBooks" + (f" · {n_paid} already paid (ignored)" if n_paid else ""))
     if rows:
         df = pd.DataFrame(rows)
         st.dataframe(df, hide_index=True, use_container_width=True, column_config={
