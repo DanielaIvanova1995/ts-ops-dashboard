@@ -5900,13 +5900,18 @@ def _render_statement_recon():
         if b["doc_no"]:
             bill_by_doc.setdefault(b["doc_no"].upper(), b)
 
-    rows, n_pay, n_paid, n_missing, n_disc, to_pay = [], 0, 0, 0, 0, 0.0
+    rows = []
+    n_pay = n_paid = n_missing = n_disc = 0
+    to_pay = paid_total = disc_total = missing_total = stmt_total = 0.0
     used = set()
     for ln in (stmt.get("lines") or []):
         if (ln.get("type") or "").lower() != "invoice":
             continue
         inv = (ln.get("invoice_no") or "").strip()
         amt, unpaid = ln.get("amount"), ln.get("unpaid")
+        val = (unpaid if isinstance(unpaid, (int, float))
+               else (amt if isinstance(amt, (int, float)) else 0.0))
+        stmt_total += val
         b = bill_by_doc.get(inv.upper())
         if not b:                    # fallback: an unused bill with the same amount
             b = next((x for x in bills if x["id"] not in used
@@ -5921,14 +5926,17 @@ def _render_statement_recon():
             status = (f"🔵 Paid in QB — under payment {paid_ref}" if paid_ref
                       else "🔵 Marked paid in QB")
             n_paid += 1
+            paid_total += val
         elif not b:
             if _norm_code(inv) in disc_nos:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
+                disc_total += val
             else:
                 status, n_missing = "🔴 Not in QuickBooks", n_missing + 1
+                missing_total += val
         else:
             status, n_pay = "✅ Approved — ready for payment", n_pay + 1
-            to_pay += unpaid if isinstance(unpaid, (int, float)) else (amt or 0)
+            to_pay += val
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
                      "Due": (_due_label(b.get("due")) if b and not b["paid"] else ""),
@@ -5947,6 +5955,16 @@ def _render_statement_recon():
         st.dataframe(df, hide_index=True, use_container_width=True, column_config={
             "Amount": st.column_config.NumberColumn(format="£%.2f"),
             "Unpaid": st.column_config.NumberColumn(format="£%.2f")})
+
+    st.markdown("---")
+    t1, t2, t3 = st.columns(3)
+    t1.metric("On the statement", f"£{stmt_total:,.2f}")
+    t2.metric("Ready to pay in QuickBooks", f"£{to_pay:,.2f}")
+    t3.metric("Gap (not yet payable)", f"£{stmt_total - to_pay:,.2f}")
+    st.caption(
+        f"Gap = £{missing_total:,.2f} not in QB ({n_missing}) + £{disc_total:,.2f} awaiting credit "
+        f"note ({n_disc}) + £{paid_total:,.2f} already paid ({n_paid}). "
+        f"Statement's own stated balance: £{(stmt.get('balance') or 0):,.2f}.")
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) on the statement aren't in QuickBooks and aren't a "
                    "known Monday discrepancy — the ones to chase up or enter. (Mailbox search + "
