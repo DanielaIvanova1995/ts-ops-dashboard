@@ -2520,3 +2520,107 @@ def qbo_disconnect():
         except Exception:  # noqa: BLE001
             pass
     qbo_store_tokens({})
+
+
+# ---------------------------------------------------------------------------
+# Supplier STATEMENT reconciliation — read a statement PDF (any layout) with
+# the AI, and read the matching bills from QuickBooks, so we can reconcile what
+# the supplier says we owe against what we've entered / paid.
+# ---------------------------------------------------------------------------
+def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None) -> dict:
+    """Read a supplier statement of account with Claude (from a URL or uploaded bytes). Returns:
+    {supplier, customer_ref, statement_date, currency, balance,
+     lines:[{date, type(invoice|credit|payment), invoice_no, order_ref, amount, unpaid}],
+     aged:{current, m1, m2, m3, m4plus}}. Amounts GBP; credits/payments negative."""
+    import base64 as _b64
+    import json as _json
+    import re as _re
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    if pdf_bytes is None:
+        pdf = requests.get(pdf_url, timeout=90)
+        pdf.raise_for_status()
+        pdf_bytes = pdf.content
+    b64 = _b64.standard_b64encode(pdf_bytes).decode()
+    prompt = (
+        "Read this SUPPLIER STATEMENT OF ACCOUNT carefully and extract every transaction line. "
+        "Reply with ONLY a JSON object, no other text:\n"
+        '{"supplier":"the supplier/company that issued the statement",'
+        '"customer_ref":"our account/customer number on the statement, or null",'
+        '"statement_date":"YYYY-MM-DD","currency":"GBP",'
+        '"balance":<total outstanding balance, number>,'
+        '"lines":[{"date":"YYYY-MM-DD",'
+        '"type":"invoice OR credit OR payment (invoices/SL Inv = invoice; credit notes = credit; '
+        'receipts/payments = payment)",'
+        '"invoice_no":"the supplier document/invoice/credit number for this line",'
+        '"order_ref":"OUR order or reference number for this line if shown (e.g. a 5-digit order), '
+        'else null",'
+        '"amount":<line total, number; NEGATIVE for credits and payments>,'
+        '"unpaid":<amount still outstanding on this line, number, or null>}],'
+        '"aged":{"current":<n>,"m1":<n>,"m2":<n>,"m3":<n>,"m4plus":<n>}}\n'
+        "All amounts GBP. Credits and payments MUST be negative. Include EVERY line on the "
+        "statement. If a value is genuinely absent use null. Do not invent lines or totals."
+    )
+    body = {
+        "model": INVOICE_MODEL, "max_tokens": 8000,
+        "messages": [{"role": "user", "content": [
+            {"type": "document",
+             "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
+            {"type": "text", "text": prompt}]}],
+    }
+    r = requests.post(ANTHROPIC_API,
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
+                      json=body, timeout=180)
+    r.raise_for_status()
+    blocks = r.json().get("content", [])
+    txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    m = _re.search(r"\{.*\}", txt, _re.S)
+    if not m:
+        raise RuntimeError("Could not read the statement PDF")
+    return _json.loads(m.group(0))
+
+
+def qbo_find_vendor(name: str):
+    """Best-match QuickBooks Vendor for a supplier name → {id, name, balance}. None if not found.
+    Tries an exact-ish name match, then a contains match on the statement supplier."""
+    n = (name or "").strip().replace("'", "''")
+    if not n:
+        return None
+    rows = qbo_query(f"select Id, DisplayName, Balance from Vendor where Active = true")
+    vendors = rows.get("Vendor") or []
+    low = name.strip().lower()
+    # exact, then startswith, then token-overlap
+    def score(v):
+        d = (v.get("DisplayName") or "").lower()
+        if d == low:
+            return 3
+        if d.startswith(low[:6]) or low.startswith(d[:6]):
+            return 2
+        aw, bw = set(low.split()), set(d.split())
+        return 1 if (aw & bw) else 0
+    vendors = [v for v in vendors if score(v) > 0]
+    if not vendors:
+        return None
+    best = max(vendors, key=score)
+    return {"id": best.get("Id"), "name": best.get("DisplayName"),
+            "balance": best.get("Balance")}
+
+
+def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
+    """QuickBooks Bills for a vendor → [{doc_no, date, total, balance, paid, ref}].
+    balance 0 = paid. Read-only."""
+    vid = str(vendor_id).replace("'", "''")
+    rows = qbo_query(f"select Id, DocNumber, TxnDate, TotalAmt, Balance, PrivateNote "
+                     f"from Bill where VendorRef = '{vid}' MAXRESULTS {int(limit)}")
+    out = []
+    for b in (rows.get("Bill") or []):
+        bal = b.get("Balance")
+        out.append({
+            "id": b.get("Id"), "doc_no": (b.get("DocNumber") or "").strip(),
+            "date": b.get("TxnDate"), "total": b.get("TotalAmt"),
+            "balance": bal, "paid": (isinstance(bal, (int, float)) and abs(bal) < 0.005),
+            "ref": (b.get("PrivateNote") or "").strip(),
+        })
+    return out

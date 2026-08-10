@@ -5687,6 +5687,83 @@ def _render_qbo_panel():
                    "Settings → Secrets, then reload.")
 
 
+def _render_statement_recon():
+    """Upload a supplier statement → match every invoice line against QuickBooks bills."""
+    if not data_sources.qbo_is_connected():
+        st.info("Connect QuickBooks above first — reconciliation reads your bills from it.")
+        return
+    up = st.file_uploader("Upload a supplier statement (PDF)", type=["pdf"], key="stmt_pdf")
+    if not up:
+        st.caption("Upload a supplier's statement of account and I'll match every line against "
+                   "QuickBooks — what's entered, paid, still owing, or missing.")
+        return
+    sig = f"{up.name}:{up.size}"
+    cache = st.session_state.setdefault("_stmt_cache", {})
+    if sig not in cache:
+        with st.spinner("Reading the statement…"):
+            try:
+                cache[sig] = data_sources.read_statement_pdf(pdf_bytes=up.getvalue())
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't read the statement: " + str(e)[:200])
+                return
+    stmt = cache[sig]
+    sup = stmt.get("supplier") or "?"
+    st.markdown(f"**{_esc(sup)}** · statement {stmt.get('statement_date') or ''} · "
+                f"outstanding **£{(stmt.get('balance') or 0):,.2f}**")
+
+    with st.spinner("Reading QuickBooks bills…"):
+        try:
+            vendor = data_sources.qbo_find_vendor(sup)
+            bills = data_sources.qbo_vendor_bills(vendor["id"]) if vendor else []
+        except Exception as e:  # noqa: BLE001
+            st.error("Couldn't read QuickBooks: " + str(e)[:200])
+            return
+    if not vendor:
+        st.warning(f"Couldn't find a QuickBooks supplier matching '{sup}'. Tell me the exact "
+                   "QuickBooks vendor name and I'll map it. Showing the statement lines only:")
+
+    bill_by_doc = {}
+    for b in bills:
+        if b["doc_no"]:
+            bill_by_doc.setdefault(b["doc_no"].upper(), b)
+
+    rows, n_pay, n_paid, n_missing, to_pay = [], 0, 0, 0, 0.0
+    used = set()
+    for ln in (stmt.get("lines") or []):
+        if (ln.get("type") or "").lower() != "invoice":
+            continue
+        inv = (ln.get("invoice_no") or "").strip()
+        amt, unpaid = ln.get("amount"), ln.get("unpaid")
+        b = bill_by_doc.get(inv.upper())
+        if not b:                    # fallback: an unused bill with the same amount
+            b = next((x for x in bills if x["id"] not in used
+                      and isinstance(x["total"], (int, float)) and isinstance(amt, (int, float))
+                      and abs(x["total"] - amt) < 0.01), None)
+        if b:
+            used.add(b["id"])
+        if not b:
+            status, n_missing = "🔴 Not in QuickBooks", n_missing + 1
+        elif b["paid"]:
+            status, n_paid = "🟠 Paid in QB (not on statement yet)", n_paid + 1
+        else:
+            status, n_pay = "✅ Entered — to pay", n_pay + 1
+            to_pay += unpaid if isinstance(unpaid, (int, float)) else (amt or 0)
+        rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
+                     "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
+                     "vs QuickBooks": status})
+
+    st.markdown(f"**{n_pay}** entered & to pay (£{to_pay:,.2f}) · **{n_paid}** already paid in QB · "
+                f"**{n_missing}** not in QuickBooks")
+    if rows:
+        df = pd.DataFrame(rows)
+        st.dataframe(df, hide_index=True, use_container_width=True, column_config={
+            "Amount": st.column_config.NumberColumn(format="£%.2f"),
+            "Unpaid": st.column_config.NumberColumn(format="£%.2f")})
+    if n_missing:
+        st.warning(f"⚠ {n_missing} invoice(s) on the statement aren't in QuickBooks — the ones to "
+                   "chase up or enter. (I'll add the mailbox search + supplier-chase draft next.)")
+
+
 def render_finance():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -5695,6 +5772,8 @@ def render_finance():
     )
     with st.expander("QuickBooks connection (read-only)", expanded=True):
         _render_qbo_panel()
+    with st.expander("📄 Statement reconciliation (upload a supplier statement)", expanded=False):
+        _render_statement_recon()
     st.caption("Live actual margin from the Orders board **Paid & Delivered** group(s) — per "
                "month, per supplier, with loss-making, missing-invoice and anomaly flags. "
                "Admin only.")
