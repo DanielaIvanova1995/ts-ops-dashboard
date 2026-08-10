@@ -5795,6 +5795,18 @@ def _gbp(x):
     return f"£{x:,.2f}"
 
 
+def _subnav(key, options):
+    """Slick sidebar sub-menu (segmented control instead of radio bubbles). Always keeps a
+    selection, defaulting to the first option, and mirrors it onto st.session_state[key] so the
+    rest of the app reads the choice exactly as it did with st.radio."""
+    cur = st.session_state.get(key)
+    if cur not in options:
+        cur = options[0]
+    sel = st.segmented_control(key, options, key=f"_sc_{key}", default=cur,
+                               label_visibility="collapsed")
+    st.session_state[key] = sel if sel in options else cur
+
+
 def _remittance_text(sup, lines, total, ref):
     """Plain-text remittance advice for the selected invoices."""
     body = [f"  {p['inv']}"
@@ -6292,10 +6304,10 @@ def render_finance():
     )
     # Views chosen from the sidebar toggle.
     _fv = st.session_state.get("fin_view")
-    if _fv == "Payables (live)":
+    if _fv == "Payables (Live)":
         _render_payables_live()
         return
-    if _fv in ("Statements (per supplier)", "Statement reconciliation"):
+    if _fv == "Statement Reconciliation":
         with st.expander("QuickBooks connection (read-only)",
                          expanded=not _qbo_connected_quiet()):
             _render_qbo_panel()
@@ -6659,19 +6671,14 @@ with st.sidebar:
             st.session_state.module = _m
             st.rerun()
         if _m == "Daily Ops" and st.session_state.module == "Daily Ops":
-            st.radio("Daily Ops view", ["Live board", "Summary dashboard"],
-                     key="ops_view", label_visibility="collapsed")
+            _subnav("ops_view", ["Live board", "Summary dashboard"])
         if _m == "Pricing" and st.session_state.module == "Pricing":
-            st.radio("Pricing view", ["Pricing", "Supplier rules"],
-                     key="pricing_view", label_visibility="collapsed")
+            _subnav("pricing_view", ["Pricing", "Supplier rules"])
         if _m == "Invoice Check" and st.session_state.module == "Invoice Check":
-            st.radio("Invoice Check view",
-                     ["Check invoices", "Matched (weekly)", "Discrepancy log"],
-                     key="ic_view", label_visibility="collapsed")
+            _subnav("ic_view", ["Check invoices", "Matched (weekly)", "Discrepancy log"])
         if _m == "Finance" and st.session_state.module == "Finance":
-            st.radio("Finance view",
-                     ["Margins", "Statements (per supplier)", "Payables (live)"],
-                     key="fin_view", label_visibility="collapsed")
+            _subnav("fin_view",
+                    ["Margins", "Statement Reconciliation", "Payables (Live)"])
     module = st.session_state.module
 
     st.write("")
