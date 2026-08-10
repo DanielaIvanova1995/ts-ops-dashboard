@@ -5856,6 +5856,109 @@ def _statement_file_text(up):
     return "\n".join(out)
 
 
+def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
+    """Tick invoices → build a remittance → send it → mark paid in QuickBooks. Reused by both a
+    fresh reconciliation and a reopened saved one, so you never reconcile a statement twice.
+    live_verify re-checks each line against QuickBooks first, so a bill that's been paid or cleared
+    since the statement was reconciled drops off before you'd pay it again."""
+    if live_verify and vid:
+        try:
+            fresh = {str(b["id"]): b for b in data_sources.qbo_vendor_bills(vid)}
+            keep, dropped = [], 0
+            for p in pay_lines:
+                b = fresh.get(str(p.get("bill_id")))
+                if b is None or b.get("paid"):
+                    dropped += 1
+                else:
+                    keep.append(p)
+            pay_lines = keep
+            if dropped:
+                st.caption(f"↻ {dropped} invoice(s) have since been paid or cleared in QuickBooks — "
+                           "removed from this list.")
+        except Exception:  # noqa: BLE001
+            pass
+    if not pay_lines:
+        st.info("Nothing left ready to pay for this supplier.")
+        return
+    _pk = key
+    st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
+    pdf = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
+                         "Amount": _gbp(p["amt"]), "Due": p.get("due", "")} for p in pay_lines])
+    edited = st.data_editor(
+        pdf, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
+        disabled=[c for c in pdf.columns if c != "Pay"],
+        column_config={"Pay": st.column_config.CheckboxColumn("Pay")})
+    try:
+        ticks = edited["Pay"]
+        picked_lines = [pay_lines[i] for i in range(len(pay_lines)) if bool(ticks.iloc[i])]
+    except Exception:  # noqa: BLE001
+        picked_lines = list(pay_lines)
+    rem_total = sum(p["amt"] for p in picked_lines if isinstance(p["amt"], (int, float)))
+    st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
+    ref = st.text_input("Remittance reference", key=f"remref_{_pk}",
+                        value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
+    remit = _remittance_text(sup, picked_lines, rem_total, ref)
+    st.text_area("Remittance advice (preview)", remit, height=200, disabled=True,
+                 key=f"remprev_{_pk}")
+    e1, e2 = st.columns([2, 1])
+    rem_to = e1.text_input("Send remittance to (supplier accounts email)",
+                           value=SUPPLIER_EMAILS.get(_norm_code(sup), ""), key=f"remto_{_pk}")
+    if e2.button("✉ Send remittance", key=f"remsend_{_pk}", type="primary",
+                 use_container_width=True,
+                 disabled=not (rem_to.strip() and picked_lines)):
+        subj = f"Remittance advice — {ref}"
+        sent = drafted = False
+        dlink = None
+        try:
+            data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, rem_to.strip(), subj, remit)
+            sent = True
+        except Exception:  # noqa: BLE001
+            try:
+                dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, rem_to.strip(),
+                                                           subj, remit)
+                drafted = True
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't send or draft: " + str(e)[:200])
+        if sent or drafted:
+            link = f" [Open the draft]({dlink})" if dlink else ""
+            st.success(f"Remittance {'sent to' if sent else 'drafted for'} {rem_to.strip()}." + link)
+    # ---- Mark paid in QuickBooks (writes a BillPayment). Confirmed, never automatic. ----
+    st.markdown("**Mark paid in QuickBooks**")
+    try:
+        banks = data_sources.qbo_bank_accounts()
+    except Exception as e:  # noqa: BLE001
+        banks = []
+        st.caption("Couldn't read your QuickBooks bank accounts: " + str(e)[:150])
+    if banks:
+        bmap = {b["name"]: b["id"] for b in banks}
+        bank = st.selectbox("Pay from (QuickBooks bank account)", list(bmap.keys()), key=f"bank_{_pk}")
+        mpend = f"markpend_{_pk}"
+        if st.button(f"Mark {len(picked_lines)} paid in QuickBooks", key=f"markpaid_{_pk}",
+                     disabled=not picked_lines):
+            st.session_state[mpend] = True
+        if st.session_state.get(mpend):
+            st.warning(f"Record a **£{rem_total:,.2f}** bill payment in QuickBooks from **{bank}**, "
+                       f"settling **{len(picked_lines)}** invoice(s), reference **{ref}**? This "
+                       "writes to QuickBooks and marks them paid. You still pay the money via your "
+                       "bank separately.")
+            yy, nn = st.columns(2)
+            if yy.button("Yes — mark paid in QuickBooks", key=f"markyes_{_pk}", type="primary"):
+                st.session_state.pop(mpend, None)
+                try:
+                    data_sources.qbo_pay_bills(
+                        vid, bmap[bank],
+                        [{"bill_id": p["bill_id"], "amount": p["amt"]} for p in picked_lines],
+                        memo=ref, date=now_uk().strftime("%Y-%m-%d"))
+                    st.success(f"✅ Marked {len(picked_lines)} invoice(s) paid in QuickBooks "
+                               f"(ref {ref}). Now pay £{rem_total:,.2f} via your bank.")
+                    st.session_state.pop("_stmt_bills_cache", None)
+                except Exception as e:  # noqa: BLE001
+                    st.error("Couldn't mark paid: " + str(e)[:250])
+            if nn.button("Cancel", key=f"markno_{_pk}"):
+                st.session_state.pop(mpend, None)
+                st.rerun()
+
+
 def _render_statement_recon():
     """Upload a supplier statement → match every invoice line against QuickBooks bills."""
     if not data_sources.qbo_is_connected():
@@ -5867,12 +5970,28 @@ def _render_statement_recon():
         saved = data_sources.recon_load_all()
     except Exception:  # noqa: BLE001
         saved = {}
+    jump = st.session_state.pop("_open_saved_pay", None)   # arrived here from Payables "Pay"
     if saved:
         st.markdown("##### 📌 Saved reconciliations")
+        st.caption("Every statement you reconcile is kept here so you can come back and pay it off "
+                   "later — no need to re-upload. Amounts are re-checked against QuickBooks when you "
+                   "open one to pay.")
         for _k, snap in sorted(saved.items(), key=lambda kv: kv[1].get("saved_at", ""),
                                reverse=True):
-            with st.expander(f"{snap.get('supplier', '?')} · saved {snap.get('saved_at', '')} · "
-                             f"ready to pay £{snap.get('to_pay', 0):,.2f}"):
+            paytog = f"paytog_{_k}"
+            if jump == _k:
+                st.session_state[paytog] = True
+            with st.expander(f"{snap.get('supplier', '?')} · statement "
+                             f"{snap.get('statement_date') or '—'} · ready to pay "
+                             f"£{snap.get('to_pay', 0):,.2f} · saved {snap.get('saved_at', '')}",
+                             expanded=(jump == _k)):
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Ready to pay", f"£{snap.get('to_pay', 0):,.2f}")
+                m2.metric("Statement date", snap.get("statement_date") or "—")
+                _cl = snap.get("credit_limit")
+                m3.metric("Credit limit", f"£{_cl:,.0f}" if _cl else "—")
+                m4.metric("Available credit",
+                          f"£{_cl - (snap.get('stmt_total') or 0):,.2f}" if _cl else "—")
                 if snap.get("statement_asset"):
                     try:
                         _surl = data_sources.monday_asset_url(snap["statement_asset"])
@@ -5888,6 +6007,14 @@ def _render_statement_recon():
                         if _c in _sdf.columns:
                             _sdf[_c] = _sdf[_c].map(_gbp)
                     st.dataframe(_sdf, hide_index=True, use_container_width=True)
+                # Pay it off straight from the saved copy (re-checked live against QuickBooks).
+                if snap.get("pay_lines") and snap.get("vid"):
+                    if st.toggle("💷 Pay this off", key=paytog):
+                        _pay_workflow(snap["supplier"], snap["vid"], snap["pay_lines"],
+                                      f"saved_{_k}", live_verify=True)
+                elif snap.get("to_pay"):
+                    st.caption("Reconcile this statement once more to enable paying it off from here "
+                               "(it was saved before that feature existed).")
         st.markdown("---")
 
     up = st.file_uploader("Upload a supplier statement (PDF, Excel or CSV)",
@@ -6075,106 +6202,39 @@ def _render_statement_recon():
     if not credit_limit:
         st.caption("No credit limit found for this supplier on the Monday Suppliers board.")
 
-    # ---- Build a remittance from the ready-to-pay invoices, email it, (later) mark paid in QB ----
+    # ---- Build a remittance from the ready-to-pay invoices, email it, mark paid in QB ----
     if pay_lines:
-        _pk = _norm_code(sup)
-        st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
-        pdf = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
-                             "Amount": _gbp(p["amt"]), "Due": p["due"]} for p in pay_lines])
-        edited = st.data_editor(
-            pdf, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
-            disabled=[c for c in pdf.columns if c != "Pay"],
-            column_config={"Pay": st.column_config.CheckboxColumn("Pay")})
+        _pay_workflow(sup, vid, pay_lines, _norm_code(sup))
+
+    # ---- Keep it for later: auto-save this reconciliation (once per statement) so you can come
+    # back in a day or two and pay off it without re-uploading. ----
+    snap = {"supplier": sup, "vid": vid, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
+            "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
+            "to_pay": round(to_pay, 2), "stmt_total": round(stmt_total, 2),
+            "credit_limit": credit_limit, "rows": rows, "pay_lines": pay_lines,
+            "statement_asset": None}
+    _saved_set = st.session_state.setdefault("_recon_autosaved", {})
+    if sig not in _saved_set:
         try:
-            ticks = edited["Pay"]
-            picked_lines = [pay_lines[i] for i in range(len(pay_lines)) if bool(ticks.iloc[i])]
-        except Exception:  # noqa: BLE001
-            picked_lines = list(pay_lines)
-        rem_total = sum(p["amt"] for p in picked_lines if isinstance(p["amt"], (int, float)))
-        st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
-        ref = st.text_input("Remittance reference", key=f"remref_{_pk}",
-                            value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
-        remit = _remittance_text(sup, picked_lines, rem_total, ref)
-        st.text_area("Remittance advice (preview)", remit, height=200, disabled=True,
-                     key=f"remprev_{_pk}")
-        e1, e2 = st.columns([2, 1])
-        rem_to = e1.text_input("Send remittance to (supplier accounts email)",
-                               value=SUPPLIER_EMAILS.get(_pk, ""), key=f"remto_{_pk}")
-        if e2.button("✉ Send remittance", key=f"remsend_{_pk}", type="primary",
-                     use_container_width=True,
-                     disabled=not (rem_to.strip() and picked_lines)):
-            subj = f"Remittance advice — {ref}"
-            sent = drafted = False
-            dlink = None
-            try:
-                data_sources.send_supplier_email(SUPPLIER_FROM_MAILBOX, rem_to.strip(), subj, remit)
-                sent = True
-            except Exception:  # noqa: BLE001
+            with st.spinner("Keeping this reconciliation…"):
                 try:
-                    dlink = data_sources.create_supplier_draft(SUPPLIER_FROM_MAILBOX, rem_to.strip(),
-                                                               subj, remit)
-                    drafted = True
-                except Exception as e:  # noqa: BLE001
-                    st.error("Couldn't send or draft: " + str(e)[:200])
-            if sent or drafted:
-                link = f" [Open the draft]({dlink})" if dlink else ""
-                st.success(f"Remittance {'sent to' if sent else 'drafted for'} "
-                           f"{rem_to.strip()}." + link)
-        # ---- Mark paid in QuickBooks (writes a BillPayment). Confirmed, never automatic. ----
-        st.markdown("**Mark paid in QuickBooks**")
-        try:
-            banks = data_sources.qbo_bank_accounts()
+                    snap["statement_asset"] = data_sources.recon_upload_statement(up.getvalue(),
+                                                                                  up.name)
+                except Exception:  # noqa: BLE001
+                    pass    # save even if the file upload fails
+                data_sources.recon_save(_norm_code(sup), snap)
+            _saved_set[sig] = snap.get("statement_asset")
+            st.caption("💾 Kept — you'll find this under **Saved reconciliations** at the top, ready "
+                       "to pay whenever you are (no need to re-upload).")
         except Exception as e:  # noqa: BLE001
-            banks = []
-            st.caption("Couldn't read your QuickBooks bank accounts: " + str(e)[:150])
-        if banks:
-            bmap = {b["name"]: b["id"] for b in banks}
-            bank = st.selectbox("Pay from (QuickBooks bank account)", list(bmap.keys()),
-                                key=f"bank_{_pk}")
-            mpend = f"markpend_{_pk}"
-            if st.button(f"Mark {len(picked_lines)} paid in QuickBooks", key=f"markpaid_{_pk}",
-                         disabled=not picked_lines):
-                st.session_state[mpend] = True
-            if st.session_state.get(mpend):
-                st.warning(f"Record a **£{rem_total:,.2f}** bill payment in QuickBooks from "
-                           f"**{bank}**, settling **{len(picked_lines)}** invoice(s), reference "
-                           f"**{ref}**? This writes to QuickBooks and marks them paid. You still "
-                           "pay the money via your bank separately.")
-                yy, nn = st.columns(2)
-                if yy.button("Yes — mark paid in QuickBooks", key=f"markyes_{_pk}", type="primary"):
-                    st.session_state.pop(mpend, None)
-                    try:
-                        data_sources.qbo_pay_bills(
-                            vid, bmap[bank],
-                            [{"bill_id": p["bill_id"], "amount": p["amt"]} for p in picked_lines],
-                            memo=ref, date=now_uk().strftime("%Y-%m-%d"))
-                        st.success(f"✅ Marked {len(picked_lines)} invoice(s) paid in QuickBooks "
-                                   f"(ref {ref}). Now pay £{rem_total:,.2f} via your bank.")
-                        st.session_state.pop("_stmt_bills_cache", None)
-                    except Exception as e:  # noqa: BLE001
-                        st.error("Couldn't mark paid: " + str(e)[:250])
-                if nn.button("Cancel", key=f"markno_{_pk}"):
-                    st.session_state.pop(mpend, None)
-                    st.rerun()
+            st.caption("Couldn't keep this reconciliation automatically: " + str(e)[:120])
+    else:
+        snap["statement_asset"] = _saved_set.get(sig)
+        st.caption("💾 Kept under **Saved reconciliations** at the top.")
 
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
                    "they've never been input. (Mailbox search + supplier-chase draft coming next.)")
-    if st.button("💾 Save this reconciliation", key=f"savrec_{_norm_code(sup)}",
-                 help="Saves it (with the statement) so it shows at the top here next time."):
-        snap = {"supplier": sup, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
-                "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
-                "to_pay": round(to_pay, 2), "rows": rows, "statement_asset": None}
-        try:
-            with st.spinner("Saving the statement file…"):
-                snap["statement_asset"] = data_sources.recon_upload_statement(up.getvalue(), up.name)
-        except Exception:  # noqa: BLE001
-            pass    # save the reconciliation even if the file upload fails
-        try:
-            data_sources.recon_save(_norm_code(sup), snap)
-            st.success("Saved — it'll show at the top here (with the statement) next time you log in.")
-        except Exception as e:  # noqa: BLE001
-            st.error("Couldn't save: " + str(e)[:150])
 
     if n_action:
         st.info(f"🟠 {n_action} invoice(s) are on Monday but not yet approved to QuickBooks — "
@@ -6245,6 +6305,13 @@ def _render_payables_live():
     vendors, bills = data["vendors"], data["bills"]
     limits = {_norm_code(k): v for k, v in (data["limits"] or {}).items()}
     today = now_uk().date()
+    # Saved reconciliations, keyed by QuickBooks vendor id — lets Payables show the statement date
+    # and jump you straight into paying one off.
+    try:
+        saved = data_sources.recon_load_all() or {}
+    except Exception:  # noqa: BLE001
+        saved = {}
+    vid_snap = {s["vid"]: (k, s) for k, s in saved.items() if s.get("vid")}
     # Owed per supplier is derived straight from the OPEN bills (Balance > 0) — more reliable than
     # the Vendor.Balance field, which QuickBooks often returns as 0 in a query.
     per = {}
@@ -6275,11 +6342,16 @@ def _render_payables_live():
         name = (vendors.get(vid) or {}).get("name") or f"Vendor {vid}"
         lim = limits.get(_norm_code(name))
         nd = p.get("next")
+        _snap = vid_snap.get(vid)
         rows.append({"Supplier": name, "Owed": round(owed, 2),
                      "Overdue": round(p.get("overdue", 0.0), 2),
                      "Next due": (_due_label(nd.isoformat()) if nd else ""),
+                     "Statement date": (_snap[1].get("statement_date") if _snap else "") or "",
                      "Credit limit": lim,
-                     "% of limit": (round(owed / lim * 100) if lim else None)})
+                     "Available credit": (round(lim - owed, 2) if isinstance(lim, (int, float))
+                                          else None),
+                     "% of limit": (round(owed / lim * 100) if lim else None),
+                     "_due": nd or date.max, "_vid": vid})
         tot_owed += owed
         tot_over += p.get("overdue", 0.0)
 
@@ -6288,18 +6360,41 @@ def _render_payables_live():
                 "bills, they may be beyond the first 1,000 pulled — tell me and I'll page through "
                 "all of them.")
         return
-    rows.sort(key=lambda r: (-(r["Overdue"] or 0), -((r["% of limit"] or 0))))
+    rows.sort(key=lambda r: r["_due"])   # oldest owing (earliest due date) first
     st.markdown(f"**{len(rows)} suppliers** owing · total **£{tot_owed:,.2f}** · overdue "
                 f"**£{tot_over:,.2f}**")
-    pdf = pd.DataFrame(rows)
-    for _c in ("Owed", "Overdue"):
+    pdf = pd.DataFrame(rows).drop(columns=["_due", "_vid"])
+    for _c in ("Owed", "Overdue", "Available credit"):
         pdf[_c] = pdf[_c].map(_gbp)
     pdf["Credit limit"] = pdf["Credit limit"].map(
         lambda v: f"£{v:,.0f}" if isinstance(v, (int, float)) else "")
     st.dataframe(pdf, hide_index=True, use_container_width=True, column_config={
         "% of limit": st.column_config.NumberColumn(format="%d%%")})
     st.caption("Live from QuickBooks open bills · overdue = past due date · % of limit uses the "
-               "credit limits on your Monday Suppliers board · sorted by overdue, then nearest limit.")
+               "credit limits on your Monday Suppliers board · **sorted oldest-first** (earliest "
+               "due date at the top). Statement date shows if you've reconciled their statement.")
+
+    # ---- Jump straight into paying off a supplier whose statement you've reconciled ----
+    jumpable = []
+    seen = set()
+    for r in rows:   # already oldest-first
+        _s = vid_snap.get(r["_vid"])
+        if _s and _s[1].get("pay_lines") and r["_vid"] not in seen:
+            seen.add(r["_vid"])
+            jumpable.append((f"{r['Supplier']} · statement {_s[1].get('statement_date') or '—'} · "
+                             f"ready £{_s[1].get('to_pay', 0):,.2f}", _s[0]))
+    if jumpable:
+        st.markdown("##### 💷 Pay one off")
+        st.caption("Pick a supplier you've reconciled (oldest first) and open it to build a "
+                   "remittance and mark it paid.")
+        j1, j2 = st.columns([3, 1])
+        choice = j1.selectbox("Supplier to pay", [lbl for lbl, _ in jumpable],
+                              key="pay_jump_pick", label_visibility="collapsed")
+        if j2.button("Open to pay →", key="pay_jump_go", type="primary",
+                     use_container_width=True):
+            st.session_state["_open_saved_pay"] = dict(jumpable)[choice]
+            st.session_state["fin_view"] = "Statement Reconciliation"
+            st.rerun()
 
 
 def render_finance():
