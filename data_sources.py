@@ -2615,14 +2615,14 @@ def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
     """QuickBooks Bills for a vendor → [{doc_no, date, total, balance, paid, ref}].
     balance 0 = paid. Read-only."""
     vid = str(vendor_id).replace("'", "''")
-    rows = qbo_query(f"select Id, DocNumber, TxnDate, TotalAmt, Balance, PrivateNote "
+    rows = qbo_query(f"select Id, DocNumber, TxnDate, DueDate, TotalAmt, Balance, PrivateNote "
                      f"from Bill where VendorRef = '{vid}' MAXRESULTS {int(limit)}")
     out = []
     for b in (rows.get("Bill") or []):
         bal = b.get("Balance")
         out.append({
             "id": b.get("Id"), "doc_no": (b.get("DocNumber") or "").strip(),
-            "date": b.get("TxnDate"), "total": b.get("TotalAmt"),
+            "date": b.get("TxnDate"), "due": b.get("DueDate"), "total": b.get("TotalAmt"),
             "balance": bal, "paid": (isinstance(bal, (int, float)) and abs(bal) < 0.005),
             "ref": (b.get("PrivateNote") or "").strip(),
         })

@@ -5768,6 +5768,23 @@ def _qbo_connected_quiet():
         return False
 
 
+def _due_label(due_str):
+    """'in 12 days' / 'due today' / 'OVERDUE 3 days' from a YYYY-MM-DD due date; '' if none."""
+    if not due_str:
+        return ""
+    try:
+        from datetime import date
+        d = date.fromisoformat(str(due_str)[:10])
+    except Exception:  # noqa: BLE001
+        return ""
+    days = (d - now_uk().date()).days
+    if days < 0:
+        return f"⚠ overdue {abs(days)} day{'s' if abs(days) != 1 else ''}"
+    if days == 0:
+        return "due today"
+    return f"in {days} day{'s' if days != 1 else ''}"
+
+
 def _statement_file_text(up):
     """Extract text from an Excel/CSV statement so the AI can parse it like a PDF."""
     if up.name.lower().endswith(".csv"):
@@ -5914,6 +5931,7 @@ def _render_statement_recon():
             to_pay += unpaid if isinstance(unpaid, (int, float)) else (amt or 0)
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
+                     "Due": (_due_label(b.get("due")) if b and not b["paid"] else ""),
                      "Paid under": paid_ref, "vs QuickBooks": status})
 
     parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
