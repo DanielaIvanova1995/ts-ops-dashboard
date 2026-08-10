@@ -2755,11 +2755,17 @@ def recon_load_all(token=None):
 
 
 def recon_save(supplier_key: str, snapshot: dict, token=None):
-    """Save/replace the latest reconciliation snapshot for a supplier."""
+    """Save/replace the latest reconciliation snapshot for a supplier. Keeps exactly ONE per
+    supplier: any older entry for the same QuickBooks vendor (by vid) is cleared first, so a
+    newer statement always replaces the previous one even if the supplier name differs slightly."""
     import base64 as _b64
     import json as _json
     token = token or get_token()
     m = recon_load_all(token)
+    vid = str(snapshot.get("vid") or "")
+    if vid:
+        m = {k: v for k, v in m.items()
+             if k == supplier_key or str(v.get("vid") or "") != vid}
     m[supplier_key] = snapshot
     item_id = _config_item_named(QBO_RECON_ITEM, token)
     monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
@@ -2983,62 +2989,109 @@ def _remit_money(x):
         return ""
 
 
+REMIT_ORANGE = (242, 106, 33)
+REMIT_GRAPHITE = (33, 36, 43)
+
+
 def build_remittance_pdf(supplier, ref, date_str, lines, total, memo="", company=None):
-    """A remittance-advice PDF (bytes) matching the QuickBooks layout: company block, title,
+    """A branded (Trade Superstore Online) remittance-advice PDF as bytes: orange header band,
     Payment To / Date / Reference, a Bill Number/Bill Date/Due Date/Original/Balance/Payment
-    table, then Memo, Total and a signature line. `lines` = [{bill_no, bill_date, due_date,
-    original, balance, payment}]."""
+    table with zebra striping, then Memo, Total and a signature line. `lines` = [{bill_no,
+    bill_date, due_date, original, balance, payment}]."""
     from fpdf import FPDF
     company = company or REMIT_COMPANY
+    org, gra = REMIT_ORANGE, REMIT_GRAPHITE
     pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(15, 14, 15)
     pdf.add_page()
-    # Company block (top-left)
-    for i, line in enumerate(company):
-        pdf.set_font("Helvetica", "B" if i == 0 else "", 12 if i == 0 else 9)
-        pdf.cell(0, 5.2, line, ln=1)
-    # Title
-    pdf.ln(3)
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.cell(0, 11, "Remittance Advice", ln=1)
-    pdf.ln(1)
-    # Payment To (left) + Date / Reference (right)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(120, 6, "Payment To", ln=0)
+    # --- Brand header band ---
+    pdf.set_fill_color(*org)
+    pdf.rect(0, 0, 210, 26, style="F")
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(15, 6)
+    pdf.set_font("Helvetica", "B", 23)
+    pdf.cell(0, 11, "Trade Superstore Online", ln=1)
+    pdf.set_xy(15, 17)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5, "Building & Trade Supplies", ln=1)
+    # --- Address (left) + REMITTANCE ADVICE (right) ---
+    pdf.set_text_color(*gra)
+    pdf.set_xy(15, 32)
+    top = pdf.get_y()
+    pdf.set_font("Helvetica", "", 9)
+    for line in company[1:]:            # skip the name (already in the band)
+        pdf.set_x(15)
+        pdf.cell(110, 5, line, ln=1)
+    pdf.set_xy(120, top)
+    pdf.set_text_color(*org)
+    pdf.set_font("Helvetica", "B", 19)
+    pdf.cell(75, 10, "REMITTANCE ADVICE", align="R", ln=1)
+    pdf.set_text_color(*gra)
+    pdf.set_y(max(pdf.get_y(), top + 20) + 3)
+    # --- Payment To / Date / Reference ---
+    pdf.set_x(15)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(120, 5, "PAYMENT TO", ln=0)
+    pdf.cell(0, 5, f"Date: {date_str}", align="R", ln=1)
+    pdf.set_x(15)
+    pdf.set_text_color(*gra)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(120, 7, str(supplier or ""), ln=0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"Date: {date_str}", ln=1)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(120, 6, str(supplier or ""), ln=0)
-    pdf.cell(0, 6, f"Reference No: {ref}", ln=1)
+    pdf.cell(0, 7, f"Reference: {ref}", align="R", ln=1)
     pdf.ln(4)
-    # Table
+    # --- Table ---
     cols = [("Bill Number", 32, "L"), ("Bill Date", 25, "L"), ("Due Date", 25, "L"),
             ("Original Amount", 35, "R"), ("Balance", 26, "R"), ("Payment", 27, "R")]
+    pdf.set_x(15)
     pdf.set_font("Helvetica", "B", 9)
-    pdf.set_fill_color(238, 238, 238)
+    pdf.set_fill_color(*gra)
+    pdf.set_text_color(255, 255, 255)
     for name, w, align in cols:
-        pdf.cell(w, 7, name, border=1, align=align, fill=True)
+        pdf.cell(w, 8, "  " + name if align == "L" else name + "  ", align=align, fill=True)
     pdf.ln()
+    pdf.set_text_color(*gra)
     pdf.set_font("Helvetica", "", 9)
-    for L in lines:
+    for i, L in enumerate(lines):
+        pdf.set_x(15)
+        pdf.set_fill_color(245, 245, 245) if i % 2 else pdf.set_fill_color(255, 255, 255)
         vals = [str(L.get("bill_no") or ""), _remit_ddmmyyyy(L.get("bill_date")),
                 _remit_ddmmyyyy(L.get("due_date")), _remit_money(L.get("original")),
                 _remit_money(L.get("balance")), _remit_money(L.get("payment"))]
         for (name, w, align), v in zip(cols, vals):
-            pdf.cell(w, 6.5, v, border="LR", align=align)
+            pdf.cell(w, 7, ("  " + v if align == "L" else v + "  "), align=align, fill=True)
         pdf.ln()
-    pdf.cell(sum(w for _, w, _ in cols), 0, "", border="T", ln=1)
-    pdf.ln(5)
-    # Memo + Total
+    pdf.set_draw_color(*org)
+    pdf.set_line_width(0.5)
+    pdf.line(15, pdf.get_y() + 1, 195, pdf.get_y() + 1)
+    pdf.ln(6)
+    # --- Memo + Total ---
+    pdf.set_x(15)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(120, 6, f"Memo: {memo}", ln=0)
-    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(120, 7, f"Memo: {memo}", ln=0)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(*org)
     try:
-        pdf.cell(0, 6, f"Total: £{float(total):,.2f}", align="R", ln=1)
+        pdf.cell(0, 7, f"Total Paid: £{float(total):,.2f}", align="R", ln=1)
     except (TypeError, ValueError):
-        pdf.cell(0, 6, f"Total: {total}", align="R", ln=1)
-    pdf.ln(10)
+        pdf.cell(0, 7, f"Total Paid: {total}", align="R", ln=1)
+    pdf.set_text_color(*gra)
+    pdf.ln(14)
+    pdf.set_x(15)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, "Signature: --------------------------", ln=1)
+    pdf.cell(0, 6, "Signature: ______________________________", ln=1)
+    # --- Footer ---
+    pdf.set_y(-18)
+    pdf.set_draw_color(*org)
+    pdf.set_line_width(0.4)
+    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(2)
+    pdf.set_x(15)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 5, "www.tradesuperstoreonline.co.uk   ·   accounts@tradesuperstoreonline.co.uk",
+             align="C", ln=1)
     out = pdf.output()
     return bytes(out)

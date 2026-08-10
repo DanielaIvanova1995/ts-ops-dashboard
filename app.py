@@ -6001,6 +6001,93 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
                 st.rerun()
 
 
+def _bulk_reconcile_one(s, limits):
+    """Headless reconcile of ONE pulled statement → saves a snapshot. Returns a short status line.
+    A quick first pass: matches statement invoices to QuickBooks bills by number (no Monday
+    cross-check — open the supplier individually for that). Only bills that are open in QuickBooks
+    become payable, so nothing unapproved can slip into the pay list."""
+    nm, by = data_sources.fetch_statement_attachment(
+        SUPPLIER_FROM_MAILBOX, s["message_id"], s["attachment_id"])
+    if not by:
+        return f"⚠ {s.get('supplier', '?')}: couldn't download the statement"
+    if (nm or "").lower().endswith(".pdf"):
+        stmt = data_sources.read_statement_pdf(pdf_bytes=by)
+    else:
+        stmt = data_sources.read_statement_pdf(text=_statement_file_text(_PulledFile(nm, by)))
+    sup = stmt.get("supplier") or s.get("supplier") or "?"
+    # Resolve the QuickBooks vendor: learned mapping first, then auto-match by name.
+    try:
+        mp = (data_sources.qbo_vendor_map_load() or {}).get(_norm_code(sup))
+    except Exception:  # noqa: BLE001
+        mp = None
+    vid = mp["id"] if mp else None
+    if not vid:
+        auto = data_sources.qbo_find_vendor(sup)
+        vid = auto["id"] if auto else None
+    if not vid:
+        return f"⚠ {sup}: no QuickBooks vendor match — open it manually to pick one"
+    bills = data_sources.qbo_vendor_bills(vid)
+    try:
+        paymap = data_sources.qbo_vendor_payments(vid)
+    except Exception:  # noqa: BLE001
+        paymap = {}
+    bmap = {_norm_code(b["doc_no"]): b for b in bills if b.get("doc_no")}
+    rows, pay_lines = [], []
+    to_pay = stmt_total = 0.0
+    n_pay = n_paid = n_missing = 0
+    for ln in (stmt.get("lines") or []):
+        if (ln.get("type") or "").lower() != "invoice":
+            continue
+        try:
+            amt = float(ln.get("amount") or 0)
+        except (TypeError, ValueError):
+            amt = 0.0
+        if amt <= 0:
+            continue
+        inv = str(ln.get("invoice_no") or "").strip()
+        try:
+            val = float(ln.get("unpaid")) if ln.get("unpaid") is not None else amt
+        except (TypeError, ValueError):
+            val = amt
+        stmt_total += amt
+        b = bmap.get(_norm_code(inv))
+        paid_ref = ""
+        if b and b.get("paid"):
+            pm = paymap.get(str(b["id"]))
+            paid_ref = pm.get("ref", "") if pm else ""
+            status, n_paid = "✅ Paid", n_paid + 1
+        elif b:
+            status, n_pay = "✅ Approved — ready for payment", n_pay + 1
+            to_pay += val
+            pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
+                              "bill_id": b["id"], "due": _due_label(b.get("due")),
+                              "bill_no": b.get("doc_no") or inv, "bill_date": b.get("date"),
+                              "due_date": b.get("due"), "original": b.get("total"),
+                              "balance": b.get("balance")})
+        else:
+            status, n_missing = "🔴 Not found in QuickBooks", n_missing + 1
+        rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
+                     "Date": ln.get("date") or "", "Amount": amt, "Unpaid": val,
+                     "Paid under": paid_ref, "vs QuickBooks": status})
+    cl = limits.get(_norm_code(sup)) or (limits.get(_norm_code(mp["name"])) if mp else None)
+    parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
+    if n_missing:
+        parts.append(f"**{n_missing}** not in QuickBooks")
+    if n_paid:
+        parts.append(f"{n_paid} paid")
+    snap = {"supplier": sup, "vid": vid, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
+            "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
+            "to_pay": round(to_pay, 2), "stmt_total": round(stmt_total, 2), "credit_limit": cl,
+            "rows": rows, "pay_lines": pay_lines, "statement_asset": None}
+    try:
+        snap["statement_asset"] = data_sources.recon_upload_statement(by, nm or s["attachment_name"])
+    except Exception:  # noqa: BLE001
+        pass
+    data_sources.recon_save(f"v{vid}", snap)
+    tail = f", {n_missing} not in QB" if n_missing else ""
+    return f"{sup}: {n_pay} ready to pay (£{to_pay:,.0f}){tail}"
+
+
 def _render_statement_recon():
     """Upload a supplier statement → match every invoice line against QuickBooks bills."""
     if not data_sources.qbo_is_connected():
@@ -6077,6 +6164,34 @@ def _render_statement_recon():
             st.info("No statement-looking emails found in the last few months. (I look for PDF/Excel "
                     "attachments whose name or subject mentions ‘statement’, ‘SOA’, etc.)")
         elif plist:
+            rc1, rc2 = st.columns([3, 1])
+            rc1.caption(f"**{len(plist)}** statements found. Reconcile them all in one go (each is "
+                        "read by AI — a small cost — so this takes a minute or two), or do them one "
+                        "at a time. Results are saved to **Saved reconciliations** above to review "
+                        "and pay.")
+            if rc2.button(f"⚡ Reconcile all {len(plist)}", key="pull_recall",
+                          use_container_width=True):
+                limits = {}
+                try:
+                    limits = {_norm_code(k): v for k, v
+                              in (data_sources.fetch_supplier_credit_limits() or {}).items()}
+                except Exception:  # noqa: BLE001
+                    pass
+                prog = st.progress(0.0, text="Reconciling…")
+                results = []
+                for i, s in enumerate(plist):
+                    try:
+                        results.append(_bulk_reconcile_one(s, limits))
+                    except Exception as e:  # noqa: BLE001
+                        results.append(f"⚠ {s.get('supplier', '?')}: {str(e)[:70]}")
+                    prog.progress((i + 1) / len(plist), text=f"Reconciled {i + 1}/{len(plist)}")
+                prog.empty()
+                st.success("Done — all saved to **Saved reconciliations** above. Open each to "
+                           "review and pay. (Bulk is a quick first pass; open one for the full "
+                           "Monday cross-check.)")
+                for r in results:
+                    st.write("• " + r)
+            st.markdown("")
             for i, s in enumerate(plist):
                 c1, c2 = st.columns([4, 1])
                 c1.markdown(
@@ -6310,7 +6425,7 @@ def _render_statement_recon():
                                                                                   up.name)
                 except Exception:  # noqa: BLE001
                     pass    # save even if the file upload fails
-                data_sources.recon_save(_norm_code(sup), snap)
+                data_sources.recon_save(f"v{vid}", snap)
             _saved_set[sig] = snap.get("statement_asset")
             st.caption("💾 Kept — you'll find this under **Saved reconciliations** at the top, ready "
                        "to pay whenever you are (no need to re-upload).")
