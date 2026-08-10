@@ -2716,3 +2716,38 @@ def fetch_supplier_credit_limits(token=None):
             if key:
                 out[key] = lim
     return out
+
+
+# ---- Saved statement reconciliations (latest per supplier), shown on login. Stored (base64) on
+# a Monday "Statement Reconciliations" config item. ----
+QBO_RECON_ITEM = "Statement Reconciliations"
+
+
+def recon_load_all(token=None):
+    """{supplier_key: snapshot} of the latest saved statement reconciliation per supplier."""
+    import base64 as _b64
+    import json as _json
+    import re as _re
+    token = token or get_token()
+    item_id = _config_item_named(QBO_RECON_ITEM, token)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:1){body}}}",
+                       {"i": [str(item_id)]}, token)
+    ups = (((data.get("items") or [{}])[0]).get("updates") or [])
+    if not ups:
+        return {}
+    b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
+    try:
+        return _json.loads(_b64.b64decode(b64).decode()) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def recon_save(supplier_key: str, snapshot: dict, token=None):
+    """Save/replace the latest reconciliation snapshot for a supplier."""
+    import base64 as _b64
+    import json as _json
+    token = token or get_token()
+    m = recon_load_all(token)
+    m[supplier_key] = snapshot
+    item_id = _config_item_named(QBO_RECON_ITEM, token)
+    monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)

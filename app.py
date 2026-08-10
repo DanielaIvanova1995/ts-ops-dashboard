@@ -5822,6 +5822,25 @@ def _render_statement_recon():
     if not data_sources.qbo_is_connected():
         st.info("Connect QuickBooks above first — reconciliation reads your bills from it.")
         return
+
+    # Saved reconciliations — visible on login without re-uploading.
+    try:
+        saved = data_sources.recon_load_all()
+    except Exception:  # noqa: BLE001
+        saved = {}
+    if saved:
+        st.markdown("##### 📌 Saved reconciliations")
+        for _k, snap in sorted(saved.items(), key=lambda kv: kv[1].get("saved_at", ""),
+                               reverse=True):
+            with st.expander(f"{snap.get('supplier', '?')} · saved {snap.get('saved_at', '')} · "
+                             f"ready to pay £{snap.get('to_pay', 0):,.2f}"):
+                if snap.get("summary"):
+                    st.markdown(snap["summary"])
+                if snap.get("rows"):
+                    st.dataframe(pd.DataFrame(snap["rows"]), hide_index=True,
+                                 use_container_width=True)
+        st.markdown("---")
+
     up = st.file_uploader("Upload a supplier statement (PDF, Excel or CSV)",
                           type=["pdf", "xlsx", "xls", "csv"], key="stmt_pdf")
     if not up:
@@ -5994,6 +6013,17 @@ def _render_statement_recon():
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
                    "they've never been input. (Mailbox search + supplier-chase draft coming next.)")
+    if st.button("💾 Save this reconciliation", key=f"savrec_{_norm_code(sup)}",
+                 help="Saves it so it shows at the top here next time you log in."):
+        snap = {"supplier": sup, "saved_at": now_uk().strftime("%d %b %Y %H:%M"),
+                "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
+                "to_pay": round(to_pay, 2), "rows": rows}
+        try:
+            data_sources.recon_save(_norm_code(sup), snap)
+            st.success("Saved — it'll show at the top here next time you log in.")
+        except Exception as e:  # noqa: BLE001
+            st.error("Couldn't save: " + str(e)[:150])
+
     if n_action:
         st.info(f"🟠 {n_action} invoice(s) are on Monday but not yet approved to QuickBooks — "
                 "review and approve (or query) these ASAP so they're ready to pay.")
