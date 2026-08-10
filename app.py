@@ -5889,11 +5889,14 @@ def _render_statement_recon():
                        "bills may be under a different vendor name.")
 
     # Missing-from-QB invoices: cross-check Monday — a Discrepancy there = awaiting a credit note.
-    try:
-        _disc = invoices_by_status("discrepancy").get("invoices") or []
-        disc_nos = {_norm_code(i.get("invoice_no")) for i in _disc if i.get("invoice_no")}
-    except Exception:  # noqa: BLE001
-        disc_nos = set()
+    def _mon_nos(key):
+        try:
+            return {_norm_code(i.get("invoice_no"))
+                    for i in (invoices_by_status(key).get("invoices") or []) if i.get("invoice_no")}
+        except Exception:  # noqa: BLE001
+            return set()
+    disc_nos = _mon_nos("discrepancy")
+    action_nos = _mon_nos("review") | _mon_nos("matched")   # on Monday but not yet approved to QB
 
     bill_by_doc = {}
     for b in bills:
@@ -5901,8 +5904,8 @@ def _render_statement_recon():
             bill_by_doc.setdefault(b["doc_no"].upper(), b)
 
     rows = []
-    n_pay = n_paid = n_missing = n_disc = 0
-    to_pay = paid_total = disc_total = missing_total = stmt_total = 0.0
+    n_pay = n_paid = n_missing = n_disc = n_action = 0
+    to_pay = paid_total = disc_total = missing_total = action_total = stmt_total = 0.0
     used = set()
     for ln in (stmt.get("lines") or []):
         if (ln.get("type") or "").lower() != "invoice":
@@ -5928,11 +5931,15 @@ def _render_statement_recon():
             n_paid += 1
             paid_total += val
         elif not b:
-            if _norm_code(inv) in disc_nos:
+            _k = _norm_code(inv)
+            if _k in disc_nos:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
                 disc_total += val
+            elif _k in action_nos:
+                status, n_action = "🟠 On Monday, not yet approved — review/approve ASAP", n_action + 1
+                action_total += val
             else:
-                status, n_missing = "🔴 Not in QuickBooks", n_missing + 1
+                status, n_missing = "🔴 Missing from Monday — not input yet", n_missing + 1
                 missing_total += val
         else:
             status, n_pay = "✅ Approved — ready for payment", n_pay + 1
@@ -5943,10 +5950,12 @@ def _render_statement_recon():
                      "Paid under": paid_ref, "vs QuickBooks": status})
 
     parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
-    if n_missing:
-        parts.append(f"**{n_missing}** not in QuickBooks")
+    if n_action:
+        parts.append(f"**{n_action}** to review/approve")
     if n_disc:
         parts.append(f"**{n_disc}** awaiting credit note")
+    if n_missing:
+        parts.append(f"**{n_missing}** missing from Monday")
     if n_paid:
         parts.append(f"{n_paid} paid")
     st.markdown(" · ".join(parts))
@@ -5960,15 +5969,18 @@ def _render_statement_recon():
     t1, t2, t3 = st.columns(3)
     t1.metric("On the statement", f"£{stmt_total:,.2f}")
     t2.metric("Ready to pay in QuickBooks", f"£{to_pay:,.2f}")
-    t3.metric("Gap (not yet payable)", f"£{stmt_total - to_pay:,.2f}")
+    t3.metric("Not yet payable", f"£{stmt_total - to_pay:,.2f}")
     st.caption(
-        f"Gap = £{missing_total:,.2f} not in QB ({n_missing}) + £{disc_total:,.2f} awaiting credit "
-        f"note ({n_disc}) + £{paid_total:,.2f} already paid ({n_paid}). "
+        f"Not yet payable = £{action_total:,.2f} to review/approve ({n_action}) + £{disc_total:,.2f} "
+        f"awaiting credit note ({n_disc}) + £{missing_total:,.2f} missing from Monday ({n_missing}) "
+        f"+ £{paid_total:,.2f} already paid ({n_paid}). "
         f"Statement's own stated balance: £{(stmt.get('balance') or 0):,.2f}.")
     if n_missing:
-        st.warning(f"⚠ {n_missing} invoice(s) on the statement aren't in QuickBooks and aren't a "
-                   "known Monday discrepancy — the ones to chase up or enter. (Mailbox search + "
-                   "supplier-chase draft coming next.)")
+        st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
+                   "they've never been input. (Mailbox search + supplier-chase draft coming next.)")
+    if n_action:
+        st.info(f"🟠 {n_action} invoice(s) are on Monday but not yet approved to QuickBooks — "
+                "review and approve (or query) these ASAP so they're ready to pay.")
 
 
 def _render_payables_live():
