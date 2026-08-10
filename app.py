@@ -5687,6 +5687,13 @@ def _render_qbo_panel():
                    "Settings → Secrets, then reload.")
 
 
+def _qbo_connected_quiet():
+    try:
+        return data_sources.qbo_is_connected()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _render_statement_recon():
     """Upload a supplier statement → match every invoice line against QuickBooks bills."""
     if not data_sources.qbo_is_connected():
@@ -5770,10 +5777,13 @@ def render_finance():
         <span class="sec">Finance</span></span></div>""",
         unsafe_allow_html=True,
     )
-    with st.expander("QuickBooks connection (read-only)", expanded=True):
-        _render_qbo_panel()
-    with st.expander("📄 Statement reconciliation (upload a supplier statement)", expanded=False):
+    # Two separate views (sidebar toggle): Statement reconciliation vs the margin dashboard.
+    if st.session_state.get("fin_view") == "Statement reconciliation":
+        with st.expander("QuickBooks connection (read-only)",
+                         expanded=not _qbo_connected_quiet()):
+            _render_qbo_panel()
         _render_statement_recon()
+        return
     st.caption("Live actual margin from the Orders board **Paid & Delivered** group(s) — per "
                "month, per supplier, with loss-making, missing-invoice and anomaly flags. "
                "Admin only.")
@@ -6141,6 +6151,9 @@ with st.sidebar:
             st.radio("Invoice Check view",
                      ["Check invoices", "Matched (weekly)", "Discrepancy log"],
                      key="ic_view", label_visibility="collapsed")
+        if _m == "Finance" and st.session_state.module == "Finance":
+            st.radio("Finance view", ["Margins", "Statement reconciliation"],
+                     key="fin_view", label_visibility="collapsed")
     module = st.session_state.module
 
     st.write("")
