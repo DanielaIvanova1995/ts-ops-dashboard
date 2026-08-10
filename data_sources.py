@@ -2859,42 +2859,63 @@ def fetch_supplier_statements(mailbox: str, since_days: int = 120, max_msgs: int
     Inbox and only keeps attachments that look like statements by name/subject."""
     from datetime import datetime, timedelta, timezone
     token = token or ms_token()
-    since = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since = datetime.now(timezone.utc) - timedelta(days=since_days)
     folder = _find_folder(mailbox, folder_name, token) if folder_name else None
     in_statements_folder = folder is not None
     scope = f"mailFolders/{folder['id']}" if in_statements_folder else "mailFolders/inbox"
+    # Step 1: list recent messages (newest first). No $expand/$filter — Graph 400s when those are
+    # combined with $orderby on a message collection; we filter in Python instead.
     r = requests.get(
         f"{GRAPH}/users/{mailbox}/{scope}/messages",
         headers={"Authorization": f"Bearer {token}"},
-        params={"$top": str(max_msgs),
-                "$select": "subject,from,receivedDateTime,hasAttachments",
-                "$expand": "attachments($select=id,name,contentType,size)",
-                "$orderby": "receivedDateTime desc",
-                "$filter": f"hasAttachments eq true and receivedDateTime ge {since}"},
+        params={"$top": str(max_msgs), "$orderby": "receivedDateTime desc",
+                "$select": "subject,from,receivedDateTime,hasAttachments"},
         timeout=45,
     )
     r.raise_for_status()
     seen: dict = {}
     for m in r.json().get("value", []):
+        if not m.get("hasAttachments"):
+            continue
+        rec = m.get("receivedDateTime") or ""
+        try:
+            if rec and datetime.fromisoformat(rec.replace("Z", "+00:00")) < since:
+                continue
+        except ValueError:
+            pass
         frm = ((m.get("from") or {}).get("emailAddress") or {})
         addr = (frm.get("address") or "").lower()
         domain = addr.split("@")[-1] if "@" in addr else addr
-        subj = m.get("subject") or ""
         key = domain or addr
         if key in seen:
             continue
-        for a in (m.get("attachments") or []):
+        subj = m.get("subject") or ""
+        # Step 2: only for the latest message per supplier, fetch its attachments to grab the file.
+        try:
+            ar = requests.get(
+                f"{GRAPH}/users/{mailbox}/messages/{m['id']}/attachments",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"$select": "id,name,contentType,size"}, timeout=30)
+            ar.raise_for_status()
+            atts = ar.json().get("value", [])
+        except Exception:  # noqa: BLE001
+            atts = []
+        att = None
+        for a in atts:
             nm = (a.get("name") or "").lower()
             ok = (nm.endswith(_STATEMENT_EXT) if in_statements_folder
                   else _looks_like_statement(a.get("name"), subj))
             if ok:
-                seen[key] = {"supplier": frm.get("name") or domain or addr,
-                             "from_email": addr, "domain": domain, "subject": subj.strip(),
-                             "received": (m.get("receivedDateTime") or "")[:10],
-                             "message_id": m.get("id"), "attachment_id": a.get("id"),
-                             "attachment_name": a.get("name"),
-                             "attachment_ctype": (a.get("contentType") or "")}
+                att = a
                 break
+        if not att:
+            continue
+        seen[key] = {"supplier": frm.get("name") or domain or addr,
+                     "from_email": addr, "domain": domain, "subject": subj.strip(),
+                     "received": rec[:10],
+                     "message_id": m.get("id"), "attachment_id": att.get("id"),
+                     "attachment_name": att.get("name"),
+                     "attachment_ctype": (att.get("contentType") or "")}
     return sorted(seen.values(), key=lambda d: d["received"], reverse=True)
 
 
