@@ -6797,7 +6797,7 @@ with st.sidebar:
             _subnav("ic_view", ["Check invoices", "Matched (weekly)", "Discrepancy log"])
         if _m == "Finance" and st.session_state.module == "Finance":
             _subnav("fin_view",
-                    ["Margins", "Statement Reconciliation", "Payables (Live)"])
+                    ["Payables (Live)", "Statement Reconciliation", "Margins"])
     module = st.session_state.module
 
     st.write("")
