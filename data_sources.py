@@ -2847,17 +2847,24 @@ def _looks_like_statement(att_name: str, subject: str) -> bool:
     return any(k in blob for k in _STATEMENT_HINTS)
 
 
-def fetch_supplier_statements(mailbox: str, since_days: int = 120, max_msgs: int = 150,
-                              token: str | None = None) -> list:
-    """Scan a mailbox's Inbox for statement emails and return the LATEST one per supplier:
+def fetch_supplier_statements(mailbox: str, since_days: int = 120, max_msgs: int = 200,
+                              folder_name: str = "Statement", token: str | None = None) -> list:
+    """Scan a mailbox folder for statement emails and return the LATEST one per supplier:
     [{supplier, from_email, domain, subject, received, message_id, attachment_id,
       attachment_name, attachment_ctype}]. Groups by sender domain; messages are read newest
-    first so the first hit per domain is the latest. Attachment bytes are NOT downloaded here."""
+    first so the first hit per domain is the latest. Attachment bytes are NOT downloaded here.
+
+    Looks in the `folder_name` sub-folder first (where a mailbox rule files statements) — there
+    every attachment is treated as a statement. If that folder isn't found, it falls back to the
+    Inbox and only keeps attachments that look like statements by name/subject."""
     from datetime import datetime, timedelta, timezone
     token = token or ms_token()
     since = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    folder = _find_folder(mailbox, folder_name, token) if folder_name else None
+    in_statements_folder = folder is not None
+    scope = f"mailFolders/{folder['id']}" if in_statements_folder else "mailFolders/inbox"
     r = requests.get(
-        f"{GRAPH}/users/{mailbox}/mailFolders/inbox/messages",
+        f"{GRAPH}/users/{mailbox}/{scope}/messages",
         headers={"Authorization": f"Bearer {token}"},
         params={"$top": str(max_msgs),
                 "$select": "subject,from,receivedDateTime,hasAttachments",
@@ -2877,7 +2884,10 @@ def fetch_supplier_statements(mailbox: str, since_days: int = 120, max_msgs: int
         if key in seen:
             continue
         for a in (m.get("attachments") or []):
-            if _looks_like_statement(a.get("name"), subj):
+            nm = (a.get("name") or "").lower()
+            ok = (nm.endswith(_STATEMENT_EXT) if in_statements_folder
+                  else _looks_like_statement(a.get("name"), subj))
+            if ok:
                 seen[key] = {"supplier": frm.get("name") or domain or addr,
                              "from_email": addr, "domain": domain, "subject": subj.strip(),
                              "received": (m.get("receivedDateTime") or "")[:10],

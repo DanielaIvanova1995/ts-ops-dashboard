@@ -6033,9 +6033,10 @@ def _render_statement_recon():
 
     # ---- Pull the latest statement per supplier straight from the accounts@ inbox ----
     with st.expander("📥 Pull latest statements from your accounts@ inbox"):
-        st.caption(f"Reads **{SUPPLIER_FROM_MAILBOX}** and finds the most recent statement email "
-                   "from each supplier (last ~4 months). Nothing is sent — it just fetches them so "
-                   "you can reconcile. Hit **Reconcile** on one to run it through below.")
+        st.caption(f"Reads the **Statement** folder in **{SUPPLIER_FROM_MAILBOX}** (where your "
+                   "mailbox rule files them) and picks the most recent statement from each supplier "
+                   "(last ~4 months). Nothing is sent — it just fetches them so you can reconcile. "
+                   "Hit **Reconcile** on one to run it through below.")
         if st.button("Fetch latest statements", key="pull_stmts"):
             with st.spinner("Reading the accounts@ inbox…"):
                 try:
