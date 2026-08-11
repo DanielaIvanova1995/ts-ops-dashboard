@@ -193,9 +193,11 @@ def _delivery_charge(supplier, goods):
     return float(flat), True
 
 
-def _build_doc(o):
+def _build_doc(o, delivery_override=None, notes_extra=None):
     """Assemble the (kind, doc) for order `o`: a priced PO for email-order suppliers, a packing
-    slip (no prices) for portal / in-house / unidentified. Delivery address = Shopify shipping."""
+    slip (no prices) for portal / in-house / unidentified. Delivery address = Shopify shipping.
+    delivery_override = a £ figure Natasha typed in (e.g. a supplier-corrected carriage charge);
+    notes_extra = extra note line(s) to add to the PO."""
     supplier = (o.get("supplier") or "").strip()
     sid = (o.get("shopify_id") or "").strip()
     ship = _ship(sid) if sid else None
@@ -206,6 +208,8 @@ def _build_doc(o):
     phone = (ship or {}).get("phone") or o.get("phone") or ""
     notes = [f"Kerbside delivery to: {contact}" + (f", {phone}" if phone else "") + ".",
              f"Quote TSO order {order_no} on all paperwork."]
+    if notes_extra:
+        notes += [n for n in notes_extra if n and str(n).strip()]
 
     items = _parse_monday_items(o.get("items"))
     is_portal = supplier in order_routing.PORTAL
@@ -239,10 +243,14 @@ def _build_doc(o):
                "qty": (float(it["Qty"]) if str(it["Qty"]).replace(".", "", 1).isdigit() else 1)}
               for it in items]
     ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country")}
-    _d = delivery_rules.expected_delivery(supplier, goods, ship_pc, dlines)
-    deliv = _d if isinstance(_d, (int, float)) else 0.0
-    deliv_known = _d is not None
-    deliv_label = _money(deliv) + ("" if deliv_known else " (rate not on file — confirm on OC)")
+    if delivery_override is not None:
+        deliv, deliv_known = float(delivery_override), True
+        deliv_label = _money(deliv)
+    else:
+        _d = delivery_rules.expected_delivery(supplier, goods, ship_pc, dlines)
+        deliv = _d if isinstance(_d, (int, float)) else 0.0
+        deliv_known = _d is not None
+        deliv_label = _money(deliv) + ("" if deliv_known else " (rate not on file — confirm on OC)")
     if any_confirm:
         sums = [["Goods (ex VAT)", "confirm on OC", False], ["Delivery", deliv_label, False],
                 ["VAT @20%", "confirm", False], ["Total (inc VAT)", "confirm on OC", True]]
@@ -578,10 +586,21 @@ def _order_detail(o):
         if a.get("url"):
             st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
 
+    # ---- Optional adjustments (e.g. a supplier corrects the delivery charge) ----
+    with st.expander("✏️ Adjust the PO before generating (delivery charge / note)"):
+        ov = st.checkbox("Override the delivery charge", key=f"op_ovck_{iid}",
+                         help="Tick and enter the correct carriage if a supplier says the "
+                              "automatic figure is wrong or was missed.")
+        dov = st.number_input("Delivery charge £ (ex VAT)", min_value=0.0, step=1.0, value=0.0,
+                              key=f"op_dov_{iid}", disabled=not ov)
+        note = st.text_input("Extra note to add to the PO (optional)", key=f"op_note_{iid}")
+    delivery_override = float(dov) if ov else None
+    notes_extra = [note] if note.strip() else None
+
     # ---- Generate the branded PO / packing slip (validation gate; prices from the feed) ----
     if st.button(":material/description: Generate PO / packing slip", key=f"op_gen_{iid}"):
         try:
-            kind, doc = _build_doc(o)
+            kind, doc = _build_doc(o, delivery_override=delivery_override, notes_extra=notes_extra)
             date_str = datetime.date.today().strftime("%d %B %Y")
             pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
                 doc, date_str=date_str)
