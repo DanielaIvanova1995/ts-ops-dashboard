@@ -9,13 +9,16 @@ lines/fulfilments and handles PO download/replace.
 Phase 2 (routing engine) and Phase 3 (PO/packing-slip generation + verified attach) plug into
 the Process buttons, which are stubbed here.
 """
+import datetime
 import html
+import json
 import re
 
 import pandas as pd
 import streamlit as st
 
 import data_sources
+import order_docs
 import order_routing
 
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
@@ -136,6 +139,91 @@ def _parse_monday_items(txt):
                 sku = p.split(":", 1)[1].strip()
         out.append({"Item": parts[0] if parts else line, "SKU": sku, "Qty": qty})
     return out
+
+
+@st.cache_data(show_spinner=False)
+def _pricing():
+    """{normalised SKU: {supplier_norm: cost}} from the pricing feed (Airtable-derived)."""
+    try:
+        d = json.load(open("pricing_lookup.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for it in d.get("items", []):
+        sku = re.sub(r"[^a-z0-9]", "", (it.get("sku") or "").lower())
+        if sku:
+            out[sku] = {re.sub(r"[^a-z0-9]", "", (o.get("s") or "").lower()): o.get("c")
+                        for o in (it.get("offers") or [])}
+    return out
+
+
+def _line_cost(sku, supplier):
+    """The routed supplier's cost for a SKU from the pricing feed, or None (→ 'confirm' on the PO;
+    never guessed — matches the rulebook)."""
+    key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
+    sup = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
+    offers = _pricing().get(key) or {}
+    c = offers.get(sup)
+    return c if isinstance(c, (int, float)) else None
+
+
+def _money(x):
+    return f"£{float(x):,.2f}"
+
+
+def _build_doc(o):
+    """Assemble the (kind, doc) for order `o`: a priced PO for email-order suppliers, a packing
+    slip (no prices) for portal / in-house / unidentified. Delivery address = Shopify shipping."""
+    supplier = (o.get("supplier") or "").strip()
+    sid = (o.get("shopify_id") or "").strip()
+    ship = _ship(sid) if sid else None
+    dl = (ship or {}).get("lines") or [x.strip() for x in (o.get("address") or "").split(",")
+                                        if x.strip()]
+    order_no = o.get("order_no") or o.get("name") or ""
+    contact = f"{o.get('customer') or ''}".strip()
+    phone = (ship or {}).get("phone") or o.get("phone") or ""
+    notes = [f"Kerbside delivery to: {contact}" + (f", {phone}" if phone else "") + ".",
+             f"Quote TSO order {order_no} on all paperwork."]
+
+    items = _parse_monday_items(o.get("items"))
+    is_portal = supplier in order_routing.PORTAL
+    in_house = supplier in ("", "SAMPLES", "CLEARANCE")
+    kind = "slip" if (is_portal or in_house) else "po"
+
+    if kind == "slip":
+        lines = [[it["SKU"] or "-", it["Item"], it["Qty"] or "1"] for it in items]
+        return "slip", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
+                        "lines": lines,
+                        "notes": (["Portal order - place on the supplier portal."] if is_portal
+                                  else ["In-house — post / fulfil from Head Office."]) + notes,
+                        "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
+
+    lines, goods, any_confirm = [], 0.0, False
+    for it in items:
+        qty = it["Qty"] or "1"
+        cost = _line_cost(it["SKU"], supplier)
+        try:
+            q = float(qty)
+        except (TypeError, ValueError):
+            q = 1
+        if cost is None:
+            lines.append([it["SKU"] or "-", it["Item"], qty, "confirm", "confirm"])
+            any_confirm = True
+        else:
+            lt = round(cost * q, 2)
+            goods += lt
+            lines.append([it["SKU"] or "-", it["Item"], qty, _money(cost), _money(lt)])
+    if any_confirm:
+        sums = [["Goods (ex VAT)", "confirm on OC", False], ["Delivery", "confirm on OC", False],
+                ["VAT @20%", "confirm", False], ["Total (inc VAT)", "confirm on OC", True]]
+    else:
+        vat = round(goods * 0.20, 2)
+        sums = [["Goods (ex VAT)", _money(goods), False], ["Delivery", "confirm on OC", False],
+                ["VAT @20%", _money(vat), False],
+                ["Total (inc VAT, ex delivery)", _money(goods + vat), True]]
+    return "po", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
+                  "acct": order_docs.account_for(supplier), "lines": lines, "sums": sums,
+                  "notes": notes, "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
 
 def _ship(sid):
@@ -283,7 +371,47 @@ def _order_detail(o):
     for a in (o.get("po_assets") or []):
         if a.get("url"):
             st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
-    up = st.file_uploader("Replace / attach PO (PDF)", type=["pdf"], key=f"op_po_{iid}")
+
+    # ---- Generate the branded PO / packing slip (validation gate; prices from the feed) ----
+    if st.button(":material/description: Generate PO / packing slip", key=f"op_gen_{iid}"):
+        try:
+            kind, doc = _build_doc(o)
+            date_str = datetime.date.today().strftime("%d %B %Y")
+            pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+                doc, date_str=date_str)
+            st.session_state[f"op_gen_pdf_{iid}"] = {
+                "bytes": pdf, "kind": kind,
+                "name": f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_"
+                        "Trade_Superstore_Online.pdf"}
+        except ValueError as e:      # the validation gate blocked it — show exactly what's missing
+            st.session_state.pop(f"op_gen_pdf_{iid}", None)
+            st.error("Can't generate yet — " + str(e))
+        except Exception as e:  # noqa: BLE001
+            st.session_state.pop(f"op_gen_pdf_{iid}", None)
+            st.error("Couldn't build the document: " + str(e)[:200])
+    gen = st.session_state.get(f"op_gen_pdf_{iid}")
+    if gen:
+        st.success(f"Built a **{'Purchase Order' if gen['kind'] == 'po' else 'Packing Slip'}** — "
+                   "download to check it, or attach it to Monday.")
+        g1, g2 = st.columns(2)
+        g1.download_button(":material/download: Download", gen["bytes"], file_name=gen["name"],
+                           mime="application/pdf", key=f"op_gendl_{iid}", use_container_width=True)
+        if g2.button(":material/attach_file: Attach this to Monday", key=f"op_genatt_{iid}",
+                     use_container_width=True):
+            with st.spinner("Uploading + verifying…"):
+                try:
+                    r = data_sources.op_upload_po(iid, gen["bytes"], gen["name"])
+                    if r.get("ok"):
+                        st.success(f"Attached & verified ({r['size']:,} bytes).")
+                        st.session_state["_op_orders"] = None
+                    else:
+                        st.error(f"Upload didn't verify — {r.get('n_assets')} asset(s), none "
+                                 "matched. Try again.")
+                except Exception as e:  # noqa: BLE001
+                    st.error("Upload failed: " + str(e)[:180])
+
+    up = st.file_uploader("…or upload / replace the PO manually (PDF)", type=["pdf"],
+                          key=f"op_po_{iid}")
     if up is not None and st.button(":material/attach_file: Attach to Monday (replaces latest)",
                                     key=f"op_poset_{iid}"):
         with st.spinner("Uploading + verifying…"):
