@@ -14,7 +14,9 @@ import re
 CANON = {
     "upb": "UPB", "nbp": "NBP", "squaredeal": "Squaredeal", "eurocell": "Eurocell",
     "southernsheeting": "Southern Sheeting", "ss": "Southern Sheeting",
-    "travisperkins": "Travis Perkins", "gap": "GAP", "huwsgray": "Huws Gray",
+    "travisperkins": "Travis Perkins", "tp": "Travis Perkins", "gap": "GAP",
+    "huwsgray": "Huws Gray", "edmundson": "Edmundson", "mercado": "Mercardo",
+    "hurlinghambaths": "Hurlingham Baths",
     "nationalskirting": "National Skirting", "molan": "Molan", "storm": "Storm",
     "pjh": "PJH", "nuie": "Nuie", "roxor": "Nuie", "decor8": "Decor8", "paintersworld": "Decor8",
     "rexel": "Rexel", "toolbank": "Toolbank", "lpd": "LPD DOORS", "lpddoors": "LPD DOORS",
