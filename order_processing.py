@@ -193,16 +193,18 @@ def _delivery_charge(supplier, goods):
     return float(flat), True
 
 
-def _build_doc(o, delivery_override=None, notes_extra=None):
+def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
+               address_override=None):
     """Assemble the (kind, doc) for order `o`: a priced PO for email-order suppliers, a packing
     slip (no prices) for portal / in-house / unidentified. Delivery address = Shopify shipping.
-    delivery_override = a £ figure Natasha typed in (e.g. a supplier-corrected carriage charge);
-    notes_extra = extra note line(s) to add to the PO."""
+    Overrides (from Natasha's 'Adjust' panel) let her fix anything the automation missed:
+    delivery_override = a corrected carriage £; notes_extra = extra note line(s);
+    items_override = edited line list [{SKU, Item, Qty, Cost}]; address_override = edited address."""
     supplier = (o.get("supplier") or "").strip()
     sid = (o.get("shopify_id") or "").strip()
     ship = _ship(sid) if sid else None
-    dl = (ship or {}).get("lines") or [x.strip() for x in (o.get("address") or "").split(",")
-                                        if x.strip()]
+    dl = address_override or (ship or {}).get("lines") or \
+        [x.strip() for x in (o.get("address") or "").split(",") if x.strip()]
     order_no = o.get("order_no") or o.get("name") or ""
     contact = f"{o.get('customer') or ''}".strip()
     phone = (ship or {}).get("phone") or o.get("phone") or ""
@@ -211,13 +213,14 @@ def _build_doc(o, delivery_override=None, notes_extra=None):
     if notes_extra:
         notes += [n for n in notes_extra if n and str(n).strip()]
 
-    items = _parse_monday_items(o.get("items"))
+    items = items_override if items_override is not None else _parse_monday_items(o.get("items"))
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
     kind = "slip" if (is_portal or in_house) else "po"
 
     if kind == "slip":
-        lines = [[it["SKU"] or "-", it["Item"], it["Qty"] or "1"] for it in items]
+        lines = [[(it.get("SKU") or "-"), it.get("Item") or "", (it.get("Qty") or "1")]
+                 for it in items]
         return "slip", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
                         "lines": lines,
                         "notes": (["Portal order - place on the supplier portal."] if is_portal
@@ -226,21 +229,24 @@ def _build_doc(o, delivery_override=None, notes_extra=None):
 
     lines, goods, any_confirm = [], 0.0, False
     for it in items:
-        qty = it["Qty"] or "1"
-        cost = _line_cost(it["SKU"], supplier)
+        qty = it.get("Qty") or "1"
+        cost = it.get("Cost") if isinstance(it.get("Cost"), (int, float)) \
+            else _line_cost(it.get("SKU"), supplier)
         try:
             q = float(qty)
         except (TypeError, ValueError):
             q = 1
         if cost is None:
-            lines.append([it["SKU"] or "-", it["Item"], qty, "confirm", "confirm"])
+            lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, "confirm", "confirm"])
             any_confirm = True
         else:
             lt = round(cost * q, 2)
             goods += lt
-            lines.append([it["SKU"] or "-", it["Item"], qty, _money(cost), _money(lt)])
-    dlines = [{"sku": it["SKU"], "description": it["Item"],
-               "qty": (float(it["Qty"]) if str(it["Qty"]).replace(".", "", 1).isdigit() else 1)}
+            lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, _money(cost),
+                          _money(lt)])
+    dlines = [{"sku": it.get("SKU"), "description": it.get("Item"),
+               "qty": (float(it.get("Qty")) if str(it.get("Qty") or "").replace(".", "", 1)
+                       .isdigit() else 1)}
               for it in items]
     ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country")}
     if delivery_override is not None:
@@ -586,21 +592,55 @@ def _order_detail(o):
         if a.get("url"):
             st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
 
-    # ---- Optional adjustments (e.g. a supplier corrects the delivery charge) ----
-    with st.expander("✏️ Adjust the PO before generating (delivery charge / note)"):
-        ov = st.checkbox("Override the delivery charge", key=f"op_ovck_{iid}",
-                         help="Tick and enter the correct carriage if a supplier says the "
-                              "automatic figure is wrong or was missed.")
-        dov = st.number_input("Delivery charge £ (ex VAT)", min_value=0.0, step=1.0, value=0.0,
-                              key=f"op_dov_{iid}", disabled=not ov)
-        note = st.text_input("Extra note to add to the PO (optional)", key=f"op_note_{iid}")
-    delivery_override = float(dov) if ov else None
-    notes_extra = [note] if note.strip() else None
+    # ---- Adjust anything before generating (fix a missed qty / address / price, add a line) ----
+    items_override = address_override = delivery_override = notes_extra = None
+    with st.expander("✏️ Adjust the PO before generating — fix qty / address / prices, add a line"):
+        st.caption("Edit anything the automation missed, then Generate. Changes here only affect "
+                   "the PO document (not the Monday/Shopify order).")
+        default_addr = "\n".join((_ship(sid) or {}).get("lines") or
+                                 [x.strip() for x in (o.get("address") or "").split(",")
+                                  if x.strip()])
+        addr_txt = st.text_area("Delivery address (one line per row)", value=default_addr,
+                                key=f"op_addr_{iid}", height=110)
+        sup_now = (o.get("supplier") or "")
+        base = _parse_monday_items(o.get("items"))
+        edf = pd.DataFrame([{"Description": it["Item"], "SKU": it["SKU"],
+                             "Qty": it["Qty"] or "1", "Unit cost £": _line_cost(it["SKU"], sup_now)}
+                            for it in base]) if base else pd.DataFrame(
+            columns=["Description", "SKU", "Qty", "Unit cost £"])
+        edited_lines = st.data_editor(
+            edf, num_rows="dynamic", hide_index=True, use_container_width=True,
+            key=f"op_lines_{iid}",
+            column_config={"Unit cost £": st.column_config.NumberColumn("Unit cost £",
+                                                                        format="%.2f")})
+        c_ov1, c_ov2 = st.columns(2)
+        ov = c_ov1.checkbox("Override delivery charge", key=f"op_ovck_{iid}")
+        dov = c_ov2.number_input("Delivery £ (ex VAT)", min_value=0.0, step=1.0, value=0.0,
+                                 key=f"op_dov_{iid}", disabled=not ov)
+        note = st.text_input("Extra note on the PO (optional)", key=f"op_note_{iid}")
+        if ov:
+            delivery_override = float(dov)
+        if note.strip():
+            notes_extra = [note]
+        _addr = [ln.strip() for ln in addr_txt.splitlines() if ln.strip()]
+        if _addr and _addr != ((_ship(sid) or {}).get("lines") or []):
+            address_override = _addr
+        try:
+            rows = [{"SKU": (r.get("SKU") or ""), "Item": (r.get("Description") or ""),
+                     "Qty": str(r.get("Qty") or ""),
+                     "Cost": (float(r["Unit cost £"]) if pd.notna(r.get("Unit cost £")) else None)}
+                    for _, r in edited_lines.iterrows()]
+            if rows != [{"SKU": it["SKU"], "Item": it["Item"], "Qty": it["Qty"] or "1",
+                         "Cost": (_line_cost(it["SKU"], sup_now))} for it in base]:
+                items_override = rows
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---- Generate the branded PO / packing slip (validation gate; prices from the feed) ----
     if st.button(":material/description: Generate PO / packing slip", key=f"op_gen_{iid}"):
         try:
-            kind, doc = _build_doc(o, delivery_override=delivery_override, notes_extra=notes_extra)
+            kind, doc = _build_doc(o, delivery_override=delivery_override, notes_extra=notes_extra,
+                                   items_override=items_override, address_override=address_override)
             date_str = datetime.date.today().strftime("%d %B %Y")
             pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
                 doc, date_str=date_str)
