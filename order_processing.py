@@ -26,6 +26,9 @@ import order_routing
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / safe to process
+# Correct PO email per supplier (set on Monday after the supplier, overriding any wrong auto-fill).
+SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills transport@ (wrong)
+                     "Vista": "orders@vistaeng.co.uk"}
 
 # Colour cue on the Stage dropdown (an editable grid cell can't have a coloured background, so we
 # prefix the label with a coloured dot). Maps the plain Monday label ↔ the coloured display label.
@@ -232,57 +235,59 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     items = items_override if items_override is not None else _parse_monday_items(o.get("items"))
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
-    kind = "slip" if (is_portal or in_house) else "po"
 
-    if kind == "slip":
-        lines = [[(it.get("SKU") or "-"), it.get("Item") or "", (it.get("Qty") or "1")]
-                 for it in items]
-        return "slip", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
-                        "lines": lines,
-                        "notes": (["Portal order - place on the supplier portal."] if is_portal
-                                  else ["In-house — post / fulfil from Head Office."]) + notes,
-                        "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
-
-    lines, goods, any_confirm = [], 0.0, False
+    # Price every line for an email-order supplier. RULE: all prices in → PO; ANY price missing →
+    # packing slip (never a PO with 'confirm' prices).
+    po_lines, goods, all_priced = [], 0.0, True
     for it in items:
         qty = it.get("Qty") or "1"
-        cost = it.get("Cost") if isinstance(it.get("Cost"), (int, float)) \
-            else _line_cost(it.get("SKU"), supplier)
         try:
             q = float(qty)
         except (TypeError, ValueError):
             q = 1
+        cost = it.get("Cost") if isinstance(it.get("Cost"), (int, float)) \
+            else _line_cost(it.get("SKU"), supplier)
         if cost is None:
-            lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, "confirm", "confirm"])
-            any_confirm = True
+            all_priced = False
         else:
             lt = round(cost * q, 2)
             goods += lt
-            lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, _money(cost),
-                          _money(lt)])
+            po_lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, _money(cost),
+                             _money(lt)])
+
+    make_slip = is_portal or in_house or (not all_priced)
+
+    if make_slip:
+        lines = [[(it.get("SKU") or "-"), it.get("Item") or "", (it.get("Qty") or "1")]
+                 for it in items]
+        if is_portal:
+            head = ["Portal order - place on the supplier portal."]
+        elif in_house:
+            head = ["In-house — post / fulfil from Head Office."]
+        else:
+            head = ["Some line prices aren't on file yet — packing slip (no prices). Please "
+                    "confirm prices on your order confirmation."]
+        return "slip", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
+                        "lines": lines, "notes": head + notes,
+                        "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
+
+    # PO — every line priced. VAT is ALWAYS 20%; a missing delivery rate is just £0.
     dlines = [{"sku": it.get("SKU"), "description": it.get("Item"),
                "qty": (float(it.get("Qty")) if str(it.get("Qty") or "").replace(".", "", 1)
                        .isdigit() else 1)}
               for it in items]
     ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country")}
     if delivery_override is not None:
-        deliv, deliv_known = float(delivery_override), True
-        deliv_label = _money(deliv)
+        deliv = float(delivery_override)
     else:
         _d = delivery_rules.expected_delivery(supplier, goods, ship_pc, dlines)
         deliv = _d if isinstance(_d, (int, float)) else 0.0
-        deliv_known = _d is not None
-        deliv_label = _money(deliv) + ("" if deliv_known else " (rate not on file — confirm on OC)")
-    if any_confirm:
-        sums = [["Goods (ex VAT)", "confirm on OC", False], ["Delivery", deliv_label, False],
-                ["VAT @20%", "confirm", False], ["Total (inc VAT)", "confirm on OC", True]]
-    else:
-        vat = round((goods + deliv) * 0.20, 2)
-        sums = [["Goods (ex VAT)", _money(goods), False], ["Delivery (ex VAT)", deliv_label, False],
-                ["VAT @20%", _money(vat), False],
-                ["Total (inc VAT)", _money(goods + deliv + vat), True]]
+    vat = round((goods + deliv) * 0.20, 2)
+    sums = [["Goods (ex VAT)", _money(goods), False], ["Delivery (ex VAT)", _money(deliv), False],
+            ["VAT @20%", _money(vat), False],
+            ["Total (inc VAT)", _money(goods + deliv + vat), True]]
     return "po", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
-                  "acct": order_docs.account_for(supplier), "lines": lines, "sums": sums,
+                  "acct": order_docs.account_for(supplier), "lines": po_lines, "sums": sums,
                   "notes": notes, "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
 
@@ -351,6 +356,8 @@ def _process_split(o, res):
                                                email=glines[0].get("branch_email"))
             else:
                 data_sources.op_set_branch(pid, branch=route)
+            if gsup:
+                _fix_po_email(pid, gsup)          # correct email for Molan/Vista etc.
             data_sources.op_set_status(pid, order_routing._stage_for(
                 gsup, route, glines[0].get("quote"), glines[0].get("portal")))
             if psell is not None:
@@ -397,6 +404,20 @@ def _process_split(o, res):
     except Exception as e:  # noqa: BLE001
         fmsg = f" · ⚠ Shopify fulfilment split failed: {str(e)[:70]}"
     return "split into " + str(n) + " parts: " + "; ".join(parts) + fmsg
+
+
+def _fix_po_email(iid, supplier, o=None):
+    """Set the correct PO email for suppliers with a known override (e.g. Molan orders@, Vista
+    orders@) after the supplier is set — overriding any wrong Monday auto-fill."""
+    em = SUPPLIER_PO_EMAIL.get(supplier)
+    if not em:
+        return
+    try:
+        data_sources.op_set_branch(iid, email=em)
+        if o is not None:
+            o["branch_email"] = em
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _resolve_branch(supplier, postcode):
@@ -447,6 +468,7 @@ def _process_current(o):
                 o["branch"] = br
             if em:
                 o["branch_email"] = em
+        _fix_po_email(iid, supplier, o)           # correct email for Molan/Vista etc.
         data_sources.op_set_status(iid, stage)
         o["stage"] = stage
     except Exception as e:  # noqa: BLE001
@@ -510,6 +532,7 @@ def _process_one(o):
                     o["branch"] = res["branch"]
                 if res.get("branch_email"):
                     o["branch_email"] = res["branch_email"]
+            _fix_po_email(iid, sup, o)           # correct email for Molan/Vista etc.
         else:                                    # SAMPLES / CLEARANCE
             data_sources.op_set_branch(iid, branch=route)
         data_sources.op_set_status(iid, res.get("stage") or "Needs Review")
