@@ -68,7 +68,7 @@ def _items_short(txt):
 
 
 def _suggestion_box():
-    with st.expander("💡 Suggestion / report a problem (emails Daniela)"):
+    with st.expander("💡 Suggestion / report a problem"):
         st.caption("Anything that doesn't work, or would help you process orders faster — this "
                    "goes straight to Daniela.")
         who = st.text_input("Your name", value="Natasha", key="op_sugg_who")
