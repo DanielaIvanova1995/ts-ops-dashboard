@@ -626,9 +626,13 @@ def _order_detail(o):
                 st.caption("⚠ Postcode not clearly on the Hardie map — confirm the branch.")
             st.dataframe(
                 pd.DataFrame([{"Item": l.get("title"), "SKU": l.get("sku") or "",
-                               "Qty": l.get("qty"), "→": (l.get("supplier") or l.get("route")),
+                               "Qty": l.get("qty"),
+                               "Routes to": (l.get("supplier") or l.get("route")),
                                "Why": l.get("reason")} for l in res["lines"]]),
-                hide_index=True, use_container_width=True)
+                hide_index=True, use_container_width=True,
+                column_config={"Routes to": st.column_config.TextColumn(
+                    "Routes to", help="The supplier this line is sent to. 'PICK' = couldn't "
+                    "identify — choose a supplier in the grid.")})
 
     # Live-from-Shopify: the Monday items above are a snapshot from when the order synced. This
     # pulls the CURRENT order (in case it was edited) and adds unit prices, variants + fulfilments.
