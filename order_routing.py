@@ -117,18 +117,19 @@ def route_line(line, area_pc=None):
     if any(k in blob for k in ("polycarbonate", "multiwall", "ezglaze", "solidpolycarbonate")):
         return out("Molan", "Molan", "Polycarbonate — Molan brand lock", "high")
 
-    # Numeric catalogue SKU → Travis Perkins.
-    if re.fullmatch(r"\d{5,6}", sku):
-        return out("Travis Perkins", "Travis Perkins",
-                   "Numeric catalogue SKU → Travis Perkins (nearest branch)", "med",
-                   portal=True, needs_branch=True)
-
-    # Shopify vendor → supplier.
+    # Shopify VENDOR is the authoritative router for everything else — check it FIRST, so a
+    # Toolbank tool (vendor "Toolbank") never gets grabbed by the numeric-SKU rule below.
     lbl = CANON.get(_norm(vendor))
     if lbl:
         return out(lbl, lbl, f"Shopify vendor “{vendor}” → {lbl}", "high",
                    portal=(lbl in PORTAL), quote=(lbl in QUOTE_FIRST),
                    needs_branch=(lbl in NEEDS_BRANCH))
+
+    # ONLY when the vendor didn't resolve: a plain 5-6 digit SKU is a Travis Perkins catalogue code.
+    if re.fullmatch(r"\d{5,6}", sku):
+        return out("Travis Perkins", "Travis Perkins",
+                   "No known vendor; numeric catalogue SKU → Travis Perkins (nearest branch)",
+                   "med", portal=True, needs_branch=True)
 
     return out("PICK", None, f"Couldn't route (vendor “{vendor or '?'}”) — pick a supplier", "low")
 
