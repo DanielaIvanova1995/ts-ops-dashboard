@@ -894,18 +894,22 @@ def render():
                   "£ to us", "£ supplier"])
 
     # ---- Auto-sync every Supplier / Stage edit straight to Monday (no Save button) ----
+    # Handles CLEARING a cell too (empty → clears it on Monday), not just choosing a new value.
     for i, o in enumerate(orders):
         try:
-            new_sup = edited.iloc[i]["Supplier"]
-            if new_sup and new_sup != (o.get("supplier") or None):
-                data_sources.op_set_supplier(o["item_id"], new_sup)
-                o["supplier"] = new_sup
-                st.toast(f"{o.get('order_no')} · supplier → {new_sup}")
-            new_stage = _stage_plain(edited.iloc[i]["Stage"])
-            if new_stage and new_stage != (o.get("stage") or None):
-                data_sources.op_set_status(o["item_id"], new_stage)
-                o["stage"] = new_stage
-                st.toast(f"{o.get('order_no')} · stage → {new_stage}")
+            raw_sup = edited.iloc[i]["Supplier"]
+            new_sup = raw_sup.strip() if isinstance(raw_sup, str) and raw_sup.strip() else None
+            if new_sup != (o.get("supplier") or None):
+                data_sources.op_set_supplier(o["item_id"], new_sup or "")   # "" clears the dropdown
+                o["supplier"] = new_sup or ""
+                st.toast(f"{o.get('order_no')} · supplier → {new_sup or '(cleared)'}")
+            raw_stage = _stage_plain(edited.iloc[i]["Stage"])
+            new_stage = raw_stage.strip() if isinstance(raw_stage, str) and raw_stage.strip() \
+                else None
+            if new_stage != (o.get("stage") or None):
+                data_sources.op_set_status(o["item_id"], new_stage or "")   # "" clears the status
+                o["stage"] = new_stage or ""
+                st.toast(f"{o.get('order_no')} · stage → {new_stage or '(cleared)'}")
         except Exception as e:  # noqa: BLE001
             st.toast(f"{o.get('order_no')} · didn't save: {str(e)[:70]}")
 

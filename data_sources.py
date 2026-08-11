@@ -3218,14 +3218,15 @@ def fetch_new_orders(limit: int = 60, token: str | None = None) -> list:
 
 
 def op_set_status(item_id, label: str, column_id: str = OP_STAGE_COL, token: str | None = None):
-    """Set a status column (default Order Process Stage) by label. Writes to Monday."""
+    """Set a status column (default Order Process Stage) by label — or CLEAR it if label is empty.
+    Writes to Monday."""
     import json as _json
     token = token or get_token()
+    val = {"label": label} if (label or "").strip() else {}      # {} clears the status
     q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,item_id:$i,"
          "column_id:$c,value:$v){id}}")
     r = requests.post(MONDAY_API, json={"query": q, "variables": {
-        "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": column_id,
-        "v": _json.dumps({"label": label})}},
+        "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": column_id, "v": _json.dumps(val)}},
         headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
     r.raise_for_status()
     p = r.json()
@@ -3235,14 +3236,15 @@ def op_set_status(item_id, label: str, column_id: str = OP_STAGE_COL, token: str
 
 
 def op_set_supplier(item_id, label: str, token: str | None = None):
-    """Set the Supplier dropdown to an existing label. Writes to Monday."""
+    """Set the Supplier dropdown to a label — or CLEAR it if label is empty. Writes to Monday."""
     import json as _json
     token = token or get_token()
+    val = {"labels": [label]} if (label or "").strip() else {"labels": []}   # empty list clears
     q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,item_id:$i,"
          "column_id:$c,value:$v){id}}")
     r = requests.post(MONDAY_API, json={"query": q, "variables": {
         "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": OP_SUPPLIER_COL,
-        "v": _json.dumps({"labels": [label]})}},
+        "v": _json.dumps(val)}},
         headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
     r.raise_for_status()
     p = r.json()
