@@ -171,6 +171,27 @@ def _money(x):
     return f"£{float(x):,.2f}"
 
 
+# ex-VAT delivery-to-us that we're confident of: {supplier_norm: (flat_charge, free_over or None)}.
+# Suppliers NOT here get £0 on the PO for now (interim) and are listed for Daniela to confirm.
+DELIVERY_TO_US = {
+    "upb": (17.50, 100), "nbp": (17.00, 250), "eurocell": (12.50, 100),
+    "travisperkins": (24.99, 100), "gap": (20.83, 150), "pjh": (37.50, 1000),
+    "molan": (23.74, None), "decor8": (5.99, 50), "deanta": (8.00, None),
+    "chasehardware": (10.00, None), "bricklink": (16.99, 100),
+}
+
+
+def _delivery_charge(supplier, goods):
+    """(amount, known). Known suppliers use their flat/free-over rule; unknown → £0 interim."""
+    key = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
+    if key not in DELIVERY_TO_US:
+        return 0.0, False
+    flat, free_over = DELIVERY_TO_US[key]
+    if free_over is not None and goods >= free_over:
+        return 0.0, True
+    return float(flat), True
+
+
 def _build_doc(o):
     """Assemble the (kind, doc) for order `o`: a priced PO for email-order suppliers, a packing
     slip (no prices) for portal / in-house / unidentified. Delivery address = Shopify shipping."""
@@ -213,17 +234,82 @@ def _build_doc(o):
             lt = round(cost * q, 2)
             goods += lt
             lines.append([it["SKU"] or "-", it["Item"], qty, _money(cost), _money(lt)])
+    deliv, deliv_known = _delivery_charge(supplier, goods)
+    deliv_label = _money(deliv) + ("" if deliv_known else " (rate not on file — confirm on OC)")
     if any_confirm:
-        sums = [["Goods (ex VAT)", "confirm on OC", False], ["Delivery", "confirm on OC", False],
+        sums = [["Goods (ex VAT)", "confirm on OC", False], ["Delivery", deliv_label, False],
                 ["VAT @20%", "confirm", False], ["Total (inc VAT)", "confirm on OC", True]]
     else:
-        vat = round(goods * 0.20, 2)
-        sums = [["Goods (ex VAT)", _money(goods), False], ["Delivery", "confirm on OC", False],
+        vat = round((goods + deliv) * 0.20, 2)
+        sums = [["Goods (ex VAT)", _money(goods), False], ["Delivery (ex VAT)", deliv_label, False],
                 ["VAT @20%", _money(vat), False],
-                ["Total (inc VAT, ex delivery)", _money(goods + vat), True]]
+                ["Total (inc VAT)", _money(goods + deliv + vat), True]]
     return "po", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
                   "acct": order_docs.account_for(supplier), "lines": lines, "sums": sums,
                   "notes": notes, "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
+
+
+def _process_one(o):
+    """Route → apply supplier/branch/stage to Monday → generate the PO/slip → verified-attach.
+    Skips splits and un-routable orders (flagged for a human). Never emails a supplier. Returns a
+    result row for the summary table."""
+    iid = o["item_id"]
+    sid = (o.get("shopify_id") or "").strip()
+    tag = o.get("order_no") or o.get("name") or iid
+    if not sid:
+        return {"Order": tag, "Supplier": "", "Result": "no Shopify ID — skipped"}
+    routes = st.session_state.setdefault("_op_routes", {})
+    res = routes.get(iid)
+    if res is None:
+        try:
+            lines = data_sources.fetch_order_lines_with_vendor(sid)
+            try:
+                pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
+            except Exception:  # noqa: BLE001
+                pc = None
+            res = order_routing.route_order(lines, postcode=pc)
+            routes[iid] = res
+        except Exception as e:  # noqa: BLE001
+            return {"Order": tag, "Supplier": "", "Result": "couldn't route: " + str(e)[:60]}
+    if not res.get("lines"):
+        return {"Order": tag, "Supplier": "", "Result": "no lines to route"}
+    if res.get("split"):
+        return {"Order": tag, "Supplier": order_routing.summary(res),
+                "Result": "SPLIT — needs manual split, skipped"}
+    sup, route = res.get("overall_supplier"), res.get("route")
+    if route == "PICK":
+        return {"Order": tag, "Supplier": "", "Result": "couldn't identify supplier — pick manually"}
+    try:
+        if sup:
+            data_sources.op_set_supplier(iid, sup)
+            o["supplier"] = sup
+            if res.get("branch") or res.get("branch_email"):
+                data_sources.op_set_branch(iid, branch=res.get("branch"),
+                                           email=res.get("branch_email"))
+                if res.get("branch"):
+                    o["branch"] = res["branch"]
+                if res.get("branch_email"):
+                    o["branch_email"] = res["branch_email"]
+        else:                                    # SAMPLES / CLEARANCE
+            data_sources.op_set_branch(iid, branch=route)
+        data_sources.op_set_status(iid, res.get("stage") or "Needs Review")
+        o["stage"] = res.get("stage") or "Needs Review"
+    except Exception as e:  # noqa: BLE001
+        return {"Order": tag, "Supplier": sup or route,
+                "Result": "Monday write failed: " + str(e)[:50]}
+    try:
+        kind, doc = _build_doc(o)
+        pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+            doc, date_str=datetime.date.today().strftime("%d %B %Y"))
+        name = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
+               "Trade_Superstore_Online.pdf"
+        r = data_sources.op_upload_po(iid, pdf, name)
+        docmsg = f"{kind.upper()} attached ✓" if r.get("ok") else f"{kind} attach UNVERIFIED"
+    except ValueError:                           # validation gate blocked it
+        docmsg = "doc BLOCKED — missing a field"
+    except Exception as e:  # noqa: BLE001
+        docmsg = "doc error: " + str(e)[:45]
+    return {"Order": tag, "Supplier": sup or route, "Result": f"routed → {docmsg}"}
 
 
 def _ship(sid):
@@ -590,10 +676,20 @@ def render():
         if not targets:
             st.warning("No orders ticked — use the ✓ column to pick which to process.")
         else:
-            st.info(f"**Routing + PO generation for {len(targets)} order(s) is the next phase.** "
-                    "For now, set Supplier/Stage inline (auto-saves to Monday) and attach POs in "
-                    "the order panel below. The automatic route → price → build → verify-attach "
-                    "flow is next.")
+            prog = st.progress(0.0, text=f"Processing {len(targets)} order(s)…")
+            results = []
+            for n, i in enumerate(targets):
+                results.append(_process_one(orders[i]))
+                prog.progress((n + 1) / len(targets),
+                              text=f"Processed {n + 1}/{len(targets)}")
+            prog.empty()
+            st.markdown(f"##### Processed {len(results)} order(s)")
+            st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
+            st.caption("Each order was routed, its supplier/branch/stage written to Monday, and a "
+                       "PO/packing slip generated & attached. **Splits** and **couldn't-identify** "
+                       "orders are skipped for you to handle manually. Nothing was emailed to a "
+                       "supplier — that stays your team's send step. Hit **↻ Refresh** to see the "
+                       "updated board.")
 
     # Expand each ticked order right off the table — no dropdown. One ticked → opens fully.
     st.divider()
