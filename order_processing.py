@@ -256,6 +256,100 @@ def _build_doc(o):
                   "notes": notes, "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
 
+def _to_float(x):
+    try:
+        return float(str(x).replace(",", "").replace("£", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _process_split(o, res):
+    """Execute a split on Monday: for each supplier group, make a part item (1st reuses the
+    original, rest are duplicates), rename to {order}-N, set its lines / supplier / branch / stage,
+    allocate the sell total by line value, generate + attach that part's PO/slip. Returns a
+    summary string. (The Shopify fulfilment split is NOT done here — flagged for manual.)"""
+    sid = (o.get("shopify_id") or "").strip()
+    order_no = o.get("order_no") or o.get("name") or ""
+    groups = list(res.get("groups", {}).items())          # [(route, [lines]), ...]
+    if len(groups) < 2:
+        return "not actually a split"
+    OP = data_sources.OP_COLS
+
+    def sub(lines):
+        return sum((l.get("line_subtotal") or 0) for l in lines)
+
+    total_sub = sub(res.get("lines") or []) or 0
+    orig_sell = _to_float(o.get("sell"))
+    n = len(groups)
+    allocated = 0.0
+    parts, date_str = [], datetime.date.today().strftime("%d %B %Y")
+
+    for idx, (route, glines) in enumerate(groups, start=1):
+        gsup = glines[0].get("supplier")
+        # sell allocation by line value; last part gets the remainder so parts sum to the original
+        if orig_sell is not None and total_sub:
+            psell = round(orig_sell - allocated, 2) if idx == n \
+                else round(orig_sell * sub(glines) / total_sub, 2)
+            if idx < n:
+                allocated += psell
+        else:
+            psell = None
+        # supplier goods cost inc VAT, only if every line is priced for that supplier
+        pcost, priced = 0.0, True
+        for l in glines:
+            c = _line_cost(l.get("sku"), gsup or "")
+            if c is None:
+                priced = False
+                break
+            q = l.get("qty") if isinstance(l.get("qty"), (int, float)) else 1
+            pcost += c * q
+        pcost = round(pcost * 1.2, 2) if priced else None
+        try:
+            pid = o["item_id"] if idx == 1 else data_sources.op_duplicate_item(o["item_id"])
+        except Exception as e:  # noqa: BLE001
+            return f"couldn't duplicate the Monday item: {str(e)[:60]}"
+        items_text = "\n".join(
+            f"{l.get('title')} | Quantity: {l.get('qty')} | SKU: {l.get('sku') or ''}"
+            for l in glines)
+        try:
+            data_sources.set_order_number(pid, "name", f"{order_no}-{idx}")
+            data_sources.set_order_number(pid, OP["items"], items_text)
+            if gsup:
+                data_sources.op_set_supplier(pid, gsup)
+                if glines[0].get("branch") or glines[0].get("branch_email"):
+                    data_sources.op_set_branch(pid, branch=glines[0].get("branch"),
+                                               email=glines[0].get("branch_email"))
+            else:
+                data_sources.op_set_branch(pid, branch=route)
+            data_sources.op_set_status(pid, order_routing._stage_for(
+                gsup, route, glines[0].get("quote"), glines[0].get("portal")))
+            if psell is not None:
+                data_sources.set_order_number(pid, OP["sell"], psell)
+            if pcost is not None:
+                data_sources.set_order_number(pid, OP["cost_supplier"], pcost)
+        except Exception as e:  # noqa: BLE001
+            parts.append(f"{order_no}-{idx} {gsup or route}: Monday write failed")
+            continue
+        temp = {"item_id": pid, "order_no": f"{order_no}-{idx}", "name": f"{order_no}-{idx}",
+                "supplier": gsup or "", "shopify_id": sid, "customer": o.get("customer"),
+                "address": o.get("address"), "phone": o.get("phone"), "items": items_text}
+        try:
+            kind, doc = _build_doc(temp)
+            pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+                doc, date_str=date_str)
+            nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{order_no}-{idx}_" \
+                 "Trade_Superstore_Online.pdf"
+            rr = data_sources.op_upload_po(pid, pdf, nm)
+            dm = "doc ✓" if rr.get("ok") else "doc unverified"
+        except ValueError:
+            dm = "doc BLOCKED"
+        except Exception:  # noqa: BLE001
+            dm = "doc error"
+        parts.append(f"{order_no}-{idx} → {gsup or route} ({dm})")
+    return "split into " + str(n) + " parts: " + "; ".join(parts) \
+        + " — ⚠ Shopify fulfilment NOT split (do that on Shopify)"
+
+
 def _process_one(o):
     """Route → apply supplier/branch/stage to Monday → generate the PO/slip → verified-attach.
     Skips splits and un-routable orders (flagged for a human). Never emails a supplier. Returns a
@@ -282,7 +376,7 @@ def _process_one(o):
         return {"Order": tag, "Supplier": "", "Result": "no lines to route"}
     if res.get("split"):
         return {"Order": tag, "Supplier": order_routing.summary(res),
-                "Result": "SPLIT — needs manual split, skipped"}
+                "Result": _process_split(o, res)}
     sup, route = res.get("overall_supplier"), res.get("route")
     if route == "PICK":
         return {"Order": tag, "Supplier": "", "Result": "couldn't identify supplier — pick manually"}
@@ -687,7 +781,7 @@ def render():
             elif not res.get("lines"):
                 act = "no lines — will skip"
             elif res.get("split"):
-                act = f"SPLIT ({order_routing.summary(res)}) — will skip"
+                act = f"→ SPLIT into {len(res['groups'])} parts: {order_routing.summary(res)}"
             elif res.get("route") == "PICK":
                 act = "no supplier found — will skip (pick manually)"
             else:
@@ -700,7 +794,9 @@ def render():
         st.markdown(f"##### Plan — {len(prows)} order(s), {doable} will process")
         st.caption("Nothing has been written yet. **Confirm** to route each order, set its "
                    "Supplier/Branch/Stage on Monday, generate the PO/packing slip and attach it. "
-                   "Splits and can't-identify orders are skipped for you to do manually.")
+                   "**Splits** are duplicated into a Monday part per supplier (each with its own "
+                   "PO) — the Shopify fulfilment split is still done on Shopify. "
+                   "**Can't-identify** orders are skipped for you to pick manually.")
         st.dataframe(pd.DataFrame(prows), hide_index=True, use_container_width=True)
         cc = st.columns([1.5, 1, 3])
         if cc[0].button(f"Confirm & process {doable}", type="primary", key="op_confirm",

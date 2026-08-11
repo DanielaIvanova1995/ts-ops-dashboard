@@ -425,7 +425,8 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
              "title quantity sku variant { product { vendor productType } } "
-             "product { vendor productType } } } } } }")
+             "product { vendor productType } "
+             "discountedTotalSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": query, "variables": {"id": gid}},
@@ -441,9 +442,15 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     for e in (order.get("lineItems") or {}).get("edges") or []:
         n = e.get("node") or {}
         prod = (n.get("variant") or {}).get("product") or n.get("product") or {}
+        try:
+            sub = float((((n.get("discountedTotalSet") or {}).get("shopMoney") or {})
+                         .get("amount")))
+        except (TypeError, ValueError):
+            sub = None
         out.append({"title": n.get("title") or "", "sku": (n.get("sku") or "").strip() or None,
                     "qty": n.get("quantity"), "vendor": (prod.get("vendor") or "").strip(),
-                    "product_type": (prod.get("productType") or "").strip()})
+                    "product_type": (prod.get("productType") or "").strip(),
+                    "line_subtotal": sub})
     return out
 
 
@@ -3320,3 +3327,19 @@ def op_set_branch(item_id, branch=None, email=None, token: str | None = None):
             "v": _json.dumps(val)}}, headers=hdr, timeout=30)
         r.raise_for_status()
     return True
+
+
+def op_duplicate_item(item_id, token: str | None = None):
+    """Duplicate an order item on the Orders board (for splitting an order across suppliers).
+    Returns the new item's id. Monday's create_item is blocked, so we duplicate + edit."""
+    token = token or get_token()
+    q = ("mutation($b:ID!,$i:ID!){duplicate_item(board_id:$b,item_id:$i,with_updates:false)"
+         "{id}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": str(ORDERS_BOARD_ID), "i": str(item_id)}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if "errors" in p:
+        raise RuntimeError(f"Monday rejected duplicate: {p['errors']}")
+    return ((p.get("data") or {}).get("duplicate_item") or {}).get("id")
