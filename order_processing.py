@@ -19,6 +19,26 @@ import data_sources
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 
+# Colour cue on the Stage dropdown (an editable grid cell can't have a coloured background, so we
+# prefix the label with a coloured dot). Maps the plain Monday label ↔ the coloured display label.
+STAGE_DOTS = {"Go To Portal": "🟡", "Needs Review": "🔴", "SEND PO": "🟢", "SEND QUOTE": "🔵"}
+
+
+def _stage_disp(label):
+    if not label:
+        return None
+    d = STAGE_DOTS.get(label)
+    return f"{d} {label}" if d else label
+
+
+def _stage_plain(disp):
+    if not disp:
+        return disp
+    for d in STAGE_DOTS.values():
+        if disp.startswith(d + " "):
+            return disp[len(d) + 1:]
+    return disp
+
 
 def _esc(s):
     return html.escape(str(s if s is not None else ""))
@@ -55,16 +75,6 @@ def _live_detail(shopify_id):
             pass
         cache[shopify_id] = d
     return cache[shopify_id]
-
-
-def _items_short(txt):
-    txt = (txt or "").strip()
-    if not txt:
-        return ""
-    lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
-    n = len(lines)
-    first = lines[0][:60] if lines else ""
-    return f"{first}" + (f"  (+{n - 1} more)" if n > 1 else "")
 
 
 def _suggestion_box():
@@ -174,21 +184,27 @@ def render():
     # Dropdown option sets must include every value currently present, or the grid errors.
     sup_opts = list(dict.fromkeys([s for s in sup_labels if s]
                                   + [o.get("supplier") for o in orders if o.get("supplier")]))
-    stage_opts = list(dict.fromkeys(data_sources.OP_STAGES
-                                    + [o.get("stage") for o in orders if o.get("stage")]))
+    stage_opts = [_stage_disp(s) for s in
+                  list(dict.fromkeys(data_sources.OP_STAGES
+                                     + [o.get("stage") for o in orders if o.get("stage")]))]
     fcounts = st.session_state.get("_op_fcounts", {})
+    store = (data_sources.get_secret("SHOPIFY_STORE") or "").strip()
 
-    # Build the board grid.
+    def _order_url(sid):
+        return f"https://{store}/admin/orders/{sid}" if (store and sid) else None
+
+    # Build the board grid — column order: Select, Order, Open, Fulfil #, then the rest.
     rows = []
     for o in orders:
         rows.append({
             "Select": False,
             "Order": o.get("order_no") or o.get("name") or "",
-            "Customer": o.get("customer") or "",
-            "Items": _items_short(o.get("items")),
+            "Open": _order_url((o.get("shopify_id") or "").strip()),
             "Fulfil": fcounts.get(o["item_id"], None),
+            "Customer": o.get("customer") or "",
+            "Branch email": o.get("branch_email") or "",
             "Supplier": o.get("supplier") or None,
-            "Stage": o.get("stage") or None,
+            "Stage": _stage_disp(o.get("stage")),
             "£ to us": o.get("sell") or "",
             "£ supplier": o.get("cost_supplier") or "",
         })
@@ -196,22 +212,28 @@ def render():
 
     edited = st.data_editor(
         df, hide_index=True, use_container_width=True, key="op_board",
+        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Branch email",
+                      "Supplier", "Stage", "£ to us", "£ supplier"],
         column_config={
             "Select": st.column_config.CheckboxColumn("✓", width="small"),
-            "Order": st.column_config.TextColumn("Order", width="small"),
-            "Customer": st.column_config.TextColumn("Customer", width="medium"),
-            "Items": st.column_config.TextColumn("Items", width="large"),
+            "Order": st.column_config.TextColumn("Order", width="small",
+                                                 help="Click the cell and Ctrl+C to copy the "
+                                                      "number; use ↗ to open it in Shopify."),
+            "Open": st.column_config.LinkColumn("↗", width="small", display_text="Open ↗",
+                                                help="Open this order in Shopify admin"),
             "Fulfil": st.column_config.NumberColumn(
                 "Fulfil #", width="small",
                 help="Fulfillment No. — how many Shopify fulfilments the order splits into "
                      "(press 'Load fulfilment counts' to fill)."),
+            "Customer": st.column_config.TextColumn("Customer", width="medium"),
+            "Branch email": st.column_config.TextColumn("Branch email", width="medium"),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
                                                          width="medium"),
             "Stage": st.column_config.SelectboxColumn("Stage", options=stage_opts, width="medium"),
             "£ to us": st.column_config.TextColumn("£ to us", width="small"),
             "£ supplier": st.column_config.TextColumn("£ supplier", width="small"),
         },
-        disabled=["Order", "Customer", "Items", "Fulfil", "£ to us", "£ supplier"])
+        disabled=["Order", "Open", "Fulfil", "Customer", "Branch email", "£ to us", "£ supplier"])
 
     b1, b2, b3, b4 = st.columns([1.2, 1.2, 1.2, 1])
     if b1.button("💾 Save changes to Monday", type="primary"):
@@ -223,7 +245,7 @@ def render():
                     data_sources.op_set_supplier(o["item_id"], new_sup)
                     o["supplier"] = new_sup
                     changed += 1
-                new_stage = edited.iloc[i]["Stage"]
+                new_stage = _stage_plain(edited.iloc[i]["Stage"])
                 if new_stage and new_stage != (o.get("stage") or None):
                     data_sources.op_set_status(o["item_id"], new_stage)
                     o["stage"] = new_stage
