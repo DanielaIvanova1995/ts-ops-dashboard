@@ -102,28 +102,40 @@ def _live_detail(shopify_id):
 
 
 def _suggestion_box():
-    with st.expander("💡 Suggestion / report a problem"):
-        st.caption("Anything that doesn't work, or would help you process orders faster — this "
-                   "goes straight to Daniela.")
+    with st.expander("💡 Notes / suggestions (saved for Daniela)"):
+        st.caption("Anything that doesn't work, or would help — this is **saved for Daniela** to "
+                   "review here, and emailed too once email sending is switched on.")
         who = st.text_input("Your name", value="Natasha", key="op_sugg_who")
         msg = st.text_area("What's up?", key="op_sugg_msg", height=110,
                            placeholder="e.g. the supplier dropdown is missing X, or the PO for "
                                        "order 30xxx has the wrong branch…")
-        if st.button(":material/send: Send to Daniela", key="op_sugg_send",
-                     disabled=not msg.strip()):
-            subj = f"TradeHub Order Processing — suggestion from {who or 'the team'}"
-            body = f"From: {who or 'the team'}\n\n{msg.strip()}\n\n— sent from TradeHub Order Processing"
+        if st.button(":material/save: Save note", key="op_sugg_send", disabled=not msg.strip()):
+            saved = False
             try:
-                data_sources.send_supplier_email(FROM_MAILBOX, DANIELA, subj, body)
-                st.success("Sent to Daniela — thank you!")
-            except Exception as send_err:  # noqa: BLE001
-                try:
-                    link = data_sources.create_supplier_draft(FROM_MAILBOX, DANIELA, subj, body)
-                    st.warning("Couldn't send automatically (" + str(send_err)[:120] + ") — saved "
-                               "as a **draft** in accounts@ for you to send." +
-                               (f" [Open the draft]({link})" if link else ""))
-                except Exception as e:  # noqa: BLE001
-                    st.error("Couldn't send or draft: " + str(e)[:150])
+                data_sources.op_save_suggestion(who, msg.strip())
+                saved = True
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't save the note: " + str(e)[:150])
+            emailed = False
+            try:                                    # best-effort email (works once Mail.Send is on)
+                subj = f"TradeHub note from {who or 'the team'}"
+                data_sources.send_supplier_email(FROM_MAILBOX, DANIELA, subj,
+                                                 f"From: {who or 'the team'}\n\n{msg.strip()}")
+                emailed = True
+            except Exception:  # noqa: BLE001
+                pass
+            if saved:
+                st.success("Saved for Daniela." + (" Emailed too." if emailed else
+                                                   " (Email is off for now — it's stored here.)"))
+        try:
+            recent = data_sources.op_load_suggestions(8)
+        except Exception:  # noqa: BLE001
+            recent = []
+        if recent:
+            st.markdown("**Recent notes**")
+            for r in recent:
+                txt = re.sub(r"<[^>]+>", "", r.get("body") or "").strip()
+                st.caption(f"{(r.get('created_at') or '')[:10]} — {txt[:220]}")
 
 
 def _parse_monday_items(txt):

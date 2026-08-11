@@ -3411,3 +3411,22 @@ def split_fulfillment_by_supplier(order_id, key_to_supplier, token=None):
         if not has_leftover and sup_list:
             actions.append(f"{sup_list[-1][0]}: stays on original ✓")
     return actions
+
+
+def op_save_suggestion(who: str, msg: str, token: str | None = None) -> bool:
+    """Save a team note / suggestion durably as an update on a 'TradeHub Suggestions' config item
+    (so notes survive even while email sending is off). Returns True."""
+    token = token or get_token()
+    item_id = _config_item_named("TradeHub Suggestions", token)
+    monday_post_update(item_id, f"[{(who or 'team').strip()}] {msg.strip()}", token)
+    return True
+
+
+def op_load_suggestions(limit: int = 8, token: str | None = None) -> list:
+    """Recent saved notes → [{body, created_at}], newest first."""
+    token = token or get_token()
+    item_id = _config_item_named("TradeHub Suggestions", token)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:%d){body created_at}}}"
+                       % int(limit), {"i": [str(item_id)]}, token)
+    ups = (((data.get("items") or [{}])[0]).get("updates") or [])
+    return [{"body": u.get("body") or "", "created_at": u.get("created_at") or ""} for u in ups]
