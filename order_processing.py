@@ -201,7 +201,7 @@ def render():
             "Order": st.column_config.TextColumn("Order", width="small"),
             "Customer": st.column_config.TextColumn("Customer", width="medium"),
             "Items": st.column_config.TextColumn("Items", width="large"),
-            "Fulfil": st.column_config.NumberColumn("Fulfil", width="small",
+            "Fulfil": st.column_config.NumberColumn("Fulfillment No.", width="small",
                                                     help="Number of Shopify fulfilments (load below)"),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
                                                          width="medium"),
