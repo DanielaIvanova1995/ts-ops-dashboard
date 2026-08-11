@@ -7100,7 +7100,8 @@ with st.sidebar:
     #   admin / manager : everything, including Invoice Check
     #   office          : Daily Ops only
     #   staff (others)  : Daily Ops, Daily Activity, Quotes, Pricing (no Invoice Check)
-    all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check", "Finance")
+    all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check",
+                   "Order Processing", "Finance")
     staff_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing")
     if role == "office":
         menu = ("Daily Ops",)
@@ -7218,6 +7219,11 @@ if module == "Invoice Check":
         render_discrepancy_log()
     else:
         render_invoice_check()
+    st.stop()
+
+if module == "Order Processing":
+    import order_processing
+    order_processing.render()
     st.stop()
 
 if module == "Finance":

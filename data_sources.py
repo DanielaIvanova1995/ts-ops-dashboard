@@ -3099,3 +3099,141 @@ def build_remittance_pdf(supplier, ref, date_str, lines, total, memo="", company
              align="C", ln=1)
     out = pdf.output()
     return bytes(out)
+
+
+# ===========================================================================
+# ORDER PROCESSING — read the "NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)"
+# group on the Orders board (1786542990) and write processing decisions back to
+# it (Monday stays the source of truth; TradeHub is the cockpit).
+# ===========================================================================
+ORDERS_NEW_GROUP = "new_group66719"      # "NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)"
+# Order-board column ids used by the processor.
+OP_COLS = {
+    "order_no": "text_mkv6z0nt", "customer": "text2", "address": "customer_address8",
+    "phone": "text20", "cust_email": "text52", "items": "order_items0",
+    "shopify_id": "text_mm04tmac", "supplier": "dropdown_mkyqdeqd", "branch": "text1",
+    "branch_email": "email", "branch_phone": "phone", "cost_supplier": "numbers6",
+    "sell": "numbers48", "stage": "color_mktyje8e", "po_file": "file_mm5cdddj",
+}
+OP_STAGE_COL = "color_mktyje8e"
+OP_SUPPLIER_COL = "dropdown_mkyqdeqd"
+OP_PO_COL = "file_mm5cdddj"
+# Order Process Stage labels the processor can set (from the live board).
+OP_STAGES = ["Needs Review", "Go To Portal", "Needs Quote", "SEND PO", "SEND QUOTE",
+             "PO SENT", "QUOTE REQUESTED", "Processed", "On Hold", "Reviewed",
+             "Cancelled with Supplier", "STOP"]
+
+
+def fetch_new_orders(limit: int = 60, token: str | None = None) -> list:
+    """Orders in the NATASHA new-orders group with everything the processor needs:
+    [{item_id, name, order_no, customer, address, phone, cust_email, items, shopify_id,
+      supplier, branch, branch_email, cost_supplier, sell, stage, po_assets:[{id,name,url,size}]}].
+    Reads straight from Monday — nothing is written here."""
+    token = token or get_token()
+    ids = ",".join(f'"{c}"' for c in OP_COLS.values())
+    q = ("query($b:[ID!],$g:[String!]){boards(ids:$b){groups(ids:$g){items_page(limit:%d){items{"
+         "id name assets{id name url file_size} "
+         "column_values(ids:[%s]){id text}}}}}}" % (int(limit), ids))
+    data = _monday_gql(q, {"b": [str(ORDERS_BOARD_ID)], "g": [ORDERS_NEW_GROUP]}, token)
+    groups = (((data.get("boards") or [{}])[0]).get("groups") or [])
+    items = ((groups[0].get("items_page") if groups else {}) or {}).get("items") or []
+    inv = {v: k for k, v in OP_COLS.items()}
+    out = []
+    for it in items:
+        row = {"item_id": it["id"], "name": it.get("name") or "",
+               "po_assets": [{"id": a.get("id"), "name": a.get("name"), "url": a.get("url"),
+                              "size": a.get("file_size")} for a in (it.get("assets") or [])]}
+        for cv in (it.get("column_values") or []):
+            key = inv.get(cv.get("id"))
+            if key:
+                row[key] = (cv.get("text") or "")
+        out.append(row)
+    return out
+
+
+def op_set_status(item_id, label: str, column_id: str = OP_STAGE_COL, token: str | None = None):
+    """Set a status column (default Order Process Stage) by label. Writes to Monday."""
+    import json as _json
+    token = token or get_token()
+    q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,item_id:$i,"
+         "column_id:$c,value:$v){id}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": column_id,
+        "v": _json.dumps({"label": label})}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if "errors" in p:
+        raise RuntimeError(f"Monday rejected status write: {p['errors']}")
+    return True
+
+
+def op_set_supplier(item_id, label: str, token: str | None = None):
+    """Set the Supplier dropdown to an existing label. Writes to Monday."""
+    import json as _json
+    token = token or get_token()
+    q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,item_id:$i,"
+         "column_id:$c,value:$v){id}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": OP_SUPPLIER_COL,
+        "v": _json.dumps({"labels": [label]})}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if "errors" in p:
+        raise RuntimeError(f"Monday rejected supplier write: {p['errors']}")
+    return True
+
+
+def op_board_supplier_labels(token: str | None = None) -> list:
+    """The live Supplier dropdown labels on the Orders board (so the UI only offers labels that
+    actually exist — writing a non-existent label would fail)."""
+    token = token or get_token()
+    q = ('query($b:[ID!]){boards(ids:$b){columns(ids:["%s"]){settings_str}}}' % OP_SUPPLIER_COL)
+    data = _monday_gql(q, {"b": [str(ORDERS_BOARD_ID)]}, token)
+    import json as _json
+    cols = (((data.get("boards") or [{}])[0]).get("columns") or [])
+    if not cols:
+        return []
+    settings = _json.loads(cols[0].get("settings_str") or "{}")
+    return [l.get("label") for l in (settings.get("labels") or []) if l.get("label")]
+
+
+def op_upload_po(item_id, file_bytes: bytes, filename: str, replace: bool = True,
+                 token: str | None = None) -> dict:
+    """Attach (or replace) a PO / packing-slip PDF on the order's PO file column, then VERIFY it
+    by reading the assets back and confirming the exact byte size — never trust the write response
+    (the hard-won lesson from the old process: 'Accepted' / 200 OK is NOT proof a file landed).
+    Returns {ok, asset_id, name, size, want}. Raises on API failure."""
+    import json as _json
+    token = token or get_token()
+    want = len(file_bytes)
+    if replace:                                   # clear old POs first so they don't stack
+        cq = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,"
+              "item_id:$i,column_id:$c,value:$v){id}}")
+        requests.post(MONDAY_API, json={"query": cq, "variables": {
+            "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": OP_PO_COL,
+            "v": _json.dumps({"clear_all": True})}},
+            headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    q = ('mutation ($file: File!){add_file_to_column(item_id:%s,column_id:"%s",file:$file)'
+         '{id}}' % (int(item_id), OP_PO_COL))
+    r = requests.post("https://api.monday.com/v2/file", headers={"Authorization": token},
+                      data={"query": q, "map": '{"file":"variables.file"}'},
+                      files={"file": (filename, file_bytes, "application/pdf")}, timeout=180)
+    r.raise_for_status()
+    if "errors" in r.json():
+        raise RuntimeError(f"Monday rejected PO upload: {r.json()['errors']}")
+    # Independent read-back verification.
+    d = _monday_gql("query($i:[ID!]){items(ids:$i){assets{id name file_size}}}",
+                    {"i": [str(item_id)]}, token)
+    assets = (((d.get("items") or [{}])[0]).get("assets") or [])
+    for a in assets:
+        try:
+            sz = int(a.get("file_size") or 0)
+        except (TypeError, ValueError):
+            sz = 0
+        if a.get("name") == filename and abs(sz - want) <= 2:
+            return {"ok": True, "asset_id": a.get("id"), "name": a.get("name"),
+                    "size": sz, "want": want, "n_assets": len(assets)}
+    return {"ok": False, "asset_id": None, "name": filename, "size": None, "want": want,
+            "n_assets": len(assets)}
