@@ -542,22 +542,18 @@ def render():
         return
     sup_labels = _supplier_labels()
 
-    # Top row: Refresh / Splits / Suggest on the left, Process ALL / SELECTED on the right.
-    tc = st.columns([1.0, 1.0, 1.4, 1.9, 1.3, 1.7])
+    # Top row: Refresh / Splits on the left, Process ALL / SELECTED on the right.
+    tc = st.columns([1.0, 1.0, 2.6, 1.3, 1.7])
     if tc[0].button(":material/refresh: Refresh"):
-        for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship"):
+        for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship", "_op_plan"):
             st.session_state.pop(k, None)
         st.rerun()
     load_fc = tc[1].button(
         ":material/call_split: Splits",
         help="Fills the Fulfil # column — how many separate Shopify fulfilments each order splits "
              "into (one lookup per order, so it loads on demand).")
-    do_route = tc[2].button(
-        ":material/route: Suggest",
-        help="Suggests a supplier for each order from the routing rulebook (by Shopify vendor, "
-             "brand, SKU pattern). Fills the Suggested column; you still choose the final supplier.")
-    do_all = tc[4].button("Process all", type="primary", use_container_width=True)
-    do_sel = tc[5].button("Process selected", type="primary", use_container_width=True)
+    do_all = tc[3].button("Process all", type="primary", use_container_width=True)
+    do_sel = tc[4].button("Process selected", type="primary", use_container_width=True)
 
     st.caption(f"**{len(orders)}** order(s) in *NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)* · "
                "editing **Supplier** or **Stage** writes to Monday **instantly** — no Save needed.")
@@ -577,25 +573,6 @@ def render():
                 except Exception:  # noqa: BLE001
                     fc[o["item_id"]] = None
             st.session_state["_op_fcounts"] = fc
-
-    if do_route:
-        with st.spinner("Routing orders from the rulebook…"):
-            routes = {}
-            for o in orders:
-                sid = (o.get("shopify_id") or "").strip()
-                if not sid:
-                    continue
-                try:
-                    lines = data_sources.fetch_order_lines_with_vendor(sid)
-                    try:
-                        pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
-                    except Exception:  # noqa: BLE001
-                        pc = None
-                    routes[o["item_id"]] = order_routing.route_order(lines, postcode=pc)
-                except Exception as e:  # noqa: BLE001
-                    routes[o["item_id"]] = {"error": str(e)[:120], "lines": []}
-            st.session_state["_op_routes"] = routes
-    routes = st.session_state.get("_op_routes", {})
 
     # Dropdown option sets must include every value currently present, or the grid errors.
     sup_opts = list(dict.fromkeys([s for s in sup_labels if s]
@@ -619,8 +596,6 @@ def render():
             "Fulfil": fcounts.get(o["item_id"], None),
             "Customer": o.get("customer") or "",
             "Supplier": o.get("supplier") or None,
-            "Suggested": order_routing.summary(routes[o["item_id"]])
-            if routes.get(o["item_id"]) else "",
             "Branch email": o.get("branch_email") or "",
             "Stage": _stage_disp(o.get("stage")),
             "£ to us": o.get("sell") or "",
@@ -630,7 +605,7 @@ def render():
 
     edited = st.data_editor(
         df, hide_index=True, use_container_width=True, key="op_board",
-        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Supplier", "Suggested",
+        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Supplier",
                       "Branch email", "Stage", "£ to us", "£ supplier"],
         column_config={
             "Select": st.column_config.CheckboxColumn("✓", width="small"),
@@ -648,15 +623,11 @@ def render():
             "Branch email": st.column_config.TextColumn("Branch email", width="medium"),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
                                                          width="medium"),
-            "Suggested": st.column_config.TextColumn(
-                "Suggested", width="medium",
-                help="Routing suggestion from the rulebook (press 'Suggest'). Tick the order to "
-                     "see the per-line breakdown and apply it."),
             "Stage": st.column_config.SelectboxColumn("Stage", options=stage_opts, width="medium"),
             "£ to us": st.column_config.TextColumn("£ to us", width="small"),
             "£ supplier": st.column_config.TextColumn("£ supplier", width="small"),
         },
-        disabled=["Order", "Open", "Fulfil", "Customer", "Suggested", "Branch email",
+        disabled=["Order", "Open", "Fulfil", "Customer", "Branch email",
                   "£ to us", "£ supplier"])
 
     # ---- Auto-sync every Supplier / Stage edit straight to Monday (no Save button) ----
@@ -678,25 +649,77 @@ def render():
     # Which rows are ticked — drives both "Process selected" and the expand-detail panels below.
     ticked = [i for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
 
+    # ---- Process = PREVIEW the plan, then CONFIRM to apply (route → Monday → PO → attach) ----
     if do_all or do_sel:
-        targets = list(range(len(orders))) if do_all else ticked
-        if not targets:
+        tgt = list(range(len(orders))) if do_all else ticked
+        if not tgt:
             st.warning("No orders ticked — use the ✓ column to pick which to process.")
         else:
-            prog = st.progress(0.0, text=f"Processing {len(targets)} order(s)…")
+            with st.spinner("Working out the plan…"):
+                rts = st.session_state.setdefault("_op_routes", {})
+                for i in tgt:
+                    o = orders[i]
+                    iid, sid = o["item_id"], (o.get("shopify_id") or "").strip()
+                    if rts.get(iid) is None and sid:
+                        try:
+                            lines = data_sources.fetch_order_lines_with_vendor(sid)
+                            try:
+                                pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
+                            except Exception:  # noqa: BLE001
+                                pc = None
+                            rts[iid] = order_routing.route_order(lines, postcode=pc)
+                        except Exception as e:  # noqa: BLE001
+                            rts[iid] = {"error": str(e)[:100], "lines": []}
+            st.session_state["_op_plan"] = [orders[i]["item_id"] for i in tgt]
+
+    plan_ids = st.session_state.get("_op_plan")
+    if plan_ids:
+        rts = st.session_state.get("_op_routes", {})
+        by_id = {o["item_id"]: o for o in orders}
+        prows = []
+        for iid in plan_ids:
+            o = by_id.get(iid)
+            if not o:
+                continue
+            res = rts.get(iid) or {}
+            if res.get("error"):
+                act = "⚠ couldn't route — will skip"
+            elif not res.get("lines"):
+                act = "no lines — will skip"
+            elif res.get("split"):
+                act = f"SPLIT ({order_routing.summary(res)}) — will skip"
+            elif res.get("route") == "PICK":
+                act = "no supplier found — will skip (pick manually)"
+            else:
+                sup = res.get("overall_supplier") or res.get("route")
+                act = f"→ {sup}" + (f" ({res['branch']})" if res.get("branch") else "") \
+                    + f" · {res.get('stage')}"
+            prows.append({"Order": o.get("order_no") or o.get("name"),
+                          "Customer": o.get("customer") or "", "Plan": act})
+        doable = sum(1 for r in prows if r["Plan"].startswith("→"))
+        st.markdown(f"##### Plan — {len(prows)} order(s), {doable} will process")
+        st.caption("Nothing has been written yet. **Confirm** to route each order, set its "
+                   "Supplier/Branch/Stage on Monday, generate the PO/packing slip and attach it. "
+                   "Splits and can't-identify orders are skipped for you to do manually.")
+        st.dataframe(pd.DataFrame(prows), hide_index=True, use_container_width=True)
+        cc = st.columns([1.5, 1, 3])
+        if cc[0].button(f"Confirm & process {doable}", type="primary", key="op_confirm",
+                        disabled=not doable):
+            ids = [i for i in plan_ids if i in by_id]
+            prog = st.progress(0.0, text="Processing…")
             results = []
-            for n, i in enumerate(targets):
-                results.append(_process_one(orders[i]))
-                prog.progress((n + 1) / len(targets),
-                              text=f"Processed {n + 1}/{len(targets)}")
+            for n, iid in enumerate(ids):
+                results.append(_process_one(by_id[iid]))
+                prog.progress((n + 1) / len(ids), text=f"Processed {n + 1}/{len(ids)}")
             prog.empty()
-            st.markdown(f"##### Processed {len(results)} order(s)")
+            st.session_state.pop("_op_plan", None)
+            st.markdown("##### Done")
             st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
-            st.caption("Each order was routed, its supplier/branch/stage written to Monday, and a "
-                       "PO/packing slip generated & attached. **Splits** and **couldn't-identify** "
-                       "orders are skipped for you to handle manually. Nothing was emailed to a "
-                       "supplier — that stays your team's send step. Hit **↻ Refresh** to see the "
-                       "updated board.")
+            st.caption("Nothing was emailed to a supplier — that stays your team's send step. "
+                       "Hit **↻ Refresh** to see the updated board.")
+        if cc[1].button("Cancel", key="op_cancel"):
+            st.session_state.pop("_op_plan", None)
+            st.rerun()
 
     # Expand each ticked order right off the table — no dropdown. One ticked → opens fully.
     st.divider()
