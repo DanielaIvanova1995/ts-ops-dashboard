@@ -3343,3 +3343,69 @@ def op_duplicate_item(item_id, token: str | None = None):
     if "errors" in p:
         raise RuntimeError(f"Monday rejected duplicate: {p['errors']}")
     return ((p.get("data") or {}).get("duplicate_item") or {}).get("id")
+
+
+def _shopify_admin_gql(query, variables, token=None):
+    """POST a GraphQL query/mutation to the Shopify Admin API. Raises on transport/GraphQL error."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                      json={"query": query, "variables": variables},
+                      headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                      timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if p.get("errors"):
+        raise RuntimeError(str(p["errors"])[:200])
+    return p.get("data") or {}
+
+
+def split_fulfillment_by_supplier(order_id, key_to_supplier, token=None):
+    """Group an order's OPEN fulfilment order line items BY SUPPLIER onto their own fulfilment
+    orders (all UPB together, all GAP together, etc.). Lines with no supplier in the map (samples /
+    in-house) are LEFT ALONE. `key_to_supplier` maps 'sku:<norm>' and 'ttl:<norm>' → supplier.
+    Returns a list of action strings. Only separates PENDING fulfilment orders — never fulfils or
+    ships. Needs a Shopify token with write-fulfilment scope (surfaces the error if not)."""
+    import re as _re
+    token = token or shopify_products_token()
+
+    def nk(s):
+        return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    q = ("query($id:ID!){order(id:$id){fulfillmentOrders(first:10){nodes{id status "
+         "lineItems(first:50){nodes{id remainingQuantity lineItem{sku title}}}}}}}")
+    data = _shopify_admin_gql(q, {"id": gid}, token)
+    fos = (((data.get("order") or {}).get("fulfillmentOrders") or {}).get("nodes") or [])
+    split_mut = ("mutation($s:[FulfillmentOrderSplitInput!]!){fulfillmentOrderSplit("
+                 "fulfillmentOrderSplits:$s){userErrors{message} "
+                 "fulfillmentOrderSplits{remainingFulfillmentOrder{id}}}}")
+    actions = []
+    for fo in fos:
+        if fo.get("status") != "OPEN":
+            continue
+        nodes = [li for li in ((fo.get("lineItems") or {}).get("nodes") or [])
+                 if (li.get("remainingQuantity") or 0) > 0]
+        groups = {}
+        for li in nodes:
+            item = li.get("lineItem") or {}
+            sup = (key_to_supplier.get("sku:" + nk(item.get("sku")))
+                   or key_to_supplier.get("ttl:" + nk(item.get("title"))))
+            if not sup:
+                continue                                  # sample / in-house — leave it
+            groups.setdefault(sup, []).append({"id": li["id"], "quantity": li["remainingQuantity"]})
+        if not groups:
+            continue
+        supplier_lines = sum(len(v) for v in groups.values())
+        has_leftover = len(nodes) > supplier_lines        # non-supplier (sample) lines remain
+        sup_list = list(groups.items())
+        peel = sup_list if has_leftover else sup_list[:-1]  # keep one group on the original FO
+        for sup, items in peel:
+            d = _shopify_admin_gql(split_mut, {"s": [{"fulfillmentOrderId": fo["id"],
+                                                      "fulfillmentOrderLineItems": items}]}, token)
+            errs = ((d.get("fulfillmentOrderSplit") or {}).get("userErrors")) or []
+            actions.append(f"{sup}: split failed ({errs[0].get('message', '?')[:40]})" if errs
+                           else f"{sup}: own fulfilment ✓")
+        if not has_leftover and sup_list:
+            actions.append(f"{sup_list[-1][0]}: stays on original ✓")
+    return actions

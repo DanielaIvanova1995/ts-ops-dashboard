@@ -346,8 +346,27 @@ def _process_split(o, res):
         except Exception:  # noqa: BLE001
             dm = "doc error"
         parts.append(f"{order_no}-{idx} → {gsup or route} ({dm})")
-    return "split into " + str(n) + " parts: " + "; ".join(parts) \
-        + " — ⚠ Shopify fulfilment NOT split (do that on Shopify)"
+
+    # Shopify fulfilment split — group each supplier's SKUs onto their own fulfilment order
+    # (all UPB together, all GAP together). Samples / in-house lines are left alone (we post them).
+    fmsg = ""
+    try:
+        key_sup = {}
+        for l in res.get("lines", []):
+            sup = l.get("supplier")
+            if not sup:
+                continue
+            if l.get("sku"):
+                key_sup["sku:" + re.sub(r"[^a-z0-9]", "", l["sku"].lower())] = sup
+            if l.get("title"):
+                key_sup["ttl:" + re.sub(r"[^a-z0-9]", "", l["title"].lower())] = sup
+        if sid and key_sup:
+            acts = data_sources.split_fulfillment_by_supplier(sid, key_sup)
+            if acts:
+                fmsg = " · Shopify fulfilment: " + "; ".join(acts)
+    except Exception as e:  # noqa: BLE001
+        fmsg = f" · ⚠ Shopify fulfilment split failed: {str(e)[:70]}"
+    return "split into " + str(n) + " parts: " + "; ".join(parts) + fmsg
 
 
 def _process_one(o):
@@ -795,7 +814,7 @@ def render():
         st.caption("Nothing has been written yet. **Confirm** to route each order, set its "
                    "Supplier/Branch/Stage on Monday, generate the PO/packing slip and attach it. "
                    "**Splits** are duplicated into a Monday part per supplier (each with its own "
-                   "PO) — the Shopify fulfilment split is still done on Shopify. "
+                   "PO) **and** the Shopify fulfilment is split by supplier (samples left alone). "
                    "**Can't-identify** orders are skipped for you to pick manually.")
         st.dataframe(pd.DataFrame(prows), hide_index=True, use_container_width=True)
         cc = st.columns([1.5, 1, 3])
