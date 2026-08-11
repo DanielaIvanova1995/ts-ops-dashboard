@@ -100,58 +100,116 @@ def _suggestion_box():
                     st.error("Couldn't send: " + str(e)[:150])
 
 
+def _parse_monday_items(txt):
+    """Turn the Monday 'Order items' text ('Title | Quantity: N | SKU: XXX' per line) into
+    [{Item, SKU, Qty}] so SKU and Qty sit in their own columns instead of one messy line."""
+    out = []
+    for line in (txt or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        qty = sku = ""
+        for p in parts[1:]:
+            low = p.lower()
+            if low.startswith("quantity") and ":" in p:
+                qty = p.split(":", 1)[1].strip()
+            elif low.startswith("sku") and ":" in p:
+                sku = p.split(":", 1)[1].strip()
+        out.append({"Item": parts[0] if parts else line, "SKU": sku, "Qty": qty})
+    return out
+
+
+def _ship(sid):
+    """Cached Shopify SHIPPING address (the delivery address) for one order."""
+    cache = st.session_state.setdefault("_op_ship", {})
+    if sid not in cache:
+        try:
+            cache[sid] = data_sources.fetch_order_shipping_full(sid)
+        except Exception:  # noqa: BLE001
+            cache[sid] = None
+    return cache[sid]
+
+
 def _order_detail(o):
-    """Full detail + live Shopify lines/fulfilments + PO for one order (rendered inside the
-    expander that opens when you tick the order in the board)."""
+    """Clean full-order view: customer, the Shopify shipping (delivery) address, the items as a
+    table, an optional live-from-Shopify refresh, and the PO. Rendered inside the row's expander."""
     iid = o["item_id"]
-    left, right = st.columns([3, 2])
-    with left:
-        st.markdown(f"**Customer:** {_esc(o.get('customer'))} · {_esc(o.get('phone'))} · "
-                    f"{_esc(o.get('cust_email'))}  \n"
-                    f"**Deliver to:** {_esc(o.get('address'))}", unsafe_allow_html=True)
-        if o.get("items"):
-            st.markdown("**Order items (Monday):**")
-            st.text(o["items"][:2500])
-        sid = (o.get("shopify_id") or "").strip()
-        if sid and st.button(":material/download: Load live Shopify detail (variants + fulfilments)",
-                             key=f"op_live_{iid}"):
-            st.session_state[f"op_liveon_{iid}"] = True
-        if sid and st.session_state.get(f"op_liveon_{iid}"):
-            d = _live_detail(sid)
-            if d.get("error"):
-                st.caption("Couldn't read Shopify: " + d["error"])
-            if d.get("lines"):
-                st.dataframe(pd.DataFrame([{"SKU": ln.get("sku") or "", "Item": ln.get("title"),
-                                            "Qty": ln.get("qty"), "Unit £": ln.get("price")}
-                                           for ln in d["lines"]]),
-                             hide_index=True, use_container_width=True)
-            locs = sorted(set((d.get("split") or {}).values()))
-            if locs:
-                st.markdown(f"**Fulfilments:** {len(locs)} — " + ", ".join(_esc(l) for l in locs))
-                for l in locs:
-                    st.caption(f"• {l}: " + ", ".join(s for s, loc in d["split"].items()
-                                                       if loc == l))
-            else:
-                st.caption("**Fulfilments:** 1 (not split)")
-    with right:
-        st.markdown("**PO / document**")
-        for a in (o.get("po_assets") or []):
-            if a.get("url"):
-                st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
-        up = st.file_uploader("Replace / attach PO (PDF)", type=["pdf"], key=f"op_po_{iid}")
-        if up is not None and st.button(":material/attach_file: Attach to Monday (replaces latest)",
-                                        key=f"op_poset_{iid}"):
-            with st.spinner("Uploading + verifying…"):
-                try:
-                    res = data_sources.op_upload_po(iid, up.getvalue(), up.name)
-                    if res.get("ok"):
-                        st.success(f"Attached & verified ({res['size']:,} bytes).")
-                        st.session_state["_op_orders"] = None
-                    else:
-                        st.error(f"Upload didn't verify — {res.get('n_assets')} asset(s) on the "
-                                 "item, none matched the exact size. Try again.")
-                except Exception as e:  # noqa: BLE001
-                    st.error("Upload failed: " + str(e)[:180])
+    sid = (o.get("shopify_id") or "").strip()
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Customer**")
+        st.markdown("  \n".join(_esc(x) for x in
+                                [o.get("customer"), o.get("phone"), o.get("cust_email")] if x)
+                    or "—")
+    with c2:
+        st.markdown("**Deliver to** — Shopify shipping address")
+        ship = _ship(sid) if sid else None
+        if ship and ship.get("lines"):
+            body = "  \n".join(_esc(l) for l in ship["lines"])
+            if ship.get("phone"):
+                body += f"  \n☎ {_esc(ship.get('phone'))}"
+            st.markdown(body)
+        elif o.get("address"):
+            st.markdown(_esc(o.get("address"))
+                        + "  \n*(from Monday — live Shopify address unavailable)*")
+        else:
+            st.markdown("—")
+
+    items = _parse_monday_items(o.get("items"))
+    if items:
+        st.markdown("**Order items**")
+        st.dataframe(
+            pd.DataFrame(items)[["Item", "SKU", "Qty"]], hide_index=True, use_container_width=True,
+            column_config={"Item": st.column_config.TextColumn("Item", width="large"),
+                           "SKU": st.column_config.TextColumn("SKU", width="medium"),
+                           "Qty": st.column_config.TextColumn("Qty", width="small")})
+
+    # Live-from-Shopify: the Monday items above are a snapshot from when the order synced. This
+    # pulls the CURRENT order (in case it was edited) and adds unit prices, variants + fulfilments.
+    if sid and st.button(":material/sync: Refresh from Shopify (live items, prices & fulfilments)",
+                         key=f"op_live_{iid}",
+                         help="Monday shows the order as it first synced. This fetches the current "
+                              "order straight from Shopify — in case it was edited — and adds unit "
+                              "prices, variants and the fulfilment split."):
+        st.session_state[f"op_liveon_{iid}"] = True
+    if sid and st.session_state.get(f"op_liveon_{iid}"):
+        d = _live_detail(sid)
+        if d.get("error"):
+            st.caption("Couldn't read Shopify: " + d["error"])
+        if d.get("lines"):
+            st.dataframe(pd.DataFrame([{"SKU": ln.get("sku") or "", "Item": ln.get("title"),
+                                        "Qty": ln.get("qty"), "Unit £": ln.get("price")}
+                                       for ln in d["lines"]]),
+                         hide_index=True, use_container_width=True)
+        locs = sorted(set((d.get("split") or {}).values()))
+        if locs:
+            st.markdown(f"**Fulfilments:** {len(locs)} — " + ", ".join(_esc(l) for l in locs))
+            for l in locs:
+                st.caption(f"• {l}: " + ", ".join(s for s, loc in d["split"].items() if loc == l))
+        else:
+            st.caption("**Fulfilments:** 1 (not split)")
+
+    st.divider()
+    st.markdown("**PO / document**")
+    for a in (o.get("po_assets") or []):
+        if a.get("url"):
+            st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
+    up = st.file_uploader("Replace / attach PO (PDF)", type=["pdf"], key=f"op_po_{iid}")
+    if up is not None and st.button(":material/attach_file: Attach to Monday (replaces latest)",
+                                    key=f"op_poset_{iid}"):
+        with st.spinner("Uploading + verifying…"):
+            try:
+                res = data_sources.op_upload_po(iid, up.getvalue(), up.name)
+                if res.get("ok"):
+                    st.success(f"Attached & verified ({res['size']:,} bytes).")
+                    st.session_state["_op_orders"] = None
+                else:
+                    st.error(f"Upload didn't verify — {res.get('n_assets')} asset(s) on the item, "
+                             "none matched the exact size. Try again.")
+            except Exception as e:  # noqa: BLE001
+                st.error("Upload failed: " + str(e)[:180])
 
 
 def render():

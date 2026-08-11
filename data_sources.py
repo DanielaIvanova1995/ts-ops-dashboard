@@ -347,6 +347,34 @@ def fetch_order_shipping(order_id, token: str | None = None) -> dict:
     return {"postcode": sa.get("zip"), "country": sa.get("countryCodeV2") or sa.get("country")}
 
 
+def fetch_order_shipping_full(order_id, token: str | None = None) -> dict:
+    """The order's full SHIPPING address from Shopify — the authoritative DELIVERY address (never
+    the billing/customer address). Returns {name, company, address1, address2, city, province,
+    zip, country, phone, lines:[...]}. Raises if the order can't be read (caller falls back)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    query = ("query ($id: ID!) { order(id: $id) { shippingAddress { name company address1 "
+             "address2 city province zip country phone } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"id": gid}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    sa = (((payload.get("data") or {}).get("order") or {}).get("shippingAddress") or {})
+    lines = [sa.get("name"), sa.get("company"), sa.get("address1"), sa.get("address2"),
+             " ".join(x for x in [sa.get("city"), sa.get("province")] if x),
+             sa.get("zip"), sa.get("country")]
+    sa = dict(sa)
+    sa["lines"] = [str(x).strip() for x in lines if x and str(x).strip()]
+    return sa
+
+
 def fetch_order_line_items(order_id, token: str | None = None) -> list:
     """Live Shopify order line items: [{title, sku, qty}] — the source of truth for the
     invoice order-check when Monday's cached order list is incomplete/out of date. Raises
