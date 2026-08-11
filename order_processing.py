@@ -201,8 +201,10 @@ def render():
             "Order": st.column_config.TextColumn("Order", width="small"),
             "Customer": st.column_config.TextColumn("Customer", width="medium"),
             "Items": st.column_config.TextColumn("Items", width="large"),
-            "Fulfil": st.column_config.NumberColumn("Fulfillment No.", width="small",
-                                                    help="Number of Shopify fulfilments (load below)"),
+            "Fulfil": st.column_config.NumberColumn(
+                "Fulfil #", width="small",
+                help="Fulfillment No. — how many Shopify fulfilments the order splits into "
+                     "(press 'Load fulfilment counts' to fill)."),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
                                                          width="medium"),
             "Stage": st.column_config.SelectboxColumn("Stage", options=stage_opts, width="medium"),
