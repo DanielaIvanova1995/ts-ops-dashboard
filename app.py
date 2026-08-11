@@ -1600,6 +1600,106 @@ def _jbkind_expected(lines, ship=None):
     return JBKIND_DOOR_DELIVERY.get(doors)
 
 
+# --- LPD (Leeds Plywood & Doors): delivery is priced PER DELIVERY by the NUMBER OF DOORS (ex-VAT):
+# £40 for 1 door, then +£5 per extra door, capped at £80 (9+ doors). Hardware-only deliveries are
+# £15 (1-10 packs) / £20 (11+). Scotland & island postcodes add a per-delivery surcharge; London
+# congestion outward codes add £15. Some postcodes are POA / non-deliverable (can't price). We hold
+# the MAX legit charge, so charging that or LESS is fine — only an over-charge flags. Flyer 2025.
+LPD_DOOR_BASE = 40.0
+LPD_DOOR_STEP = 5.0
+LPD_DOOR_CAP = 80.0
+LPD_HARDWARE_LO, LPD_HARDWARE_HI = 15.0, 20.0          # 1-10 packs / 11+ packs
+_LPD_CONGESTION = {"W1", "NW1", "WC1", "WC2", "EC1", "EC2", "EC3", "EC4", "E1", "SE1", "SE11"}
+
+
+def _is_lpd(supplier):
+    return (supplier or "").startswith("lpd")
+
+
+def _lpd_pc_parts(ship):
+    pc = ((ship or {}).get("postcode") or "").upper().strip()
+    m = re.match(r"([A-Z]{1,2})(\d{1,2})", pc)
+    if not m:
+        return None, None, None
+    outward = pc.split(" ")[0] if " " in pc else (pc[:-3] if len(pc) > 3 else pc)
+    return m.group(1), int(m.group(2)), outward.strip()
+
+
+def _lpd_surcharge(ship):
+    """(surcharge £, poa). poa True = LPD can't price it (POA / non-deliverable). Includes the
+    £15 London congestion add-on where the outward code matches."""
+    area, dist, outward = _lpd_pc_parts(ship)
+    if area is None:
+        return 0.0, False
+    if area in ("GY", "IM", "JE"):
+        return 0.0, True
+    if (area == "IV" and dist == 40) or (area == "TR" and 21 <= dist <= 25) \
+            or (area == "PO" and 30 <= dist <= 40):
+        return 0.0, True
+    s = 0.0
+    if area == "AB":
+        s = 37.0
+    elif area == "BT":
+        s = 70.0
+    elif area == "DD":
+        s = 42.0
+    elif area == "HS":
+        s = 95.0
+    elif area == "IV":
+        s = 40.0
+    elif area == "KY":
+        s = 37.0
+    elif area == "PH":
+        s = 40.0
+    elif area == "ZE":
+        s = 95.0
+    elif area == "KW":
+        s = 40.0 if dist <= 14 else 95.0
+    elif area == "PA":
+        s = 37.0 if dist <= 19 else 67.50
+    elif area == "KA" and 27 <= dist <= 28:
+        s = 95.0
+    elif area == "FK" and 8 <= dist <= 21:
+        s = 20.0
+    elif area == "G" and (dist == 63 or 82 <= dist <= 84):
+        s = 20.0
+    if f"{area}{dist}" in _LPD_CONGESTION:      # congestion codes are area+district (e.g. EC1)
+        s += 15.0
+    return s, False
+
+
+def _lpd_doors(lines):
+    """(door_count, hardware_packs) on the invoice. Doors = qty of product lines that aren't
+    ironmongery/hardware or delivery; ironmongery/hardware lines count as packs."""
+    doors, packs = 0, 0
+    for l in (lines or []):
+        s, d = l.get("sku") or "", l.get("description") or ""
+        if _is_delivery(s) or _is_delivery(d) or _is_surcharge(s) or _is_surcharge(d):
+            continue
+        q = l.get("qty") if isinstance(l.get("qty"), (int, float)) else 1
+        if any(w in d.lower() for w in _JBKIND_IRONMONGERY_WORDS):
+            packs += q
+        else:
+            doors += q
+    return int(round(doors)), int(round(packs))
+
+
+def _lpd_expected(lines, ship=None):
+    """Expected (max legit) ex-VAT LPD carriage: door-count band (or hardware rate) + postcode
+    surcharge. None = POA/non-deliverable postcode or can't tell (noted, not flagged)."""
+    surcharge, poa = _lpd_surcharge(ship)
+    if poa:
+        return None
+    doors, packs = _lpd_doors(lines)
+    if doors > 0:
+        base = min(LPD_DOOR_BASE + (doors - 1) * LPD_DOOR_STEP, LPD_DOOR_CAP)
+    elif packs > 0:
+        base = LPD_HARDWARE_LO if packs <= 10 else LPD_HARDWARE_HI
+    else:
+        return None
+    return base + surcharge
+
+
 # --- Southern Sheeting: delivery priced by the delivery postcode's colour ZONE (ex-VAT):
 # White/Purple £50, Blue £80, Green/Orange £115. The full postcode→zone map (1,469 outward
 # codes) is bundled as southern_zones.json {outward: £}. We hold the MAX zone price per postcode
@@ -1834,6 +1934,8 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         return _ctie_expected(goods_value, ship)
     if _is_jbkind(supplier):
         return _jbkind_expected(lines, ship)
+    if _is_lpd(supplier):
+        return _lpd_expected(lines, ship)
     if _is_southern(supplier):
         return _southern_expected(ship)
     if _is_nuie(supplier):
@@ -1978,6 +2080,10 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             if _is_jbkind(supplier):
                 _dn, _ = _jbkind_doors(parsed_lines)
                 zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
+            elif _is_lpd(supplier):
+                _dn, _hp = _lpd_doors(parsed_lines)
+                zinfo = (f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn
+                         else f" ({_hp} hardware pack{'s' if _hp != 1 else ''})" if _hp else "")
             elif _is_southern(supplier) and known is not None:
                 zinfo = f" ({(carron_ship or {}).get('postcode', '')} zone)"
             elif _is_nuie(supplier) and known is not None:
@@ -1995,6 +2101,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 elif _is_jbkind(supplier):
                     dissues.append(("name", f"delivery £{amt:,.2f} — JB Kind POA postcode / door "
                                             "count unclear; not auto-checked"))
+                elif _is_lpd(supplier):
+                    dissues.append(("name", f"delivery £{amt:,.2f} — LPD POA postcode / door count "
+                                            "unclear; not auto-checked"))
                 elif _is_toolbank(supplier):
                     dissues.append(("name", f"delivery £{amt:,.2f} — Toolbank (no set rate; "
                                             "checked via the order margin instead)"))
@@ -2119,6 +2228,10 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 if _is_jbkind(supplier):
                     _dn, _ = _jbkind_doors(parsed_lines)
                     zinfo = f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn else " (ironmongery)"
+                elif _is_lpd(supplier):
+                    _dn, _hp = _lpd_doors(parsed_lines)
+                    zinfo = (f" ({_dn} door{'s' if _dn != 1 else ''})" if _dn
+                             else f" ({_hp} hardware pack{'s' if _hp != 1 else ''})" if _hp else "")
                 elif _is_southern(supplier):
                     zinfo = f" ({(carron_ship or {}).get('postcode', '')} zone)"
                 elif _is_nuie(supplier):
@@ -2128,6 +2241,9 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         elif _is_jbkind(supplier):
             cissues.append(("name", f"carriage £{carriage:,.2f} — JB Kind POA postcode / door "
                                     "count unclear; not auto-checked"))
+        elif _is_lpd(supplier):
+            cissues.append(("name", f"carriage £{carriage:,.2f} — LPD POA postcode / door count "
+                                    "unclear; not auto-checked"))
         elif _is_toolbank(supplier):
             cissues.append(("name", f"carriage £{carriage:,.2f} — Toolbank (no set rate; "
                                     "checked via the order margin instead)"))
