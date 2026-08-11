@@ -24,6 +24,7 @@ import order_routing
 
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
+PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / safe to process
 
 # Colour cue on the Stage dropdown (an editable grid cell can't have a coloured background, so we
 # prefix the label with a coloured dot). Maps the plain Monday label ↔ the coloured display label.
@@ -390,6 +391,9 @@ def _process_one(o):
     iid = o["item_id"]
     sid = (o.get("shopify_id") or "").strip()
     tag = o.get("order_no") or o.get("name") or iid
+    if (o.get("stage") or "").strip() != PLACE_ORDER:      # only ever process unprocessed orders
+        return {"Order": tag, "Supplier": o.get("supplier") or "",
+                "Result": f"already {(o.get('stage') or '—')} — skipped"}
     if not sid:
         return {"Order": tag, "Supplier": "", "Result": "no Shopify ID — skipped"}
     routes = st.session_state.setdefault("_op_routes", {})
@@ -831,6 +835,8 @@ def render():
                 rts = st.session_state.setdefault("_op_routes", {})
                 for i in tgt:
                     o = orders[i]
+                    if (o.get("stage") or "").strip() != PLACE_ORDER:
+                        continue                       # already processed — don't even route it
                     iid, sid = o["item_id"], (o.get("shopify_id") or "").strip()
                     if rts.get(iid) is None and sid:
                         try:
@@ -854,7 +860,9 @@ def render():
             if not o:
                 continue
             res = rts.get(iid) or {}
-            if res.get("error"):
+            if (o.get("stage") or "").strip() != PLACE_ORDER:
+                act = f"already processed (stage: {o.get('stage') or '—'}) — will skip"
+            elif res.get("error"):
                 act = "⚠ couldn't route — will skip"
             elif not res.get("lines"):
                 act = "no lines — will skip"
@@ -870,11 +878,12 @@ def render():
                           "Customer": o.get("customer") or "", "Plan": act})
         doable = sum(1 for r in prows if r["Plan"].startswith("→"))
         st.markdown(f"##### Plan — {len(prows)} order(s), {doable} will process")
-        st.caption("Nothing has been written yet. **Confirm** to route each order, set its "
-                   "Supplier/Branch/Stage on Monday, generate the PO/packing slip and attach it. "
-                   "**Splits** are duplicated into a Monday part per supplier (each with its own "
-                   "PO) **and** the Shopify fulfilment is split by supplier (samples left alone). "
-                   "**Can't-identify** orders are skipped for you to pick manually.")
+        st.caption("Nothing has been written yet. **Only orders at stage *Place Order* are "
+                   "processed** — anything already processed is skipped. **Confirm** to route each "
+                   "order, set its Supplier/Branch/Stage on Monday, generate the PO/packing slip "
+                   "and attach it. **Splits** are duplicated into a Monday part per supplier (each "
+                   "with its own PO) **and** the Shopify fulfilment is split by supplier (samples "
+                   "left alone). **Can't-identify** orders are skipped for you to pick manually.")
         st.dataframe(pd.DataFrame(prows), hide_index=True, use_container_width=True)
         cc = st.columns([1.5, 1, 3])
         if cc[0].button(f"Confirm & process {doable}", type="primary", key="op_confirm",

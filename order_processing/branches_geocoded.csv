@@ -1,0 +1,740 @@
+supplier,branch_name,address,postcode,email,phone,latitude,longitude
+Eurocell,Leicester,"15 Progress Way Troon Industrial Estate, Leicester, Leicestershire",LE4 9LQ,leicester@eurocell.co.uk,0333 032 3168,52.658579,-1.084305
+Eurocell,Manchester,"Unit 1 Hatton Road, Trafford Park, Manchester",M17 1PS,manchester@eurocell.co.uk,0333 234 1093,53.465414,-2.323241
+Eurocell,Wakefield,"Unit 1 38 Commercial Street, Wakefield, West Yorkshire",WF1 5RN,wakefield@eurocell.co.uk,0333 032 3237,53.673511,-1.494085
+Eurocell,Aberdeen South,"Unit 5 Wellington Trade Park, Wellington Road, Aberdeen",AB11 8DG,aberdeensouth@eurocell.co.uk,0333 032 3080,57.129356,-2.090941
+Eurocell,Sittingbourne,"Unit D9 Trinity Trading Estate, Millway, Sittingbourne, Kent",ME10 2PD,sittingbourne@eurocell.co.uk,0333 234 1195,51.351494,0.739648
+Eurocell,Sutton Coldfield,"Unit B1 Stockton Close, Minworth Trade Park, Sutton Coldfield, West Midlands",B76 1DH,suttoncoldfield@eurocell.co.uk,0333 032 3223,52.530395,-1.779601
+Eurocell,Altrincham,"Unit 1B Stag Industrial Estate, Atlantic Street, Altrincham, Greater Manchester",WA14 5DW,altrincham@eurocell.co.uk,0333 032 3084,53.396445,-2.363832
+Eurocell,Poole,"Unit 6 Chancery Gate Trade Centre, Holyrood Close Unit 6, Chancery Gate Trade Centre, Poole, Dorset",BH17 7AE,poole@eurocell.co.uk,1202698564,50.742879,-1.994556
+Eurocell,Aldridge,"Unit 3 Rossway Business Park, Aldridge, West Midlands",WS9 8BX,aldridge@eurocell.co.uk,0333 032 3082,52.606976,-1.931803
+Eurocell,Alfreton,"Unit C1 Wimsey Way, Alfreton Trading Estate, Somercotes, Alfreton, Derbyshire",DE55 4LS,alfreton@eurocell.co.uk,0333 032 3083,53.084916,-1.378356
+Eurocell,Accrington,"Units 3-4 Accrington Trade Park, Electricity St., Accrington, Lancashire",BB5 1EF,accrington@eurocell.co.uk,0333 234 0724,53.755831,-2.370467
+Eurocell,Abingdon,"Unit 34A Abingdon Trade Centre, Nuffield Way, Abingdon, Oxfordshire",OX14 1RL,abingdon@eurocell.co.uk,0333 032 3081,51.673555,-1.305479
+Eurocell,Aberystwyth,"Unit 1.3 Parc Melin Glanyrafon Industrial Estate, Llanbadarn Fawr, Aberystwyth, Ceredigion",SY23 3JQ,aberystwyth@eurocell.co.uk,0333 9999 574,52.40188,-4.042948
+Eurocell,Newark,"Unit 5 Glenholm Park, Brunel Drive, Newark, Nottinghamshire",NG24 2EG,newark@eurocell.co.uk,0333 032 3179,53.083166,-0.78972
+Eurocell,Andover,"Unit L Hunting Gate, East Portway Ind. Est., Andover, Hampshire",SP10 3SJ,andover@eurocell.co.uk,0333 032 3085,51.211293,-1.509948
+Eurocell,Norwich West,"Unit 35 Morgan Way Industrial Estate, Bowthorpe Employment Area, Norwich, Norfolk",NR5 9JJ,norwichwest@eurocell.co.uk,0333 032 3188,52.643869,1.214406
+Eurocell,Anglesey,"Unit 33 Gaerwen Industrial Estate, Anglesey, Gwynedd",LL60 6HR,anglesey@eurocell.co.uk,0333 032 3086,53.221671,-4.283142
+Eurocell,Rotherham,"Unit 2-3 Taylors Close, Barbot Hall Ind. Est., Rotherham",S62 6NW,rotherham@eurocell.co.uk,0333 032 3202,53.449188,-1.347278
+Eurocell,Ashton,"Unit 2 Park Parade, Ashton-Under-Lyne, Greater Manchester",OL6 7PP,ashton@eurocell.co.uk,0333 032 3087,53.484009,-2.102478
+Eurocell,Stevenage,"Unit 14 The IO Centre Arlington Business Park, Whittle Way, Stevenage, Hertfordshire",SG1 2BD,stevenage@eurocell.co.uk,0333 234 1194,51.889525,-0.205783
+Eurocell,Avonmouth,"Unit 1 Third Way Corner, St Andrews Road, Avonmouth, Bristol",BS11 9HL,avonmouth@eurocell.co.uk,0333 032 3088,51.505688,-2.69533
+Eurocell,Tewkesbury,"Unit 1 Tewkesbury Trade Park, Tewkesbury, Gloucestershire",GL20 8UQ,tewkesbury@eurocell.co.uk,0333 032 3230,52.000785,-2.124125
+Eurocell,Banbury,"Unit A2 / 20C Wildmere Road Industrial Estate, Banbury, Oxfordshire",OX16 3JU,banbury@eurocell.co.uk,0333 032 3089,52.074608,-1.324124
+Eurocell,Woolwich,"Unit 2 Gateway Business Centre, Tom Cribb Road, Woolwich, London",SE28 0EZ,woolwich@eurocell.co.uk,0333 234 1189,51.491309,0.08101
+Eurocell,Bangor,"Unit 2 Gateway Park Llandegai Road, Bangor, Gwynedd",LL57 4YH,Bangor@eurocell.co.uk,0333 032 3090,53.217985,-4.111526
+Eurocell,Kirkcaldy,"Block 5 Unit 1, Mitchelston Industrial Estate, Kirkcaldy, Fife",KY1 3PB,kirkcaldy@eurocell.co.uk,0333 032 3164,56.138725,-3.147095
+Eurocell,Barnsley,"Unit 5 Barnsley Trade Park, Wombwell Lane, Barnsley, South Yorkshire",S70 3PB,barnsley@eurocell.co.uk,0333 032 3091,53.53888,-1.430761
+Eurocell,Livingston,"Block 1 Unit 4 Hunting Park, Houston Ind. Estate, Livingston, West Lothian",EH54 5QS,livingston@eurocell.co.uk,0333 032 3170,55.914997,-3.50908
+Eurocell,Barnstaple,"Unit 4 Roundswell Industrial Estate, Baron Court, Barnstaple, Devon",EX31 3TB,barnstaple@eurocell.co.uk,0333 032 3092,51.06391,-4.085929
+Eurocell,Milton Keynes,"Unit 2 Dawson Road, Mount Farm, Milton Keynes, Buckinghamshire",MK1 1LH,miltonkeynes@eurocell.co.uk,0333 032 3176,52.009934,-0.729507
+Eurocell,Basildon,"Unit 7 Yardley Business Park, Luckly Lane, Basildon, Essex",SS14 3GL,basildon@eurocell.co.uk,0333 032 3093,51.582793,0.447405
+Eurocell,Newmarket,"Unit 6 Acorn Business Centre, Newmarket, Suffolk",CB8 7SX,newmarket@eurocell.co.uk,0333 032 3183,52.261697,0.396076
+Eurocell,Basingstoke,"Unit 5 Houndmills Trade Park, Houndsmills Roundabout, Basingstoke, Hampshire",RG21 6YT,basingstoke@eurocell.co.uk,0333 032 3094,51.274542,-1.109573
+Eurocell,Penzance,"Unit 7C Long Rock Industrial Estate, Penzance, Cornwall",TR20 8HX,Penzance@eurocell.co.uk,0333 032 3192,50.13026,-5.505136
+Eurocell,Bath,"Windsor Bridge Road, Bath, Somerset",BA2 3AY,bath@eurocell.co.uk,01225 480148,51.383205,-2.381675
+Eurocell,Redhill,"Unit 3 Trowers Way Centre, Trowers Way, Redhill, Surrey",RH1 2LH,redhill@eurocell.co.uk,0333 032 3200,51.250759,-0.156341
+Eurocell,Bedford,"13 Kingfisher Business Park London Road, Bedford, Bedfordshire",MK42 0NY,bedford@eurocell.co.uk,0333 032 3096,52.1262,-0.461442
+Eurocell,Scarborough,"Unit 5D Dunslow Court, Eastfield, Scarborough, North Yorkshire",YO11 3XT,scarborough@eurocell.co.uk,0333 032 3205,54.237132,-0.412566
+Eurocell,Beverley,"Unit 2 The Trade Yard, Barmston Road, Beverley, East Riding of Yorkshire",HU17 0LA,beverley@eurocell.co.uk,0333 032 3250,53.845882,-0.404962
+Eurocell,Southampton,"Unit 23 City Industrial Park, Southern Road, Southampton, Hampshire",SO15 1HG,southampton@eurocell.co.uk,0333 032 3213,50.903885,-1.415282
+Eurocell,Birkenhead,"Units 9 and 10 Egerton Court, Tower Road, Birkenhead, Merseyside",CH41 1FN,birkenhead@eurocell.co.uk,0151 650 0090,53.398073,-3.020873
+Eurocell,Stoke,"Unit 11 Rosevale Road, Parkhouse Ind. Est. West, Stoke-On-Trent, Staffordshire",ST5 7EF,stoke@eurocell.co.uk,0333 032 3218,53.044358,-2.249648
+Eurocell,Birmingham,"Unit 1 Cheston Road, Aston, Birmingham, West Midlands",B7 5EA,birmingham@eurocell.co.uk,0333 032 3099,52.497875,-1.876529
+Eurocell,Sydenham,"Unit 1 Orchard Business Centre, Kangley Bridge Road, Sydenham, London",SE26 5AQ,sydenham@eurocell.co.uk,0333 234 1186,51.426275,-0.035919
+Eurocell,Bishops Stortford,"Unit 12 Raynham Close, Raynham Road, Bishops Stortford",CM23 5PJ,bishopsstortford@eurocell.co.uk,01279 211203,51.871817,0.178866
+Eurocell,Torquay,"Unit C3 Broomhill Way Industrial Estate, Torquay, Devon",TQ2 7QL,torquay@eurocell.co.uk,0333 032 3233,50.484674,-3.547977
+Eurocell,Blackburn,"Unit 3 Waterfall Trade Park, Stancliffe Street, Blackburn, Lancashire",BB2 2QR,blackburn@eurocell.co.uk,0333 234 1002,53.738169,-2.497141
+Eurocell,Wickford,"Unit 1 Blenhiem Court, Hurricaine Way, Wickford, Essex",SS11 8YT,wickford@eurocell.co.uk,0333 032 3239,51.602058,0.544172
+Eurocell,Blackpool,"Unit 6B Moorfields Ind. Est., Moor Park Ave., Blackpool, Lancashire",FY2 0JY,blackpool@eurocell.co.uk,0333 234 1003,53.850752,-3.022339
+Eurocell,Wrexham,"Unit 3 Cambrian Price Industrial Estate, Rivulet Road, Wrexham, Denbighshire",LL13 8DL,wrexham@eurocell.co.uk,01978 312859,53.043052,-2.988807
+Eurocell,Blandford,"5A Sunrise Park Higher Shaftesbury Road, Blandford Forum, Dorset",DT11 8ST,blandford@eurocell.co.uk,0333 032 3100,50.875543,-2.156583
+Eurocell,Kings Lynn,"Unit 28 Bergen Way, North Lynn Industrial Estate, Kings Lynn, Norfolk",PE30 2JG,kingslynn@eurocell.co.uk,0333 032 3162,52.771512,0.414155
+Eurocell,Bognor Regis,"Unit 2 Block K, Southern Cross Ind. Estate, Bognor Regis, West Sussex",PO22 9SE,bognor@eurocell.co.uk,0333 032 3101,50.802736,-0.665185
+Eurocell,Leeds,"Unit 2 Gelderd Place Gelderd Road, Leeds, Yorkshire",LS12 6HL,leeds@eurocell.co.uk,0333 032 3166,53.788598,-1.568657
+Eurocell,Bolton,"Unit 7 Millfield Road, Boundary Ind. Estate, Bolton, Lancashire",BL2 6QY,bolton@eurocell.co.uk,0333 234 1016,53.580059,-2.375949
+Eurocell,Lincoln,"Unit 1-2 Bishops Road, Outer Circle Road, Lincoln, Lincolnshire",LN2 4JZ,lincoln@eurocell.co.uk,0333 032 3169,53.238328,-0.511126
+Eurocell,Bournemouth,"Unit 7 Dewitt Industrial Estate, 865 Ringwood Road, Poole, Bornmouth, Dorset",BH11 8LL,bournemouth@eurocell.co.uk,0333 032 3196,50.755302,-1.927768
+Eurocell,Luton,"Unit 3 Chaul End Lane, Luton, Bedfordshire",LU4 8EZ,luton@eurocell.co.uk,0333 032 3172,51.890138,-0.456187
+Eurocell,Bracknell,"Unit 6 Trade City, Western Road, Bracknell, Berkshire",RG12 1FJ,bracknell@eurocell.co.uk,0333 032 3248,51.416857,-0.766008
+Eurocell,Medway,"Unit 3 Cliff Court, Off George Summers Close, Medway, Kent",ME2 4GU,medway@eurocell.co.uk,0333 234 1196,51.397709,0.518165
+Eurocell,Bradford,"Unit 15 Great Russell Crt, Fieldhead Bus. Centre, Bradford, West Yorkshire",BD7 1JZ,bradford@eurocell.co.uk,0333 032 3102,53.794666,-1.772166
+Eurocell,Morecambe,"Unit 2 Middlegate, White Lund Industrial Estate, Middlegate, Morecambe, Lancashire",LA3 3BN,morecambe@eurocell.co.uk,0333 234 1094,54.058178,-2.838666
+Eurocell,Bridgwater,"Unit X Wylds Road, Castlefields Industrial Estate, Bridgwater, Somerset",TA6 4BH,bridgwater@eurocell.co.uk,0333 032 3104,51.139168,-2.996144
+Eurocell,Newcastle,"Unit 4C North Tyne Ind. Estate, Whitley Rd., Newcastle-Upon-Tyne, Tyne & Wear",NE12 9SZ,newcastle@eurocell.co.uk,0333 032 3181,55.020516,-1.543289
+Eurocell,Bridlington,"Unit 3B Bessingby Industrial Estate Bessingby Way, Bridlington, East Riding of Yorkshire",YO16 4SJ,bridlington@eurocell.co.uk,0333 032 3105,54.079342,-0.212058
+Eurocell,Northampton,"Unit 8 75 St. James Mill Road, Northampton, Northamptonshire",NN5 5JP,northampton@eurocell.co.uk,0333 032 3186,52.231747,-0.910148
+Eurocell,Brierley Hill,"Unit 29 Enterprise Trading Estate, Pedmore Road, Brierley Hill, West Midlands",DY5 1TX,brierleyhill@eurocell.co.uk,0333 032 3106,52.484146,-2.105724
+Eurocell,Nuneaton,"Unit 2 Bermuda Trade Centre, St. Davids Way, Nuneaton, Warwickshire",CV10 7RA,nuneaton@eurocell.co.uk,0333 032 3190,52.499405,-1.475361
+Eurocell,Brighton,"Unit 5B Freshfield Trade Park, Stevenson Road, Brighton, East Sussex",BN2 0DF,brighton@eurocell.co.uk,0333 032 3107,50.822627,-0.123105
+Eurocell,Peterborough,"Unit 3 Fengate East, Titan Drive, Fengate, Peterborough, Cambridgeshire",PE1 5XN,peterborough@eurocell.co.uk,0333 032 3194,52.573578,-0.207569
+Eurocell,Bristol,"Unit 2 Eldon Wall Trading Estate, Eldon Way, Bristol, Avon",BS4 3QQ,bristol@eurocell.co.uk,0333 032 3108,51.447583,-2.555841
+Eurocell,Preston,"Unit E, Guild Trading Estate, Ribbleton Lane, Preston",PR1 5DP,preston@eurocell.co.uk,0333 234 1096,53.764834,-2.685443
+Eurocell,Burton upon Trent,"Unit 22 Albion Gateway, Battista Road, Burton Upon Trent, Staffordshire",DE13 0DW,burton@eurocell.co.uk,0333 032 3109,52.82381,-1.621992
+Eurocell,Rochdale,"Unit 4 Magnum Trade Park, Fishwick Street, Rochdale, Greater Manchester",OL16 5NP,rochdale@eurocell.co.uk,0333 234 1097,53.612237,-2.145609
+Eurocell,Bury St Edmunds,"Unit 11, Greyfriars Road, Bury St Edmunds",IP32 7DX,burystedmunds@eurocell.co.uk,01284 337051,52.239835,0.743071
+Eurocell,Salisbury,"Unit 3 The Faraday Centre, Faraday Road, Churchfields Industrial Estate, Salisbury, Wiltshire",SP27NR,salisbury@eurocell.co.uk,0333 032 3204,51.07019,-1.812159
+Eurocell,Camberley,"Unit 18 Nelson Way, Tuscan Trading Estate, Camberley, Surrey",GU15 3DH,camberley@eurocell.co.uk,0333 032 3110,51.331433,-0.772163
+Eurocell,Sheffield,"Unit 1b, Attercliffe Common Trade Estate, Sheffield, South Yorkshire",S9 2DN,sheffield@eurocell.co.uk,0333 032 3208,53.403247,-1.416943
+Eurocell,Cambridge,"Unit 9 Clifton Road Ind. Est., Clifton Road, Cambridge, Cambridgeshire",CB1 7EA,cambridge@eurocell.co.uk,0333 032 3112,52.19091,0.138649
+Eurocell,Slough,"Unit 101, Farnham Road, Slough",SL1 4UN,slough@eurocell.co.uk,01753 201871,51.519631,-0.615569
+Eurocell,Cannock,"Unit 4 Ranton Park, Martindale, Cannock, Staffordshire",WS11 7XL,cannock@eurocell.co.uk,0333 032 3113,52.694717,-2.012766
+Eurocell,St Austell,"Unit 16 Bucklers Lane, St Austell, Cornwall",PL25 3JN,staustell@eurocell.co.uk,0333 032 3215,50.343249,-4.759793
+Eurocell,Cardiff,"Unit 3 Quay Point, Collivaud Place, Ocean Park, Cardiff, South Glamorgan",CF24 5HF,cardiff@eurocell.co.uk,03330323114,51.475435,-3.158201
+Eurocell,Stockport,"Unit 2B Bankfield Trading Estate, Coronation St., South Reddish, Stockport, Cheshire",SK5 7PG,stockport@eurocell.co.uk,0333 234 1098,53.421564,-2.161568
+Eurocell,Carlisle,"Unit 6 Site 24 Brunthill Road, Carlisle, Cumbria",CA3 0EH,carlisle@eurocell.co.uk,0333 032 3115,54.922872,-2.958812
+Eurocell,Stratford-Upon-Avon,"Unit 10 Swan Trade Centre, Stratford Upon Avon, Stratford-Upon-Avon, Warwickshire",CV37 0HS,stratforduponavon@eurocell.co.uk,0333 032 3220,52.201559,-1.719409
+Eurocell,Castleford,"Unit 2 Eshton Park Carr Wood Road, Castleford, West Yorkshire",WF10 4SB,castleford@eurocell.co.uk,0333 032 3257,53.712781,-1.335602
+Eurocell,Swindon,"Unit 10 Caen View, Rushey Platt, Swindon, Wiltshire",SN5 8WQ,swindon@eurocell.co.uk,0333 032 3225,51.552852,-1.808478
+Eurocell,Chelmsford,"4 Northumberland Court, Montrose Road, Chelmsford, Essex",CM2 6UW,chelmsford@eurocell.co.uk,0333 032 3116,51.741774,0.503427
+Eurocell,Taunton,"Unit 5 Venture Way, Priorswood Ind Est, Taunton, Somerset",TA2 8DG,taunton@eurocell.co.uk,0333 032 3228,51.025913,-3.086442
+Eurocell,Cheltenham,"Unit A3 Upperfield Lane, Kingsditch Trade Park, Cheltenham, Gloucestershire",GL51 9PA,cheltenham@eurocell.co.uk,01242 474 540,51.915602,-2.098389
+Eurocell,Thetford,"Unit 10 Mundford Road Industrial Estate, Thetford, Norfolk",IP24 1NB,thetford@eurocell.co.uk,0333 032 3231,52.423489,0.742662
+Eurocell,Chester,"Unit 1 Sealand Ind. Estate, Bumpers Lane, Chester",CH1 4LT,chester@eurocell.co.uk,0333 234 1017,53.192611,-2.916451
+Eurocell,Truro,"Unit 5 Curlew Park, Truro, Cornwall",TR4 9LE,truro@eurocell.co.uk,0333 032 3235,50.262901,-5.119628
+Eurocell,Chesterfield,"Unit 5 Lockoford Trade Park, Lockoford Lane, Chesterfield, Derbyshire",S41 7JB,chesterfield@eurocell.co.uk,0333 032 3117,53.251869,-1.421175
+Eurocell,Wembley,"Unit 7 Wembley Trade Park, 390 North Circular Road, Wembley",NW10 0JF,wembley@eurocell.co.uk,0203 5404930,51.55247,-0.255439
+Eurocell,Chichester,"Unit 3 Beaver Trade Park, Quarry Lane, Chichester, West Sussex",PO19 8NY,chichester@eurocell.co.uk,0333 032 3118,50.829648,-0.756815
+Eurocell,Winchester,"Unit 4, Winchester Trade Park, Winchester",SO23 7FA,winchester@eurocell.co.uk,01962 671640,51.069219,-1.295709
+Eurocell,Chorley,"Unit 17 Highfield Industrial Estate, North Street, Chorley, Lancashire",PR7 1QD,chorley@eurocell.co.uk,0333 234 1018,53.662776,-2.629305
+Eurocell,Workington,"Unit 4B Clay Flatts Industrial Estate, Workington, Cumbria",CA14 3YD,workington@eurocell.co.uk,01900 601261,54.635377,-3.561987
+Eurocell,Christchurch,"Unit 15 Somerford Business Park, Wilverley Road, Christchurch, Hampshire",BH23 3RU,christchurch@eurocell.co.uk,0333 032 3119,50.739107,-1.742659
+Eurocell,Yeovil,"Unit 1A Bartlett Court, Lynx Trading Estate, Yeovil, Somerset",BA20 2NZ,yeovil@eurocell.co.uk,01935 477693,50.933915,-2.661248
+Eurocell,Coatbridge,"Unit 2 M8 Interlink Industrial Estate Coatbridge, Coatbridge, North Lanarkshire",ML5 4RP,coatbridge@eurocell.co.uk,0333 032 3120,55.842617,-4.032093
+Eurocell,Kidderminster,"Unit 13 Acorn Enterprise Centre, Hoo Farm Industrial Estate, Kidderminster, Worcestershire",DY11 7RA,kidderminster@eurocell.co.uk,0333 032 3161,52.366072,-2.244007
+Eurocell,Colchester,"Unit 3 Brunel Way, Severalls Industrial Park, Colchester, Essex",CO4 9QX,colchester@eurocell.co.uk,0333 032 3121,51.919455,0.923999
+Eurocell,Kings Norton,"Unit 24 Sovereign Road Kings Norton Bus. Centre, Kings Norton, West Midlands",B30 3HN,kingsnorton@eurocell.co.uk,0333 032 3163,52.41562,-1.924363
+Eurocell,Corby,"Unit G3 Alpha Court, Phoenix Parkway, Napier Road, Corby, Northamptonshire",NN17 5DP,corby@eurocell.co.uk,0333 032 3122,52.506273,-0.678727
+Eurocell,Leamington Spa,"Unit 35 22 Longfield Road, Sydenham Ind. Est., Leamington Spa, Warwickshire",CV31 1XB,leamingtonspa@eurocell.co.uk,0333 032 3165,52.277787,-1.520146
+Eurocell,Coventry,"Unit 6 Kingswood Close, (Off Holbrook Lane), Coventry, West Midlands",CV6 4AZ,coventry@eurocell.co.uk,0333 032 3123,52.435123,-1.504131
+Eurocell,Leeds Collect,"Unit 7 Roundhay Road Trading Park, Grant Avenue, Leeds, West Yorkshire",LS7 1QB,leedscollect@eurocell.co.uk,0113 249 9242,53.809837,-1.52809
+Eurocell,Cramlington,"Unit 7 Nelson Park Industrial Estate, Cramlington, Northumberland",NE23 1WD,cramlington@eurocell.co.uk,0333 032 3124,55.097512,-1.603699
+Eurocell,Letchworth,"Unit 20 Woodside Industrial Estate, Works Road, Letchworth, Hertfordshire",SG6 1LA,letchworth@eurocell.co.uk,0333 032 3252,51.982002,-0.213678
+Eurocell,Crawley,"Unit 9 Oakwood Trade Park, Gatwick Road, Crawley, West Sussex",RH10 9AZ,crawley@eurocell.co.uk,0333 032 3125,51.131626,-0.167748
+Eurocell,Liverpool,"Unit C4 Kingfisher Business Park, Hawthorne Road, Liverpool, Merseyside",L20 6PF,liverpool@eurocell.co.uk,0333 234 1087,53.465918,-2.994391
+Eurocell,Crayford,"Unit 6 Acorn Ind. Estate, Crayford Road, Crayford, Darftord, Kent",DA1 4AL,crayford@eurocell.co.uk,0333 234 1143,51.452034,0.186396
+Eurocell,Loughborough,"Unit 23 Kernan Drive, Loughborough, Leicestershire",LE11 5JF,loughborough@eurocell.co.uk,0333 032 3171,52.784174,-1.219565
+Eurocell,Croydon,"Unit 7, The IO Trade Centre, Croydon Road, Beddington, Croydon",CR0 4WQ,croydon@eurocell.co.uk,02045 306624,51.366008,-0.123847
+Eurocell,Maidstone,"Unit A Hart Street Commercial Centre Hart Street, Maidstone, Maidstone, Kent",ME16 8RF,maidstone@eurocell.co.uk,0333 032 3173,51.269305,0.516142
+Eurocell,Darlington,"Unit A2 Meynall Road, Darlington, Co Durham",DL3 0XA,darlington@eurocell.co.uk,0333 032 3126,54.539206,-1.555101
+Eurocell,Mansfield,"Unit 4 Hermitage Lane Ind. Est., Mansfield, Nottinghamshire",NG18 5ES,mansfield@eurocell.co.uk,0333 032 3174,53.131343,-1.221978
+Eurocell,Dartford,"Unit 17 Charles Park, Quadrant Court, Dartford, Kent",DA9 9AY,dartford@eurocell.co.uk,0333 234 1145,51.453173,0.271188
+Eurocell,Middlesbrough,"Unit A8 Commerce Way, Skippers Lane Ind. Est., Middlesborough, North Yorkshire",TS6 6UR,middlesbrough@eurocell.co.uk,0333 032 3175,54.569973,-1.175228
+Eurocell,Derby,"Unit 5 Derby Trading Estate, Stores Road, Derby, Derbyshire",DE21 4BE,derby@eurocell.co.uk,0333 032 3127,52.933046,-1.466257
+Eurocell,Mochdre,"Unit 1 Eagle House, Eagle Estate, Mochdre, Conwy",LL28 5HF,mochdre@eurocell.co.uk,0333 032 3178,53.289677,-3.765239
+Eurocell,Dewsbury,"Unit 1 Flagship Court, Flagship Square, Shaw Cross Business Park, Dewsbury, West Yorkshire",WF12 7TH,dewsbury@eurocell.co.uk,01924 430500,53.702296,-1.605756
+Eurocell,Nelson,"Unit 2A Pendle Court Westfield, Nelson, Lancashire",BB9 7YN,nelson@eurocell.co.uk,0333 999 9573,53.842104,-2.217354
+Eurocell,Doncaster,"Unit D1-D2 Railway Court, Sandall Stones Road, Doncaster, South Yorkshire",DN3 1QR,doncaster@eurocell.co.uk,0333 032 3128,53.557395,-1.081816
+Eurocell,Newbury,"Unit 1A The Paddock Industrial Estate, Hambridge Road, Newbury, Berkshire",RG14 5TQ,newbury@eurocell.co.uk,0333 032 3180,51.399322,-1.304849
+Eurocell,Dover,"Trademarq Dover Unit 4 Dubris Close, Whitfield Business Park, Dover, Kent",CT16 3FJ,Dover@eurocell.co.uk,0333 032 3129,51.152558,1.304313
+Eurocell,Newcastle West,"Unit 12C Airport Industrial Estate, Kingston Park, Newcastle Upon Tyne, Tyne & Wear",NE3 2EF,newcastlewest@eurocell.co.uk,0333 032 3182,55.011677,-1.663137
+Eurocell,Dublin,"Unit 8 Robinhood Business Park, Dublin",D22 YR81,dublin@eurocell.co.uk,00 353 1460 5383,53.321288,-6.354053
+Eurocell,Newton Abbot,"1 Valley Buildings Brunel Road Industrial Estate, Newton Abbot, Devon",TQ12 4PB,newtonabbot@eurocell.co.uk,0333 032 3185,50.529063,-3.596244
+Eurocell,Dublin Santry,"Unit 47 Airways Industrial Estate, Santry, Dublin Santry",D17 EV97,dublinsantry@eurocell.co.uk,00 353 1862 3278,53.406233,-6.233245
+Eurocell,Norwich,"40 Roundtree Way, Norwich, Norfolk",NR7 8SG,norwich@eurocell.co.uk,0333 032 3187,52.64813,1.323922
+Eurocell,Dumfries,"Unit 2 Dumfries Ent. Park, Tinwald Downs Rd, Heathall, Dumfries",DG1 3SJ,dumfries@eurocell.co.uk,0333 032 3130,55.092497,-3.576485
+Eurocell,Nottingham,"Unit 11 Castle Park, Queens Drive, Nottingham, Nottinghamshire",NG2 1AH,nottingham@eurocell.co.uk,0333 032 3189,52.944896,-1.156006
+Eurocell,Dundee,"Unit 9 Rutherford Road, Dryburgh Ind. Est., Dundee",DD2 3XH,dundee@eurocell.co.uk,0333 032 3131,56.482813,-3.014424
+Eurocell,Oldham,"Unit 6 Westwood Business Centre, Featherstall Road South, Oldham, Lancashire",OL9 6HN,oldham@eurocell.co.uk,0333 234 1095,53.539946,-2.12843
+Eurocell,Durham,"Unit 47 Dragonville Industrial Park Renneys Lane, Durham",DH1 2XU,durham@eurocell.co.uk,0333 032 3132,54.779786,-1.542347
+Eurocell,Perth,"Units 1 and 3 Inveralmond Way, Inveralmond Industrial Estate, Perth, Perthshire",PH1 3UQ,perth@eurocell.co.uk,0333 032 3193,56.416932,-3.478291
+Eurocell,Eastbourne,"3 Courtlands Rd, Eastbourne, East Sussex",BN22 8TR,eastbourne@eurocell.co.uk,01323 730730,50.778225,0.28843
+Eurocell,Plymouth,"Unit C Valley Court, Plympton, Plymouth, Devon",PL7 1RF,plymouth@eurocell.co.uk,0333 032 3195,50.388584,-4.070002
+Eurocell,Edinburgh,"Unit 8 A1 Ind. Est., Sir Harry Lauder Road, Edinburgh",EH15 2QA,edinburgh@eurocell.co.uk,0333 032 3134,55.947858,-3.107162
+Eurocell,Portsmouth,"Unit C OYO Business Units, Fitzherbet Road, Farlingont, Portsmouth, Hampshire",PO6 1RU,portsmouth@eurocell.co.uk,0333 032 3197,50.842375,-1.03461
+Eurocell,Edinburgh West,"Unit 10 (6G) Bankhead Crossway North Bankhead Industrial Estate, Sighthill, Edinburgh",EH11 4BP,edinburgh2@eurocell.co.uk,0333 032 3135,55.927033,-3.296507
+Eurocell,Redditch,"Unit 3 Pipers Road, Redditch, Worcestershire",B98 0HU,redditch@eurocell.co.uk,0333 032 3199,52.283478,-1.905412
+Eurocell,Enfield,"Unit 7 Watermill Business Centre, Edison Road, Enfield",EN3 7XF,enfield@eurocell.co.uk,0333 234 1147,51.657959,-0.021825
+Eurocell,Rhyl,"Unit 8 Tir Llwyd Industrial Estate, Kinmel Bay, Rhyl, Denbighshire",LL18 5JA,rhyl@eurocell.co.uk,0333 032 3201,53.294777,-3.516957
+Eurocell,Exeter,"Unit 4 Mamhead Business Units, Exeter, Devon",EX2 8HE,exeter@eurocell.co.uk,0333 032 3136,50.698654,-3.517529
+Eurocell,Romford,"Unit 11 Falcon Business Centre, Ashton Road, Romford, Essex",RM3 8UA,romford@eurocell.co.uk,0333 234 1193,51.596775,0.220962
+Eurocell,Falkirk,"Unit 4 Etna Court, Middlefield Industrial Estate, Falkirk, Stirlingshire",FK2 9EQ,falkirk@eurocell.co.uk,0333 032 3251,56.010846,-3.766459
+Eurocell,Rugby,"Unit 71 Somers Road Ind. Estate, Rugby, Warwickshire",CV22 7DG,rugby@eurocell.co.uk,0333 032 3203,52.371666,-1.286777
+Eurocell,Fareham,"Units 2/3, Apex Centre Speedfields Park, Newgate Lane, Fareham, Hampshire",PO14 1TP,fareham@eurocell.co.uk,0333 032 3137,50.834513,-1.185201
+Eurocell,Saltash,"Unit 11 Edgcumbe Trade Park Tamar View Industrial Estate, Saltash, Cornwall",PL12 6LD,Saltash@eurocell.co.uk,0333 003 8888,50.421424,-4.23376
+Eurocell,Folkestone,"Unit 2 Three Acre Estate, Park Farm Road, Folkestone, Kent",CT19 5FG,folkestone@eurocell.co.uk,0333 234 1214,51.09657,1.168235
+Eurocell,Scunthorpe,"6 Eastgate Park Queensway Ind. Est, Arkwright Way, Scunthorpe, South Yorkshire",DN16 1AE,scunthorpe@eurocell.co.uk,0333 032 3206,53.56742,-0.616594
+Eurocell,Gateshead,"Unit 12 Octavian Way, Team Valley, Gateshead, Tyne & Wear",NE11 0HZ,gateshead@eurocell.co.uk,0333 032 3138,54.925643,-1.620569
+Eurocell,Shrewsbury,"30A Vanguard Way, Battlefield Enterprise Park, Shrewsbury, Shropshire",SY1 3TG,shrewsbury@eurocell.co.uk,0333 032 3211,52.741515,-2.72867
+Eurocell,Glasgow,"44 Kelvin Avenue Hillington Park, Glasgow, Lanarkshire",G52 4LT,glasgow@eurocell.co.uk,0333 032 3139,55.862817,-4.369743
+Eurocell,Skegness,"Unit 16 Beaubridge Business Park, Heath Road, Skegness, Lincolnshire",PE25 3ST,skegness@eurocell.co.uk,0333 032 3212,53.142485,0.325217
+Eurocell,Glasgow East,"Unit 2A Rutherglen Links Business Park , Cambuslang Road, Rutherglen, Glasgow, Lanarkshire",G73 1BQ,glasgoweast@eurocell.co.uk,0333 032 3140,55.83212,-4.205774
+Eurocell,Solihull,"Unit 4 Highland Trade Park, Cranmore Boulevard, Solihull, West Midlands",B90 4QN,solihull@eurocell.co.uk,0333 032 3253,52.39777,-1.807995
+Eurocell,Gloucester,"Unit 2 Woodrow Way, Gloucester, Gloucestershire",GL2 5DX,gloucester@eurocell.co.uk,0333 032 3141,51.837112,-2.269597
+Eurocell,Southend,"Unit 7 Fletcher Square, Temple Farm Ind. Estate, Southend-on-Sea, Essex",SS2 5RN,southend@eurocell.co.uk,0333 032 3214,51.562107,0.714415
+Eurocell,Grantham,"Unit 6 Grantham Trade Park, Harlaxton Road, Grantham, Lincolnshire",NG31 7SA,grantham@eurocell.co.uk,0333 032 3246,52.90209,-0.651384
+Eurocell,Stafford,"Unit 7 St Albans Business Park, St Albans Road, Stafford, Staffordshire",ST16 3DR,stafford@eurocell.co.uk,0333 032 3216,52.824364,-2.113408
+Eurocell,Great Yarmouth,"Unit 3 Bessemer Way, Harfreys Industrial Estate, Great Yarmouth, Norfolk",NR31 0LX,GreatYarmouth@eurocell.co.uk,0333 032 3143,52.592578,1.713649
+Eurocell,Stirling,"Unit 12 Crest Business Centre, Broadleys Industrial Estate, Stirling, Stirlingshire",FK7 7LH,Stirling@eurocell.co.uk,0333 032 3217,56.109102,-3.91568
+Eurocell,Grimsby,"Units 12-13 Birchin Way, Grimsby, Lincolnshire",DN31 2SG,grimsby@eurocell.co.uk,0333 032 3144,53.575077,-0.100692
+Eurocell,Stockton-on-Tees,"Unit 7 Portrack Trade Park, Stockton On Tees, County Durham",TS18 2AD,stocktonontees@eurocell.co.uk,01642 601007,54.576922,-1.284386
+Eurocell,Guildford,"Unit 1D, Cathedral Hill Industrial Estate, Guildford, Surrey",GU2 7YB,guildford@eurocell.co.uk,0333 032 3145,51.246423,-0.590687
+Eurocell,Stoke South,"Block B Unit 1 Trentham Trade Park, Trentham, Stoke-On-Trent, Staffordshire",ST4 8GA,stokesouth@eurocell.co.uk,0333 032 3219,52.971177,-2.167729
+Eurocell,Halesworth,"Unit 3B Blyth Road Industrial Estate, Halesworth, Suffolk",IP19 8EN,halesworth@eurocell.co.uk,0333 032 3146,52.336913,1.507291
+Eurocell,Sunderland,"Unit 7CD Carrmere Road, Sunderland, Tyne & Wear",SR2 9TW,sunderland@eurocell.co.uk,0333 032 3221,54.879814,-1.37504
+Eurocell,Harrogate,"Unit 16A Hornbeam Park, Harrogate, North Yorkshire",HG2 8RB,harrogate@eurocell.co.uk,0333 032 3148,53.978677,-1.524128
+Eurocell,Swansea,"Unit 5A Imperial Centre, Lion Way, Swansea, Glamorgan",SA79FY,swansea@eurocell.co.uk,0333 032 3224,51.659313,-3.910753
+Eurocell,Hastings,"Unit A1 Maunsell Road, Castleham Ind. Est., Hastings, East Sussex",TN38 9NN,hastings@eurocell.co.uk,0333 234 1197,50.881614,0.539991
+Eurocell,Swindon North,"Unit 2270D Dunbeath Road, Elgin Industrial Estate, Swindon North, Wiltshire",SN2 8EA,swindonnorth@eurocell.co.uk,0333 032 3226,51.574792,-1.769207
+Eurocell,Hayes,"Unit 3 Clayton Business Centre, Trevor Road, Hayes, Middlesex",UB3 1RT,hayes@eurocell.co.uk,0333 234 1149,51.505973,-0.426068
+Eurocell,Tamworth,"Unit 3 Ninian Park, Ninian Way, Tamworth, Staffordshire",B77 5ES,tamworth@eurocell.co.uk,0333 032 3227,52.60183,-1.677277
+Eurocell,Hedge End,"Unit A2 Hamilton Way Business Park, Botley Road, Hedge End, Hampshire",SO30 2JR,hedgeend@eurocell.co.uk,0333 032 3149,50.924604,-1.306817
+Eurocell,Telford,"Unit E4 Stafford Park 4, Telford, Telford, Shropshire",TF3 3BA,telford@eurocell.co.uk,0333 032 3229,52.675592,-2.421096
+Eurocell,Hereford,"Pineapple Place, Widemarsh Street, Hereford, Herefordshire",HR4 9HW,hereford@eurocell.co.uk,0333 032 3150,52.059437,-2.715084
+Eurocell,Thanet,"Unit D Ozengell Place, Eurokent Business Park, Ramsgate, Kent",CT12 6PB,thanet@eurocell.co.uk,0333 234 1192,51.349189,1.388054
+Eurocell,Huddersfield,"Unit 7 St Andrews Court, Leeds Road, Huddersfield, West Yorkshire",HD1 6NW,huddersfield@eurocell.co.uk,0333 032 3151,53.655231,-1.775655
+Eurocell,Tonbidge,"Unit 3, Tonbridge Trade Park, Ingot Way, Tonbridge",TN9 1GN,tonbridge@eurocell.co.uk,01732 444656,51.190689,0.285693
+Eurocell,Hull,"Unit A 41 Gillet Street, Hull, East Riding of Yorkshire",HU3 4JF,hull@eurocell.co.uk,0333 032 3152,53.731923,-0.36971
+Eurocell,Trowbridge,"Unit 1 Block D Doric Business Centre, Trowbridge, Wiltshire",BA14 8FW,trowbridge@eurocell.co.uk,0333 032 3234,51.333468,-2.203399
+Eurocell,Huntingdon,"Unit 2 St Margaret's Way, Huntingdon, Cambridgeshire",PE29 6EB,huntingdon@eurocell.co.uk,0333 032 3153,52.341637,-0.191547
+Eurocell,Uckfield,"Unit 2b The Copwood Centre, Bell Lane, Uckfield, East Sussex",TN22 1QL,Uckfield@eurocell.co.uk,0333 032 3236,50.969211,0.089335
+Eurocell,Huyton,"Unit 8 Brickfields, Huyton Business Park, Huyton, Merseyside",L36 6HY,huyton@eurocell.co.uk,0333 234 1019,53.408244,-2.824697
+Eurocell,Warrington,"Unit 24 Gateway 49 Trade Park, Kerfoot Street, Warrington, Cheshire",WA2 8NT,warrington@eurocell.co.uk,0333 234 1136,53.401762,-2.598766
+Eurocell,Inverness,"Unit 1 39/41 Harbour Road, Inverness",IV1 1UA,inverness@eurocell.co.uk,0333 032 3154,57.484325,-4.214806
+Eurocell,Weymouth,"Unit D3 Link Park, Chickerell link Road, Weymouth, Dorset",DT3 4FL,weymouth@eurocell.co.uk,0333 032 3238,50.615161,-2.495561
+Eurocell,Ipswich,"Unit 3 Edison Close, Ransomes Europark, Ipswich, Suffolk",IP3 9GU,ipswich@eurocell.co.uk,0333 032 3155,52.029458,1.222336
+Eurocell,Wigan,"Unit 2 Clayton Street, Wigan, Greater Manchester",WN3 4DA,wigan@eurocell.co.uk,0333 234 1137,53.544299,-2.639153
+Eurocell,Irvine,"Unit 3 Mackintosh Place, South Newmoor Ind. Est., Irvine, Ayrshire",KA11 4JT,irvine@eurocell.co.uk,0333 032 3156,55.608234,-4.642123
+Eurocell,Wolverhampton,"Unit 52 Planetary Road Trading Estate, Wednesfield, Wolverhampton, West Midlands",WV13 3XA,wolverhampton@eurocell.co.uk,0333 032 3240,52.592839,-2.088286
+Eurocell,Isle Of Wight,"Unit 6 Barry Way Newport Business Park, Newport, Isle Of Wight, Hampshire",PO30 5GY,isleofwight@eurocell.co.uk,0333 032 3157,50.711929,-1.293911
+Eurocell,Worcester,"Unit 20 Worcester Trade Park, Sherriff Street, Worcester, Worcestershire",WR4 9AB,worcester@eurocell.co.uk,01905 723579,52.194993,-2.207064
+Eurocell,Keighley,"Unit 4, Beckside Park, Beck Street, Keighley, West Yorkshire",BD21 5AF,keighley@eurocell.co.uk,0333 032 3158,53.864548,-1.909841
+Eurocell,Worthing,"Unit 11 Downsbrook Trading Estate, Worthing, West Sussex",BN14 8NQ,worthing@eurocell.co.uk,01903 216967,50.829505,-0.365057
+Eurocell,Kendal,"Mintsfeet Road Mintsfeet Industrial Estate, Kendal, Cumbria",LA9 6LU,kendal@eurocell.co.uk,0333 032 3159,54.337778,-2.741996
+Eurocell,Yate,"Unit B1 Millbrook Road, Stover Trading Estate, Yate, Gloucestershire",BS37 5PB,yate@eurocell.co.uk,01454 313 135,51.542246,-2.434785
+Eurocell,Kettering,"Unit 7 Vista Park, Telford Way Industrial Estate, Kettering, Northamptonshire",NN16 8AS,kettering@eurocell.co.uk,0333 032 3160,52.405323,-0.743765
+Eurocell,York,"Unit 1 Stirling Park, Clifton Moor, York, North Yorkshire",YO30 4WU,york@eurocell.co.uk,01904 479201,53.989751,-1.098739
+Eurocell,Aberdeen,"Unit 24 Denmore Industrial Estate, Denmore Road, Bridge of Don, Aberdeen",AB23 8JW,aberdeen@eurocell.co.uk,0333 032 3079,57.196673,-2.093141
+Travis Perkins,AYLESFORD,"TRAVIS PERKINS TRADING CO. LTD, FORSTAL ROAD, AYLESFORD",ME20 7AG,AYLESFORD@travisperkins.co.uk,01622 710111,51.299392,0.498347
+Travis Perkins,CANTERBURY,"TRAVIS PERKINS TRADING CO. LTD, MARSHWOOD INDUSTRIAL ESTATE, MARSHWOOD CLOSE, CANTERBURY",CT1 1DX,CANTERBURY@travisperkins.co.uk,01227 765560,51.291295,1.099587
+Travis Perkins,TUNBRIDGE WELLS,"TRAVIS PERKINS TRADING CO. LTD, LONGFIELD ROAD, TUNBRIDGE WELLS",TN2 3EY,TWELLS@travisperkins.co.uk,01892 522224,51.154921,0.288514
+Travis Perkins,MARGATE,"TRAVIS PERKINS TRADING CO. LTD, 14 ENTERPRISE WAY, WESTWOOD INDUSTRIAL ESTATE, MARGATE",CT9 4JF,RAMSGATE@travisperkins.co.uk,01843 595599,51.368912,1.389108
+Travis Perkins,READING TILEHURST,"TRAVIS PERKINS TRADING CO. LTD, 132 CITY ROAD, TILEHURST, READING",RG31 5SD,READINGTLE@travisperkins.co.uk,0118 942 7437,51.451224,-1.056375
+Travis Perkins,GUILDFORD,"TRAVIS PERKINS TRADING CO. LTD, WOODBRIDGE ROAD, GUILDFORD",GU1 1EH,GUILDFORD@travisperkins.co.uk,01483 562821,51.245705,-0.57962
+Travis Perkins,SOUTHAMPTON,"TRAVIS PERKINS TRADING CO. LTD, ALBERT ROAD NORTH, SOUTHAMPTON",SO14 5GB,SHAMPTON@travisperkins.co.uk,02380 229505,50.900921,-1.3913
+Travis Perkins,LEATHERHEAD,"TRAVIS PERKINS TRADING CO. LTD, OAK ROAD, LEATHERHEAD",KT22 7PG,LEATHERHD@travisperkins.co.uk,01372 363322,51.309118,-0.333696
+Travis Perkins,CRAWLEY,"TRAVIS PERKINS TRADING CO. LTD, HOLMBUSH POTTERIES, CRAWLEY RD, FAYGATE, HORSHAM",RH12 4SE,CRAWLEY@travisperkins.co.uk,01293 851355,51.094985,-0.246701
+Travis Perkins,EASTBOURNE,"TRAVIS PERKINS TRADING CO. LTD, WHITLEY ROAD, EASTBOURNE",BN22 8LT,EASTBOURNE@travisperkins.co.uk,01323 648301,50.776591,0.290124
+Travis Perkins,NEWHAVEN,"TRAVIS PERKINS TRADING CO. LTD, NEW ROAD, NEWHAVEN, EAST SUSSEX",BN9 0HE,NEWHAVEN@travisperkins.co.uk,01273 512201,50.802204,0.052018
+Travis Perkins,SHEPTON MALLET,"TRAVIS PERKINS TRADING CO. LTD, CROWN TRADING ESTATE, SHEPTON MALLET",BA4 5QQ,SHEPMALLET@travisperkins.co.uk,01749 346262,51.184505,-2.534441
+Travis Perkins,STANFORD LE HOPE,"TRAVIS PERKINS TRADING CO. LTD, UNIT D, STANHOPE INDUST EST, WHARF ROAD, STANFORD LE HOPE",SS17 0EH,STANFORD@travisperkins.co.uk,01375 643580,51.505892,0.444694
+Travis Perkins,BASINGSTOKE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, STROUDLEY ROAD, BASINGSTOKE",RG24 8FW,BASINGSTOKE@travisperkins.co.uk,01256 841551,51.276891,-1.064739
+Travis Perkins,PADDINGTON,"TRAVIS PERKINS TRADING CO. LTD, 149 HARROW ROAD, PADDINGTON, LONDON",W2 6NA,PADDINGTON@travisperkins.co.uk,020 7262 6602,51.519603,-0.178585
+Travis Perkins,WEYBRIDGE,"TRAVIS PERKINS TRADING CO. LTD, 2 BYRON ROAD, WEYBRIDGE",KT15 2SZ,,,51.370917,-0.475873
+Travis Perkins,NEW SOUTHGATE BRICK,"TRAVIS PERKINS TRADING CO. LTD, 19 STATION ROAD, NEW SOUTHGATE, LONDON",N11 1QJ,NSOUTHGATE@travisperkins.co.uk,020 8368 6467,51.611884,-0.13958
+Travis Perkins,DALSTON,"TRAVIS PERKINS TRADING CO. LTD, 113 DALSTON LANE, DALSTON, LONDON",E8 1NH,DALSTON@travisperkins.co.uk,020 7254 0153,51.548389,-0.067904
+Travis Perkins,WADEBRIDGE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, TRENANT INDUSTRIAL ESTATE, WADEBRIDGE",PL27 6HB,WADEBRIDGE@travisperkins.co.uk,01208 812087,50.520111,-4.823276
+Travis Perkins,WALTHAMSTOW,"TRAVIS PERKINS TRADING CO. LTD, 171 WOOD STREET, WALTHAMSTOW",E17 3LX,WALTHAM@travisperkins.co.uk,020 8521 8891,51.587109,-0.003308
+Travis Perkins,WOOLWICH,"TRAVIS PERKINS TRADING CO. LTD, 653 WOOLWICH ROAD, CHARLTON, LONDON",SE7 8LH,WOOLWICH@travisperkins.co.uk,020 8858 6323,51.490608,0.034837
+Travis Perkins,EALING,"TRAVIS PERKINS TRADING CO. LTD, THE PADDOCKS, POPES LANE, EALING, LONDON",W5 4PA,EALING@travisperkins.co.uk,020 8567 3344,51.498545,-0.302292
+Travis Perkins,CROYDON HAMPTON ROAD,"TRAVIS PERKINS TRADING CO. LTD, 22-24 HAMPTON ROAD, CROYDON",CR0 2XG,CROYDON@travisperkins.co.uk,020 8689 4311,51.388144,-0.097358
+Travis Perkins,FOREST HILL,"TRAVIS PERKINS TRADING CO. LTD, 4 MALHAM ROAD, FOREST HILL, LONDON",SE23 1HF,FORESTHILL@travisperkins.co.uk,020 8699 0881,51.442526,-0.049453
+Travis Perkins,LONDON BRIDGE,"TRAVIS PERKINS TRADING CO. LTD, 46 REDCROSS WAY, SOUTHWARK, LONDON",SE1 1HA,LONBRIDGE@travisperkins.co.uk,020 7407 3511,51.502377,-0.09501
+Travis Perkins,SIDCUP,"TRAVIS PERKINS TRADING CO. LTD, 2 HURST ROAD, SIDCUP",DA15 9AB,SIDCUP@travisperkins.co.uk,020 8300 9341,51.435053,0.103472
+Travis Perkins,WALLINGTON,"TRAVIS PERKINS TRADING CO. LTD, 21 ROSS PARADE, WALLINGTON",SM6 8QF,WALLINGTON@travisperkins.co.uk,020 8669 1654,51.360269,-0.149204
+Travis Perkins,PERTH,"TRAVIS PERKINS TRADING CO. LTD, 174 DUNKELD ROAD, PERTH",PH1 3AA,PERTH@travisperkins.co.uk,01738 633611,56.411565,-3.455764
+Travis Perkins,INVERNESS,"TRAVIS PERKINS TRADING CO. LTD, SHORE STREET, INVERNESS",IV1 1NT,INVERNESS@travisperkins.co.uk,01463 231171,57.484563,-4.228834
+Travis Perkins,INVERGORDON,"TRAVIS PERKINS TRADING CO. LTD, HIGH STREET, INVERGORDON",IV18 0EW,INVGORDON@travisperkins.co.uk,01349 852402,57.688499,-4.175817
+Travis Perkins,ELGIN,"TRAVIS PERKINS TRADING CO. LTD, PINEFIELD INDUSTRIAL ESTATE, 5 PINEFIELD PARADE, ELGIN",IV30 6AG,ELGIN@travisperkins.co.uk,01343 548484,57.644987,-3.291029
+Travis Perkins,BUCKIE,"TRAVIS PERKINS TRADING CO. LTD, COMMERCIAL ROAD, BUCKIE",AB56 1TX,BUCKIE@travisperkins.co.uk,01542 831131,57.68081,-2.951594
+Travis Perkins,LARBERT,"TRAVIS PERKINS TRADING CO. LTD, MUIRHALL ROAD, LARBERT",FK5 4AP,LARBERT@travisperkins.co.uk,01324 554111,56.023224,-3.829026
+Travis Perkins,SELBY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 3 BAWTRY RD INDUST EST, BAWTRY ROAD, SELBY",YO8 8NB,SELBY@travisperkins.co.uk,01757 702822,53.769995,-1.064986
+Travis Perkins,POCKLINGTON,"TRAVIS PERKINS TRADING CO. LTD, STATION ROAD, POCKLINGTON",YO42 2SQ,POCKLINGTON@travisperkins.co.uk,01759 302118,53.928806,-0.779353
+Travis Perkins,GRIMSBY,"TRAVIS PERKINS TRADING CO. LTD, ROWLANDSON STREET, RIBY SQUARE, GRIMSBY",DN31 3LG,GRIMSBY@travisperkins.co.uk,01472 345471,53.575629,-0.073903
+Travis Perkins,DONCASTER,"TRAVIS PERKINS TRADING CO. LTD, TICKHILL ROAD, BALBY, DONCASTER",DN4 8QG,DONCASTER@travisperkins.co.uk,01302 854537,53.498025,-1.152502
+Travis Perkins,EPWORTH,"TRAVIS PERKINS TRADING CO. LTD, STATION ROAD, EPWORTH",DN9 1JU,EPWORTH@travisperkins.co.uk,01427 872597,53.529217,-0.828765
+Travis Perkins,LINCOLN NORTH,"TRAVIS PERKINS TRADING CO. LTD, LONG LEYS ROAD, LINCOLN",LN1 1DU,LINCOLN@travisperkins.co.uk,01522 527113,53.240354,-0.555262
+Travis Perkins,MARKET RASEN,"TRAVIS PERKINS TRADING CO. LTD, WATERLOO WORKS, JAMESON BRIDGE ST, MARKET RASEN",LN8 3EW,MKTRASEN@travisperkins.co.uk,01673 842327,53.387706,-0.333385
+Travis Perkins,NOTTINGHAM,"TRAVIS PERKINS TRADING CO. LTD, CROSSGATE DRIVE, QUEENS DRIVE INDUSTRIAL ESTATE, NOTTINGHAM",NG2 1LN,NOTTINGHAM@travisperkins.co.uk,0115 986 2691,52.936858,-1.164688
+Travis Perkins,PONTYPOOL,"TRAVIS PERKINS TRADING CO. LTD, POLO GROUNDS INDUSTRIAL ESTATE, NEW INN, PONTYPOOL",NP4 0TW,PONTYPOOL@travisperkins.co.uk,01495 763434,51.691575,-3.014997
+Travis Perkins,CALLINGTON,"TRAVIS PERKINS TRADING CO. LTD, LISKEARD ROAD, CALLINGTON",PL17 7HH,CALLINGTON@travisperkins.co.uk,01579 383521,50.497979,-4.320528
+Travis Perkins,EAST PECKHAM,"TRAVIS PERKINS TRADING CO. LTD, 41 OLD ROAD, EAST PECKHAM",TN12 5AP,EPECKHAM@travisperkins.co.uk,01622 871261,51.211976,0.389269
+Travis Perkins,BARNSTAPLE,"TRAVIS PERKINS TRADING CO. LTD, SEVEN BRETHREN BANK, BARNSTAPLE",EX31 2AS,BARNSTAPLETP@travisperkins.co.uk,01271 378888,51.073052,-4.058788
+Travis Perkins,EAST KILBRIDE,"TRAVIS PERKINS TRADING CO. LTD, 32 PEEL PARK PLACE, PEEL PARK, COLLEGE MILTON, EAST KILBRIDE",G74 5LW,KILBRIDE@travisperkins.co.uk,01355 242306,55.763088,-4.220221
+Travis Perkins,GLASGOW MUIREND AVENUE,"TRAVIS PERKINS TRADING CO. LTD, 20 MUIREND AVENUE, MUIREND, GLASGOW",G44 3DZ,MUIREND@travisperkins.co.uk,0141 633 2233,55.812782,-4.269305
+Travis Perkins,CHIPPING NORTON,"TRAVIS PERKINS TRADING CO. LTD, TRAVIS PERKINS TRADING CO. LTD, STATION ROAD, CHIPPING NORTON",OX7 5HX,CHIPNORTON@travisperkins.co.uk,01608 641550,51.939536,-1.554335
+Travis Perkins,WESTON SUPER MARE,"TRAVIS PERKINS TRADING CO. LTD, PHILIPS ROAD, WINTERSTOKE COMMERCIAL CENTRE, WESTON SUPER MARE",BS23 3UZ,WESTONSM@travisperkins.co.uk,01934 636060,51.341378,-2.95814
+Travis Perkins,NORTHFLEET,"TRAVIS PERKINS TRADING CO. LTD, THAMES WAY, NORTHFLEET",DA11 9QJ,GRAVESEND@travisperkins.co.uk,01474 333233,51.438607,0.348645
+Travis Perkins,BRENTWOOD,"TRAVIS PERKINS TRADING CO. LTD, 131 ONGAR ROAD, BRENTWOOD",CM15 9DH,BRENTWOOD@travisperkins.co.uk,01277 200898,51.624441,0.302429
+Travis Perkins,BRIGHTON TRAFALGAR LANE,"TRAVIS PERKINS TRADING CO. LTD, 1 TRAFALGAR LANE, BRIGHTON",BN1 4ES,BRIGHTRAF@travisperkins.co.uk,01273 620760,50.827851,-0.139353
+Travis Perkins,CHELMSFORD,"TRAVIS PERKINS TRADING CO. LTD, NAVIGATION ROAD, CHELMSFORD",CM2 6HX,CHELMSFORD@travisperkins.co.uk,01245 490000,51.73339,0.479775
+Travis Perkins,CLACTON,"TRAVIS PERKINS TRADING CO. LTD, OXFORD ROAD, CLACTON-ON-SEA",CO15 3TH,CLACTON@travisperkins.co.uk,01255 422301,51.800248,1.158708
+Travis Perkins,DUNMOW,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1 CHELMSFORD ROAD, GREAT DUNMOW",CM6 1XG,DUNMOW@travisperkins.co.uk,01371 872144,51.864864,0.373662
+Travis Perkins,KIDDERMINSTER,"TRAVIS PERKINS TRADING CO. LTD, EDWIN AVENUE, HOO FARM IND EST, WORCESTER ROAD, KIDDERMINSTER",DY11 7RA,KIDDERMINSTER@travisperkins.co.uk,01562 747777,52.366072,-2.244007
+Travis Perkins,GRAYS,"TRAVIS PERKINS TRADING CO. LTD, SEALLY ROAD, GRAYS",RM17 5XS,TPGRAYS@travisperkins.co.uk,01375 373068,51.478431,0.318255
+Travis Perkins,LITTLEHAMPTON,"TRAVIS PERKINS TRADING CO. LTD, PIER ROAD, LITTLEHAMPTON",BN17 5BB,LHAMPTON@travisperkins.co.uk,01903 713071,50.807113,-0.542417
+Travis Perkins,BRIGHTON PORTSLADE,"TRAVIS PERKINS TRADING CO. LTD, BALTIC WHARF, WELLINGTON ROAD, PORTSLADE",BN41 1ET,PORTSLADE@travisperkins.co.uk,01273 430775,50.82947,-0.210673
+Travis Perkins,POTTERS BAR,"TRAVIS PERKINS TRADING CO. LTD, 57 BARNET ROAD, POTTERS BAR",EN6 2QY,POTTERSBAR@travisperkins.co.uk,01707 652364,51.690346,-0.179365
+Travis Perkins,WARE,"TRAVIS PERKINS TRADING CO. LTD, 35 BALDOCK STREET, WARE",SG12 9DN,WARE@travisperkins.co.uk,01920 462474,51.813056,-0.034741
+Travis Perkins,WOODFORD,"TRAVIS PERKINS TRADING CO. LTD, 31 MARLBOROUGH ROAD, SOUTH WOODFORD, LONDON",E18 1AR,WOODFORD@travisperkins.co.uk,020 8989 0034,51.591713,0.026547
+Travis Perkins,SLOUGH,"TRAVIS PERKINS TRADING CO. LTD, 4 BUCKINGHAM AVENUE, SLOUGH",SL1 4NJ,SLOUGH@travisperkins.co.uk,01753 571321,51.523083,-0.632329
+Travis Perkins,MAIDENHEAD,"TRAVIS PERKINS TRADING CO. LTD, BALTIC WHARF, BOYN VALLEY ROAD, MAIDENHEAD",SL6 4EE,MAIDENHEAD@travisperkins.co.uk,01628 770577,51.517795,-0.730652
+Travis Perkins,HITCHIN,"TRAVIS PERKINS TRADING CO. LTD, WALLACE WAY, HITCHIN",SG4 0SE,HITCHIN@travisperkins.co.uk,01462 451311,51.963577,-0.268443
+Travis Perkins,GLASGOW POLLOKSHAWS ROAD,"TRAVIS PERKINS TRADING CO. LTD, 265 POLLOKSHAWS ROAD, GLASGOW",G41 1PT,POLLOKSHAW@travisperkins.co.uk,0141 423 5461,55.843136,-4.261825
+Travis Perkins,TOTTENHAM,"TRAVIS PERKINS TRADING CO. LTD, MOWLEM TRADING ESTATE, LEESIDE, TOTTENHAM, LONDON",N17 0QJ,TOTTENHAM@travisperkins.co.uk,020 8801 8855,51.605785,-0.048169
+Travis Perkins,BURNHAM ON CROUCH,"TRAVIS PERKINS TRADING CO. LTD, MILDMAY HOUSE, FOUNDRY LANE, BURNHAM ON CROUCH",CM0 8BL,BURNHAM@travisperkins.co.uk,01621 786222,51.632508,0.809665
+Travis Perkins,CAERNARFON,"TRAVIS PERKINS TRADING CO. LTD, ST. HELENS ROAD, CAERNARFON",LL55 2YD,CAERNARFON@travisperkins.co.uk,01286 672443,53.137101,-4.271462
+Travis Perkins,PUTNEY,"TRAVIS PERKINS TRADING CO. LTD, 7-9 PUTNEY COMMON, PUTNEY, LONDON",SW15 1HL,PUTNEY@travisperkins.co.uk,020 8789 8221,51.467884,-0.227741
+Travis Perkins,MITCHAM,"TRAVIS PERKINS TRADING CO. LTD, 50-54 MORDEN ROAD, MITCHAM",CR4 4GL,MITCHAM@travisperkins.co.uk,020 8640 7260,51.398567,-0.174901
+Travis Perkins,FOLKESTONE,"TRAVIS PERKINS TRADING CO. LTD, SHEARWAY BUSINESS PARK, FOLKESTONE",CT19 4RJ,FOLKESTONE@travisperkins.co.uk,01303 271122,51.092765,1.149249
+Travis Perkins,INVERURIE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 10-12, HARLAW BUSINESS CENTRE, INVERURIE",AB51 4FR,INVERURIE@travisperkins.co.uk,01467 625274,57.293717,-2.388009
+Travis Perkins,BERKHAMSTED,"TRAVIS PERKINS TRADING CO. LTD, STATION RD, VIA LOWER KINGS RD, BERKHAMSTED",HP4 2EY,BERKHAMSTD@travisperkins.co.uk,01442 875991,51.761207,-0.557646
+Travis Perkins,SHREWSBURY,"TRAVIS PERKINS TRADING CO. LTD, VANGUARD WAY, BATTLEFIELD ENTERPRISE PARK, SHREWSBURY",SY1 3TG,SHREWSBURY@travisperkins.co.uk,01743 453670,52.741515,-2.72867
+Travis Perkins,OSWESTRY,"TRAVIS PERKINS TRADING CO. LTD, MAESBURY ROAD, OSWESTRY",SY10 8HA,OSWESTRY@travisperkins.co.uk,01691 652192,52.84886,-3.042001
+Travis Perkins,WHITCHURCH,"TRAVIS PERKINS TRADING CO. LTD, TALBOT STREET, WHITCHURCH",SY13 1PN,WHITCHURCH@travisperkins.co.uk,01948 662123,52.970617,-2.673196
+Travis Perkins,LEOMINSTER,"TRAVIS PERKINS TRADING CO. LTD, LOWER BRIDGE STREET, LEOMINSTER",HR6 8EA,LEOMINSTER@travisperkins.co.uk,01568 612531,52.234183,-2.74404
+Travis Perkins,HOYLAKE,"TRAVIS PERKINS TRADING CO. LTD, CARR LANE, HOYLAKE, WIRRAL",CH47 4BA,HOYLAKE@travisperkins.co.uk,0151 632 3325,53.389785,-3.17799
+Travis Perkins,MACHYNLLETH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 8, TREOWAIN INDUSTRIAL ESTATE, MACHYNLLETH",SY20 8EG,MACHY@travisperkins.co.uk,01654 703415,52.589374,-3.843796
+Travis Perkins,PORTHMADOG,"TRAVIS PERKINS TRADING CO. LTD, PENAMSER INDUSTRIAL ESTATE, PENAMSER ROAD, PORTHMADOG",LL49 9NY,PORTHMADOG@travisperkins.co.uk,01766 513330,52.928547,-4.136985
+Travis Perkins,BROMSGROVE,"TRAVIS PERKINS TRADING CO. LTD, 167 BIRMINGHAM ROAD, BROMSGROVE",B61 0DZ,BROMSGROVE@travisperkins.co.uk,01527 872249,52.3431,-2.051868
+Travis Perkins,BALA,"TRAVIS PERKINS TRADING CO. LTD, STATION YARD, BALA",LL23 7NL,BALA@travisperkins.co.uk,01678 520477,52.909302,-3.591503
+Travis Perkins,TELFORD,"TRAVIS PERKINS TRADING CO. LTD, HOLYHEAD ROAD, OAKENGATES, TELFORD",TF2 6BF,TELFORDBM@travisperkins.co.uk,01952 620111,52.693981,-2.460926
+Travis Perkins,CHEPSTOW,"TRAVIS PERKINS TRADING CO. LTD, BRIDGE STREET, CHEPSTOW",NP16 5EZ,CHEPSTOW@travisperkins.co.uk,01291 622233,51.644961,-2.672256
+Travis Perkins,LYDNEY,"TRAVIS PERKINS TRADING CO. LTD, CHURCH ROAD, LYDNEY",GL15 5EQ,LYDNEY@travisperkins.co.uk,01594 842471,51.718176,-2.532693
+Travis Perkins,NEWPORT SHROPSHIRE,"TRAVIS PERKINS TRADING CO. LTD, UPPER BAR, NEWPORT",TF10 7EH,NEWPORT@travisperkins.co.uk,01952 820153,52.76588,-2.377002
+Travis Perkins,ECCLES,"TRAVIS PERKINS TRADING CO. LTD, 281 LIVERPOOL ROAD, ECCLES",M30 0QN,ECCLES@travisperkins.co.uk,0161 789 2631,53.48156,-2.357026
+Travis Perkins,ASHTON IN MAKERFIELD,"TRAVIS PERKINS TRADING CO. LTD, YORK ROAD (OFF PRINCESS ROAD), ASHTON IN MAKERFIELD",WN4 9DS,MAKERFIELD@travisperkins.co.uk,01942 720966,53.48586,-2.631719
+Travis Perkins,HORWICH,"TRAVIS PERKINS TRADING CO. LTD, CHORLEY NEW ROAD, HORWICH",BL6 6DU,HORWICH@travisperkins.co.uk,01204 699331,53.590948,-2.539361
+Travis Perkins,SALFORD,"TRAVIS PERKINS TRADING CO. LTD, 20 JAMES CORBETT ROAD, WEASTE, SALFORD",M50 1DE,SALFORD@travisperkins.co.uk,0161 736 8751,53.482491,-2.310456
+Travis Perkins,BEVERLEY,"TRAVIS PERKINS TRADING CO. LTD, BARMSTON ROAD, SWINEMOOR LANE, BEVERLEY",HU17 0LA,BEVERLEY@travisperkins.co.uk,01482 862748,53.845882,-0.404962
+Travis Perkins,MILTON KEYNES SOUTH,"TRAVIS PERKINS TRADING CO. LTD, DENBIGH ROAD, BLETCHLEY",MK1 1AX,BLETCHLEY@travisperkins.co.uk,01908 642207,52.006512,-0.737355
+Travis Perkins,TOTNES,"TRAVIS PERKINS TRADING CO. LTD, STATION ROAD, TOTNES",TQ9 5JG,TOTNES@travisperkins.co.uk,01803 864610,50.434317,-3.687672
+Travis Perkins,KIDWELLY,"TRAVIS PERKINS TRADING CO. LTD, UNITS 4 & 5, KIDWELLY INDUST E, PEMBREY ROAD, KIDWELLY",SA17 4TF,KIDWELLY@travisperkins.co.uk,01554 891222,51.73069,-4.30683
+Travis Perkins,BRENTWOOD COXTIE GREEN,"TRAVIS PERKINS TRADING CO. LTD, COXTIE GREEN ROAD, BRENTWOOD",CM14 5PN,BRENTWOODCG@travisperkins.co.uk,01277 372316,51.63932,0.275029
+Travis Perkins,LEIGH,"TRAVIS PERKINS TRADING CO. LTD, LORD STREET SOUTH, LEIGH",WN7 1BY,LEIGH@travisperkins.co.uk,01942 261702,53.496746,-2.513547
+Travis Perkins,CRANBROOK,"TRAVIS PERKINS TRADING CO. LTD, WHEATFIELD DRIVE, CRANBROOK",TN17 3LU,CRANBROOK@travisperkins.co.uk,01580 713357,51.096109,0.527478
+Travis Perkins,KELSO,"TRAVIS PERKINS TRADING CO. LTD, SPYLAW ROAD, KELSO",TD5 8DN,KELSO@travisperkins.co.uk,01573 226125,55.590466,-2.431934
+Travis Perkins,MACDUFF,"TRAVIS PERKINS TRADING CO. LTD, MACDUFF INDUSTRIAL ESTATE, OLD GAMRIE ROAD, MACDUFF",AB44 1GD,MACDUFF@travisperkins.co.uk,01261 832247,57.668328,-2.481716
+Travis Perkins,ARBROATH,"TRAVIS PERKINS TRADING CO. LTD, PEASIEHILL ROAD, ELLIOTT INDUSTRIAL ESTATE, ARBROATH",DD11 2NJ,ARBROATH@travisperkins.co.uk,01241 878333,56.551906,-2.615381
+Travis Perkins,WIGTON,"TRAVIS PERKINS TRADING CO. LTD, BOG FARM, STATION ROAD, WIGTON",CA7 9AX,WIGTON@travisperkins.co.uk,01697 342286,54.827804,-3.159342
+Travis Perkins,FORT WILLIAM,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, BEN NEVIS DRIVE, BEN NEVIS INDUST ESTATE, CLAGG, FORT WILLIAM",PH33 6RU,FTWILLIAM@travisperkins.co.uk,01397 705195,56.82489,-5.084876
+Travis Perkins,HARTLEPOOL,"TRAVIS PERKINS TRADING CO. LTD, BELLE VUE WAY, HARTLEPOOL",TS25 1JZ,HARTLEPOOL@travisperkins.co.uk,01429 221133,54.666491,-1.215695
+Travis Perkins,PALMERS GREEN,"TRAVIS PERKINS TRADING CO. LTD, BRIDGE DRIVE, BROOMFIELD LANE, LONDON",N13 4EU,PALMERSGRN@travisperkins.co.uk,020 8886 6585,51.616556,-0.111713
+Travis Perkins,DENBIGH,"TRAVIS PERKINS TRADING CO. LTD, PLOT 10C, COLOMENDY INDUSTRIAL ESTATE, DENBIGH",LL16 5TA,DENBIGH@travisperkins.co.uk,01745 813332,53.19325,-3.414292
+Travis Perkins,HYDE,"TRAVIS PERKINS TRADING CO. LTD, ROBERT STREET, HYDE",SK14 1BN,HYDE@travisperkins.co.uk,0161 351 7847,53.452599,-2.084784
+Travis Perkins,ROCHDALE,"TRAVIS PERKINS TRADING CO. LTD, LIVSEY STREET, ROCHDALE",OL16 1ST,ROCHDALE@travisperkins.co.uk,01706 657325,53.614504,-2.151134
+Travis Perkins,BARNSLEY,"TRAVIS PERKINS TRADING CO. LTD, BEEVOR INDUSTRIAL ESTATE, PONTEFRACT ROAD, BARNSLEY",S71 1HN,BARNSLEY@travisperkins.co.uk,01226 243225,53.552857,-1.459947
+Travis Perkins,HALIFAX,"TRAVIS PERKINS TRADING CO. LTD, ALBERT STREET, OFF HANSON LANE, HALIFAX",HX1 5NW,HALIFAX@travisperkins.co.uk,01422 355571,53.724194,-1.871373
+Travis Perkins,WAKEFIELD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 14A, GREENS INDUST EST, CALDER VALE ROAD, WAKEFIELD",WF1 5PE,WAKEFIELD@travisperkins.co.uk,01924 372497,53.677384,-1.485439
+Travis Perkins,DUDLEY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 8, PEAR TREE LANE, DUDLEY",DY2 0QU,DUDLEY@travisperkins.co.uk,01384 76251,52.492247,-2.103888
+Travis Perkins,KINGS LYNN,"TRAVIS PERKINS TRADING CO. LTD, HAMLIN WAY, THE NARROWS, KINGS LYNN",PE30 4NG,HAMLINWAY@travisperkins.co.uk,01553 692300,52.734387,0.407482
+Travis Perkins,BRIDGEND,"TRAVIS PERKINS TRADING CO. LTD, WATERTON INDUSTRIAL ESTATE, WATERTON ROAD, BRIDGEND",CF31 3YY,BRIDGEND@travisperkins.co.uk,01656 661006,51.494934,-3.556264
+Travis Perkins,NEWPORT GWENT,"TRAVIS PERKINS TRADING CO. LTD, FREDERICK STREET, NEWPORT",NP20 2DR,NEWPORTG@travisperkins.co.uk,01633 265265,51.577782,-2.986858
+Travis Perkins,RHONDDA,"TRAVIS PERKINS TRADING CO. LTD, ABERLLECHAU ROAD, WATTSTOWN, RHONDDA",CF39 0PB,RHONDDA@travisperkins.co.uk,01443 757471,51.634292,-3.419692
+Travis Perkins,EAST GRINSTEAD TP,"TRAVIS PERKINS TRADING CO. LTD, UNIT B, BIRCHES INDUSTRIAL ESTATE, EAST GRINSTEAD",RH19 1XZ,EASTGRINSTEAD@travisperkins.co.uk,01342 325761,51.135633,-0.038856
+Travis Perkins,WIMBLEDON,"TRAVIS PERKINS TRADING CO. LTD, TRAVIS PERKINS WIMBLEDON, 14 ENDEAVOUR WAY, WIMBLEDON",SW19 8UH,WIMBLEDON@travisperkins.co.uk,020 8605 9020,51.431819,-0.192725
+Travis Perkins,CASTLE DOUGLAS,"TRAVIS PERKINS TRADING CO. LTD, UNIT 5, BLACKPARK ROAD, CASTLE DOUGLAS",DG7 1DJ,CASTLEDOUGLAS@travisperkins.co.uk,01556 505320,54.938739,-3.936863
+Travis Perkins,DINGWALL,"TRAVIS PERKINS TRADING CO. LTD, STRATHPEFFER ROAD, DINGWALL",IV15 9QF,DINGWALL@travisperkins.co.uk,01349 862277,57.599924,-4.44452
+Travis Perkins,BLAIRGOWRIE,"TRAVIS PERKINS TRADING CO. LTD, WELTON ROAD, BLAIRGOWRIE",PH10 6NB,BLAIRGOWRIE@travisperkins.co.uk,01250 872888,56.585693,-3.325699
+Travis Perkins,BLACKPOOL NORTH,"TRAVIS PERKINS TRADING CO. LTD, 10-20 CHORLEY ROAD, BLACKPOOL",FY3 7XQ,BLACKPOOLNORTH@travisperkins.co.uk,01253 300006,53.838447,-3.023468
+Travis Perkins,WATFORD,"TRAVIS PERKINS TRADING CO. LTD, OTTERSPOOL WAY, BUSHEY, WATFORD",WD25 8HL,TPWATFORD@travisperkins.co.uk,01923 831070,51.666787,-0.366431
+Travis Perkins,WELWYN GARDEN CITY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 9 BESSEMER RD BUSINESS PA, BESSEMER ROAD, WELWYN GARDEN CITY",AL7 1GF,WELWYNGC@travisperkins.co.uk,01707 428673,51.803194,-0.199987
+Travis Perkins,STOWMARKET,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2 RIVERSIDE DRIVE, OFF GIPPING WAY, STOWMARKET",IP14 1RT,STOWMARKET@travisperkins.co.uk,01449 601051,52.186459,1.00125
+Travis Perkins,WORCESTER,"TRAVIS PERKINS TRADING CO. LTD, MCKENZIE WAY, WORCESTER",WR4 9GN,TPWORCESTERMCKENZIE@travisperkins.co.uk,01905 469451,52.19786,-2.207326
+Travis Perkins,SUTTON,"TRAVIS PERKINS TRADING CO. LTD, WEALDSTONE ROAD, SUTTON",SM3 9QN,SUTTON@travisperkins.co.uk,020 3284 8023,51.376089,-0.208341
+Travis Perkins,STAPLES CORNER,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6, 1000 NORTH CIRCULAR RD, NEASDEN, LONDON",NW2 7JP,STAPLESCORNER@travisperkins.co.uk,020 8438 3180,51.569753,-0.234358
+Travis Perkins,HEREFORD,"TRAVIS PERKINS TRADING CO. LTD, BARTON SIDINGS, HEREFORD",HR4 0AX,HEREFORD@travisperkins.co.uk,01432 359321,52.054622,-2.723364
+Travis Perkins,BICESTER,"TRAVIS PERKINS TRADING CO. LTD, 128 CHURCHILL ROAD, BICESTER",OX26 4XZ,BICESTER@travisperkins.co.uk,01869 244301,51.902789,-1.138139
+Travis Perkins,HAVERFORDWEST,"TRAVIS PERKINS TRADING CO. LTD, PORTFIELD, HAVERFORDWEST",SA61 1JA,PORTFIELD@travisperkins.co.uk,01437 767031,51.797991,-4.984518
+Travis Perkins,TROWBRIDGE,"TRAVIS PERKINS TRADING CO. LTD, BRADFORD ROAD, TROWBRIDGE",BA14 9AZ,TROWBRIDGE@travisperkins.co.uk,01225 764451,51.321003,-2.21979
+Travis Perkins,OXFORD SANDY LANE,"TRAVIS PERKINS TRADING CO. LTD, SANDY LANE WEST, LITTLEMORE, OXFORD",OX4 6JU,OXFORDSANDY@travisperkins.co.uk,01865 241411,51.721801,-1.212347
+Travis Perkins,CHIPPENHAM,"TRAVIS PERKINS TRADING CO. LTD, 65A SHELDON ROAD, CHIPPENHAM",SN14 0BU,CHIPPENHAM@travisperkins.co.uk,01249 653365,51.458198,-2.130649
+Travis Perkins,BRISTOL STOKE GIFFORD,"TRAVIS PERKINS TRADING CO. LTD, NEW ROAD, STOKE GIFFORD, BRISTOL",BS34 8QW,BRISNORTH@travisperkins.co.uk,0117 969 5811,51.508133,-2.557688
+Travis Perkins,BRISTOL CLIFTON,"TRAVIS PERKINS TRADING CO. LTD, 5 WHITELADIES GATE, CLIFTON, BRISTOL",BS8 2PH,BRISSOUTH@travisperkins.co.uk,0117 973 8246,51.464419,-2.609381
+Travis Perkins,SWANSEA,"TRAVIS PERKINS TRADING CO. LTD, UPPER FFOREST WAY, LLANSAMLET, SWANSEA",SA6 8PP,SWANSEACAR@travisperkins.co.uk,01792 588171,51.666366,-3.91225
+Travis Perkins,ALTON,"TRAVIS PERKINS TRADING CO. LTD, WINCHESTER ROAD, ALTON",GU34 1RY,ALTONTP@travisperkins.co.uk,01420 85256,51.137004,-0.986771
+Travis Perkins,ANDOVER,"TRAVIS PERKINS TRADING CO. LTD, CHARLTON ROAD, ANDOVER",SP10 3JJ,CHARLTONRD@travisperkins.co.uk,01264 353135,51.21313,-1.487565
+Travis Perkins,CHRISTCHURCH,"TRAVIS PERKINS TRADING CO. LTD, WILVERLEY ROAD, CHRISTCHURCH",BH23 3RU,CCHURCH@travisperkins.co.uk,01202 483441,50.739107,-1.742659
+Travis Perkins,PULBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, STATION APPROACH, PULBOROUGH",RH20 1AQ,PULBOROUGH@travisperkins.co.uk,01798 873811,50.957904,-0.514836
+Travis Perkins,PETERSFIELD,"TRAVIS PERKINS TRADING CO. LTD, 9 BEDFORD ROAD, PETERSFIELD",GU32 3LW,PETERSFLD@travisperkins.co.uk,01730 262233,51.004212,-0.946322
+Travis Perkins,BRISTOL SOUTHMEAD,"TRAVIS PERKINS TRADING CO. LTD, KELSTON ROAD, SOUTHMEAD, BRISTOL",BS10 5EP,BRISWEST@travisperkins.co.uk,0117 950 4700,51.495377,-2.598961
+Travis Perkins,GASTARD,"TRAVIS PERKINS TRADING CO. LTD, LANES END, GASTARD, CORSHAM",SN13 9QS,GASTARD@travisperkins.co.uk,01249 713431,51.414715,-2.165323
+Travis Perkins,MINEHEAD,"TRAVIS PERKINS TRADING CO. LTD, MART ROAD, MINEHEAD, SOMERSET",TA24 5BJ,MINEHEAD@travisperkins.co.uk,01643 703702,51.203611,-3.468078
+Travis Perkins,WINCANTON,"TRAVIS PERKINS TRADING CO. LTD, OLD TOWN MILLS, MILL STREET, WINCANTON",BA9 9AN,WINCANTON@travisperkins.co.uk,01963 33881,51.055372,-2.414129
+Travis Perkins,BATH,"TRAVIS PERKINS TRADING CO. LTD, SYDENHAM WHARF, LOWER BRISTOL ROAD, BATH",BA2 3EE,BATH@travisperkins.co.uk,01225 446110,51.379505,-2.36923
+Travis Perkins,BLANDFORD TANGLEWOOD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, BLANDFORD HTS IND EST, BLANDFORD FORUM",DT11 7XB,BLANDFORDT@travisperkins.co.uk,01258 480480,50.871259,-2.15907
+Travis Perkins,DROITWICH,"TRAVIS PERKINS TRADING CO. LTD, KIDDERMINSTER ROAD, DROITWICH SPA",WR9 9AY,DROITWICH@travisperkins.co.uk,01905 776019,52.27205,-2.154941
+Travis Perkins,PERSHORE,"TRAVIS PERKINS TRADING CO. LTD, HURST FARM, WYRE ROAD, PERSHORE",WR10 1PF,PERSHORE@travisperkins.co.uk,01386 552078,52.122383,-2.073707
+Travis Perkins,FINCHAMPSTEAD,"TRAVIS PERKINS TRADING CO. LTD, PARK LANE SAWMILLS, FINCHAMPSTEAD",RG40 4PT,FINCHAMP@travisperkins.co.uk,01189 761100,51.381139,-0.885256
+Travis Perkins,MALVERN,"TRAVIS PERKINS TRADING CO. LTD, 2 BOND STREET, HOWSELL ROAD, MALVERN",WR14 1TQ,MALVERN@travisperkins.co.uk,01684 568401,52.128258,-2.321894
+Travis Perkins,PORTISHEAD,"TRAVIS PERKINS TRADING CO. LTD, BRISTOL ROAD, PORTISHEAD, BRISTOL",BS20 6QG,PORTISHEAD@travisperkins.co.uk,01275 846355,51.476066,-2.761056
+Travis Perkins,SOUTH WOODHAM FERRERS,"TRAVIS PERKINS TRADING CO. LTD, 73-79 CUTLERS ROAD, SALTCOATES INDUSTRIAL ESTATE, SOUTH WOODHAM FERRERS",CM3 5WA,WOODHAMFER@travisperkins.co.uk,01245 324022,51.649521,0.621224
+Travis Perkins,LEEDS ELLAND ROAD,"TRAVIS PERKINS TRADING CO.LTD, ELLAND ROAD INDUSTRIAL ESTATE, ELLAND WAY, LEEDS",LS11 0EY,ELLANDROAD@travisperkins.co.uk,0113 512 4488,53.774905,-1.579965
+Travis Perkins,LOWESTOFT,"TRAVIS PERKINS TRADING CO. LTD, 2 TOWER ROAD, SOUTH LOWESTOFT INDUST EST, LOWESTOFT",NR33 7NG,LOWESTOFT@travisperkins.co.uk,01502 585146,52.44479,1.722907
+Travis Perkins,SWAFFHAM,"TRAVIS PERKINS TRADING CO. LTD, LYNN ROAD, SWAFFHAM",PE37 7PT,SWAFFHAM@travisperkins.co.uk,01760 723290,52.651357,0.674884
+Travis Perkins,MAIDSTONE PARKWOOD,"TRAVIS PERKINS TRADING CO. LTD, BIRCHOLT ROAD, PARKWOOD INDUSTRIAL ESTATE, MAIDSTONE",ME15 9XY,PARKWOOD@travisperkins.co.uk,01622 688809,51.238396,0.563669
+Travis Perkins,PERTH,"TRAVIS PERKINS TRADING CO. LTD, 174 DUNKELD ROAD, PERTH",PH1 3AA,,01738 633611,56.411565,-3.455764
+Travis Perkins,ORPINGTON,"TRAVIS PERKINS TRADING CO. LTD, KENT ROAD, ST MARY CRAY, ORPINGTON",BR5 4AB,ORPINGTON@travisperkins.co.uk,01689 825062,51.387036,0.110698
+Travis Perkins,SHEFFIELD CENTRAL,"TRAVIS PERKINS TRADING CO. LTD, 515 QUEENS ROAD, SHEFFIELD",S2 4DS,SHEFFIELDQR@travisperkins.co.uk,0114 255 6121,53.365947,-1.46778
+Travis Perkins,WRINGTON,"TRAVIS PERKINS TRADING CO. LTD, HAVYATT ROAD TRADING ESTATE, HAVYATT ROAD, WRINGTON",BS40 5PA,WRINGTON@travisperkins.co.uk,01934 862439,51.355786,-2.761762
+Travis Perkins,CLEATOR MOOR,"TRAVIS PERKINS TRADING CO. LTD, LECONFIELD INDUSTRIAL ESTATE, CLEATOR MOOR",CA25 5QB,CLEATORMR@travisperkins.co.uk,01946 811553,54.526154,-3.522073
+Travis Perkins,QUEENS PARK,"TRAVIS PERKINS TRADING CO. LTD, CHAMBERLAYNE ROAD, BRENT, LONDON",NW10 3NB,QUEENSPARK@travisperkins.co.uk,020 8964 9000,51.531241,-0.216732
+Travis Perkins,KEIGHLEY,"TRAVIS PERKINS TRADING CO. LTD, HAINCLIFFE ROAD, INGROW, KEIGHLEY",BD21 5BU,KEIGHLEY@travisperkins.co.uk,01535 665426,53.853164,-1.914077
+Travis Perkins,PRESTON,"TRAVIS PERKINS TRADING CO. LTD, TULKETH BROW, PRESTON",PR2 2SH,PRESTONTP@travisperkins.co.uk,01772 729326,53.765408,-2.720951
+Travis Perkins,MUCH WENLOCK,"TRAVIS PERKINS TRADING CO. LTD, NEW ROAD, MUCH WENLOCK",TF13 6EQ,MUCHWEN@travisperkins.co.uk,01952 727118,52.597073,-2.56049
+Travis Perkins,BOURTON ON THE WATER,"TRAVIS PERKINS TRADING CO. LTD, BOURTON INDUSTRIAL PARK, BOURTON-ON-THE-WATER, CHELTENHAM",GL54 2HQ,BOURTON@travisperkins.co.uk,01451 822040,51.893725,-1.752453
+Travis Perkins,READING WOODLEY,"TRAVIS PERKINS TRADING CO. LTD, UNIT C HEADLEY PARK 8, HEADLEY PARK EAST, WOODLEY, READING",RG5 4SW,WOODLEY@travisperkins.co.uk,0118 969 5959,51.454628,-0.89337
+Travis Perkins,CAMBERLEY,"TRAVIS PERKINS TRADING CO. LTD, 280 GORDON AVENUE, CAMBERLEY",GU15 2NU,CAMBERLEY@travisperkins.co.uk,01276 65051,51.32866,-0.753951
+Travis Perkins,WRENINGHAM,"TRAVIS PERKINS TRADING CO. LTD, THE MILL, MILL LANE, WRENINGHAM, NORWICH",NR16 1AG,WRENINGHAM@travisperkins.co.uk,01508 489789,52.538154,1.190657
+Travis Perkins,CAMERTON,"TRAVIS PERKINS TRADING CO. LTD, REDHILL, CAMERTON, BATH",BA2 0NY,CAMERTON@travisperkins.co.uk,01761 470237,51.322518,-2.457488
+Travis Perkins,MARPLE,"TRAVIS PERKINS TRADING CO. LTD, 46 STOCKPORT ROAD, MARPLE",SK6 6AB,MARPLE@travisperkins.co.uk,0161 426 0707,53.39495,-2.064954
+Travis Perkins,LEAMINGTON SPA,"TRAVIS PERKINS TRADING CO. LTD, UNIT 5 SHIRES GATE TRADE PARK, TACHBROOK PARK DRIVE, LEAMINGTON SPA",CV34 6RH,LEAMSPA@travisperkins.co.uk,01926 463000,52.278337,-1.548165
+Travis Perkins,RICHMOND,"TRAVIS PERKINS TRADING CO. LTD, 8-10 BARDOLPH ROAD, RICHMOND",TW9 2LH,RICHMOND@travisperkins.co.uk,020 8332 9689,51.466516,-0.289472
+Travis Perkins,BODMIN,"TRAVIS PERKINS TRADING CO. LTD, RESPRYN ROAD, BODMIN",PL31 1DQ,BODMIN@travisperkins.co.uk,01208 78880,50.458474,-4.70878
+Travis Perkins,MALDON,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1 GALLIFORD RD INDUST EST, HEYBRIDGE, MALDON",CM9 4XD,MALDONBM@travisperkins.co.uk,01621 853949,51.739579,0.682322
+Travis Perkins,MARLBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, 56 GEORGE LANE, MARLBOROUGH",SN8 4BY,MARLBORO@travisperkins.co.uk,01672 519135,51.418107,-1.72887
+Travis Perkins,PORTSMOUTH,"TRAVIS PERKINS TRADING CO. LTD, QUARTREMAINE ROAD, QUARTREMAINE RD INDUST EST, PORTSMOUTH",PO3 5QH,PORTSMOUTH@travisperkins.co.uk,02392 669299,50.821172,-1.053602
+Travis Perkins,MERTHYR TYDFIL,"TRAVIS PERKINS TRADING CO. LTD, CYFARTHFA YARD, CYFARTHFA ROAD, MERTHYR TYDFIL",CF48 1BS,MERTHYR@travisperkins.co.uk,01685 384321,51.751697,-3.390588
+Travis Perkins,BURY ST EDMUNDS,"TRAVIS PERKINS TRADING CO. LTD, 35 NORTHERN WAY, BURY ST EDMUNDS",IP32 6NL,BSTEDMUNDS@travisperkins.co.uk,01284 703003,52.266257,0.698971
+Travis Perkins,CAERPHILLY DIRECT,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6 SWANBRIDGE COURT, BEDWAS HOUSE INDUSTRIAL ESTATE, CAERPHILLY",CF83 8FW,,029 2086 1237,51.593123,-3.207895
+Travis Perkins,BURGESS HILL,"TRAVIS PERKINS TRADING CO. LTD, UNIT 12 VICTORIA WAY, VICTORIA TRADING ESTATE, BURGESS HILL",RH15 9NF,BURGESSHILL@travisperkins.co.uk,01444 239900,50.954637,-0.142467
+Travis Perkins,SHEPSHED,"TRAVIS PERKINS TRADING CO. LTD, OLD STATION CLOSE, SHEPSHED",LE12 9NJ,SHEPSHED@travisperkins.co.uk,01509 504666,52.762615,-1.294209
+Travis Perkins,NORTH WALSHAM,"TRAVIS PERKINS TRADING CO. LTD, 108 CROMER ROAD, NORTH WALSHAM",NR28 0NB,WALSHAM@travisperkins.co.uk,01692 404356,52.827186,1.368243
+Travis Perkins,TOLWORTH,"TRAVIS PERKINS TRADING CO. LTD, 165 KING CHARLES ROAD, TOLWORTH, SURBITON",KT5 9BG,TOLWORTH@travisperkins.co.uk,020 8399 1307,51.383571,-0.285941
+Travis Perkins,EASTWOOD,"TRAVIS PERKINS TRADING CO. LTD, LINKMEL RD, LANGLEY BRG IND ES, LANGLEY MILL, EASTWOOD",NG16 3RZ,EASTWOOD@travisperkins.co.uk,01773 712630,53.02005,-1.322386
+Travis Perkins,HEMEL HEMPSTEAD,"TRAVIS PERKINS TRADING CO. LTD, LAWN LANE, HEMEL HEMPSTEAD",HP3 9HR,HEMELHEMP@travisperkins.co.uk,01442 251311,51.742921,-0.471802
+Travis Perkins,LUDLOW,"TRAVIS PERKINS TRADING CO. LTD, CORFIELD ROAD, LUDLOW BUSINESS PARK, LUDLOW",SY8 1FH,LUDLOW@travisperkins.co.uk,01584 873877,52.370424,-2.697092
+Travis Perkins,WALTON ON THAMES,"TRAVIS PERKINS TRADING CO. LTD, NORTH WEYLANDS INDUSTRIAL EST, MOLESEY ROAD, WALTON ON THAMES",KT12 3PL,HERSHAM@travisperkins.co.uk,01932 247 761,51.380516,-0.386833
+Travis Perkins,COLEFORD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2, TUFTHORN BUSINESS PARK, COLEFORD",GL16 8PJ,COLEFORD@travisperkins.co.uk,01594 836836,51.784278,-2.607289
+Travis Perkins,MONMOUTH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 8, WONASTOW RD INDUST EST WEST, MONMOUTH",NP25 5JA,MONMOUTH@travisperkins.co.uk,01600 713029,51.807227,-2.729883
+Travis Perkins,WROXALL IOW,"TRAVIS PERKINS TRADING CO. LTD, 4-6 STA RD INDUST EST, WROXALL, VENTNOR",PO38 3BE,WROXALL@travisperkins.co.uk,01983 852273,50.616481,-1.222334
+Travis Perkins,CUFFLEY,"TRAVIS PERKINS TRADING CO. LTD, SOPERS ROAD, CUFFLEY",EN6 4RY,CUFFLEY@travisperkins.co.uk,01707 873536,51.70725,-0.108184
+Travis Perkins,CARDIFF HEATH,"TRAVIS PERKINS TRADING CO. LTD, FIELD WAY, MAES-Y-COED ROAD, HEATH, CARDIFF",CF14 4HY,BRITCARD2@travisperkins.co.uk,02920 621767,51.521079,-3.194816
+Travis Perkins,GORSEINON,"TRAVIS PERKINS TRADING CO. LTD, PHOENIX WAY, GARNGOCH INDUSTRIAL ESTATE, GORSEINON",SA4 9WF,BRITSWAN@travisperkins.co.uk,01792 894081,51.6648,-4.018701
+Travis Perkins,PONTYPRIDD,"TRAVIS PERKINS TRADING CO. LTD, GYFEILLON ROAD, TREHAFOD, PONTYPRIDD",CF37 2PP,PONTYPRIDD@travisperkins.co.uk,01443 492323,51.609561,-3.369977
+Travis Perkins,BULWELL,"TRAVIS PERKINS TRADING CO. LTD, LEEN DRIVE, SPRINGFIELD PARK, HUCKNALL LANE, BULWELL, NOTTINGHAM",NG6 8EP,BULWELL@travisperkins.co.uk,0115 975 3811,53.010439,-1.189798
+Travis Perkins,HEYWOOD,"TRAVIS PERKINS TRADING CO. LTD, BROOKBANK WORKS, GREEN LANE, HEYWOOD",OL10 1NG,HEYWOOD@travisperkins.co.uk,01706 360038,53.592155,-2.207633
+Travis Perkins,YORK CLIFTON MOOR,"TRAVIS PERKINS TRADING CO. LTD, GEORGE CAYLEY DRIVE, CLIFTON MOOR, YORK",YO30 4XE,YORKYSS@travisperkins.co.uk,01904 690821,53.986079,-1.098041
+Travis Perkins,STOCKPORT ADSWOOD LANE,"TRAVIS PERKINS TRADING CO. LTD, ADSWOOD LANE WEST, CALE GREEN, STOCKPORT",SK3 8HT,ADSWOOD@travisperkins.co.uk,0161 480 6655,53.396608,-2.157413
+Travis Perkins,SLEAFORD,"TRAVIS PERKINS TRADING CO. LTD, OAKSIDE PARK INDUSTRIAL ESTATE, EAST ROAD, SLEAFORD",NG34 7EQ,SLEAFORD@travisperkins.co.uk,01529 309670,53.004588,-0.396654
+Travis Perkins,BRIGHOUSE,"TRAVIS PERKINS TRADING CO. LTD, WAKEFIELD ROAD, BRIGHOUSE",HD6 1QQ,BRIGHOUSE@travisperkins.co.uk,01484 721188,53.70063,-1.770356
+Travis Perkins,TRAVIS PERKINS AGGREGATE SALES,"TRAVIS PERKINS TRADING CO. LTD, FENCE AVENUE, MACCLESFIELD, CHESHIRE",SK10 1LT,AGGREGATEORDERS@travisperkins.co.uk,01625 413044,53.261988,-2.116365
+Travis Perkins,RADCLIFFE,"TRAVIS PERKINS TRADING CO. LTD, BURY & BOLTON ROAD, RADCLIFFE, MANCHESTER",M26 4FP,RADCLIFFE@travisperkins.co.uk,01204 386714,53.578454,-2.357132
+Travis Perkins,LLANTRISANT,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4B, COED CAE LANE IND EST, PONTYCLUN, LLANTRISANT",CF72 9HG,LLANTRISANT@travisperkins.co.uk,01443 239114,51.532298,-3.40223
+Travis Perkins,LEEK,"TRAVIS PERKINS TRADING CO. LTD, BARNFIELD ROAD, LEEK",ST13 5QG,LEEK@travisperkins.co.uk,01538 399014,53.097616,-2.032454
+Travis Perkins,SCARBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, FORGE HOUSE, DUNSLOW ROAD, EASTFIELD, SCARBOROUGH",YO11 3UT,SCARBOROUGH@travisperkins.co.uk,01723 583399,54.238045,-0.414342
+Travis Perkins,CARLISLE KINGSTOWN,"TRAVIS PERKINS TRADING CO. LTD, BLACKDYKE ROAD, KINGSTOWN INDUSTRIAL ESTATE, CARLISLE",CA3 0PJ,KINGSTOWN@travisperkins.co.uk,01228 542990,54.925499,-2.955036
+Travis Perkins,MORETON IN MARSH,"TRAVIS PERKINS TRADING CO. LTD, COTSWOLD BUSINESS PARK, LONDON ROAD, MORETON IN MARSH",GL56 0JQ,MORETONINMARSH@travisperkins.co.uk,01608 654037,51.987814,-1.687395
+Travis Perkins,ROWLEY REGIS,"TRAVIS PERKINS TRADING CO. LTD, AVENUE ROAD, ROWLEY REGIS",B65 0LP,ROWLEYREGIS@travisperkins.co.uk,0121 561 2233,52.475855,-2.034298
+Travis Perkins,BIRMINGHAM STIRCHLEY,"TRAVIS PERKINS TRADING CO. LTD, TEN ACRES END, 1058 PERSHORE R, STIRCHLEY, BIRMINGHAM",B30 2YG,BIRMINGHAMSTIRCHLEY@travisperkins.co.uk,0121 472 8215,52.433767,-1.918523
+Travis Perkins,STROUD,"TRAVIS PERKINS TRADING CO. LTD, MIDDLE WHARF, WALLBRIDGE, STROUD",GL5 3JB,STROUD@travisperkins.co.uk,01453 762194,51.744055,-2.221331
+Travis Perkins,CORBY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 3 HERITAGE WAY, CORBY",NN17 5XW,TPCORBY@travisperkins.co.uk,01536 264001,52.506527,-0.680547
+Travis Perkins,PONTEFRACT,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4B, DALIAN BUSINESS PARK, PARK ROAD, PONTEFRACT",WF8 4PR,PONTEFRACT@travisperkins.co.uk,01977 795694,53.697139,-1.319187
+Travis Perkins,BIRMINGHAM TYSELEY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6, KINGS ROAD INDUSTRIAL ESTATE, BIRMINGHAM",B11 2AX,BIRMINGHAMEAST@travisperkins.co.uk,0121 766 8160,52.460556,-1.837822
+Travis Perkins,HODDESDON,"TRAVIS PERKINS TRADING CO. LTD, ESSEX ROAD, HODDESDON",EN11 0DR,HODDESDON@travisperkins.co.uk,01992 461941,51.761969,-0.000559
+Travis Perkins,ELY,"TRAVIS PERKINS TRADING CO. LTD, LISLE LN, ELY",CB7 4AS,ELY@travisperkins.co.uk,01353 662580,52.398165,0.269808
+Travis Perkins,HAVERHILL,"TRAVIS PERKINS TRADING CO. LTD, 35 HOLLANDS ROAD, HAVERHILL",CB9 8PU,HAVERHILL@travisperkins.co.uk,01440 707788,52.073954,0.444515
+Travis Perkins,WINDLESHAM,"TRAVIS PERKINS TRADING CO. LTD, SNOWS RIDE, WINDLESHAM",GU20 6LA,WINDLESHAM@travisperkins.co.uk,01276 473304,51.375416,-0.663846
+Travis Perkins,MIDDLESBROUGH,"TRAVIS PERKINS TRADING CO. LTD, SOTHERBY ROAD, MIDDLESBROUGH",TS3 8TE,MIDDLESBROUGH@travisperkins.co.uk,01642 233190,54.571526,-1.189598
+Travis Perkins,NAILSEA,"TRAVIS PERKINS TRADING CO. LTD, UNIT 19-20, SOUTHFIELD RD IND, NAILSEA, BRISTOL",BS48 1JE,NAILSEA@travisperkins.co.uk,01275 857299,51.438495,-2.751915
+Travis Perkins,DEREHAM,"TRAVIS PERKINS TRADING CO. LTD, GREENS ROAD, DEREHAM",NR20 3TG,DEREHAM@travisperkins.co.uk,01362 854082,52.674238,0.951529
+Travis Perkins,BRAMPTON,"TRAVIS PERKINS TRADING CO. LTD, TOWNFOOT INDUSTRIAL ESTATE, BRAMPTON",CA8 1SW,BRAMPTON@travisperkins.co.uk,01697 742167,54.941776,-2.74826
+Travis Perkins,MILFORD HAVEN,"TRAVIS PERKINS TRADING CO. LTD, UNIT 12, THORNTON INDUSTRIAL ESTATE, MILFORD HAVEN",SA73 2RR,MILFORDHAVEN@travisperkins.co.uk,01646 690222,51.726331,-5.031079
+Travis Perkins,BIRMINGHAM CENTRAL,"TRAVIS PERKINS TRADING CO. LTD, 1 SOUTH ROAD, HOCKLEY, BIRMINGHAM",B18 5LT,BIRMINGHAMCENTRAL@travisperkins.co.uk,0121 554 3396,52.496113,-1.917923
+Travis Perkins,LAMPETER,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1-4 LLAMBED BUSINESS PARK, TREGARON ROAD, LAMPETER",SA48 8LT,LAMPETER@travisperkins.co.uk,01570 422521,52.120506,-4.076524
+Travis Perkins,ABERYSTWYTH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, CAE GWYN, GLAN YR AFON INDUSTRIAL ESTATE, ABERYSTWYTH",SY23 3JF,ABERYSTWYTH@travisperkins.co.uk,01970 625679,52.399896,-4.042768
+Travis Perkins,TONBRIDGE,"TRAVIS PERKINS TRADING CO. LTD, CANNON LANE, TONBRIDGE",TN9 1PL,TONBRIDGE@travisperkins.co.uk,01732 350286,51.196866,0.284396
+Travis Perkins,LICHFIELD,"TRAVIS PERKINS TRADING CO. LTD, BIRMINGHAM ROAD, LICHFIELD",WS14 9BJ,LICHFIELD@travisperkins.co.uk,01543 420680,52.672898,-1.831549
+Travis Perkins,KESWICK,"TRAVIS PERKINS TRADING CO. LTD, BROWFOOT WORKS, PENRITH ROAD, KESWICK",CA12 4LH,KESWICK@travisperkins.co.uk,017687 64700,54.604518,-3.118324
+Travis Perkins,HARROW NORTH,"TRAVIS PERKINS TRADING CO. LTD, 24-42 PALMERSTON ROAD, WEALDSTONE, HARROW",HA3 7RR,TANNANDSONS@travisperkins.co.uk,020 8427 0297,51.59339,-0.333768
+Travis Perkins,LEIGHTON BUZZARD,"TRAVIS PERKINS TRADING CO. LTD, UNIT A, LANCER COURT, GROVEBURY ROAD, LEIGHTON BUZZARD",LU7 4SE,LEIGHTONBUZZ@travisperkins.co.uk,01525 372270,51.911668,-0.658189
+Travis Perkins,ST ALBANS,"TRAVIS PERKINS TRADING CO. LTD, CAMPFIELD ROAD, ST ALBANS",AL1 5HT,STALBANS@travisperkins.co.uk,01727 773800,51.749644,-0.315188
+Travis Perkins,BURNLEY,"TRAVIS PERKINS TRADING CO. LTD, ACCRINGTON ROAD, BURNLEY",BB11 5AL,BURNLEY@travisperkins.co.uk,01282 455336,53.787387,-2.265654
+Travis Perkins,FISHGUARD,"TRAVIS PERKINS TRADING CO. LTD, CELTIC LINK INDUSTRIAL PARK, SCLEDDAU, FISHGUARD",SA65 9RE,FISHGUARD@travisperkins.co.uk,01348 875656,51.97411,-5.006728
+Travis Perkins,LEYTONSTONE TP,"TRAVIS PERKINS TRADING CO. LTD, ARCHES 234-248, JOSEPH RAY ROAD, LEYTONSTONE",E11 4RA,LEYTONSTONE@travisperkins.co.uk,0207 126 7566,51.5639,0.008199
+Travis Perkins,CHICHESTER,"TRAVIS PERKINS TRADING CO. LTD, SHIPTON GREEN LANE, ITCHENOR, CHICHESTER",PO20 7BZ,CHICHESTER@travisperkins.co.uk,01243 512823,50.789603,-0.856225
+Travis Perkins,BIRMINGHAM BOURNVILLE,"TRAVIS PERKINS TRADING CO. LTD, HASTINGS HOUSE, CHARLOTTE ROAD, STIRCHLEY, BIRMINGHAM",B30 2BT,BRIMINGHAMBOURNVILLE@travisperkins.co.uk,0121 451 1664,52.425194,-1.923788
+Travis Perkins,WARMINSTER,"TRAVIS PERKINS TRADING CO. LTD, STEPHENS WAY, WARMINSTER BUSINESS PARK, WARMINSTER",BA12 8SR,WARMINSTER@travisperkins.co.uk,01985 216902,51.212899,-2.190553
+Travis Perkins,TWICKENHAM,"TRAVIS PERKINS TRADING CO. LTD, 209 WORTON ROAD, ISLEWORTH",TW7 6DS,TWICKENHAM@travisperkins.co.uk,020 8465 2900,51.467324,-0.333686
+Travis Perkins,CLEARANCE WAREHOUSE,"TRAVIS PERKINS TRADING CO. LTD, 73 COMMERCIAL SQUARE, FREEMENS COMMON, LEICESTER",LE2 7SR,TPCLEARANCE@travisperkins.co.uk,0116 255 3539,52.617329,-1.134116
+Travis Perkins,BRADFORD CLEARANCE W-HOUSE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4 WHITEHEAD BUSINESS PARK, HOLLAND STREET, BRADFORD",BD4 8BH,BRADFORDCLEARANCE@travisperkins.co.uk,01274 888991,53.789489,-1.713377
+Travis Perkins,HAILSHAM,"TRAVIS PERKINS TRADING CO. LTD, STELLA HOUSE, DIPLOCKS WAY, HAILSHAM",BN27 3JF,HAILSHAM@travisperkins.co.uk,01323 449742,50.860833,0.248746
+Travis Perkins,ENFIELD,"TRAVIS PERKINS TRADING CO. LTD, 46 CROWN ROAD, ENFIELD",EN1 1TH,ENFIELD@travisperkins.co.uk,020 8344 9700,51.653507,-0.057264
+Travis Perkins,BRACKNELL,"TRAVIS PERKINS TRADING CO. LTD, 6 TRADE CITY, EASTHAMPSTEAD ROAD, BRACKNELL",RG12 1BX,BRACKNELL@travisperkins.co.uk,01344 306689,51.416645,-0.762117
+Travis Perkins,LEEDS COAL ROAD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1B, SEACROFT INDUST PARK, COAL ROAD, LEEDS",LS14 2AQ,LEEDSCOALROAD@travisperkins.co.uk,0113 273 5857,53.827572,-1.456091
+Travis Perkins,PENZANCE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 18, PONIOU ROAD, LONG ROCK INDUSTRIAL ESTATE, PENZANCE",TR20 8HX,PENZANCE@travisperkins.co.uk,01736 874576,50.13026,-5.505136
+Travis Perkins,LINCOLN SOUTH,"TRAVIS PERKINS TRADING CO.LTD, TEAL PARK, WHISBY ROAD, LINCOLN",LN6 3AG,LINCOLNSOUTH@travisperkins.co.uk,01522 899792,53.199673,-0.611033
+Travis Perkins,STRANRAER,"TRAVIS PERKINS TRADING CO. LTD, COMMERCE ROAD, BLACK PARKS IND EST, STRANRAER",DG9 7DF,STRANRAERTP@travisperkins.co.uk,01776 706101,54.89435,-5.021666
+Travis Perkins,BOREHAMWOOD,"TRAVIS PERKINS TRADING CO. LTD, CHESTER ROAD, BOREHAMWOOD",WD6 1LT,BOREHAMWOOD@travisperkins.co.uk,020 8953 1926,51.658022,-0.2584
+Travis Perkins,BANBURY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 11, WILDMERE ROAD, WILDMERE ROAD IND ESTATE, BANBURY",OX16 3UU,BANBURY@travisperkins.co.uk,01295 272200,52.074368,-1.319882
+Travis Perkins,OXFORD WEST WAY,"TRAVIS PERKINS TRADING CO. LTD, 61 WEST WAY, BOTLEY, OXFORD",OX2 0JE,OXFORDWEST@travisperkins.co.uk,01865 240401,51.752841,-1.294846
+Travis Perkins,SWINDON WEST,"TRAVIS PERKINS TRADING CO. LTD, PAGODA PARK, WESTMEAD DRIVE, SWINDON",SN5 7UN,SWINDONWEST@travisperkins.co.uk,01793 615861,51.564631,-1.820085
+Travis Perkins,MINWORTH,"TRAVIS PERKINS TRADING CO. LTD, MINWORTH INDUSTRIAL PARK, FORGE LANE, MINWORTH, SUTTON COLDFIELD",B76 1AH,BIRMINGHAMERDINGTON@travisperkins.co.uk,0121 377 6313,52.529019,-1.784531
+Travis Perkins,SWADLINCOTE,"TRAVIS PERKINS TRADING CO. LTD, GEORGE HOLMES BUSINESS PARK, GEORGE HOLMES WAY, SWADLINCOTE",DE11 9DF,SWADCOTE@travisperkins.co.uk,01283 226644,52.771595,-1.568222
+Travis Perkins,BRISTOL LONGWELL GREEN TP,"TRAVIS PERKINS TRADING CO. LTD, ALDERMOOR LANE, LONGWELL GREEN, BRISTOL",BS30 7DA,BRISTOLLONGWELLGREEN@travisperkins.co.uk,0117 3224041,51.444848,-2.498065
+Travis Perkins,NORWICH BROADLAND GATE,"TRAVIS PERKINS TRADING CO. LTD, BROADLAND GATE, MAPLE WAY, POSTWICK, NORWICH",NR13 5HB,BROADLANDGATE@travisperkins.co.uk,01603 567667,52.628943,1.382772
+Travis Perkins,AYLESBURY BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, 10 GATEHOUSE WAY, AYLESBURY",HP19 8DB,AYLESBURYBRANCH@benchmarxjoinery.co.uk,01296 339343,51.819628,-0.828111
+Travis Perkins,BURY ST EDMUNDS BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNITS 9 & 11 CRATFIELD ROAD, MORETON HALL INDUSTRIAL PARK, BURY ST EDMUNDS, SUFFOLK",IP32 7DF,BURYSTEDMUNDSBRANCH@benchmarxjoinery.co.uk,01284 717290,52.238896,0.745533
+Travis Perkins,BRIDGEND BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 7 YORK PARK, NEW STREET, BRIDGEND",CF31 3TB,BRIDGENDBRANCH@benchmarxjoinery.co.uk,01656 647878,51.498677,-3.561506
+Travis Perkins,LONGBENTON BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4A NORTH TYNE IND. ESTATE, WHITLEY ROAD, NEWCASTLE UPON TYNE",NE12 9SZ,LONGBENTONBRANCH@benchmarxjoinery.co.uk,01912 599524,55.020516,-1.543289
+Travis Perkins,BANGOR BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6 GATEWAY PARK, LLANDEGAI INDUSTRIAL ESTATE, GWYNEDD, BANGOR",LL57 4YH,BANGORBRANCH@benchmarxjoinery.co.uk,01248 371195,53.217985,-4.111526
+Travis Perkins,MINWORTH BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT C3, MINWORTH TRADE PARK, STOCKTON CLOSE, SUTTON COLDFIELD",B76 1DH,MINWORTHBRANCH@benchmarxjoinery.co.uk,0121 313 2412,52.530395,-1.779601
+Travis Perkins,SHEFFIELD MEADOWHALL BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1 ATTERCLIFFE TRADING CTR, SURBITON STREET, SHEFFIELD",S9 2DN,SHEFFIELDBRANCH@benchmarxjoinery.co.uk,01142 444168,53.403247,-1.416943
+Travis Perkins,READING ACRE ROAD,"TRAVIS PERKINS TRADING CO. LTD, ACRE ROAD, READING",RG2 0SU,READING@travisperkins.co.uk,0118 943 3803,51.424288,-0.977463
+Travis Perkins,READING ACRE ROAD DIRECT,"TRAVIS PERKINS TRADING CO. LTD, ACRE ROAD, READING",RG2 0SU,,0118 943 3803,51.424288,-0.977463
+Travis Perkins,CROWBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, 12 WEALDEN INDUSTRIAL ESTATE, FARNINGHAM ROAD, CROWBOROUGH",TN6 2JR,CROWBOROUGH@travisperkins.co.uk,01892 663392,51.045071,0.184313
+Travis Perkins,ALFORD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 7, BEECHINGS WAY INDUST EST, ALFORD",LN13 9JE,ALFORD@travisperkins.co.uk,01507 462741,53.255997,0.168584
+Travis Perkins,AYR,"TRAVIS PERKINS TRADING CO. LTD, 1 OLD FARM ROAD, HEATHFIELD INDUSTRIAL ESTATE, AYR",KA8 9ST,AYR@travisperkins.co.uk,01292 265171,55.476815,-4.599607
+Travis Perkins,LOCHGILPHEAD,"TRAVIS PERKINS TRADING CO. LTD, KILMORY INDUSTRIAL ESTATE, LOCHGILPHEAD",PA31 8RR,LOCHGILPHEAD@travisperkins.co.uk,01546 602071,56.026723,-5.425672
+Travis Perkins,ST BOSWELLS,"TRAVIS PERKINS TRADING CO. LTD, INDUSTRIAL ESTATE, NEWTOWN ST BOSWELLS, MELROSE",TD6 0PL,STBOSWELLS@travisperkins.co.uk,01835 822727,55.575324,-2.668386
+Travis Perkins,STIRLING,"TRAVIS PERKINS TRADING CO. LTD, WHITEHOUSE ROAD, SPRINGKERSE INDUSTRIAL ESTATE, STIRLING",FK7 7SP,STIRLING@travisperkins.co.uk,01786 475454,56.115046,-3.918276
+Travis Perkins,TAIN,"TRAVIS PERKINS TRADING CO. LTD, SHORE ROAD, TAIN",IV19 1EH,TAIN@travisperkins.co.uk,01862 892200,57.814906,-4.056507
+Travis Perkins,SHEFFIELD SOUTH,"TRAVIS PERKINS TRADING CO. LTD, MEADOWBROOK PARK, STATION ROAD, HOLBROOK, SHEFFIELD",S20 3PJ,SHEFFIELDCP@travisperkins.co.uk,0114 208 6943,53.328486,-1.334135
+Travis Perkins,CROYDON BEDDINGTON LANE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1-4 ASHWORTH IND ESTATE., BEDDINGTON LANE, CROYDON",CR0 4YZ,CROYDONBL@travisperkins.co.uk,020 3281 6228,51.380633,-0.132474
+Travis Perkins,NORWOOD,"TRAVIS PERKINS TRADING CO. LTD, 61-79 NORWOOD HIGH STREET, LAMBETH, LONDON",SE27 9JS,NORWOOD@travisperkins.co.uk,020 8670 0700,51.43047,-0.101656
+Travis Perkins,BURGH HEATH,"TRAVIS PERKINS TRADING CO. LTD, HEATHSIDE HOUSE, BRIGHTON ROAD, BURGH HEATH, TADWORTH",KT20 6BE,BURGHHEATH@travisperkins.co.uk,01737 362111,51.304408,-0.218994
+Travis Perkins,KENSAL GREEN,"TRAVIS PERKINS TRADING CO. LTD, 763 HARROW ROAD, KENSAL GREEN, LONDON",NW10 5NY,KENSAL@travisperkins.co.uk,020 8969 2000,51.530448,-0.22909
+Travis Perkins,BRIDGWATER,"TRAVIS PERKINS TRADING CO. LTD, 8-9 RIVERSIDE HOUSE, WYLDS ROAD, BRIDGWATER",TA6 4BH,BRIDGWATER@travisperkins.co.uk,01278 457371,51.139168,-2.996144
+Travis Perkins,MACCLESFIELD,"TRAVIS PERKINS TRADING CO. LTD, FENCE AVENUE, MACCLESFIELD",SK10 1LT,MACCLES@travisperkins.co.uk,01625 426262,53.261988,-2.116365
+Travis Perkins,SHARSTON,"TRAVIS PERKINS TRADING CO. LTD, LEESTONE ROAD, SHARSTON IND ES, SHARSTON, MANCHESTER",M22 4RF,SHARSTON@travisperkins.co.uk,0161 428 7331,53.398191,-2.255371
+Travis Perkins,NORWICH,"TRAVIS PERKINS TRADING CO. LTD, 35 EUROPA WAY, MARTINEAU LANE, NORWICH",NR1 2EN,NORWICH@travisperkins.co.uk,01603 765106,52.612444,1.307846
+Travis Perkins,TIPTON,"TRAVIS PERKINS TRADING CO. LTD, TOLL END ROAD, TIPTON",DY4 0EU,TIPTON@travisperkins.co.uk,0121 557 6437,52.540643,-2.040189
+Travis Perkins,BEDFORD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4, APEX BUSINESS PARK, CAMBRIDGE ROAD, BEDFORD",MK42 0AW,BEDFORD@travisperkins.co.uk,01234 356131,52.122407,-0.425434
+Travis Perkins,HINCKLEY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 24, HARROWBROOK ROAD, HINCKLEY",LE10 3DJ,HINCKLEY@travisperkins.co.uk,01455 238711,52.536092,-1.410259
+Travis Perkins,COALVILLE,"TRAVIS PERKINS TRADING CO. LTD, SNIBSTON DRIVE, COALVILLE",LE67 3NQ,COALVILLE@travisperkins.co.uk,01530 510383,52.726915,-1.387863
+Travis Perkins,MELTON MOWBRAY,"TRAVIS PERKINS TRADING CO. LTD, 1 PATE ROAD, LEICESTER RD INDUST EST, MELTON MOWBRAY",LE13 0RG,MELTON@travisperkins.co.uk,01664 563895,52.751724,-0.910681
+Travis Perkins,WORKSOP,"TRAVIS PERKINS TRADING CO. LTD, VESUVIUS WAY (OFF SANDY LANE), WORKSOP, NOTTS",S80 3NE,WORKSOP@travisperkins.co.uk,01909 475181,53.314429,-1.141309
+Travis Perkins,KETTERING,"TRAVIS PERKINS TRADING CO. LTD, 22 TELFORD WAY, KETTERING",NN16 8UN,KETTERING@travisperkins.co.uk,01536 482681,52.40844,-0.740912
+Travis Perkins,MARKET HARBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, THREE MANORS RETAIL PARK, ROCKINGHAM RD INDUST EST, MARKET HARBOROUGH",LE16 7BA,MKTHARBORO@travisperkins.co.uk,01858 467600,52.480171,-0.903743
+Travis Perkins,WELLINGBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, 10-14 MEADOW CLOSE, WELLINGBOROUGH, WELLINGBOROUGH",NN8 4BH,WELLINGBOR@travisperkins.co.uk,01933 276156,52.31695,-0.672765
+Travis Perkins,CANNOCK,"TRAVIS PERKINS TRADING CO. LTD, PHOENIX ROAD, HAWKS GREEN LANE, CANNOCK",WS11 7LR,CANNOCK@travisperkins.co.uk,01543 466866,52.696137,-2.010991
+Travis Perkins,SUTTON BENCHMARX KICHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, T/A BENCHMARX KITCHENS, K2 TRADE PARK, KIMPTON PARKWAY, SUTTON",SM3 9QS,SUTTONBRANCH@benchmarxjoinery.co.uk,0208 641 0424,51.377318,-0.206971
+Travis Perkins,WISBECH,"TRAVIS PERKINS TRADING CO. LTD, OLDFIELD LANE, WISBECH",PE13 2HH,WISBECH@travisperkins.co.uk,01945 582825,52.657574,0.152489
+Travis Perkins,PETERBOROUGH PADHOLME ROAD,"TRAVIS PERKINS TRADING CO. LTD, PADHOLME ROAD EAST, PETERBOROUGH",PE1 5XL,PETERPAD@travisperkins.co.uk,01733 566081,52.576995,-0.215341
+Travis Perkins,NEWARK,"TRAVIS PERKINS TRADING CO. LTD, BRUNEL DRIVE, NORTHERN RD INDUST EST, NEWARK",NG24 2DE,NEWARK@travisperkins.co.uk,01636 703388,53.088683,-0.786758
+Travis Perkins,STAFFORD,"TRAVIS PERKINS TRADING CO. LTD, 36 CORPORATION STREET, STAFFORD",ST16 3LY,STAFFORD@travisperkins.co.uk,01785 259421,52.814761,-2.115638
+Travis Perkins,STAPLEFORD,"TRAVIS PERKINS TRADING CO. LTD, CHURCH STREET, STAPLEFORD",CB22 5DS,STAPLEFORD@travisperkins.co.uk,01223 842041,52.145692,0.147371
+Travis Perkins,HOVE BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT B2-B3 PORTLAND BUS. PARK, PORTLAND ROAD, BRIGHTON",BN3 5RY,HOVEBRANCH@benchmarxjoinery.co.uk,01273 416818,50.835469,-0.197818
+Travis Perkins,AYLESBURY,"TRAVIS PERKINS TRADING CO. LTD, 10 GATEHOUSE WAY, AYLESBURY",HP19 8DB,AYLESBURY@travisperkins.co.uk,01296 431099,51.819628,-0.828111
+Travis Perkins,CROMER,"TRAVIS PERKINS TRADING CO. LTD, MIDDLEBROOK WAY, HOLT ROAD, CROMER",NR27 9JR,CROMER@travisperkins.co.uk,01263 511244,52.927692,1.284727
+Travis Perkins,CROYDON BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 5, 681 MITCHAM ROAD, CROYDON",CR0 3YH,CROYDONBRANCH@benchmarxjoinery.co.uk,0208 6895948,51.389192,-0.134655
+Travis Perkins,NEWBURY,"TRAVIS PERKINS TRADING CO. LTD, ARNHEM ROAD, VIA BONE LANE, NEWBURY",RG14 5RU,NEWBURY@travisperkins.co.uk,01635 45791,51.400559,-1.311888
+Travis Perkins,CIRENCESTER,"TRAVIS PERKINS TRADING CO. LTD, 12 LOVE LANE, CIRENCESTER",GL7 1WW,CIRENCESTER@travisperkins.co.uk,01285 652157,51.704336,-1.959266
+Travis Perkins,GLOUCESTER,"TRAVIS PERKINS TRADING CO. LTD, ASHVILLE INDUSTRIAL ESTATE, ASHVILLE ROAD, GLOUCESTER",GL2 5EU,GLOUCESTER@travisperkins.co.uk,01452 528411,51.844973,-2.260484
+Travis Perkins,PECKHAM BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT B1 6 BRIDGES TRADING EST, MARLBOROUGH GROVE, OFF OLD KENT ROAD, LONDON",SE1 5JT,PECKHAMBRANCH@benchmarxjoinery.co.uk,0207 237 6421,51.486124,-0.067355
+Travis Perkins,WALTHAMSTOW BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 9 WALTHAM PARK WAY, BILLET ROAD, WALTHAMSTOW, LONDON",E17 5DU,WALTHAMSTOWBRANCH@benchmarxjoinery.co.uk,0208 531 5769,51.601148,-0.020945
+Travis Perkins,CHESTER,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4 WINSFORD WAY, SEALAND INDUSTRIAL ESTATE, CHESTER",CH1 4NL,CHESTER@travisperkins.co.uk,01244 381662,53.193112,-2.916776
+Travis Perkins,BOURNEMOUTH WALLISDOWN ROAD,"TRAVIS PERKINS TRADING CO. LTD, 500 WALLISDOWN ROAD, BOURNEMOUTH",BH11 8PT,WALLISDOWN@travisperkins.co.uk,01202 519411,50.753019,-1.928792
+Travis Perkins,NUNEATON,"TRAVIS PERKINS TRADING CO. LTD, HEATH END ROAD, NUNEATON, WARWICKSHIRE",CV10 7HS,NUNEATON@travisperkins.co.uk,024 7635 4074,52.51248,-1.486448
+Travis Perkins,NEW SOUTHGATE BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, 4 BRUNSWICK INDUSTRIAL ESTATE, BRUNSWICK WAY, LONDON",N11 1JL,NEWSOUTHGATEBRANCH@benchmarxjoinery.co.uk,0208 368 9850,51.619596,-0.141041
+Travis Perkins,CWMBRAN,"TRAVIS PERKINS TRADING CO. LTD, WOODLAND WORKS, STATION ROAD, LOWER PONTNEWYDD, CWMBRAN",NP44 2YP,CWMBRAN@travisperkins.co.uk,01633 862121,51.660385,-3.015804
+Travis Perkins,KENDAL,"TRAVIS PERKINS TRADING CO. LTD, MINTSFEET TRADING ESTATE, KENDAL",LA9 6RX,KENDAL@travisperkins.co.uk,01539 731166,54.335217,-2.741981
+Travis Perkins,BARROW,"TRAVIS PERKINS TRADING CO. LTD, 297 DUKE STREET, BARROW-IN-FURNESS",LA14 5UJ,BARROW@travisperkins.co.uk,01229 834344,54.116972,-3.236966
+Travis Perkins,MILNTHORPE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 7, GRISLEYMIRES LN, MILNTHORPE",LA7 7RF,MILNTHORPE@travisperkins.co.uk,015395 63251,54.228441,-2.775604
+Travis Perkins,CARNFORTH,"TRAVIS PERKINS TRADING CO. LTD, OXFORD STREET, CARNFORTH",LA5 9LG,CARNFORTH@travisperkins.co.uk,01524 734774,54.126613,-2.769736
+Travis Perkins,WORKINGTON,"TRAVIS PERKINS TRADING CO. LTD, CLAY FLATTS TRADING ESTATE, WORKINGTON",CA14 2TQ,WORKINGTON@travisperkins.co.uk,01900 602361,54.639552,-3.560194
+Travis Perkins,CARLISLE CURROCK ROAD,"TRAVIS PERKINS TRADING CO. LTD, CURROCK ROAD, CARLISLE",CA2 4AX,CARLISLE@travisperkins.co.uk,01228 538511,54.884603,-2.932853
+Travis Perkins,PENRITH,"TRAVIS PERKINS TRADING CO. LTD, 52 GILWILLY TRADING ESTATE, PENRITH",CA11 9BL,PENRITH@travisperkins.co.uk,01768 899333,54.666367,-2.761776
+Travis Perkins,SEVENOAKS,"TRAVIS PERKINS TRADING CO. LTD, UNIT A, CRAMPTONS ROAD, SEVENOAKS",TN14 5EF,SEVENOAKS@travisperkins.co.uk,01732 465111,51.290747,0.192796
+Travis Perkins,ASHFORD BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 13-14 BRUNSWICK IND EST, BRUNSWICK ROAD, ASHFORD",TN23 1EL,ASHFORDBRANCH@benchmarxjoinery.co.uk,01233 638 561,51.149343,0.853812
+Travis Perkins,MAIDSTONE BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 9 HASLEMERE TRADING EST., SUTTON ROAD, MAIDSTONE",ME15 9NL,MAIDSTONEBRANCH@benchmarxjoinery.co.uk,01622 672 613,51.241238,0.560789
+Travis Perkins,BASILDON BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 18-19 YARDLEY BUS PARK, LUCKYN LANE, BASILDON",SS14 3GL,BASILDONBRANCH@benchmarxjoinery.co.uk,01268 527 911,51.582793,0.447405
+Travis Perkins,CHELMSFORD BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 7, CHELMSFORD TRADE PARK, WESTWAY, CHELMSFORD",CM1 3AR,CHELMSFORDBRANCH@benchmarxjoinery.co.uk,01245 263 284,51.72486,0.452562
+Travis Perkins,FOLKESTONE BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2 PARK FARM IND EST, PARK FARM ROAD, FOLKESTONE",CT19 5EY,FOLKESTONEBRANCH@benchmarxjoinery.co.uk,01303 243 854,51.093127,1.171814
+Travis Perkins,GUILDFORD BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, WOODBRIDGE PARK ESTATE, WOODBRIDGE ROAD, GUILDFORD",GU1 1EH,GUILDFORDBRANCH@benchmarxjoinery.co.uk,01483 578 097,51.245705,-0.57962
+Travis Perkins,BROMLEY BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, BROMLEY INDUSTRIAL EST, WALDO ROAD, BROMLEY",BR1 2WD,BROMLEYBRANCH@benchmarxjoinery.co.uk,0208 460 9408,51.399042,0.033344
+Travis Perkins,BRACKNELL BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, 3 TRADE CITY, EASTHAMPSTEAD ROAD, BRACKNELL",RG12 1BX,BRACKNELLBRANCH@benchmarxjoinery.co.uk,01344 306687,51.416645,-0.762117
+Travis Perkins,MILTON KEYNES NORTH,"TRAVIS PERKINS TRADING CO. LTD, 1 DEANS ROAD, OLD WOLVERTON, MILTON KEYNES",MK12 5NA,WOLVERTON@travisperkins.co.uk,01908 456500,52.06601,-0.817271
+Travis Perkins,YATE,"TRAVIS PERKINS TRADING CO. LTD, 70 NORTH ROAD, YATE",BS37 7PR,YATE@travisperkins.co.uk,01454 322600,51.54474,-2.433785
+Travis Perkins,BALHAM,"TRAVIS PERKINS TRADING CO. LTD, 2-6 WEIR ROAD, BALHAM, LONDON",SW12 0NA,BALHAM@travisperkins.co.uk,020 8673 1212,51.445541,-0.143095
+Travis Perkins,NORTHAMPTON KETTERING ROAD,"TRAVIS PERKINS TRADING CO. LTD, KETTERING ROAD NORTH, NORTHAMPTON",NN3 6HB,NTONKRN@travisperkins.co.uk,01604 647131,52.271376,-0.85476
+Travis Perkins,BEGELLY,"TRAVIS PERKINS TRADING CO. LTD, BEGELLY CROSS ROAD, KILGETTY",SA68 0YH,BEGELLY@travisperkins.co.uk,01834 812269,51.732708,-4.725274
+Travis Perkins,CINDERFORD,"TRAVIS PERKINS TRADING CO. LTD, HOLLYHILL ROAD, FOREST VALE INDUSTRIAL ESTATE, CINDERFORD",GL14 2YA,CINDERFORD@travisperkins.co.uk,01594 822157,51.826032,-2.511474
+Travis Perkins,SOUTHEND,"TRAVIS PERKINS TRADING CO. LTD, UNIT 5, GRAINGER ROAD, SOUTHEND-ON-SEA",SS2 5DD,SOUTHEND@travisperkins.co.uk,01702 460500,51.54525,0.713339
+Travis Perkins,DISS,"TRAVIS PERKINS TRADING CO. LTD, BREWERY FARM, SHELFANGER ROAD, DISS",IP22 4EH,DISS@travisperkins.co.uk,01379 642712,52.379544,1.106181
+Travis Perkins,WOKING,"TRAVIS PERKINS TRADING CO. LTD, UNIT 7, GOLDSWORTH PK TRADE ES, KESTREL WAY, WOKING",GU21 3BA,WOKING@travisperkins.co.uk,01483 750251,51.32451,-0.585025
+Travis Perkins,HALSTEAD,"TRAVIS PERKINS TRADING CO. LTD, 7-11 SECOND AVENUE, BLUE BRIDGE INDUSTRIAL ESTATE, HALSTEAD",CO9 2SU,HALSTEAD@travisperkins.co.uk,01787 477882,51.939347,0.657067
+Travis Perkins,ABERDARE,"TRAVIS PERKINS TRADING CO. LTD, WELLINGTON STREET, ROBERTSTOWN, ABERDARE",CF44 8EW,ABERDARE@travisperkins.co.uk,01685 874886,51.721993,-3.451147
+Travis Perkins,WYCOMBE,"TRAVIS PERKINS TRADING CO. LTD, WYCOMBE LANE, WOOBURN GREEN, HIGH WYCOMBE",HP10 0HH,WYCOMBE@travisperkins.co.uk,01628 529616,51.594129,-0.68429
+Travis Perkins,LEE GREEN,"TRAVIS PERKINS TRADING CO. LTD, BURNT ASH HILL, LONDON",SE12 0JE,LEE@travisperkins.co.uk,020 8857 5556,51.4495,0.012054
+Travis Perkins,ASHFORD,"TRAVIS PERKINS TRADING CO. LTD, 22 BEAVER ROAD, ASHFORD",TN23 7RP,ASHFORD@travisperkins.co.uk,01233 625935,51.141522,0.87166
+Travis Perkins,FARNHAM,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6, COXBRIDGE BUSINESS PK, FARNHAM",GU10 5EH,FARNHAM@travisperkins.co.uk,01252 725611,51.206283,-0.820915
+Travis Perkins,CREWE,"TRAVIS PERKINS TRADING CO. LTD, NORTH STREET, CREWE",CW1 4NN,CREWE@travisperkins.co.uk,01270 584515,53.112852,-2.442062
+Travis Perkins,BIRKENHEAD BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 3 COMMERCE PARK, COMPBELTOWN ROAD, BIRKENHEAD",CH41 9HP,BIRKENHEADBRANCH@benchmarxjoinery.co.uk,0151 644 9490,53.379039,-3.010737
+Travis Perkins,WOLVERHAMPTON,"TRAVIS PERKINS TRADING CO. LTD, NEACHELLS LANE, WILLENHALL",WV13 3LR,WOLVERHTON@travisperkins.co.uk,01902 604555,52.584783,-2.078381
+Travis Perkins,TAUNTON,"TRAVIS PERKINS TRADING CO. LTD, PRIORSWOOD INDUSTRIAL ESTATE, VENTURE WAY, TAUNTON",TA2 8DB,TAUNTON@travisperkins.co.uk,01823 337181,51.027663,-3.084829
+Travis Perkins,SOUTHAMPTON PARK GATE,"TRAVIS PERKINS TRADING CO. LTD, DUNCAN ROAD, PARK GATE, SOUTHAMPTON",SO31 1BX,southamptonpg@travisperkins.co.uk,01489 583711,50.875384,-1.266499
+Travis Perkins,RUGBY,"TRAVIS PERKINS TRADING CO. LTD, 2 SOMERS ROAD, RUGBY",CV22 7DD,RUGBYSOM@travisperkins.co.uk,01788 542171,52.373635,-1.282353
+Travis Perkins,COVENTRY NORTH,"TRAVIS PERKINS TRADING CO. LTD, LOCKHURST LANE, COVENTRY",CV6 5NJ,COVENTRY@travisperkins.co.uk,02476 686100,52.431427,-1.503879
+Travis Perkins,BRANDON,"TRAVIS PERKINS TRADING CO. LTD, 40 WIMBLEDON AVENUE, BRANDON",IP27 0NZ,BRANDON@travisperkins.co.uk,01842 811444,52.437872,0.608993
+Travis Perkins,DOVER,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2 WHITE CLFS BUSINESS PAR, WHITFIELD, DOVER",CT16 3PT,DOVER@travisperkins.co.uk,01304 829912,51.153499,1.303479
+Travis Perkins,IPSWICH BENCHMARX KICHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, 25 ANSON ROAD, MARTLESHAM HEATH, IPSWICH",IP5 3RG,MARTLESHAMHEATHBRANCH@benchmarxjoinery.co.uk,01473 623 814,52.062587,1.281514
+Travis Perkins,SUNBURY SCOTTS,"TRAVIS PERKINS TRADING CO. LTD, 77 STAINES ROAD EAST, SUNBURY ON THAMES",TW16 5AD,SUNBURYSCOTT@travisperkins.co.uk,01932 782612,51.418515,-0.411513
+Travis Perkins,SOLIHULL,"TRAVIS PERKINS TRADING CO. LTD, UNIT A, RADWAY ROAD, SOLIHULL",B90 4NS,TPSOLIHULL@travisperkins.co.uk,0121 709 2704,52.396037,-1.803946
+Travis Perkins,WIGSTON,"TRAVIS PERKINS TRADING CO. LTD, CHARTWELL DRIVE, WIGSTON",LE18 2FL,WIGSTONTP@travisperkins.co.uk,0116 281 2900,52.587442,-1.123752
+Travis Perkins,BETHNAL GREEN,"TRAVIS PERKINS TRADING CO. LTD, HOLLY WORKS, HOLLYBUSH PLACE, LONDON",E2 9QX,BETHNAL@travisperkins.co.uk,020 7739 4640,51.527781,-0.056667
+Travis Perkins,WELWYN GARDEN CITY BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 8 BESSEMER BUSINESS PARK, BESSEMER ROAD, WELWYN GARDEN CITY",AL7 1GF,WELWYNGARDENCITYBRANCH@benchmarxjoinery.co.uk,01707 428639,51.803194,-0.199987
+Travis Perkins,DERBY NORTH,"TRAVIS PERKINS TRADING CO. LTD, NORTH EDGE BUSINESS PARK, ALFRETON ROAD, DERBY",DE21 4BN,DERBYNORTH@travisperkins.co.uk,01332 977575,52.944322,-1.467011
+Travis Perkins,RIPLEY,"TRAVIS PERKINS TRADING CO. LTD, BRITTAIN DRIVE, CODNOR GATE BUSINESS PARK, RIPLEY",DE5 3NB,RIPLEY@travisperkins.co.uk,01773 749084,53.048557,-1.385592
+Travis Perkins,PENARTH,"TRAVIS PERKINS TRADING CO. LTD, WEIGHBRIDGE YARD COGAN STATION, PENARTH",CF64 2NS,TPPENARTH@travisperkins.co.uk,029 2070 8528,51.445501,-3.190439
+Travis Perkins,RICKMANSWORTH VALLEY PARK,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4-7 VALLEY PK IND EST, OLD'S APPROACH, WATFORD",WD18 9TL,RICKMANSWORTH@travisperkins.co.uk,01923 777711,51.63955,-0.438557
+Travis Perkins,GREAT YARMOUTH,"TRAVIS PERKINS TRADING CO. LTD, BOUNDARY ROAD, HARFREYS INDUSTRIAL ESTATE, GREAT YARMOUTH",NR31 0LW,BOUNDARYRD@travisperkins.co.uk,01493 650211,52.594196,1.719118
+Travis Perkins,NEWMARKET,"TRAVIS PERKINS TRADING CO. LTD, WILLIE SNAITH ROAD, STUDLANDS PARK INDUST EST, NEWMARKET",CB8 7AU,NEWMARKET@travisperkins.co.uk,01638 667667,52.258879,0.388289
+Travis Perkins,WEYBRIDGE,"TRAVIS PERKINS TRADING CO. LTD, 2 BYRON ROAD, ADDLESTONE",KT15 2SZ,TPWEYBRIDGE@travisperkins.co.uk,01932 698368,51.370917,-0.475873
+Travis Perkins,MANSFIELD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 7, ABBEY INDUSTRIAL PARK, HERMITAGE WAY, MANSFIELD",NG18 5GJ,TPMANSFIELD@travisperkins.co.uk,01623 661450,53.131946,-1.219322
+Travis Perkins,LEICESTER CENTRAL,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, RAVENSBRIDGE DRIVE, LEICESTER",LE4 0BX,LEICSRAVEN@travisperkins.co.uk,0116 262 8567,52.646021,-1.144576
+Travis Perkins,LOUGHBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, WHITEGATES, NOTTINGHAM ROAD, LOUGHBOROUGH",LE11 1FH,LOUGHBORO@travisperkins.co.uk,01509 215773,52.77664,-1.197907
+Travis Perkins,COVENTRY SOUTH,"TRAVIS PERKINS TRADING CO. LTD, 159 SIR HENRY PARKES ROAD, COVENTRY",CV5 6BL,COVENTRYSOUTH@travisperkins.co.uk,024 7601 0040,52.395075,-1.549974
+Travis Perkins,EDINBURGH EAST,"TRAVIS PERKINS TRADING CO. LTD, UNITS 55-57 FISHWIVES CAUSEWAY, TELFERTON INDUSTRIAL ESTATE, LEITH, EDINBURGH",EH7 6GH,EDINBURGHEAST@travisperkins.co.uk,0131 5195000,55.954566,-3.12646
+Travis Perkins,BURNOPFIELD,"TRAVIS PERKINS TRADING CO. LTD, HOBSON INDUSTRIAL ESTATE, BURNOPFIELD, TYNE & WEAR, NEWCASTLE UPON TYNE",NE16 6EA,BURNOPFIELD@travisperkins.co.uk,01207 270071,54.899121,-1.730391
+Travis Perkins,BLAYDON,"TRAVIS PERKINS TRADING CO. LTD, FACTORY ROAD, BLAYDON",NE21 5SA,BLAYDON@travisperkins.co.uk,0191 4990444,54.969062,-1.703792
+Travis Perkins,NEWCASTLE UNDER LYME,"TRAVIS PERKINS TRADING CO. LTD, 520 SHELTON NEW ROAD, STOKE-ON-TRENT",ST4 6DH,NEWCASTLE@travisperkins.co.uk,01782 623531,53.012461,-2.215078
+Travis Perkins,FERNDOWN,"TRAVIS PERKINS TRADING CO. LTD, 35 COBHAM ROAD, FERNDOWN INDUSTRIAL ESTATE, WIMBORNE",BH21 7PF,FERNDOWN@travisperkins.co.uk,01202 863444,50.811636,-1.918073
+Travis Perkins,LYME REGIS,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6 LYME REGIS INDUST EST, UPLYME ROAD, LYME REGIS",DT7 3LS,LYMEREGIS@travisperkins.co.uk,01297 442441,50.729842,-2.946655
+Travis Perkins,HARLOW,"TRAVIS PERKINS TRADING CO. LTD, UNIT 9 EAST PLACE, EAST ROAD, HARLOW",CM20 2TG,HARLOW@travisperkins.co.uk,01279 454466,51.785563,0.125163
+Travis Perkins,LYMINGTON,"TRAVIS PERKINS TRADING CO. LTD, RICARDO WAY, AMPRESS PARK, LYMINGTON",SO41 8JU,LYMINGTON@travisperkins.co.uk,01590 672571,50.772063,-1.549211
+Travis Perkins,BRAINTREE,"TRAVIS PERKINS TRADING CO. LTD, 9 BENFIELD WAY, LAKES ROAD INDUSTRIAL ESTATE, BRAINTREE",CM7 3YS,BRAINTREE@travisperkins.co.uk,01376 347515,51.877158,0.565562
+Travis Perkins,SHAFTESBURY,"TRAVIS PERKINS TRADING CO. LTD, WARMINSTER ROAD, LITTLEDOWN, SHAFTESBURY",SP7 9HD,SHAFTBURY@travisperkins.co.uk,01747 852772,51.016251,-2.18966
+Travis Perkins,BOURNEMOUTH ASHLEY ROAD,"TRAVIS PERKINS TRADING CO. LTD, 70 ASHLEY ROAD, BOSCOMBE, BOURNEMOUTH",BH1 4LL,ASHLEY@travisperkins.co.uk,01202 552100,50.729756,-1.839367
+Travis Perkins,BOURNEMOUTH WINTON,"TRAVIS PERKINS TRADING CO. LTD, 2-4 JAMESON ROAD, WINTON, BOURNEMOUTH",BH9 2QE,WINTON@travisperkins.co.uk,01202 519133,50.747545,-1.878312
+Travis Perkins,DORCHESTER,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, POUNDBURY INDUSTRIAL ESTATE, DORCHESTER",DT1 2PG,DORCHESTER@travisperkins.co.uk,01305 265973,50.716327,-2.450253
+Travis Perkins,BRIDPORT,"TRAVIS PERKINS TRADING CO. LTD, ST. ANDREWS ROAD, BRIDPORT",DT6 3DJ,BRIDPORT@travisperkins.co.uk,01308 422351,50.739288,-2.745728
+Travis Perkins,SWANAGE,"TRAVIS PERKINS TRADING CO. LTD, 3 VICTORIA AVE INDUST EST, SWANAGE",BH19 1BJ,SWANAGE@travisperkins.co.uk,01929 425411,50.612408,-1.973427
+Travis Perkins,BRADFORD,"TRAVIS PERKINS TRADING CO. LTD, WINDSOR STREET, OFF WAKEFIELD ROAD, BRADFORD",BD4 7AQ,WINDSORST@travisperkins.co.uk,01274 737581,53.787567,-1.742001
+Travis Perkins,BOSTON,"TRAVIS PERKINS TRADING CO. LTD, 117A HIGH STREET, BOSTON",PE21 8TJ,BOSTON@travisperkins.co.uk,01205 311600,52.972153,-0.0251
+Travis Perkins,SALTASH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 11 SALTASH INDUST EST, CALLINGTON ROAD, SALTASH",PL12 6LF,SALTASH@travisperkins.co.uk,01752 847222,50.41779,-4.233787
+Travis Perkins,BRISTOL ST PHILIPS,"TRAVIS PERKINS TRADING CO. LTD, DAYS ROAD, ST PHILIPS, BRISTOL",BS2 0QP,BRISSTPHIL@travisperkins.co.uk,0117 971 0294,51.453963,-2.571548
+Travis Perkins,SKEGNESS,"TRAVIS PERKINS TRADING CO. LTD, HOLLY ROAD, SKEGNESS",PE25 3TE,SKEGNESS@travisperkins.co.uk,01754 763784,53.139639,0.319487
+Travis Perkins,WEYBRIDGE BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4, WATERSIDE TRADING EST., HAMM MORR LANE, ADDLESTONE",KT15 2SN,WEYBRIDGEBRANCH@benchmarxjoinery.co.uk,01932 844528,51.369822,-0.474588
+Travis Perkins,TEWKESBURY,"TRAVIS PERKINS TRADING CO. LTD, BREDON ROAD, TEWKESBURY",GL20 5BD,TEWKESBURY@travisperkins.co.uk,01684 292751,51.997819,-2.153204
+Travis Perkins,BATTERSEA,"TRAVIS PERKINS TRADING CO. LTD, 37 LOMBARD ROAD, BATTERSEA, LONDON",SW11 3RW,BATTERSEA@travisperkins.co.uk,020 7228 7775,51.471228,-0.176596
+Travis Perkins,CAERPHILLY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6 SWANBRIDGE COURT, BEDWAS HOUSE INDUSTRIAL ESTATE, CAERPHILLY",CF83 8FW,CAERPHILLY@travisperkins.co.uk,02920 861237,51.593123,-3.207895
+Travis Perkins,COTTENHAM,"TRAVIS PERKINS TRADING CO. LTD, 50 HIGH STREET, COTTENHAM, CAMBRIDGE",CB24 8SA,COTTENHAM@travisperkins.co.uk,01954 250447,52.295122,0.130511
+Travis Perkins,HUNTINGDON,"TRAVIS PERKINS TRADING CO. LTD, 32 ST PETERS ROAD, HUNTINGDON",PE29 7DA,HUNTINGDON@travisperkins.co.uk,01480 52358,52.340227,-0.186907
+Travis Perkins,LLANELLI,"TRAVIS PERKINS TRADING CO. LTD, TROSTRE ROAD, LLANELLI",SA14 9RA,LLANELLI@travisperkins.co.uk,01554 741741,51.672505,-4.144078
+Travis Perkins,MARKET DRAYTON,"TRAVIS PERKINS TRADING CO. LTD, BERT SMITH WAY, ADDERLEY RD INDUST EST, MARKET DRAYTON",TF9 3SN,MARKETDRAYTON@travisperkins.co.uk,01630 656280,52.910448,-2.488159
+Travis Perkins,ABERCARN,"TRAVIS PERKINS TRADING CO. LTD, UNIT 27, ABERCARN IND EST, BRIDGE STREET, ABERCARN, NEWPORT",NP11 5EY,ABERCARN@travisperkins.co.uk,01495 245572,51.647761,-3.13822
+Travis Perkins,CLITHEROE,"TRAVIS PERKINS TRADING CO. LTD, DEANFIELD WAY, LINK 59 BUSINESS PARK, CLITHEROE",BB7 1QU,CLITHEROE@travisperkins.co.uk,01200 427222,53.881615,-2.371017
+Travis Perkins,SNETTERTON,"TRAVIS PERKINS TRADING CO. LTD, ADA COLE AVENUE, SNETTERTON, NORFOLK",NR16 2JZ,SNETTERTONTP@travisperkins.co.uk,01953 469890,52.477153,0.950921
+Travis Perkins,WEST WICKHAM,"TRAVIS PERKINS TRADING CO. LTD, 205 HIGH STREET, WEST WICKHAM",BR4 0PH,WESTWICK@travisperkins.co.uk,020 8777 8326,51.377296,-0.023904
+Travis Perkins,FLEET,"TRAVIS PERKINS TRADING CO. LTD, FLEET ROAD, ENTER VIA ALBERT S, FLEET",GU51 3PD,FLEETTP@travisperkins.co.uk,01252 613681,51.283415,-0.839289
+Travis Perkins,BIRKENHEAD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 5 TURBINE BUSINESS PARK, NEW CHESTER ROAD, BIRKENHEAD",CH41 9BA,BIRKENHEAD@travisperkins.co.uk,0151 666 2299,53.381264,-3.013315
+Travis Perkins,BISHOPS STORTFORD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 10, WOODSIDE, DUNMOW ROAD, BISHOPS STORTFORD",CM23 5RG,BISHOPSSTORTFORD@travisperkins.co.uk,01279 505666,51.873613,0.189166
+Travis Perkins,WARRINGTON,"TRAVIS PERKINS TRADING CO. LTD, FARRELL STREET, WARRINGTON",WA1 2DT,WARRINGFAR@travisperkins.co.uk,01925 632223,53.392776,-2.574595
+Travis Perkins,KNARESBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, MANSE LANE, KNARESBOROUGH",HG5 8LF,KNARESBOROUGH@travisperkins.co.uk,01423 862277,54.004025,-1.448973
+Travis Perkins,MORECAMBE,"TRAVIS PERKINS TRADING CO. LTD, STATION YARD, EUSTON ROAD, MORECAMBE",LA4 5LL,MORECAMBE@travisperkins.co.uk,01524 410056,54.070453,-2.863242
+Travis Perkins,ULVERSTON,"TRAVIS PERKINS TRADING CO. LTD, NORTH LONSDALE ROAD, ULVERSTON",LA12 0DW,ULVERSTON@travisperkins.co.uk,01229 582335,54.194011,-3.073793
+Travis Perkins,TAMWORTH,"TRAVIS PERKINS TRADING CO. LTD, TAME RETAIL & TRADE PARK, NINIAN WAY, TAMWORTH",B77 5DQ,TAMWORTH@travisperkins.co.uk,01827 260808,52.607375,-1.676882
+Travis Perkins,LIVERPOOL HUYTON,"TRAVIS PERKINS TRADING CO. LTD, WILSON ROAD, HUYTON",L36 6AN,HUYTON@travisperkins.co.uk,0151 443 0482,53.405716,-2.825025
+Travis Perkins,BLACKBURN,"TRAVIS PERKINS TRADING CO. LTD, PHOENIX MILL, KING STREET, BLACKBURN",BB2 2DT,BLACKBURN@travisperkins.co.uk,01254 581666,53.74599,-2.488182
+Travis Perkins,EVESHAM,"TRAVIS PERKINS TRADING CO. LTD, ENTERPRISE WAY, VALE PARK, EVESHAM",WR11 1GS,EVESHAM@travisperkins.co.uk,01386 422866,52.073244,-1.933532
+Travis Perkins,CHESTERFIELD,"TRAVIS PERKINS TRADING CO. LTD, BOYTHORPE ROAD, CHESTERFIELD",S40 2NF,CHESTERFIELD@travisperkins.co.uk,01246 271221,53.233428,-1.436989
+Travis Perkins,ROTHERHAM,"TRAVIS PERKINS TRADING CO. LTD, CANKLOW MDWS INDUST EST, WEST BAWTRY ROAD, MOORGATE, ROTHERHAM",S60 2XL,ROTHERHAM@travisperkins.co.uk,01709 377677,53.40622,-1.358585
+Travis Perkins,BOURNE,"TRAVIS PERKINS TRADING CO. LTD, CHERRY HOLT ROAD, BOURNE",PE10 9LA,BOURNE@travisperkins.co.uk,01778 423991,52.765956,-0.362342
+Travis Perkins,HASTINGS,"TRAVIS PERKINS TRADING CO. LTD, SPRINGFIELD VALLEY ROAD, HASTINGS",TN38 0RP,HASTINGS@travisperkins.co.uk,01424 424300,50.862351,0.555927
+Travis Perkins,UTTOXETER,"TRAVIS PERKINS TRADING CO. LTD, TRENT HOUSE, 3 ASHBOURNE ROAD, UTTOXETER",ST14 7BA,UTTOXETER@travisperkins.co.uk,01889 562417,52.908043,-1.872738
+Travis Perkins,WIGAN,"TRAVIS PERKINS TRADING CO. LTD, 23 QUEEN STREET, WIGAN",WN3 4DZ,WIGAN@travisperkins.co.uk,01942 231242,53.542565,-2.634132
+Travis Perkins,WILMSLOW,"TRAVIS PERKINS TRADING CO. LTD, ALDERLEY ROAD, WILMSLOW",SK9 1PY,WILMSLOW@travisperkins.co.uk,01625 524770,53.319459,-2.238176
+Travis Perkins,DIDCOT,"TRAVIS PERKINS TRADING CO. LTD, LOWER BROADWAY, DIDCOT",OX11 8AG,DIDCOT@travisperkins.co.uk,01235 819262,51.607591,-1.234324
+Travis Perkins,ROMSEY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4 ROMSEY INDUST EST, GREAT BRIDGE ROAD, ROMSEY",SO51 0HR,ROMSEY@travisperkins.co.uk,01794 516232,50.994644,-1.49569
+Travis Perkins,BRISTOL FISHPONDS,"TRAVIS PERKINS TRADING CO. LTD, 269A RIDGEWAY ROAD, FISHPONDS, BRISTOL",BS16 3JR,BRISTOLFSH@travisperkins.co.uk,0117 965 1402,51.474609,-2.53522
+Travis Perkins,CHELTENHAM MEAD ROAD,"TRAVIS PERKINS TRADING CO. LTD, MEAD ROAD, LECKHAMPTON, CHELTENHAM",GL53 7EB,CHELTENHAM@travisperkins.co.uk,01242 230971,51.882559,-2.074838
+Travis Perkins,FAKENHAM,"TRAVIS PERKINS TRADING CO. LTD, HAWTHORN WAY, CLIPBUSH LANE, FAKENHAM",NR21 8SX,FAKENHAMTP@travisperkins.co.uk,01328 855193,52.840558,0.869531
+Travis Perkins,BROMYARD,"TRAVIS PERKINS TRADING CO. LTD, BROADBRIDGE, BROMYARD",HR7 4NT,BROMYARD@travisperkins.co.uk,01885 482232,52.192389,-2.497688
+Travis Perkins,CONGLETON,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1 RADNOR PARK TRADING EST, BACK LANE, CONGLETON",CW12 4XJ,CONGLETON@travisperkins.co.uk,01260 289433,53.171394,-2.234886
+Travis Perkins,FARNBOROUGH TP,"TRAVIS PERKINS TRADING CO. LTD, 21 INVINCIBLE ROAD IND ESTATE, FARNBOROUGH",GU14 7QU,FARNBOROUGHTP@travisperkins.co.uk,01252 309095,51.287557,-0.76503
+Travis Perkins,OAKHAM,"TRAVIS PERKINS TRADING CO. LTD, 1 STATION APPROACH, OAKHAM",LE15 6QW,OAKHAM@travisperkins.co.uk,01572 722888,52.674031,-0.733369
+Travis Perkins,SALISBURY,"TRAVIS PERKINS TRADING CO. LTD, NEWTON ROAD, CHURCHFIELDS INDUSTRIAL ESTATE, SALISBURY",SP2 7QA,SALISBURY@travisperkins.co.uk,01722 326344,51.069372,-1.817914
+Travis Perkins,DERBY,"TRAVIS PERKINS TRADING CO. LTD, BLOCK C, WINCANTON CLOSE, DERBY",DE24 8NB,DERBY@travisperkins.co.uk,01332 576890,52.902764,-1.453203
+Travis Perkins,STRATFORD UPON AVON,"TRAVIS PERKINS TRADING CO. LTD, MAYBROOK ROAD, MAYBROOK INDUSTRIAL ESTATE, STRATFORD UPON AVON",CV37 0BT,STRATFORD@travisperkins.co.uk,01789 415243,52.19929,-1.714199
+Travis Perkins,BUCKINGHAM,"TRAVIS PERKINS TRADING CO. LTD, UNIT 16 SWAN BUSINESS PARK, OSIER WAY, BUCKINGHAM",MK18 1TG,BUCKINGHAM@travisperkins.co.uk,01280 816029,51.988502,-0.990853
+Travis Perkins,EDINBURGH WEST,"TRAVIS PERKINS TRADING CO. LTD, 5 BANKHEAD AVENUE, SIGHTHILL, EDINBURGH",EH11 4AA,TPEDINBURGHWEST@travisperkins.co.uk,0131 287 7022,55.923507,-3.292596
+Travis Perkins,CAMBRIDGE COLDHAMS LANE,"TRAVIS PERKINS TRADING CO. LTD, 511 COLDHAMS LANE, CAMBRIDGE",CB1 3JS,CAMBRIDGE@travisperkins.co.uk,01223 355484,52.192843,0.177502
+Travis Perkins,HEATHROW,"TRAVIS PERKINS TRADING CO. LTD, BETAM ROAD, HAYES",UB3 1ST,HEATHROW@travisperkins.co.uk,020 8573 9393,51.506241,-0.433336
+Travis Perkins,DAGENHAM,"TRAVIS PERKINS TRADING CO. LTD, FRESHWATER ROAD, DAGENHAM",RM8 1RX,DAGENHAM@travisperkins.co.uk,020 8598 9949,51.566539,0.136736
+Travis Perkins,REDDITCH,"TRAVIS PERKINS TRADING CO. LTD, 17 HOWARD ROAD, PARK FARM INDUSTRIAL ESTATE, REDDITCH",B98 7SE,REDDITCH@travisperkins.co.uk,01527 526397,52.289543,-1.912965
+Travis Perkins,NEWCASTLE UPON TYNE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 12, CHOLLERTON DRIVE, NORTH TYNE INDUSTRIAL ESTATE, BENTON",NE12 9SZ,BENTON@travisperkins.co.uk,0191 266 6696,55.020516,-1.543289
+Travis Perkins,NEW MILTON,"TRAVIS PERKINS TRADING CO. LTD, MANOR FARM CLOSE, CHRISTCHURCH ROAD, NEW MILTON",BH25 6QP,NEWMILTON@travisperkins.co.uk,01425 617700,50.747527,-1.665605
+Travis Perkins,FAREHAM,"TRAVIS PERKINS TRADING CO. LTD, 166 FAREHAM ROAD, GOSPORT",PO13 0FW,FAREHAM@travisperkins.co.uk,01329 818253,50.836673,-1.177694
+Travis Perkins,PECKHAM,"TRAVIS PERKINS TRADING CO. LTD, ACORN WHARF, FRENSHAM STREET, LONDON",SE15 6TH,PECKHAM@travisperkins.co.uk,020 7639 5111,51.482426,-0.067814
+Travis Perkins,BOURNVILLE BENCHMARX KITCHENS & JOINERY,"TRAVIS PERKINS TRADING CO. LTD, HASTINGS HOUSE, CHARLOTTE ROAD, STIRCHLEY",B30 2BT,STIRCHLEYBRANCH@benchmarxjoinery.co.uk,0121 4581445,52.425194,-1.923788
+Travis Perkins,PETERBOROUGH IVATT WAY,"TRAVIS PERKINS TRADING CO. LTD, IVATT WAY, WESTWOOD INDUSTRIAL ESTATE, PETERBOROUGH",PE3 7PA,PETERIVATT@travisperkins.co.uk,01733 263463,52.593048,-0.26583
+Travis Perkins,BOGNOR REGIS,"TRAVIS PERKINS TRADING CO. LTD, 43 OLDLANDS WAY, SOUTHERN CROSS TRADING ESTATE, BOGNOR REGIS",PO22 9SE,BOGNORREGIS@travisperkins.co.uk,01243 842228,50.802736,-0.665185
+Travis Perkins,BISHOP AUCKLAND,"TRAVIS PERKINS TRADING CO. LTD, MAUDE TERRACE, ST. HELEN AUCKLAND, BISHOP AUCKLAND",DL14 9AX,AUCKLAND@travisperkins.co.uk,01388 605777,54.63665,-1.698385
+Travis Perkins,WALSALL,"TRAVIS PERKINS TRADING CO. LTD, LICHFIELD ROAD, RUSHALL, WALSALL",WS4 1PH,WALSALLBM@travisperkins.co.uk,01922 721333,52.611259,-1.958276
+Travis Perkins,STAMFORD,"TRAVIS PERKINS TRADING CO. LTD, RYHALL ROAD, STAMFORD",PE9 1XS,STAMFORD@travisperkins.co.uk,01780 762266,52.663368,-0.466228
+Travis Perkins,COLCHESTER HAWKINS ROAD,"TRAVIS PERKINS TRADING CO. LTD, HAWKINS ROAD, COLCHESTER",CO2 8JX,COLCHESTER@travisperkins.co.uk,01206 869999,51.883811,0.927336
+Travis Perkins,GLASGOW HELEN STREET TP,"TRAVIS PERKINS TRADING CO. LTD, GLASGOW HELEN STREET, 23 LOANBANK QUADRANT, GLASGOW",G51 3HZ,GLASGOWHELENSTR@travisperkins.co.uk,0141 2129130,55.857945,-4.31839
+Travis Perkins,WINTERBOURNE,"TRAVIS PERKINS TRADING CO. LTD, STATION YARD,HICKS COMMON RD, WINTERBOURNE, BRISTOL",BS36 1EJ,WINTERB@travisperkins.co.uk,01454 775459,51.518124,-2.499512
+Travis Perkins,BARRY,"TRAVIS PERKINS TRADING CO. LTD, MOREL STREET, BARRY",CF63 4PN,BRITBARRY@travisperkins.co.uk,01446 748986,51.408947,-3.261741
+Travis Perkins,CAMBRIDGE KILMAINE CLOSE,"TRAVIS PERKINS TRADING CO. LTD, KILMAINE CLOSE, CAMBRIDGE",CB4 2PH,CAMBRIDGEKILMAINE@travisperkins.co.uk,01223 581470,52.232865,0.134808
+Travis Perkins,LEICESTER THURMASTON,"TRAVIS PERKINS TRADING CO. LTD, UNIT 5, WESTMORELAND AVENUE, THURMASTON, LEICESTER",LE4 8PH,LEICTHURM@travisperkins.co.uk,0116 355 2700,52.683904,-1.098318
+Travis Perkins,HYTHE & FAWLEY,"TRAVIS PERKINS TRADING CO. LTD, LONG LANE, HARDLEY, HYTHE, SOUTHAMPTON",SO45 3NN,HYTHE@travisperkins.co.uk,02380 815000,50.841421,-1.391931
+Travis Perkins,EASTLEIGH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 16-17, PARHAM DRIVE, EASTLEIGH",SO50 4NU,EASTLEIGH@travisperkins.co.uk,023 8061 2781,50.974773,-1.361976
+Travis Perkins,BLACKPOOL SOUTH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1 PLUMPTON CLOSE, WHITEHILLS BUSINESS PARK, BLACKPOOL",FY4 5RT,BLACKPOOLTP@travisperkins.co.uk,01253 768433,53.788868,-2.987926
+Travis Perkins,EPSOM,"TRAVIS PERKINS TRADING CO. LTD, 3 ROY RICHMOND WAY, EPSOM, SURREY",KT19 9BA,EPSOM@travisperkins.co.uk,01372 720110,51.34495,-0.261664
+Travis Perkins,WICKFORD,"TRAVIS PERKINS TRADING CO. LTD, ROBERT WAY, WICKFORD",SS11 8DD,WICKFORD@travisperkins.co.uk,01268 766633,51.607319,0.537548
+Travis Perkins,URMSTON,"TRAVIS PERKINS TRADING CO. LTD, URMSTON SAWMILLS, HIGHER ROAD, URMSTON",M41 9AB,URMSTON@travisperkins.co.uk,0161 748 2023,53.448245,-2.351989
+Travis Perkins,KIRKHAM,"TRAVIS PERKINS TRADING CO. LTD, UNIT 12 KIRKHAM TRADING PARK, FRECKLETON ROAD, KIRKHAM",PR4 3RB,KIRKHAM@travisperkins.co.uk,01772 683084,53.776939,-2.871119
+Travis Perkins,SALE,"TRAVIS PERKINS TRADING CO. LTD, ELM GROVE, CROSS STREET, SALE",M33 7JX,SALE@travisperkins.co.uk,0161 962 2218,53.43264,-2.320479
+Travis Perkins,EDINBURGH SOUTH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2A, PENTLAND INDUSTRIAL ESTATE, LOANHEAD, EDINBURGH",EH20 9QH,LOANHEAD@travisperkins.co.uk,0131 440 3618,55.876771,-3.167888
+Travis Perkins,MARTLESHAM HEATH,"TRAVIS PERKINS TRADING CO. LTD, HILTON ROAD, MARTLESHAM HEATH, IPSWICH",IP5 3RL,MARTLESHAMHEATH@travisperkins.co.uk,01473 209390,52.06346,1.281797
+Travis Perkins,LONG EATON,"TRAVIS PERKINS TRADING CO. LTD, FORBES CLOSE, OFF FIELDS FARM ROAD, LONG EATON",NG10 1PR,LONGEATON@travisperkins.co.uk,0115 946 8100,52.886818,-1.267838
+Travis Perkins,AMERSHAM,"TRAVIS PERKINS TRADING CO. LTD, 43-47 CHILTERN AVENUE, AMERSHAM",HP6 5AF,AMERSHAM@travisperkins.co.uk,01494 433936,51.677322,-0.603269
+Travis Perkins,GAINSBOROUGH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 20 LONGWOOD ROAD, CORRINGHAM RD INDUST EST, GAINSBOROUGH",DN21 1QB,GAINSBOROUGH@travisperkins.co.uk,01427 678556,53.402932,-0.747445
+Travis Perkins,LUTON,"TRAVIS PERKINS TRADING CO. LTD, DALLOW ROAD INDUSTRIAL ESTATE, LUTON",LU1 1SR,LUTONBURR@travisperkins.co.uk,01582 727707,51.883677,-0.434716
+Travis Perkins,FELIXSTOWE,"TRAVIS PERKINS TRADING CO. LTD, RECREATION LANE, FELIXSTOWE",IP11 9DQ,FELIXSTOWE@travisperkins.co.uk,01394 278999,51.971014,1.342603
+Travis Perkins,KNUTSFORD,"TRAVIS PERKINS TRADING CO. LTD, KNUTSFORD SAWMILLS, THE OLD WATER TOWER, MOBBERLEY, KNUTSFORD",WA16 8EU,KNUTSFORD@travisperkins.co.uk,01565 632031,53.307009,-2.363265
+Travis Perkins,STAINES,"TRAVIS PERKINS TRADING CO. LTD, HAWTHORN ROAD, STAINES UPON THAMES",TW18 3AY,STAINESTP@travisperkins.co.uk,01784 843585,51.433626,-0.530427
+Travis Perkins,COLCHESTER WHITEHALL ROAD,"TRAVIS PERKINS TRADING CO. LTD, WHITEHALL ROAD, COLCHESTER",CO2 8JJ,COLCHESTERWHITEHALLRD@travisperkins.co.uk,01206 795141,51.875869,0.928418
+Travis Perkins,MONTROSE,"TRAVIS PERKINS TRADING CO. LTD, WALDRON ROAD, MONTROSE",DD10 9BD,MONTROSE@travisperkins.co.uk,01674 672354,56.726643,-2.463806
+Travis Perkins,RAINHAM,"TRAVIS PERKINS TRADING CO. LTD, RAINHAM ROAD, RAINHAM",RM13 8ST,RAINHAM@travisperkins.co.uk,01708 522441,51.526305,0.192304
+Travis Perkins,POOLE,"TRAVIS PERKINS TRADING CO. LTD, 541 BLANDFORD ROAD, HAMWORTHY, POOLE",BH16 5BW,POOLEBM@travisperkins.co.uk,01202 624730,50.730162,-2.021946
+Travis Perkins,IPSWICH,"TRAVIS PERKINS TRADING CO. LTD, HADLEIGH ROAD INDS EST, 2B ARKWRIGHT ROAD, IPSWICH",IP2 0UB,IPSWICH@travisperkins.co.uk,01473 253792,52.061819,1.126625
+Travis Perkins,LEICESTER TIMBER,"TRAVIS PERKINS TRADING CO. LTD, ULVERSCROFT ROAD, LEICESTER",LE4 6BY,LEICESTERTIMBER@travisperkins.co.uk,0116 251 1185,52.645342,-1.113329
+Travis Perkins,CHATTERIS,"TRAVIS PERKINS TRADING CO. LTD, BRIDGE STREET, SHORT NIGHTLAYERS DROVE, CHATTERIS",PE16 6RD,CHATTERIS@travisperkins.co.uk,01354 692343,52.462277,0.045665
+Travis Perkins,BLYTH,"TRAVIS PERKINS TRADING CO. LTD, SPENCER ROAD, BLYTH RIVERSIDE BUSINESS PARK, BLYTH",NE24 5TG,BLYTH@travisperkins.co.uk,01670 352126,55.133972,-1.531204
+Travis Perkins,DURHAM,"TRAVIS PERKINS TRADING CO. LTD, DRAGON LANE, GILESGATE MOOR, DURHAM",DH1 2XD,DURHAM@travisperkins.co.uk,0191 386 0060,54.780361,-1.53979
+Travis Perkins,COWBRIDGE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 21, LLANDOW TRADING EST, LLANDOW, COWBRIDGE",CF71 7PB,COWBRIDGE@travisperkins.co.uk,01446 793121,51.435313,-3.50401
+Travis Perkins,NORTHAMPTON HARVEY REEVES ROAD,"TRAVIS PERKINS TRADING CO. LTD, HARVEY REEVES ROAD, NORTHAMPTON",NN5 5JR,NTONHRR@travisperkins.co.uk,01604 752333,52.234375,-0.916249
+Travis Perkins,DAVENTRY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 9, LOW MARCH, DAVENTRY",NN11 4SD,DAVENTRY@travisperkins.co.uk,01327 300722,52.246711,-1.153936
+Travis Perkins,CROWTHORNE,"TRAVIS PERKINS TRADING CO. LTD, PINEWOOD SAWMILLS, PINEWOOD AVENUE, CROWTHORNE",RG45 6RG,CROWTHORNE@travisperkins.co.uk,01344 772020,51.371902,-0.792402
+Travis Perkins,READING PLAYHATCH,"TRAVIS PERKINS TRADING CO. LTD, HENLEY ROAD, PLAYHATCH, READING",RG4 9RD,READINGTIM@travisperkins.co.uk,0118 948 4588,51.478086,-0.932041
+Travis Perkins,CARDIFF SOUTH,"TRAVIS PERKINS TRADING CO. LTD, EAST BAY CLOSE, OFF TYNDALL STREET, CARDIFF",CF10 4SF,CARDSOUTH@travisperkins.co.uk,02920 471471,51.478892,-3.16317
+Travis Perkins,MELKSHAM,"TRAVIS PERKINS TRADING CO. LTD, 20 HERCULES WAY, BOWERHILL INDUSTRIAL ESTATE, MELKSHAM",SN12 6TS,MELKSHAM@travisperkins.co.uk,01225 700218,51.355037,-2.129263
+Travis Perkins,WORTHING CLAPHAM COMMON,"TRAVIS PERKINS TRADING CO. LTD, CLAPHAM COMMON, WORTHING",BN13 3UR,WORTHING@travisperkins.co.uk,01903 871224,50.841214,-0.450125
+Travis Perkins,NEWQUAY,"TRAVIS PERKINS TRADING CO. LTD, UNIT 12A, TRELOGGAN INDUSTRIAL ESTATE, NEWQUAY",TR7 2SX,NEWQUAY@travisperkins.co.uk,01637 877734,50.405689,-5.06117
+Travis Perkins,WITNEY TP,"TRAVIS PERKINS TRADING CO. LTD, WITAN PARK, AVE TWO, STATION LANE WITNEY",OX28 4FH,WITNEYTP@travisperkins.co.uk,01993 608504,51.776924,-1.482523
+Travis Perkins,TAVISTOCK,"TRAVIS PERKINS TRADING CO. LTD, UNITS 3,5,7, PLYMOUTH RD INDUST EST, TAVISTOCK",PL19 9QN,TAVISTOCK@travisperkins.co.uk,01822 616558,50.538845,-4.144982
+Travis Perkins,TORQUAY,"TRAVIS PERKINS TRADING CO. LTD, HAPPAWAY ROAD, BARTON, TORQUAY",TQ2 8ES,TORQUAY@travisperkins.co.uk,01803 326531,50.489216,-3.535761
+Travis Perkins,DULVERTON,"TRAVIS PERKINS TRADING CO. LTD, BRUSHFORD, DULVERTON",TA22 9AT,DULVERTON@travisperkins.co.uk,01398 323323,51.018855,-3.533095
+Travis Perkins,TRURO,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2, BLOCK C, TRELISKE INDUSTRIAL ESTATE, TRURO",TR1 3LP,TRURO@travisperkins.co.uk,01872 261261,50.265752,-5.098482
+Travis Perkins,ALTRINCHAM,"TRAVIS PERKINS TRADING CO. LTD, BUILDER HOUSE, MANOR ROAD, ALTRINCHAM",WA15 9QX,ALTMANRD@travisperkins.co.uk,0161 928 1160,53.38583,-2.345324
+Travis Perkins,EBBW VALE,"TRAVIS PERKINS TRADING CO. LTD, WAUN-Y-POUND INDUSTRIAL ESTATE, EBBW VALE",NP23 6PL,EBBWVALE@travisperkins.co.uk,01495 301566,51.787577,-3.224608
+Travis Perkins,EXETER,"TRAVIS PERKINS TRADING CO. LTD, HENNOCK ROAD NORTH, MARSH BARTON TRADING ESTATE, EXETER",EX2 8NJ,EXETER@travisperkins.co.uk,01392 446810,50.704847,-3.525391
+Travis Perkins,PENRYN,"TRAVIS PERKINS TRADING CO. LTD, CHURCH HILL, PENRYN",TR10 8AJ,PENRYN@travisperkins.co.uk,01326 373535,50.170382,-5.100611
+Travis Perkins,BRAUNTON,"TRAVIS PERKINS TRADING CO. LTD, THE WAREHOUSE, WRAFTON ROAD, BRAUNTON",EX33 2BT,BRAUNTON@travisperkins.co.uk,01271 817275,51.104352,-4.156875
+Travis Perkins,TEIGNMOUTH,"TRAVIS PERKINS TRADING CO. LTD, UNIT 12, BROADMEADOW INDUSTRIAL ESTATE, TEIGNMOUTH",TQ14 9AE,TEIGNMOUTH@travisperkins.co.uk,01626 777474,50.546984,-3.515081
+Travis Perkins,ABERGAVENNY,"TRAVIS PERKINS TRADING CO. LTD, OFF LOWER MONK STREET, ABERGAVENNY",NP7 5LT,ABERGAVENNY@travisperkins.co.uk,01873 858626,51.823438,-3.013678
+Travis Perkins,HELSTON,"TRAVIS PERKINS TRADING CO. LTD, UNIT 1, CULDROSE INDUSTRIAL ESTATE, HELSTON",TR12 6BL,HELSTON@travisperkins.co.uk,01326 221414,50.07674,-5.235796
+Travis Perkins,STOCKPORT WHITEHILL,"TRAVIS PERKINS TRADING CO. LTD, WHITEHILL IN EST, HAIGH AVE, OFF MANCHESTER ROAD, STOCKPORT",SK4 1NY,WHITEHILL@travisperkins.co.uk,0161 480 0881,53.425147,-2.163929
+Travis Perkins,MANCHESTER CENTRAL,"TRAVIS PERKINS TRADING CO. LTD, HOLT STREET, OFF OLDHAM ROAD, MANCHESTER",M40 5AX,MANOLDHAMRD@travisperkins.co.uk,0161 205 8527,53.499596,-2.200788
+Travis Perkins,TIVERTON,"TRAVIS PERKINS TRADING CO. LTD, BLUNDELLS ROAD, TIVERTON",EX16 4BU,TIVERTON@travisperkins.co.uk,01884 257025,50.903003,-3.480987
+Travis Perkins,PLYMOUTH,"TRAVIS PERKINS TRADING CO. LTD, ST. JOHNS YARD, SUTTON ROAD, PLYMOUTH",PL4 0HQ,PLYMOUTH@travisperkins.co.uk,01752 266301,50.369812,-4.128814
+Travis Perkins,RUABON,"TRAVIS PERKINS TRADING CO. LTD, AFON GOCH, RUABON, WREXHAM",LL14 6RA,RUABON@travisperkins.co.uk,01978 822826,52.999737,-3.042741
+Travis Perkins,RYDE IOW,"TRAVIS PERKINS TRADING CO. LTD, UNIT 4, ATLANTIS COURT, NICHOLSON ROAD, RYDE",PO33 1FB,RYDE@travisperkins.co.uk,01983 613827,50.718221,-1.155476
+Travis Perkins,BIGGLESWADE,"TRAVIS PERKINS TRADING CO. LTD, UNIT 6, MONTGOMERY WAY, BIGGLESWADE",SG18 8UB,BIGGSWADE@travisperkins.co.uk,01767 313020,52.072892,-0.238742
+Travis Perkins,STOKE,"TRAVIS PERKINS TRADING CO. LTD, SCOTIA ROAD, TUNSTALL, STOKE ON TRENT",ST6 4HG,STOKE@travisperkins.co.uk,01782 811999,53.053679,-2.202961
+Travis Perkins,CATFORD,"TRAVIS PERKINS TRADING CO. LTD, 26 SANGLEY ROAD, CATFORD, LONDON",SE6 2JN,CATFORD@travisperkins.co.uk,020 8698 1081,51.443774,-0.018749
+Travis Perkins,CHELTENHAM TEWKESBURY ROAD,"TRAVIS PERKINS TRADING CO. LTD, BROOK ROAD, CHELTENHAM",GL51 9DZ,CHELTENHAMG@travisperkins.co.uk,01242 521477,51.911673,-2.098017
+Travis Perkins,ALEXANDRA PALACE,"TRAVIS PERKINS TRADING CO. LTD, PALACE GATES YARD, 31 BRIDGE RD, ALEXANDRA PALACE, LONDON",N22 7SN,ALEXANDRA@travisperkins.co.uk,020 8273 2500,51.599479,-0.120666
+Travis Perkins,LIVERPOOL CENTRAL,"TRAVIS PERKINS TRADING CO. LTD, 42 SANDHILLS LANE, LIVERPOOL",L5 9XN,LIVERPOOLBM@travisperkins.co.uk,0151 207 2111,53.43092,-2.996073
+Travis Perkins,BURTON ON TRENT,"TRAVIS PERKINS TRADING CO. LTD, HAWKINS LANE, BURTON-ON-TRENT",DE14 1AE,BURTON@travisperkins.co.uk,01283 566781,52.815501,-1.626871
+Travis Perkins,YORK FOSS ISLANDS,"TRAVIS PERKINS TRADING CO. LTD, FOSS ISLANDS ROAD, YORK",YO31 7UY,YORKWALKER@travisperkins.co.uk,01904 638742,53.958682,-1.071808
+Travis Perkins,ST PANCRAS,"TRAVIS PERKINS TRADING CO. LTD, 13 ST PANCRAS WAY, CAMDEN, LONDON",NW1 0PT,STPANCRAS@travisperkins.co.uk,020 7380 6480,51.537921,-0.133354
+Travis Perkins,WHITSTABLE,"TRAVIS PERKINS TRADING CO. LTD, JOSEPH WILSON BUSINESS PARK, MILSTROOD ROAD, WHITSTABLE",CT5 3PS,WHITSTABLE@travisperkins.co.uk,01227201547,51.345707,1.04426
+Travis Perkins,MOLD,"TRAVIS PERKINS TRADING CO. LTD, 64 NEW STREET, MOLD",CH7 1NZ,MOLD@travisperkins.co.uk,01352 752255,53.166071,-3.142475
+Travis Perkins,DUNFERMLINE,"TRAVIS PERKINS TRADING CO. LTD, PITREAVIE BUSINESS PARK, PITREAVIE CRESCENT, DUNFERMLINE",KY11 8PU,DUNFERMLINE@travisperkins.co.uk,01383 731911,56.055959,-3.449062
+Travis Perkins,QUEENSFERRY,"TRAVIS PERKINS TRADING CO. LTD, 108 CHESTER ROAD EAST, SHOTTON, DEESIDE",CH5 1QD,QUEENSFERRY@travisperkins.co.uk,01244 822223,53.20922,-3.033252
+Travis Perkins,WREXHAM,"TRAVIS PERKINS TRADING CO. LTD, BENJAMIN ROAD, WREXHAM",LL13 8EE,WREXHAM@travisperkins.co.uk,01978 290214,53.043249,-2.984546
+Travis Perkins,HULL,"TRAVIS PERKINS TRADING CO. LTD, 50-58 CLARENCE STREET, HULL",HU9 1DN,HULL@travisperkins.co.uk,01482 324303,53.74699,-0.323495
+Travis Perkins,LIVERPOOL AINTREE,"TRAVIS PERKINS TRADING CO. LTD, BRIDLE ROAD, NETHERTON, BOOTLE, LIVERPOOL",L30 1PG,AINTREE@travisperkins.co.uk,0151 905 0112,53.475784,-2.958642
+Travis Perkins,BECCLES,"TRAVIS PERKINS TRADING CO. LTD, THE QUAY, FEN LANE, BECCLES",NR34 9BH,BECCLES@travisperkins.co.uk,01502 712421,52.463849,1.565709
+Travis Perkins,SWINDON DUNBEATH ROAD,"TRAVIS PERKINS TRADING CO. LTD, UNIT 2274, DUNBEATH ROAD, SWINDON",SN2 8EA,SWINDONTP@travisperkins.co.uk,01793 532433,51.574792,-1.769207
+Travis Perkins,WORTHING TOWN CENTRE,"TRAVIS PERKINS TRADING CO. LTD, 22 SOMPTING ROAD, WORTHING",BN14 9EP,WORTHINGTP@travisperkins.co.uk,01903 641484,50.8287,-0.366704
+Travis Perkins,ST HELENS,"TRAVIS PERKINS TRADING CO. LTD, JACKSON STREET, ST HELENS",WA9 1AN,STHELENS@travisperkins.co.uk,01744 22691,53.451186,-2.722982
+Travis Perkins,VAUXHALL,"TRAVIS PERKINS TRADING CO. LTD, ENTRANCE VIA FENTIMAN ROAD, OFF SOUTH LAMBETH ROAD, VAUXHALL",SW8 1JY,VAUXHALL@travisperkins.co.uk,020 7582 4255,51.482062,-0.122919
+Travis Perkins,NORWICH NORTH,"TRAVIS PERKINS TRADING CO. LTD, 24 WESTON ROAD, NORWICH",NR3 3TP,NORWICHNORTH@travisperkins.co.uk,01603 424155,52.655302,1.283485
+Travis Perkins,OLDHAM,"TRAVIS PERKINS TRADING CO. LTD, ROYAL WORKS, FEATHERSTALL ROAD NORTH, OLDHAM",OL1 2HD,OLDHAM@travisperkins.co.uk,0161 626 3411,53.550425,-2.120553
+Travis Perkins,HADDINGTON,"TRAVIS PERKINS TRADING CO. LTD, 2A HOSPITAL ROAD, HADDINGTON",EH41 3BH,HADDINGTON@travisperkins.co.uk,01620 822472,55.95797,-2.796212

@@ -162,12 +162,29 @@ def route_order(lines, postcode=None):
 
     if not split and distinct:
         r0 = routed[0]
-        return {"split": False, "groups": groups, "overall_supplier": r0["supplier"],
-                "branch": r0.get("branch"), "branch_email": r0.get("branch_email"),
-                "route": r0["route"], "stage": _stage_for(r0["supplier"], r0["route"],
-                                                          r0["quote"], r0["portal"]),
-                "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf,
-                "lines": routed}
+        result = {"split": False, "groups": groups, "overall_supplier": r0["supplier"],
+                  "branch": r0.get("branch"), "branch_email": r0.get("branch_email"),
+                  "route": r0["route"], "stage": _stage_for(r0["supplier"], r0["route"],
+                                                            r0["quote"], r0["portal"]),
+                  "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf,
+                  "lines": routed}
+        # Eurocell / Travis Perkins: fill the nearest physical branch + email from the postcode.
+        if result["overall_supplier"] in ("Eurocell", "Travis Perkins") and postcode \
+                and not result.get("branch"):
+            try:
+                import branch_finder
+                nb = branch_finder.nearest_branch(postcode, result["overall_supplier"])
+                if nb and nb.get("branch_name"):
+                    result["branch"] = nb["branch_name"]
+                    result["branch_email"] = nb["email"]
+                    result["needs_branch"] = False
+                    for l in routed:
+                        if l.get("supplier") == result["overall_supplier"]:
+                            l["reason"] = (l["reason"] + f" → nearest branch "
+                                           f"{nb['branch_name']} ({nb['miles']} mi)")
+            except Exception:  # noqa: BLE001
+                pass
+        return result
     return {"split": split, "groups": groups, "overall_supplier": None, "branch": None,
             "branch_email": None, "route": None, "stage": "Needs Review",
             "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf, "lines": routed}
