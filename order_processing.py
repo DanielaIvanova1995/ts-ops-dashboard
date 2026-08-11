@@ -85,7 +85,7 @@ def _suggestion_box():
         msg = st.text_area("What's up?", key="op_sugg_msg", height=110,
                            placeholder="e.g. the supplier dropdown is missing X, or the PO for "
                                        "order 30xxx has the wrong branch…")
-        if st.button("✉ Send to Daniela", key="op_sugg_send", type="primary",
+        if st.button(":material/send: Send to Daniela", key="op_sugg_send",
                      disabled=not msg.strip()):
             subj = f"TradeHub Order Processing — suggestion from {who or 'the team'}"
             body = f"From: {who or 'the team'}\n\n{msg.strip()}\n\n— sent from TradeHub Order Processing"
@@ -121,7 +121,7 @@ def _detail_and_po(orders, sup_opts):
             st.markdown("**Order items (Monday):**")
             st.text(o["items"][:2500])
         sid = (o.get("shopify_id") or "").strip()
-        if sid and st.button("Load live Shopify detail (variants + fulfilments)",
+        if sid and st.button(":material/download: Load live Shopify detail (variants + fulfilments)",
                              key=f"op_live_{iid}"):
             st.session_state[f"op_liveon_{iid}"] = True
         if sid and st.session_state.get(f"op_liveon_{iid}"):
@@ -147,7 +147,8 @@ def _detail_and_po(orders, sup_opts):
             if a.get("url"):
                 st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
         up = st.file_uploader("Replace / attach PO (PDF)", type=["pdf"], key=f"op_po_{iid}")
-        if up is not None and st.button("Attach to Monday (replaces latest)", key=f"op_poset_{iid}"):
+        if up is not None and st.button(":material/attach_file: Attach to Monday (replaces latest)",
+                                        key=f"op_poset_{iid}"):
             with st.spinner("Uploading + verifying…"):
                 try:
                     res = data_sources.op_upload_po(iid, up.getvalue(), up.name)
@@ -167,19 +168,53 @@ def render():
         <span class="sec">Order Processing</span></span></div>""",
         unsafe_allow_html=True)
 
-    if st.button("↻ Refresh"):
-        for k in ("_op_orders", "_op_detail", "_op_fcounts"):
-            st.session_state.pop(k, None)
+    # Blocky (Bebas Neue) styling, scoped to the primary action buttons (Process ALL / SELECTED).
+    st.markdown(
+        "<style>.stButton>button[kind=\"primary\"],"
+        ".stButton>button[data-testid=\"baseButton-primary\"],"
+        ".stButton>button[data-testid=\"stBaseButton-primary\"]{"
+        "font-family:'Bebas Neue',sans-serif!important;text-transform:uppercase;"
+        "letter-spacing:.09em;font-size:18px;}</style>",
+        unsafe_allow_html=True)
+
     try:
         orders = _orders()
     except Exception as e:  # noqa: BLE001
         st.error("Couldn't read the orders board: " + str(e)[:200])
         return
     sup_labels = _supplier_labels()
+
+    # Top row: Refresh + Splits on the left, Process ALL / SELECTED tight together on the right.
+    tc = st.columns([1.1, 1.2, 3.0, 1.3, 1.7])
+    if tc[0].button(":material/refresh: Refresh"):
+        for k in ("_op_orders", "_op_detail", "_op_fcounts"):
+            st.session_state.pop(k, None)
+        st.rerun()
+    load_fc = tc[1].button(
+        ":material/call_split: Splits",
+        help="Fills the Fulfil # column — how many separate Shopify fulfilments each order splits "
+             "into (one lookup per order, so it loads on demand).")
+    do_all = tc[3].button("Process all", type="primary", use_container_width=True)
+    do_sel = tc[4].button("Process selected", type="primary", use_container_width=True)
+
     st.caption(f"**{len(orders)}** order(s) in *NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)* · "
-               "edit **Supplier** or **Stage** inline, then **Save to Monday**.")
+               "editing **Supplier** or **Stage** writes to Monday **instantly** — no Save needed.")
 
     _suggestion_box()
+
+    if load_fc:
+        with st.spinner("Reading Shopify fulfilments…"):
+            fc = {}
+            for o in orders:
+                sid = (o.get("shopify_id") or "").strip()
+                if not sid:
+                    continue
+                try:
+                    split = data_sources.fetch_order_fulfillment_split(sid)
+                    fc[o["item_id"]] = len(set(split.values())) or 1
+                except Exception:  # noqa: BLE001
+                    fc[o["item_id"]] = None
+            st.session_state["_op_fcounts"] = fc
 
     # Dropdown option sets must include every value currently present, or the grid errors.
     sup_opts = list(dict.fromkeys([s for s in sup_labels if s]
@@ -223,8 +258,9 @@ def render():
                                                 help="Open this order in Shopify admin"),
             "Fulfil": st.column_config.NumberColumn(
                 "Fulfil #", width="small",
-                help="Fulfillment No. — how many Shopify fulfilments the order splits into "
-                     "(press 'Load fulfilment counts' to fill)."),
+                help="Fulfillment No. — how many separate Shopify fulfilments the order splits "
+                     "into (press the 'Splits' button to fill; 2+ means route to more than one "
+                     "supplier)."),
             "Customer": st.column_config.TextColumn("Customer", width="medium"),
             "Branch email": st.column_config.TextColumn("Branch email", width="medium"),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
@@ -235,47 +271,22 @@ def render():
         },
         disabled=["Order", "Open", "Fulfil", "Customer", "Branch email", "£ to us", "£ supplier"])
 
-    b1, b2, b3, b4 = st.columns([1.2, 1.2, 1.2, 1])
-    if b1.button("💾 Save changes to Monday", type="primary"):
-        changed, errors = 0, []
-        for i, o in enumerate(orders):
-            try:
-                new_sup = edited.iloc[i]["Supplier"]
-                if new_sup and new_sup != (o.get("supplier") or None):
-                    data_sources.op_set_supplier(o["item_id"], new_sup)
-                    o["supplier"] = new_sup
-                    changed += 1
-                new_stage = _stage_plain(edited.iloc[i]["Stage"])
-                if new_stage and new_stage != (o.get("stage") or None):
-                    data_sources.op_set_status(o["item_id"], new_stage)
-                    o["stage"] = new_stage
-                    changed += 1
-            except Exception as e:  # noqa: BLE001
-                errors.append(f"{o.get('order_no')}: {str(e)[:80]}")
-        if changed:
-            st.success(f"Saved {changed} change(s) to Monday.")
-        elif not errors:
-            st.info("No changes to save.")
-        if errors:
-            st.error("Some didn't save: " + " · ".join(errors))
+    # ---- Auto-sync every Supplier / Stage edit straight to Monday (no Save button) ----
+    for i, o in enumerate(orders):
+        try:
+            new_sup = edited.iloc[i]["Supplier"]
+            if new_sup and new_sup != (o.get("supplier") or None):
+                data_sources.op_set_supplier(o["item_id"], new_sup)
+                o["supplier"] = new_sup
+                st.toast(f"{o.get('order_no')} · supplier → {new_sup}")
+            new_stage = _stage_plain(edited.iloc[i]["Stage"])
+            if new_stage and new_stage != (o.get("stage") or None):
+                data_sources.op_set_status(o["item_id"], new_stage)
+                o["stage"] = new_stage
+                st.toast(f"{o.get('order_no')} · stage → {new_stage}")
+        except Exception as e:  # noqa: BLE001
+            st.toast(f"{o.get('order_no')} · didn't save: {str(e)[:70]}")
 
-    if b2.button("🔢 Load fulfilment counts"):
-        with st.spinner("Reading Shopify fulfilments…"):
-            fc = {}
-            for o in orders:
-                sid = (o.get("shopify_id") or "").strip()
-                if not sid:
-                    continue
-                try:
-                    split = data_sources.fetch_order_fulfillment_split(sid)
-                    fc[o["item_id"]] = len(set(split.values())) or 1
-                except Exception:  # noqa: BLE001
-                    fc[o["item_id"]] = None
-            st.session_state["_op_fcounts"] = fc
-        st.rerun()
-
-    do_all = b3.button("⚙ Process all")
-    do_sel = b4.button("⚙ Process selected")
     if do_all or do_sel:
         picks = [orders[i]["item_id"] for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
         targets = [o["item_id"] for o in orders] if do_all else picks
