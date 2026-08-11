@@ -721,7 +721,8 @@ def render():
     # Top row: Refresh / Splits on the left, Process ALL / SELECTED on the right.
     tc = st.columns([1.0, 1.0, 2.6, 1.3, 1.7])
     if tc[0].button(":material/refresh: Refresh"):
-        for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship", "_op_plan"):
+        for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship",
+                  "_op_results", "_op_split_pending"):
             st.session_state.pop(k, None)
         st.rerun()
     load_fc = tc[1].button(
@@ -825,18 +826,19 @@ def render():
     # Which rows are ticked — drives both "Process selected" and the expand-detail panels below.
     ticked = [i for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
 
-    # ---- Process = PREVIEW the plan, then CONFIRM to apply (route → Monday → PO → attach) ----
+    # ---- Process = one click: run non-splits straight away; pause only to confirm splits ----
     if do_all or do_sel:
         tgt = list(range(len(orders))) if do_all else ticked
         if not tgt:
             st.warning("No orders ticked — use the ✓ column to pick which to process.")
         else:
-            with st.spinner("Working out the plan…"):
-                rts = st.session_state.setdefault("_op_routes", {})
-                for i in tgt:
+            by_id = {o["item_id"]: o for o in orders}
+            rts = st.session_state.setdefault("_op_routes", {})
+            with st.spinner("Routing & processing…"):
+                for i in tgt:                                  # route Place Order orders only
                     o = orders[i]
                     if (o.get("stage") or "").strip() != PLACE_ORDER:
-                        continue                       # already processed — don't even route it
+                        continue
                     iid, sid = o["item_id"], (o.get("shopify_id") or "").strip()
                     if rts.get(iid) is None and sid:
                         try:
@@ -848,60 +850,57 @@ def render():
                             rts[iid] = order_routing.route_order(lines, postcode=pc)
                         except Exception as e:  # noqa: BLE001
                             rts[iid] = {"error": str(e)[:100], "lines": []}
-            st.session_state["_op_plan"] = [orders[i]["item_id"] for i in tgt]
+                now_ids, split_ids, results = [], [], []
+                for i in tgt:
+                    o = orders[i]
+                    iid = o["item_id"]
+                    if (o.get("stage") or "").strip() != PLACE_ORDER:
+                        results.append({"Order": o.get("order_no") or o.get("name"),
+                                        "Supplier": o.get("supplier") or "",
+                                        "Result": f"already {(o.get('stage') or '—')} — skipped"})
+                    elif (rts.get(iid) or {}).get("split"):
+                        split_ids.append(iid)                  # splits wait for a confirm
+                    else:
+                        now_ids.append(iid)
+                prog = st.progress(0.0, text="Processing…") if now_ids else None
+                for n, iid in enumerate(now_ids):
+                    results.append(_process_one(by_id[iid]))
+                    if prog:
+                        prog.progress((n + 1) / len(now_ids), text=f"Processed {n + 1}/{len(now_ids)}")
+                if prog:
+                    prog.empty()
+            st.session_state["_op_results"] = results
+            st.session_state["_op_split_pending"] = split_ids
 
-    plan_ids = st.session_state.get("_op_plan")
-    if plan_ids:
+    results = st.session_state.get("_op_results")
+    if results:
+        st.markdown("##### Processed")
+        st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
+        st.caption("Supplier / branch / stage set on Monday and a PO or packing slip attached, per "
+                   "order. **Only orders at stage *Place Order* are processed.** Nothing was emailed "
+                   "to a supplier — that stays the team's send step. Hit **↻ Refresh** to see the "
+                   "updated board.")
+
+    pend = [i for i in (st.session_state.get("_op_split_pending") or [])
+            if i in {o["item_id"] for o in orders}]
+    if pend:
         rts = st.session_state.get("_op_routes", {})
         by_id = {o["item_id"]: o for o in orders}
-        prows = []
-        for iid in plan_ids:
-            o = by_id.get(iid)
-            if not o:
-                continue
-            res = rts.get(iid) or {}
-            if (o.get("stage") or "").strip() != PLACE_ORDER:
-                act = f"already processed (stage: {o.get('stage') or '—'}) — will skip"
-            elif res.get("error"):
-                act = "⚠ couldn't route — will skip"
-            elif not res.get("lines"):
-                act = "no lines — will skip"
-            elif res.get("split"):
-                act = f"→ SPLIT into {len(res['groups'])} parts: {order_routing.summary(res)}"
-            elif res.get("route") == "PICK":
-                act = "no supplier found — will skip (pick manually)"
-            else:
-                sup = res.get("overall_supplier") or res.get("route")
-                act = f"→ {sup}" + (f" ({res['branch']})" if res.get("branch") else "") \
-                    + f" · {res.get('stage')}"
-            prows.append({"Order": o.get("order_no") or o.get("name"),
-                          "Customer": o.get("customer") or "", "Plan": act})
-        doable = sum(1 for r in prows if r["Plan"].startswith("→"))
-        st.markdown(f"##### Plan — {len(prows)} order(s), {doable} will process")
-        st.caption("Nothing has been written yet. **Only orders at stage *Place Order* are "
-                   "processed** — anything already processed is skipped. **Confirm** to route each "
-                   "order, set its Supplier/Branch/Stage on Monday, generate the PO/packing slip "
-                   "and attach it. **Splits** are duplicated into a Monday part per supplier (each "
-                   "with its own PO) **and** the Shopify fulfilment is split by supplier (samples "
-                   "left alone). **Can't-identify** orders are skipped for you to pick manually.")
-        st.dataframe(pd.DataFrame(prows), hide_index=True, use_container_width=True)
-        cc = st.columns([1.5, 1, 3])
-        if cc[0].button(f"Confirm & process {doable}", type="primary", key="op_confirm",
-                        disabled=not doable):
-            ids = [i for i in plan_ids if i in by_id]
-            prog = st.progress(0.0, text="Processing…")
-            results = []
-            for n, iid in enumerate(ids):
-                results.append(_process_one(by_id[iid]))
-                prog.progress((n + 1) / len(ids), text=f"Processed {n + 1}/{len(ids)}")
-            prog.empty()
-            st.session_state.pop("_op_plan", None)
-            st.markdown("##### Done")
-            st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
-            st.caption("Nothing was emailed to a supplier — that stays your team's send step. "
-                       "Hit **↻ Refresh** to see the updated board.")
-        if cc[1].button("Cancel", key="op_cancel"):
-            st.session_state.pop("_op_plan", None)
+        srows = [{"Order": by_id[i].get("order_no") or by_id[i].get("name"),
+                  "Split into": order_routing.summary(rts.get(i) or {})} for i in pend]
+        st.warning(f"**{len(srows)} split order(s)** need a quick confirm — a split creates a "
+                   "Monday part per supplier **and** restructures the Shopify fulfilment (harder to "
+                   "undo than a normal order).")
+        st.dataframe(pd.DataFrame(srows), hide_index=True, use_container_width=True)
+        s1, s2, _ = st.columns([1.4, 1, 3])
+        if s1.button(f"Confirm & split {len(srows)}", type="primary", key="op_splitconfirm"):
+            with st.spinner("Splitting…"):
+                extra = [_process_one(by_id[i]) for i in pend]
+            st.session_state["_op_results"] = (st.session_state.get("_op_results") or []) + extra
+            st.session_state.pop("_op_split_pending", None)
+            st.rerun()
+        if s2.button("Skip splits", key="op_splitskip"):
+            st.session_state.pop("_op_split_pending", None)
             st.rerun()
 
     # Expand each ticked order right off the table — no dropdown. One ticked → opens fully.
