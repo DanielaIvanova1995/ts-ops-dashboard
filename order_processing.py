@@ -17,6 +17,7 @@ import re
 import pandas as pd
 import streamlit as st
 
+import branch_finder
 import data_sources
 import delivery_rules
 import order_docs
@@ -384,6 +385,73 @@ def _process_split(o, res):
     return "split into " + str(n) + " parts: " + "; ".join(parts) + fmsg
 
 
+def _resolve_branch(supplier, postcode):
+    """(branch, email) for a chosen supplier + postcode: nearest branch for Eurocell/Travis
+    Perkins, the UPB Hardie depot for UPB, else (None, None)."""
+    if not postcode:
+        return None, None
+    if supplier in ("Eurocell", "Travis Perkins"):
+        nb = branch_finder.nearest_branch(postcode, supplier)
+        if nb and nb.get("branch_name"):
+            return nb["branch_name"], nb["email"]
+    if supplier == "UPB":
+        hr = order_routing.hardie_route(postcode)
+        return hr.get("branch"), hr.get("branch_email")
+    return None, None
+
+
+def _stage_for_supplier(supplier):
+    if supplier in order_routing.PORTAL:
+        return "Go To Portal"
+    if supplier in order_routing.QUOTE_FIRST:
+        return "Needs Quote"
+    return "Needs Review"
+
+
+def _process_current(o):
+    """Process ONE order using the supplier already chosen on it (a manual override) — resolve the
+    branch, set supplier/branch/stage on Monday, generate the PO/slip and verified-attach. Does NOT
+    re-route, so your dropdown choice is honoured. Returns a status string."""
+    iid = o["item_id"]
+    sid = (o.get("shopify_id") or "").strip()
+    supplier = (o.get("supplier") or "").strip()
+    if not supplier:
+        return "Pick a supplier in the dropdown first."
+    pc = None
+    if sid:
+        try:
+            pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
+        except Exception:  # noqa: BLE001
+            pc = None
+    br, em = _resolve_branch(supplier, pc)
+    stage = _stage_for_supplier(supplier)
+    try:
+        data_sources.op_set_supplier(iid, supplier)
+        if br or em:
+            data_sources.op_set_branch(iid, branch=br, email=em)
+            if br:
+                o["branch"] = br
+            if em:
+                o["branch_email"] = em
+        data_sources.op_set_status(iid, stage)
+        o["stage"] = stage
+    except Exception as e:  # noqa: BLE001
+        return "Monday write failed: " + str(e)[:80]
+    try:
+        kind, doc = _build_doc(o)
+        pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+            doc, date_str=datetime.date.today().strftime("%d %B %Y"))
+        nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
+             "Trade_Superstore_Online.pdf"
+        r = data_sources.op_upload_po(iid, pdf, nm)
+        docmsg = f"{kind.upper()} attached ✓" if r.get("ok") else f"{kind} attach UNVERIFIED"
+    except ValueError:
+        docmsg = "doc BLOCKED — a field is missing (use Adjust)"
+    except Exception as e:  # noqa: BLE001
+        docmsg = "doc error: " + str(e)[:50]
+    return f"{supplier}" + (f" ({br})" if br else "") + f" · stage {stage} · {docmsg}"
+
+
 def _process_one(o):
     """Route → apply supplier/branch/stage to Monday → generate the PO/slip → verified-attach.
     Skips splits and un-routable orders (flagged for a human). Never emails a supplier. Returns a
@@ -595,6 +663,17 @@ def _order_detail(o):
     for a in (o.get("po_assets") or []):
         if a.get("url"):
             st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
+
+    # ---- Override: process this one order using the supplier YOU picked (no re-routing) ----
+    cur_sup = (o.get("supplier") or "").strip()
+    if cur_sup:
+        st.caption(f"To **override**: set the Supplier in the grid, then process this order as that "
+                   f"supplier here (it won't re-route). Currently **{cur_sup}**.")
+        if st.button(f":material/bolt: Process this order as {cur_sup}", key=f"op_proc1_{iid}"):
+            with st.spinner("Processing…"):
+                msg = _process_current(o)
+            st.success("Processed → " + msg + ". Hit ↻ Refresh to see the board.")
+            st.session_state["_op_orders"] = None
 
     # ---- Adjust anything before generating (fix a missed qty / address / price, add a line) ----
     # A checkbox, not an expander — this whole panel already renders inside the order's expander,
