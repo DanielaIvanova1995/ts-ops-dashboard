@@ -537,6 +537,36 @@ def _order_detail(o):
     iid = o["item_id"]
     sid = (o.get("shopify_id") or "").strip()
 
+    # Instant Supplier / Stage change — a selectbox applies the moment you pick (unlike the grid,
+    # which only commits when you click away). Empty = clear it on Monday.
+    e1, e2 = st.columns(2)
+    sopts = [""] + [s for s in _supplier_labels() if s]
+    csup = o.get("supplier") or ""
+    if csup and csup not in sopts:
+        sopts = [csup] + sopts
+    nsup = e1.selectbox("Supplier", sopts, index=sopts.index(csup) if csup in sopts else 0,
+                        key=f"op_dsup_{iid}")
+    if nsup != csup:
+        try:
+            data_sources.op_set_supplier(iid, nsup)
+            o["supplier"] = nsup
+            st.toast(f"{o.get('order_no')} · supplier → {nsup or '(cleared)'}")
+        except Exception as ex:  # noqa: BLE001
+            st.toast("Supplier didn't save: " + str(ex)[:60])
+    stopts = [""] + list(data_sources.OP_STAGES)
+    cstg = o.get("stage") or ""
+    if cstg and cstg not in stopts:
+        stopts = [cstg] + stopts
+    nstg = e2.selectbox("Stage", stopts, index=stopts.index(cstg) if cstg in stopts else 0,
+                        key=f"op_dstg_{iid}")
+    if nstg != cstg:
+        try:
+            data_sources.op_set_status(iid, nstg)
+            o["stage"] = nstg
+            st.toast(f"{o.get('order_no')} · stage → {nstg or '(cleared)'}")
+        except Exception as ex:  # noqa: BLE001
+            st.toast("Stage didn't save: " + str(ex)[:60])
+
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Customer**")
