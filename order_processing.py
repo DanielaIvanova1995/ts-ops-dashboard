@@ -597,8 +597,11 @@ def _order_detail(o):
             st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
 
     # ---- Adjust anything before generating (fix a missed qty / address / price, add a line) ----
+    # A checkbox, not an expander — this whole panel already renders inside the order's expander,
+    # and Streamlit forbids nesting expanders.
     items_override = address_override = delivery_override = notes_extra = None
-    with st.expander("✏️ Adjust the PO before generating — fix qty / address / prices, add a line"):
+    if st.checkbox("✏️ Adjust the PO before generating — fix qty / address / prices, add a line",
+                   key=f"op_adjust_{iid}"):
         st.caption("Edit anything the automation missed, then Generate. Changes here only affect "
                    "the PO document (not the Monday/Shopify order).")
         default_addr = "\n".join((_ship(sid) or {}).get("lines") or
