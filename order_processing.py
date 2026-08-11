@@ -116,12 +116,14 @@ def _suggestion_box():
             try:
                 data_sources.send_supplier_email(FROM_MAILBOX, DANIELA, subj, body)
                 st.success("Sent to Daniela — thank you!")
-            except Exception:  # noqa: BLE001
+            except Exception as send_err:  # noqa: BLE001
                 try:
                     link = data_sources.create_supplier_draft(FROM_MAILBOX, DANIELA, subj, body)
-                    st.success("Saved as a draft to send." + (f" [Open]({link})" if link else ""))
+                    st.warning("Couldn't send automatically (" + str(send_err)[:120] + ") — saved "
+                               "as a **draft** in accounts@ for you to send." +
+                               (f" [Open the draft]({link})" if link else ""))
                 except Exception as e:  # noqa: BLE001
-                    st.error("Couldn't send: " + str(e)[:150])
+                    st.error("Couldn't send or draft: " + str(e)[:150])
 
 
 def _parse_monday_items(txt):
