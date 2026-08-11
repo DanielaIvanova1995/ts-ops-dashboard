@@ -100,18 +100,10 @@ def _suggestion_box():
                     st.error("Couldn't send: " + str(e)[:150])
 
 
-def _detail_and_po(orders, sup_opts):
-    """A panel below the board: pick one order, see full detail + live Shopify lines/fulfilments,
-    and download / replace its PO."""
-    st.markdown("##### 🔎 Open an order — full detail & PO")
-    labels = {f"{o.get('order_no') or o.get('name')} · {o.get('customer') or '—'}": o
-              for o in orders}
-    if not labels:
-        return
-    pick = st.selectbox("Order", list(labels.keys()), key="op_openone")
-    o = labels[pick]
+def _order_detail(o):
+    """Full detail + live Shopify lines/fulfilments + PO for one order (rendered inside the
+    expander that opens when you tick the order in the board)."""
     iid = o["item_id"]
-
     left, right = st.columns([3, 2])
     with left:
         st.markdown(f"**Customer:** {_esc(o.get('customer'))} · {_esc(o.get('phone'))} · "
@@ -247,8 +239,8 @@ def render():
 
     edited = st.data_editor(
         df, hide_index=True, use_container_width=True, key="op_board",
-        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Branch email",
-                      "Supplier", "Stage", "£ to us", "£ supplier"],
+        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Supplier",
+                      "Branch email", "Stage", "£ to us", "£ supplier"],
         column_config={
             "Select": st.column_config.CheckboxColumn("✓", width="small"),
             "Order": st.column_config.TextColumn("Order", width="small",
@@ -287,15 +279,27 @@ def render():
         except Exception as e:  # noqa: BLE001
             st.toast(f"{o.get('order_no')} · didn't save: {str(e)[:70]}")
 
+    # Which rows are ticked — drives both "Process selected" and the expand-detail panels below.
+    ticked = [i for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
+
     if do_all or do_sel:
-        picks = [orders[i]["item_id"] for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
-        targets = [o["item_id"] for o in orders] if do_all else picks
+        targets = list(range(len(orders))) if do_all else ticked
         if not targets:
             st.warning("No orders ticked — use the ✓ column to pick which to process.")
         else:
             st.info(f"**Routing + PO generation for {len(targets)} order(s) is the next phase.** "
-                    "For now, set Supplier/Stage inline and Save, and attach POs in the panel "
-                    "below. The automatic route → price → build → verify-attach flow is next.")
+                    "For now, set Supplier/Stage inline (auto-saves to Monday) and attach POs in "
+                    "the order panel below. The automatic route → price → build → verify-attach "
+                    "flow is next.")
 
+    # Expand each ticked order right off the table — no dropdown. One ticked → opens fully.
     st.divider()
-    _detail_and_po(orders, sup_opts)
+    if not ticked:
+        st.caption("Tick an order's **✓** to open its full detail & PO here.")
+    else:
+        only_one = len(ticked) == 1
+        for i in ticked:
+            o = orders[i]
+            with st.expander(f"{o.get('order_no') or o.get('name')} · {o.get('customer') or '—'}",
+                             expanded=only_one):
+                _order_detail(o)
