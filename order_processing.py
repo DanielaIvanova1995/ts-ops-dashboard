@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 import data_sources
+import delivery_rules
 import order_docs
 import order_routing
 
@@ -234,7 +235,13 @@ def _build_doc(o):
             lt = round(cost * q, 2)
             goods += lt
             lines.append([it["SKU"] or "-", it["Item"], qty, _money(cost), _money(lt)])
-    deliv, deliv_known = _delivery_charge(supplier, goods)
+    dlines = [{"sku": it["SKU"], "description": it["Item"],
+               "qty": (float(it["Qty"]) if str(it["Qty"]).replace(".", "", 1).isdigit() else 1)}
+              for it in items]
+    ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country")}
+    _d = delivery_rules.expected_delivery(supplier, goods, ship_pc, dlines)
+    deliv = _d if isinstance(_d, (int, float)) else 0.0
+    deliv_known = _d is not None
     deliv_label = _money(deliv) + ("" if deliv_known else " (rate not on file — confirm on OC)")
     if any_confirm:
         sums = [["Goods (ex VAT)", "confirm on OC", False], ["Delivery", deliv_label, False],

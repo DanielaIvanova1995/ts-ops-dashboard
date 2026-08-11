@@ -30,6 +30,8 @@ import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
 
+import delivery_rules
+
 BASE = Path(__file__).parent
 LOGO_PATH = BASE / "assets" / "tso-logo.png"
 
@@ -1940,6 +1942,8 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         return _southern_expected(ship)
     if _is_nuie(supplier):
         return _nuie_expected(lines, ship)
+    if (supplier or "").startswith("vista"):
+        return delivery_rules.vista_expected(goods_value, lines)
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
