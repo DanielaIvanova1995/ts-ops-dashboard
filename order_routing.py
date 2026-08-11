@@ -30,26 +30,77 @@ CANON = {
 
 PORTAL = {"PJH", "Toolbank", "Velux", "MB Decor", "Nuie", "National Skirting"}
 QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices"}
-NEEDS_BRANCH = {"UPB", "Travis Perkins", "Eurocell", "NBP"}
+NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
+
+# ---- James Hardie / Freefoam / Fortex / Cladco postcode routing (Aug 2026 map, avoid NBP) ----
+# Postcode AREAS (the leading letters of a postcode) → who supplies.
+_SCOTLAND = {"AB", "DD", "DG", "EH", "FK", "G", "HS", "IV", "KA", "KW", "KY", "ML", "PA", "PH",
+             "TD", "ZE"}
+_UPB_NEWMARKET = {"PE", "CB", "SG", "NN", "MK", "EN"}
+_UPB_IPSWICH = {"NR", "IP", "CO", "SS", "OX", "HP", "AL", "LU", "RG", "SL", "RH", "GU", "BN",
+                "TN", "ME", "CT", "IG"}
+_UPB_ALDRIDGE = {"YO", "BD", "HG", "PR", "BB", "HD", "LS", "WF", "HU", "L", "WN", "OL", "HX",
+                 "WA", "M", "SK", "CH", "CW", "ST", "DE", "NG", "S", "LN", "LE", "TF", "WS",
+                 "B", "WV", "DY", "CV"}
+_SQUAREDEAL = {"TR", "PL", "TQ", "EX", "TA", "DT", "BH", "BA", "BS", "SP", "SO", "PO", "SN",
+               "GL", "DA", "BR", "CR", "KT", "SM", "CM", "N", "NW", "E", "EC", "SE", "SW", "W",
+               "WC", "RM", "TW", "UB", "HA", "WD", "NP", "CF",
+               "OX", "RG", "GU", "RH", "BN", "TN", "ME", "CT", "IG", "SS", "SL", "HP", "LU",
+               "AL", "SG", "MK", "EN",
+               "SA", "SY", "LD"}    # southern NBP-excluded patch → Squaredeal (quote first)
+_UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
+              "UPB Ipswich": "ipswich@upbuildingproducts.co.uk",
+              "UPB Aldridge": "martinmelaney@upbuildingproducts.com"}
+
+
+def postcode_area(pc):
+    m = re.match(r"\s*([A-Za-z]{1,2})", pc or "")
+    return m.group(1).upper() if m else ""
+
+
+def hardie_route(pc, smooth=False):
+    """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (avoiding NBP). Returns
+    {supplier, branch, branch_email, reason, conf, quote, needs_branch}."""
+    area = postcode_area(pc)
+    note = (" — SMOOTH finish: confirm UPB stock, else Squaredeal always have Smooth"
+            if smooth else "")
+    if not area:
+        return {"supplier": "UPB", "reason": "Hardie/Freefoam — no postcode to route on; "
+                "confirm branch" + note, "needs_branch": True, "conf": "low"}
+    if area in _SCOTLAND:
+        return {"supplier": "Bricklink", "reason": f"Scotland ({area}) → Bricklink (quote first)"
+                + note, "quote": True, "conf": "med"}
+    for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
+                        ("UPB Aldridge", _UPB_ALDRIDGE)):
+        if area in keys:
+            return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
+                    "reason": f"{depot} ({area})" + note, "conf": "high"}
+    if area in _SQUAREDEAL:
+        return {"supplier": "Squaredeal", "reason": f"Squaredeal south ({area}) — quote first"
+                + note, "quote": True, "conf": "med"}
+    return {"supplier": "UPB", "reason": f"Postcode {area} not on the Hardie map — try "
+            "UPB/Squaredeal/Bricklink, confirm" + note, "needs_branch": True, "conf": "low"}
 
 
 def _norm(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
-def route_line(line):
-    """Route a single line → {supplier, route, portal, quote, needs_branch, reason, conf}.
-    `route` is the supplier label, or 'SAMPLES'/'CLEARANCE'/'PICK'. supplier is None for the
-    in-house/PICK routes."""
+def route_line(line, area_pc=None):
+    """Route a single line → {supplier, route, branch, branch_email, portal, quote, needs_branch,
+    reason, conf}. `route` is the supplier label, or 'SAMPLES'/'CLEARANCE'/'PICK'. supplier is
+    None for the in-house/PICK routes. `area_pc` is the order's delivery postcode (for Hardie)."""
     title = line.get("title") or ""
     sku = (line.get("sku") or "").strip()
     vendor = line.get("vendor") or ""
     blob = _norm(title) + " " + _norm(vendor)
 
-    def out(route, supplier, reason, conf, portal=False, quote=False, needs_branch=False):
+    def out(route, supplier, reason, conf, portal=False, quote=False, needs_branch=False,
+            branch=None, branch_email=None):
         return {"route": route, "supplier": supplier, "reason": reason, "conf": conf,
-                "portal": portal, "quote": quote, "needs_branch": needs_branch}
+                "portal": portal, "quote": quote, "needs_branch": needs_branch,
+                "branch": branch, "branch_email": branch_email}
 
     tl = title.lower()
     if "sample" in tl or sku.lower().startswith("sample"):
@@ -57,15 +108,12 @@ def route_line(line):
     if "clearance" in tl or sku.lower().startswith("clear"):
         return out("CLEARANCE", None, "Clearance stock we hold — in-house", "high")
 
-    # Brand keyword locks (title or vendor).
-    if "hardie" in blob:
-        return out("UPB", "UPB", "James Hardie → UPB first (confirm area / Smooth / Scotland)",
-                   "med", needs_branch=True)
-    if "freefoam" in blob or "fortex" in blob:
-        return out("UPB", "UPB", "Freefoam/Fortex → UPB if in area, else NBP (never Squaredeal)",
-                   "med", needs_branch=True)
-    if "cladco" in blob:
-        return out("UPB", "UPB", "Cladco via UPB", "med", needs_branch=True)
+    # Hardie / Freefoam / Fortex / Cladco — route by the delivery postcode (Aug 2026 map).
+    if any(k in blob for k in ("hardie", "freefoam", "fortex", "cladco")):
+        hr = hardie_route(area_pc, smooth="smooth" in tl)
+        return out(hr["supplier"], hr["supplier"], hr["reason"], hr["conf"],
+                   quote=hr.get("quote", False), needs_branch=hr.get("needs_branch", False),
+                   branch=hr.get("branch"), branch_email=hr.get("branch_email"))
     if any(k in blob for k in ("polycarbonate", "multiwall", "ezglaze", "solidpolycarbonate")):
         return out("Molan", "Molan", "Polycarbonate — Molan brand lock", "high")
 
@@ -95,13 +143,13 @@ def _stage_for(supplier, route, quote, portal):
     return "Needs Review"
 
 
-def route_order(lines):
-    """Route a whole order → {split, groups, overall_supplier, stage, needs_branch, conf, lines}.
-    `groups` maps each distinct route → its lines (for a split). `overall_supplier` is set only
-    when the whole order routes to ONE supplier."""
+def route_order(lines, postcode=None):
+    """Route a whole order → {split, groups, overall_supplier, branch, branch_email, stage,
+    needs_branch, conf, lines}. `groups` maps each distinct route → its lines (for a split).
+    `overall_supplier`/`branch` are set only when the whole order routes to ONE supplier."""
     routed = []
     for ln in (lines or []):
-        r = route_line(ln)
+        r = route_line(ln, area_pc=postcode)
         routed.append({**ln, **r})
 
     routes = [r["route"] for r in routed]
@@ -114,13 +162,14 @@ def route_order(lines):
     if not split and distinct:
         r0 = routed[0]
         return {"split": False, "groups": groups, "overall_supplier": r0["supplier"],
+                "branch": r0.get("branch"), "branch_email": r0.get("branch_email"),
                 "route": r0["route"], "stage": _stage_for(r0["supplier"], r0["route"],
-                                                           r0["quote"], r0["portal"]),
+                                                          r0["quote"], r0["portal"]),
                 "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf,
                 "lines": routed}
-    return {"split": split, "groups": groups, "overall_supplier": None, "route": None,
-            "stage": "Needs Review", "needs_branch": any(r["needs_branch"] for r in routed),
-            "conf": conf, "lines": routed}
+    return {"split": split, "groups": groups, "overall_supplier": None, "branch": None,
+            "branch_email": None, "route": None, "stage": "Needs Review",
+            "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf, "lines": routed}
 
 
 def summary(res):

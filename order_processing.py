@@ -10,6 +10,7 @@ Phase 2 (routing engine) and Phase 3 (PO/packing-slip generation + verified atta
 the Process buttons, which are stubbed here.
 """
 import html
+import re
 
 import pandas as pd
 import streamlit as st
@@ -43,6 +44,22 @@ def _stage_plain(disp):
 
 def _esc(s):
     return html.escape(str(s if s is not None else ""))
+
+
+def _norm_addr(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _addr_changed(monday_addr, ship):
+    """True if the live Shopify shipping postcode or first address line isn't present in the Monday
+    address text — i.e. the customer likely changed the delivery address after it synced."""
+    if not ship:
+        return False
+    m = _norm_addr(monday_addr)
+    for key in (ship.get("zip"), ship.get("address1")):
+        if key and _norm_addr(key) and _norm_addr(key) not in m:
+            return True
+    return False
 
 
 def _orders():
@@ -152,6 +169,9 @@ def _order_detail(o):
             if ship.get("phone"):
                 body += f"  \n☎ {_esc(ship.get('phone'))}"
             st.markdown(body)
+            if _addr_changed(o.get("address"), ship):
+                st.warning("⚠ This differs from the address on Monday — the customer may have "
+                           "**changed the delivery address**. Update Monday and re-issue the PO.")
         elif o.get("address"):
             st.markdown(_esc(o.get("address"))
                         + "  \n*(from Monday — live Shopify address unavailable)*")
@@ -185,23 +205,45 @@ def _order_detail(o):
                            "fulfilment) is the next piece of the build — for now set the main "
                            "supplier and note the split.")
             elif res.get("overall_supplier"):
-                st.markdown(f"→ **{res['overall_supplier']}** · suggested stage "
-                            f"**{res['stage']}**")
-                if st.button(f":material/check: Apply {res['overall_supplier']} + {res['stage']} "
-                             "to Monday", key=f"op_apply_{iid}"):
+                _br = res.get("branch")
+                st.markdown(f"→ **{res['overall_supplier']}**"
+                            + (f" · **{_br}**" if _br else "")
+                            + f" · suggested stage **{res['stage']}**")
+                if res.get("branch_email"):
+                    st.caption(f"Branch email: {_esc(res['branch_email'])}")
+                applbl = f"Apply {res['overall_supplier']}" + (f" ({_br})" if _br else "") \
+                    + f" + {res['stage']}"
+                if st.button(":material/check: " + applbl + " to Monday", key=f"op_apply_{iid}"):
                     try:
                         data_sources.op_set_supplier(iid, res["overall_supplier"])
                         o["supplier"] = res["overall_supplier"]
                         data_sources.op_set_status(iid, res["stage"])
                         o["stage"] = res["stage"]
-                        st.success("Applied — supplier & stage set on Monday.")
+                        if _br or res.get("branch_email"):
+                            data_sources.op_set_branch(iid, branch=_br,
+                                                       email=res.get("branch_email"))
+                            if _br:
+                                o["branch"] = _br
+                            if res.get("branch_email"):
+                                o["branch_email"] = res["branch_email"]
+                        st.success("Applied — supplier, branch & stage set on Monday.")
                     except Exception as e:  # noqa: BLE001
                         st.error("Couldn't apply: " + str(e)[:150])
             else:
                 st.markdown(f"→ **{res.get('route')}** — in-house / pick (no supplier to set)")
-            if res.get("needs_branch"):
-                st.caption("⚠ Needs a branch chosen (UPB / Eurocell / Travis Perkins) with the "
-                           "delivery postcode checked — not auto-filled.")
+            # Eurocell / Travis Perkins: nearest physical branch needs their live locator.
+            _sup = res.get("overall_supplier") or ""
+            _pc = (_ship(sid) or {}).get("zip") if sid else None
+            if _sup == "Eurocell":
+                _u = f"https://www.eurocell.co.uk/branch-finder?postcode={_pc or ''}"
+                st.caption(f"⚠ Pick the nearest **Eurocell** branch: [branch finder]({_u}) → "
+                           "put its name in Branch and `branchname@eurocell.co.uk` in Branch email.")
+            elif _sup == "Travis Perkins":
+                _u = f"https://www.travisperkins.co.uk/branch-locator?searchTerm={_pc or ''}"
+                st.caption(f"⚠ Pick the nearest **Travis Perkins** branch: [branch locator]({_u}) → "
+                           "put its name in Branch and its email in Branch email.")
+            elif res.get("needs_branch"):
+                st.caption("⚠ Postcode not clearly on the Hardie map — confirm the branch.")
             st.dataframe(
                 pd.DataFrame([{"Item": l.get("title"), "SKU": l.get("sku") or "",
                                "Qty": l.get("qty"), "→": (l.get("supplier") or l.get("route")),
@@ -210,12 +252,15 @@ def _order_detail(o):
 
     # Live-from-Shopify: the Monday items above are a snapshot from when the order synced. This
     # pulls the CURRENT order (in case it was edited) and adds unit prices, variants + fulfilments.
-    if sid and st.button(":material/sync: Refresh from Shopify (live items, prices & fulfilments)",
+    if sid and st.button(":material/sync: Refresh from Shopify (live items, address & fulfilments)",
                          key=f"op_live_{iid}",
-                         help="Monday shows the order as it first synced. This fetches the current "
-                              "order straight from Shopify — in case it was edited — and adds unit "
-                              "prices, variants and the fulfilment split."):
+                         help="Monday shows the order as it first synced. This re-fetches the "
+                              "current order from Shopify — items, prices, the fulfilment split, "
+                              "AND the shipping address — in case anything was changed."):
         st.session_state[f"op_liveon_{iid}"] = True
+        st.session_state.get("_op_detail", {}).pop(sid, None)     # bust caches → truly re-fetch
+        st.session_state.get("_op_ship", {}).pop(sid, None)
+        st.rerun()
     if sid and st.session_state.get(f"op_liveon_{iid}"):
         d = _live_detail(sid)
         if d.get("error"):
@@ -321,7 +366,11 @@ def render():
                     continue
                 try:
                     lines = data_sources.fetch_order_lines_with_vendor(sid)
-                    routes[o["item_id"]] = order_routing.route_order(lines)
+                    try:
+                        pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
+                    except Exception:  # noqa: BLE001
+                        pc = None
+                    routes[o["item_id"]] = order_routing.route_order(lines, postcode=pc)
                 except Exception as e:  # noqa: BLE001
                     routes[o["item_id"]] = {"error": str(e)[:120], "lines": []}
             st.session_state["_op_routes"] = routes
