@@ -416,6 +416,37 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     return out
 
 
+def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
+    """Order line items WITH each product's Shopify vendor + product type — the inputs the routing
+    engine needs to pick a supplier. Returns [{title, sku, qty, vendor, product_type}]. One call
+    per order. Raises if the order can't be read (caller falls back)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
+             "title quantity sku variant { product { vendor productType } } "
+             "product { vendor productType } } } } } }")
+    r = requests.post(
+        f"https://{store}/admin/api/2024-10/graphql.json",
+        json={"query": query, "variables": {"id": gid}},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=25,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    order = (payload.get("data") or {}).get("order") or {}
+    out = []
+    for e in (order.get("lineItems") or {}).get("edges") or []:
+        n = e.get("node") or {}
+        prod = (n.get("variant") or {}).get("product") or n.get("product") or {}
+        out.append({"title": n.get("title") or "", "sku": (n.get("sku") or "").strip() or None,
+                    "qty": n.get("quantity"), "vendor": (prod.get("vendor") or "").strip(),
+                    "product_type": (prod.get("productType") or "").strip()})
+    return out
+
+
 def fetch_order_fulfillment_split(order_id, token: str | None = None) -> dict:
     """For orders split across suppliers (Shopify drop-ship), map each order line's SKU to the
     name of the fulfilment LOCATION it's assigned to: {sku: location_name}. Empty dict if the

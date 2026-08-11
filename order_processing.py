@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 import data_sources
+import order_routing
 
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
@@ -166,6 +167,47 @@ def _order_detail(o):
                            "SKU": st.column_config.TextColumn("SKU", width="medium"),
                            "Qty": st.column_config.TextColumn("Qty", width="small")})
 
+    # ---- Routing suggestion (from the 'Suggest' button) ----
+    res = st.session_state.get("_op_routes", {}).get(iid)
+    if res is not None:
+        st.markdown("**Routing suggestion**")
+        if res.get("error"):
+            st.caption("Couldn't route: " + res["error"])
+        elif not res.get("lines"):
+            st.caption("No lines to route.")
+        else:
+            if res.get("split"):
+                st.markdown("⚠ **Split order** — routes to more than one supplier:")
+                for rt, lns in res["groups"].items():
+                    st.markdown(f"- **{rt}** — " + ", ".join(
+                        (l.get("sku") or l.get("title") or "")[:26] for l in lns))
+                st.caption("Splitting an order (duplicate the Monday item + split the Shopify "
+                           "fulfilment) is the next piece of the build — for now set the main "
+                           "supplier and note the split.")
+            elif res.get("overall_supplier"):
+                st.markdown(f"→ **{res['overall_supplier']}** · suggested stage "
+                            f"**{res['stage']}**")
+                if st.button(f":material/check: Apply {res['overall_supplier']} + {res['stage']} "
+                             "to Monday", key=f"op_apply_{iid}"):
+                    try:
+                        data_sources.op_set_supplier(iid, res["overall_supplier"])
+                        o["supplier"] = res["overall_supplier"]
+                        data_sources.op_set_status(iid, res["stage"])
+                        o["stage"] = res["stage"]
+                        st.success("Applied — supplier & stage set on Monday.")
+                    except Exception as e:  # noqa: BLE001
+                        st.error("Couldn't apply: " + str(e)[:150])
+            else:
+                st.markdown(f"→ **{res.get('route')}** — in-house / pick (no supplier to set)")
+            if res.get("needs_branch"):
+                st.caption("⚠ Needs a branch chosen (UPB / Eurocell / Travis Perkins) with the "
+                           "delivery postcode checked — not auto-filled.")
+            st.dataframe(
+                pd.DataFrame([{"Item": l.get("title"), "SKU": l.get("sku") or "",
+                               "Qty": l.get("qty"), "→": (l.get("supplier") or l.get("route")),
+                               "Why": l.get("reason")} for l in res["lines"]]),
+                hide_index=True, use_container_width=True)
+
     # Live-from-Shopify: the Monday items above are a snapshot from when the order synced. This
     # pulls the CURRENT order (in case it was edited) and adds unit prices, variants + fulfilments.
     if sid and st.button(":material/sync: Refresh from Shopify (live items, prices & fulfilments)",
@@ -234,18 +276,22 @@ def render():
         return
     sup_labels = _supplier_labels()
 
-    # Top row: Refresh + Splits on the left, Process ALL / SELECTED tight together on the right.
-    tc = st.columns([1.1, 1.2, 3.0, 1.3, 1.7])
+    # Top row: Refresh / Splits / Suggest on the left, Process ALL / SELECTED on the right.
+    tc = st.columns([1.0, 1.0, 1.4, 1.9, 1.3, 1.7])
     if tc[0].button(":material/refresh: Refresh"):
-        for k in ("_op_orders", "_op_detail", "_op_fcounts"):
+        for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship"):
             st.session_state.pop(k, None)
         st.rerun()
     load_fc = tc[1].button(
         ":material/call_split: Splits",
         help="Fills the Fulfil # column — how many separate Shopify fulfilments each order splits "
              "into (one lookup per order, so it loads on demand).")
-    do_all = tc[3].button("Process all", type="primary", use_container_width=True)
-    do_sel = tc[4].button("Process selected", type="primary", use_container_width=True)
+    do_route = tc[2].button(
+        ":material/route: Suggest",
+        help="Suggests a supplier for each order from the routing rulebook (by Shopify vendor, "
+             "brand, SKU pattern). Fills the Suggested column; you still choose the final supplier.")
+    do_all = tc[4].button("Process all", type="primary", use_container_width=True)
+    do_sel = tc[5].button("Process selected", type="primary", use_container_width=True)
 
     st.caption(f"**{len(orders)}** order(s) in *NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)* · "
                "editing **Supplier** or **Stage** writes to Monday **instantly** — no Save needed.")
@@ -265,6 +311,21 @@ def render():
                 except Exception:  # noqa: BLE001
                     fc[o["item_id"]] = None
             st.session_state["_op_fcounts"] = fc
+
+    if do_route:
+        with st.spinner("Routing orders from the rulebook…"):
+            routes = {}
+            for o in orders:
+                sid = (o.get("shopify_id") or "").strip()
+                if not sid:
+                    continue
+                try:
+                    lines = data_sources.fetch_order_lines_with_vendor(sid)
+                    routes[o["item_id"]] = order_routing.route_order(lines)
+                except Exception as e:  # noqa: BLE001
+                    routes[o["item_id"]] = {"error": str(e)[:120], "lines": []}
+            st.session_state["_op_routes"] = routes
+    routes = st.session_state.get("_op_routes", {})
 
     # Dropdown option sets must include every value currently present, or the grid errors.
     sup_opts = list(dict.fromkeys([s for s in sup_labels if s]
@@ -287,8 +348,10 @@ def render():
             "Open": _order_url((o.get("shopify_id") or "").strip()),
             "Fulfil": fcounts.get(o["item_id"], None),
             "Customer": o.get("customer") or "",
-            "Branch email": o.get("branch_email") or "",
             "Supplier": o.get("supplier") or None,
+            "Suggested": order_routing.summary(routes[o["item_id"]])
+            if routes.get(o["item_id"]) else "",
+            "Branch email": o.get("branch_email") or "",
             "Stage": _stage_disp(o.get("stage")),
             "£ to us": o.get("sell") or "",
             "£ supplier": o.get("cost_supplier") or "",
@@ -297,7 +360,7 @@ def render():
 
     edited = st.data_editor(
         df, hide_index=True, use_container_width=True, key="op_board",
-        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Supplier",
+        column_order=["Select", "Order", "Open", "Fulfil", "Customer", "Supplier", "Suggested",
                       "Branch email", "Stage", "£ to us", "£ supplier"],
         column_config={
             "Select": st.column_config.CheckboxColumn("✓", width="small"),
@@ -315,11 +378,16 @@ def render():
             "Branch email": st.column_config.TextColumn("Branch email", width="medium"),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
                                                          width="medium"),
+            "Suggested": st.column_config.TextColumn(
+                "Suggested", width="medium",
+                help="Routing suggestion from the rulebook (press 'Suggest'). Tick the order to "
+                     "see the per-line breakdown and apply it."),
             "Stage": st.column_config.SelectboxColumn("Stage", options=stage_opts, width="medium"),
             "£ to us": st.column_config.TextColumn("£ to us", width="small"),
             "£ supplier": st.column_config.TextColumn("£ supplier", width="small"),
         },
-        disabled=["Order", "Open", "Fulfil", "Customer", "Branch email", "£ to us", "£ supplier"])
+        disabled=["Order", "Open", "Fulfil", "Customer", "Suggested", "Branch email",
+                  "£ to us", "£ supplier"])
 
     # ---- Auto-sync every Supplier / Stage edit straight to Monday (no Save button) ----
     for i, o in enumerate(orders):
