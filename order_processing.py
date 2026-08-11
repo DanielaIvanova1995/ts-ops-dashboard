@@ -1,15 +1,17 @@
-"""Order Processing cockpit (Phase 1).
+"""Order Processing cockpit (Phase 1) — board-style grid.
 
 Reads the "NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)" group on the Monday Orders board and
-lets whoever is processing orders see the full order, the fulfilment breakdown, change the
-Order Process Stage and the routed Supplier (both written straight back to Monday), download or
-replace the PO, and send a suggestion to Daniela. Monday stays the source of truth.
+shows it like the Monday board itself: one editable row per order with inline Supplier and
+Order-Process-Stage dropdowns and a Select tick. Edits are written back to Monday on Save
+(Monday stays the source of truth). A detail panel below shows the full order + live Shopify
+lines/fulfilments and handles PO download/replace.
 
-Phase 2 (routing engine from the supplier rulebook) and Phase 3 (PO/packing-slip generation +
-verified attach) plug into the `Process` buttons, which are stubbed here.
+Phase 2 (routing engine) and Phase 3 (PO/packing-slip generation + verified attach) plug into
+the Process buttons, which are stubbed here.
 """
 import html
 
+import pandas as pd
 import streamlit as st
 
 import data_sources
@@ -39,7 +41,7 @@ def _supplier_labels():
 
 
 def _live_detail(shopify_id):
-    """Lazy-load (and cache) the live Shopify line items + fulfilment split for one order."""
+    """Lazy-load (and cache) live Shopify line items + fulfilment split for one order."""
     cache = st.session_state.setdefault("_op_detail", {})
     if shopify_id not in cache:
         d = {"lines": [], "split": {}, "error": None}
@@ -55,6 +57,16 @@ def _live_detail(shopify_id):
     return cache[shopify_id]
 
 
+def _items_short(txt):
+    txt = (txt or "").strip()
+    if not txt:
+        return ""
+    lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+    n = len(lines)
+    first = lines[0][:60] if lines else ""
+    return f"{first}" + (f"  (+{n - 1} more)" if n > 1 else "")
+
+
 def _suggestion_box():
     with st.expander("💡 Suggestion / report a problem (emails Daniela)"):
         st.caption("Anything that doesn't work, or would help you process orders faster — this "
@@ -62,16 +74,14 @@ def _suggestion_box():
         who = st.text_input("Your name", value="Natasha", key="op_sugg_who")
         msg = st.text_area("What's up?", key="op_sugg_msg", height=110,
                            placeholder="e.g. the supplier dropdown is missing X, or the PO for "
-                                       "order 29xxx has the wrong branch…")
+                                       "order 30xxx has the wrong branch…")
         if st.button("✉ Send to Daniela", key="op_sugg_send", type="primary",
                      disabled=not msg.strip()):
             subj = f"TradeHub Order Processing — suggestion from {who or 'the team'}"
-            body = (f"From: {who or 'the team'}\n\n{msg.strip()}\n\n"
-                    "— sent from TradeHub Order Processing")
+            body = f"From: {who or 'the team'}\n\n{msg.strip()}\n\n— sent from TradeHub Order Processing"
             try:
                 data_sources.send_supplier_email(FROM_MAILBOX, DANIELA, subj, body)
                 st.success("Sent to Daniela — thank you!")
-                st.session_state["op_sugg_msg"] = ""
             except Exception:  # noqa: BLE001
                 try:
                     link = data_sources.create_supplier_draft(FROM_MAILBOX, DANIELA, subj, body)
@@ -80,107 +90,65 @@ def _suggestion_box():
                     st.error("Couldn't send: " + str(e)[:150])
 
 
-def _order_card(o, sup_labels):
+def _detail_and_po(orders, sup_opts):
+    """A panel below the board: pick one order, see full detail + live Shopify lines/fulfilments,
+    and download / replace its PO."""
+    st.markdown("##### 🔎 Open an order — full detail & PO")
+    labels = {f"{o.get('order_no') or o.get('name')} · {o.get('customer') or '—'}": o
+              for o in orders}
+    if not labels:
+        return
+    pick = st.selectbox("Order", list(labels.keys()), key="op_openone")
+    o = labels[pick]
     iid = o["item_id"]
-    stage = o.get("stage") or ""
-    supplier = o.get("supplier") or ""
-    title = f"{o.get('name') or o.get('order_no') or iid} · {o.get('customer') or '—'}"
-    badge = f"  ·  {stage}" if stage else ""
-    with st.expander(title + badge):
-        pick = st.checkbox("Select to process", key=f"op_pick_{iid}")
 
-        det, ctrl = st.columns([3, 2])
-        with det:
-            st.markdown(f"**Order:** {_esc(o.get('order_no') or o.get('name'))}  \n"
-                        f"**Customer:** {_esc(o.get('customer'))} · {_esc(o.get('phone'))} · "
-                        f"{_esc(o.get('cust_email'))}  \n"
-                        f"**Deliver to:** {_esc(o.get('address'))}", unsafe_allow_html=True)
-            if o.get("items"):
-                st.markdown("**Order items (Monday):**")
-                st.text(o["items"][:2000])
-            sid = (o.get("shopify_id") or "").strip()
-            if sid:
-                if st.button("🔎 Load live Shopify detail (variants + fulfilments)",
+    left, right = st.columns([3, 2])
+    with left:
+        st.markdown(f"**Customer:** {_esc(o.get('customer'))} · {_esc(o.get('phone'))} · "
+                    f"{_esc(o.get('cust_email'))}  \n"
+                    f"**Deliver to:** {_esc(o.get('address'))}", unsafe_allow_html=True)
+        if o.get("items"):
+            st.markdown("**Order items (Monday):**")
+            st.text(o["items"][:2500])
+        sid = (o.get("shopify_id") or "").strip()
+        if sid and st.button("Load live Shopify detail (variants + fulfilments)",
                              key=f"op_live_{iid}"):
-                    st.session_state[f"op_liveon_{iid}"] = True
-                if st.session_state.get(f"op_liveon_{iid}"):
-                    d = _live_detail(sid)
-                    if d.get("error"):
-                        st.caption("Couldn't read Shopify: " + d["error"])
-                    if d.get("lines"):
-                        import pandas as pd
-                        df = pd.DataFrame([{"SKU": ln.get("sku") or "", "Item": ln.get("title"),
-                                            "Qty": ln.get("qty"),
-                                            "Unit £": ln.get("price")} for ln in d["lines"]])
-                        st.dataframe(df, hide_index=True, use_container_width=True)
-                    split = d.get("split") or {}
-                    locs = sorted(set(split.values()))
-                    if locs:
-                        st.markdown(f"**Fulfilments:** {len(locs)} — " + ", ".join(_esc(l)
-                                    for l in locs))
-                        for l in locs:
-                            skus = [s for s, loc in split.items() if loc == l]
-                            st.caption(f"• {l}: {', '.join(skus)}")
-                    else:
-                        st.caption("**Fulfilments:** 1 (not split)")
+            st.session_state[f"op_liveon_{iid}"] = True
+        if sid and st.session_state.get(f"op_liveon_{iid}"):
+            d = _live_detail(sid)
+            if d.get("error"):
+                st.caption("Couldn't read Shopify: " + d["error"])
+            if d.get("lines"):
+                st.dataframe(pd.DataFrame([{"SKU": ln.get("sku") or "", "Item": ln.get("title"),
+                                            "Qty": ln.get("qty"), "Unit £": ln.get("price")}
+                                           for ln in d["lines"]]),
+                             hide_index=True, use_container_width=True)
+            locs = sorted(set((d.get("split") or {}).values()))
+            if locs:
+                st.markdown(f"**Fulfilments:** {len(locs)} — " + ", ".join(_esc(l) for l in locs))
+                for l in locs:
+                    st.caption(f"• {l}: " + ", ".join(s for s, loc in d["split"].items()
+                                                       if loc == l))
             else:
-                st.caption("No Shopify Order ID on this Monday item — live detail unavailable.")
-
-        with ctrl:
-            # ---- Order Process Stage (writes to Monday) ----
-            stages = data_sources.OP_STAGES
-            si = stages.index(stage) if stage in stages else 0
-            new_stage = st.selectbox("Order Process Stage", stages, index=si,
-                                     key=f"op_stage_{iid}")
-            if st.button("Set stage on Monday", key=f"op_stageset_{iid}",
-                         disabled=(new_stage == stage)):
+                st.caption("**Fulfilments:** 1 (not split)")
+    with right:
+        st.markdown("**PO / document**")
+        for a in (o.get("po_assets") or []):
+            if a.get("url"):
+                st.markdown(f"📄 [{_esc(a.get('name'))}]({a['url']})")
+        up = st.file_uploader("Replace / attach PO (PDF)", type=["pdf"], key=f"op_po_{iid}")
+        if up is not None and st.button("Attach to Monday (replaces latest)", key=f"op_poset_{iid}"):
+            with st.spinner("Uploading + verifying…"):
                 try:
-                    data_sources.op_set_status(iid, new_stage)
-                    o["stage"] = new_stage
-                    st.success(f"Stage → {new_stage}")
+                    res = data_sources.op_upload_po(iid, up.getvalue(), up.name)
+                    if res.get("ok"):
+                        st.success(f"Attached & verified ({res['size']:,} bytes).")
+                        st.session_state["_op_orders"] = None
+                    else:
+                        st.error(f"Upload didn't verify — {res.get('n_assets')} asset(s) on the "
+                                 "item, none matched the exact size. Try again.")
                 except Exception as e:  # noqa: BLE001
-                    st.error("Couldn't set stage: " + str(e)[:150])
-
-            # ---- Supplier (writes to Monday) ----
-            # Keep the order's current supplier first even if it's not in the board's label list.
-            opts = list(dict.fromkeys([supplier] + (sup_labels or []))) if supplier else \
-                (sup_labels or [])
-            if opts:
-                idx = opts.index(supplier) if supplier in opts else 0
-                new_sup = st.selectbox("Supplier", opts, index=idx, key=f"op_sup_{iid}")
-                if st.button("Set supplier on Monday", key=f"op_supset_{iid}",
-                             disabled=(new_sup == supplier)):
-                    try:
-                        data_sources.op_set_supplier(iid, new_sup)
-                        o["supplier"] = new_sup
-                        st.success(f"Supplier → {new_sup}")
-                    except Exception as e:  # noqa: BLE001
-                        st.error("Couldn't set supplier: " + str(e)[:150])
-            else:
-                st.caption("Couldn't load the supplier list.")
-
-            # ---- PO file (download / replace) ----
-            st.markdown("**PO / document**")
-            for a in (o.get("po_assets") or []):
-                url = a.get("url")
-                if url:
-                    st.markdown(f"📄 [{_esc(a.get('name'))}]({url})")
-            up = st.file_uploader("Replace / attach PO (PDF)", type=["pdf"],
-                                  key=f"op_po_{iid}", label_visibility="collapsed")
-            if up is not None and st.button("Attach to Monday (replaces latest)",
-                                            key=f"op_poset_{iid}"):
-                with st.spinner("Uploading + verifying…"):
-                    try:
-                        res = data_sources.op_upload_po(iid, up.getvalue(), up.name)
-                        if res.get("ok"):
-                            st.success(f"Attached & verified ({res['size']:,} bytes).")
-                            st.session_state["_op_orders"] = None
-                        else:
-                            st.error(f"Upload didn't verify — {res.get('n_assets')} asset(s) on "
-                                     "the item, none matched the exact size. Try again.")
-                    except Exception as e:  # noqa: BLE001
-                        st.error("Upload failed: " + str(e)[:180])
-        return pick
+                    st.error("Upload failed: " + str(e)[:180])
 
 
 def render():
@@ -189,9 +157,8 @@ def render():
         <span class="sec">Order Processing</span></span></div>""",
         unsafe_allow_html=True)
 
-    top = st.columns([1, 1, 2])
-    if top[0].button("↻ Refresh"):
-        for k in ("_op_orders", "_op_detail"):
+    if st.button("↻ Refresh"):
+        for k in ("_op_orders", "_op_detail", "_op_fcounts"):
             st.session_state.pop(k, None)
     try:
         orders = _orders()
@@ -200,26 +167,100 @@ def render():
         return
     sup_labels = _supplier_labels()
     st.caption(f"**{len(orders)}** order(s) in *NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)* · "
-               "changes to Stage, Supplier and the PO write straight back to Monday.")
+               "edit **Supplier** or **Stage** inline, then **Save to Monday**.")
 
     _suggestion_box()
 
-    # Process controls (routing + PO generation land here in Phase 2/3).
-    pcols = st.columns([1, 1, 3])
-    do_all = pcols[0].button("⚙ Process all", type="primary")
-    do_sel = pcols[1].button("⚙ Process selected")
+    # Dropdown option sets must include every value currently present, or the grid errors.
+    sup_opts = list(dict.fromkeys([s for s in sup_labels if s]
+                                  + [o.get("supplier") for o in orders if o.get("supplier")]))
+    stage_opts = list(dict.fromkeys(data_sources.OP_STAGES
+                                    + [o.get("stage") for o in orders if o.get("stage")]))
+    fcounts = st.session_state.get("_op_fcounts", {})
 
-    picks = []
+    # Build the board grid.
+    rows = []
     for o in orders:
-        if _order_card(o, sup_labels):
-            picks.append(o["item_id"])
+        rows.append({
+            "Select": False,
+            "Order": o.get("order_no") or o.get("name") or "",
+            "Customer": o.get("customer") or "",
+            "Items": _items_short(o.get("items")),
+            "Fulfil": fcounts.get(o["item_id"], None),
+            "Supplier": o.get("supplier") or None,
+            "Stage": o.get("stage") or None,
+            "£ to us": o.get("sell") or "",
+            "£ supplier": o.get("cost_supplier") or "",
+        })
+    df = pd.DataFrame(rows)
 
+    edited = st.data_editor(
+        df, hide_index=True, use_container_width=True, key="op_board",
+        column_config={
+            "Select": st.column_config.CheckboxColumn("✓", width="small"),
+            "Order": st.column_config.TextColumn("Order", width="small"),
+            "Customer": st.column_config.TextColumn("Customer", width="medium"),
+            "Items": st.column_config.TextColumn("Items", width="large"),
+            "Fulfil": st.column_config.NumberColumn("Fulfil", width="small",
+                                                    help="Number of Shopify fulfilments (load below)"),
+            "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
+                                                         width="medium"),
+            "Stage": st.column_config.SelectboxColumn("Stage", options=stage_opts, width="medium"),
+            "£ to us": st.column_config.TextColumn("£ to us", width="small"),
+            "£ supplier": st.column_config.TextColumn("£ supplier", width="small"),
+        },
+        disabled=["Order", "Customer", "Items", "Fulfil", "£ to us", "£ supplier"])
+
+    b1, b2, b3, b4 = st.columns([1.2, 1.2, 1.2, 1])
+    if b1.button("💾 Save changes to Monday", type="primary"):
+        changed, errors = 0, []
+        for i, o in enumerate(orders):
+            try:
+                new_sup = edited.iloc[i]["Supplier"]
+                if new_sup and new_sup != (o.get("supplier") or None):
+                    data_sources.op_set_supplier(o["item_id"], new_sup)
+                    o["supplier"] = new_sup
+                    changed += 1
+                new_stage = edited.iloc[i]["Stage"]
+                if new_stage and new_stage != (o.get("stage") or None):
+                    data_sources.op_set_status(o["item_id"], new_stage)
+                    o["stage"] = new_stage
+                    changed += 1
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{o.get('order_no')}: {str(e)[:80]}")
+        if changed:
+            st.success(f"Saved {changed} change(s) to Monday.")
+        elif not errors:
+            st.info("No changes to save.")
+        if errors:
+            st.error("Some didn't save: " + " · ".join(errors))
+
+    if b2.button("🔢 Load fulfilment counts"):
+        with st.spinner("Reading Shopify fulfilments…"):
+            fc = {}
+            for o in orders:
+                sid = (o.get("shopify_id") or "").strip()
+                if not sid:
+                    continue
+                try:
+                    split = data_sources.fetch_order_fulfillment_split(sid)
+                    fc[o["item_id"]] = len(set(split.values())) or 1
+                except Exception:  # noqa: BLE001
+                    fc[o["item_id"]] = None
+            st.session_state["_op_fcounts"] = fc
+        st.rerun()
+
+    do_all = b3.button("⚙ Process all")
+    do_sel = b4.button("⚙ Process selected")
     if do_all or do_sel:
+        picks = [orders[i]["item_id"] for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
         targets = [o["item_id"] for o in orders] if do_all else picks
         if not targets:
-            st.warning("No orders selected — tick 'Select to process' on the ones you want.")
+            st.warning("No orders ticked — use the ✓ column to pick which to process.")
         else:
             st.info(f"**Routing + PO generation for {len(targets)} order(s) is the next phase.** "
-                    "For now, set the Supplier and Stage on each order above (both sync to "
-                    "Monday), and attach/replace the PO. The automatic route → price → build → "
-                    "verify-attach flow is being built next.")
+                    "For now, set Supplier/Stage inline and Save, and attach POs in the panel "
+                    "below. The automatic route → price → build → verify-attach flow is next.")
+
+    st.divider()
+    _detail_and_po(orders, sup_opts)
