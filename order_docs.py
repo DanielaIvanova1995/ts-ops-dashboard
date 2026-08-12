@@ -265,9 +265,10 @@ def _grid_table(pdf, cols, lines, line_h=4.4, pad=1.8):
             pdf.cell(w, row_h, "", border="LR", fill=True)
             x += w
         x = x0
-        for (w, _, a), parts in zip(cols, wrapped):              # then the wrapped text, top-aligned
-            pdf.set_xy(x + pad, y0 + 1.1)
-            pdf.multi_cell(w - 2 * pad, line_h, "\n".join(parts), align=a)
+        for (w, _, a), parts in zip(cols, wrapped):              # render each pre-wrapped line as-is
+            for j, ln_txt in enumerate(parts):                   # (cell() never re-wraps → no distortion)
+                pdf.set_xy(x + pad, y0 + 1.1 + j * line_h)
+                pdf.cell(w - 2 * pad, line_h, ln_txt, align=a)
             x += w
         pdf.set_xy(x0, y0 + row_h)
     pdf.set_x(12)
