@@ -7165,6 +7165,16 @@ with st.sidebar:
         if data.get("outlook_error"):
             st.caption(data["outlook_error"][:160])
         st.caption(f"Updated: {data.get('updated','—')}")
+        if st.button("Check Shopify fulfilment permission", use_container_width=True):
+            try:
+                sc = data_sources.shopify_token_scopes()
+                can_split = any("fulfillment_orders" in s for s in sc.get("scopes", []))
+                st.caption(("🟢 Can split fulfilments" if can_split else
+                            "🔴 CANNOT split fulfilments — add a `write_..._fulfillment_orders` "
+                            "scope to the Shopify app and regenerate the token")
+                           + f" · app: {sc.get('app') or '?'}")
+            except Exception as e:  # noqa: BLE001
+                st.caption(f"Couldn't read Shopify scopes: {str(e)[:120]}")
         if st.button("Refresh data", use_container_width=True):
             load_kpis.clear()
             st.rerun()

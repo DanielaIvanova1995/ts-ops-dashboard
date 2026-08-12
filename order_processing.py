@@ -998,9 +998,9 @@ def render():
             st.session_state.pop(k, None)
         st.rerun()
     load_fc = tc[1].button(
-        ":material/call_split: Splits",
-        help="Fills the Fulfil # column — how many separate Shopify fulfilments each order splits "
-             "into (one lookup per order, so it loads on demand).")
+        ":material/call_split: Refresh Fulfil #",
+        help="Re-reads how many separate Shopify fulfilments each order has. Fills automatically; "
+             "use this to refresh after splitting.")
     do_all = tc[3].button("Process all", type="primary", use_container_width=True)
     do_sel = tc[4].button("Process selected", type="primary", use_container_width=True)
 
@@ -1009,7 +1009,7 @@ def render():
 
     _suggestion_box()
 
-    if load_fc:
+    if load_fc or "_op_fcounts" not in st.session_state:      # auto-fill on first load / Refresh
         with st.spinner("Reading Shopify fulfilments…"):
             fc = {}
             for o in orders:
@@ -1017,8 +1017,7 @@ def render():
                 if not sid:
                     continue
                 try:
-                    split = data_sources.fetch_order_fulfillment_split(sid)
-                    fc[o["item_id"]] = len(set(split.values())) or 1
+                    fc[o["item_id"]] = data_sources.fetch_order_fulfillment_count(sid)
                 except Exception:  # noqa: BLE001
                     fc[o["item_id"]] = None
             st.session_state["_op_fcounts"] = fc
@@ -1065,9 +1064,8 @@ def render():
                                                 help="Open this order in Shopify admin"),
             "Fulfil": st.column_config.NumberColumn(
                 "Fulfil #", width="small",
-                help="Fulfillment No. — how many separate Shopify fulfilments the order splits "
-                     "into (press the 'Splits' button to fill; 2+ means route to more than one "
-                     "supplier)."),
+                help="Fulfillment No. — how many separate Shopify fulfilments the order has "
+                     "(2+ means it's split across suppliers). Fills automatically."),
             "Customer": st.column_config.TextColumn("Customer", width="medium"),
             "Branch email": st.column_config.TextColumn("Branch email", width="medium"),
             "Supplier": st.column_config.SelectboxColumn("Supplier", options=sup_opts,
