@@ -205,9 +205,40 @@ def _meta(pdf, acct, order, req, contact):
     pdf.ln(3)
 
 
-def _po_table(pdf, lines):
-    cols = [(30, "SKU", "L"), (78, "Description", "L"), (16, "Qty", "C"),
-            (30, "Unit cost (ex VAT)", "R"), (32, "Line total", "R")]
+def _wrap(pdf, text, max_w):
+    """Word-wrap `text` to fit `max_w` mm at the current font; hard-breaks any single word (e.g. a
+    long hyphenated SKU) that's still too wide, so nothing ever overflows its column."""
+    words = _S(str(text)).split()
+    if not words:
+        return [""]
+    lines, cur = [], ""
+    for wd in words:
+        trial = wd if not cur else cur + " " + wd
+        if pdf.get_string_width(trial) <= max_w:
+            cur = trial
+            continue
+        if cur:
+            lines.append(cur)
+            cur = ""
+        while pdf.get_string_width(wd) > max_w and len(wd) > 1:
+            cut = len(wd)
+            while cut > 1 and pdf.get_string_width(wd[:cut]) > max_w:
+                cut -= 1
+            hy = wd.rfind("-", 1, cut)          # break cleanly after a hyphen (e.g. long SKUs)
+            if hy != -1:
+                cut = hy + 1
+            lines.append(wd[:cut])
+            wd = wd[cut:]
+        cur = wd
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+
+def _grid_table(pdf, cols, lines, line_h=4.4, pad=1.8):
+    """Branded line-items table with per-cell text WRAPPING: every row grows to fit its tallest
+    cell and text stays inside its own box (fixes long product names running behind the columns)."""
+    total_w = sum(w for w, _, _ in cols)
     pdf.set_x(12)
     pdf.set_fill_color(*ORANGE)
     pdf.set_text_color(*WHITE)
@@ -218,16 +249,35 @@ def _po_table(pdf, lines):
     pdf.set_text_color(*INK)
     pdf.set_font("Helvetica", "", 8.5)
     for i, l in enumerate(lines):
-        vals = (list(l) + ["", "", "", "", ""])[:5]
-        pdf.set_x(12)
-        pdf.set_fill_color(*(PALE if i % 2 else WHITE))
-        for (w, h, a), v in zip(cols, vals):
-            pdf.cell(w, 6.5, ("  " + _S(v)) if a == "L" else (_S(v) + "  "), border="LR",
-                     align=a, fill=True)
-        pdf.ln()
+        vals = (list(l) + [""] * len(cols))[:len(cols)]
+        wrapped = [_wrap(pdf, v, w - 2 * pad) for (w, _, _), v in zip(cols, vals)]
+        n = max((len(p) for p in wrapped), default=1)
+        row_h = n * line_h + 2.2
+        x0, y0 = 12, pdf.get_y()
+        if y0 + row_h > pdf.page_break_trigger:                  # keep a row whole on the page
+            pdf.add_page()
+            y0 = pdf.get_y()
+        fill = PALE if i % 2 else WHITE
+        x = x0
+        for (w, _, _) in cols:                                   # draw each cell's box (fill + sides)
+            pdf.set_xy(x, y0)
+            pdf.set_fill_color(*fill)
+            pdf.cell(w, row_h, "", border="LR", fill=True)
+            x += w
+        x = x0
+        for (w, _, a), parts in zip(cols, wrapped):              # then the wrapped text, top-aligned
+            pdf.set_xy(x + pad, y0 + 1.1)
+            pdf.multi_cell(w - 2 * pad, line_h, "\n".join(parts), align=a)
+            x += w
+        pdf.set_xy(x0, y0 + row_h)
     pdf.set_x(12)
-    pdf.cell(186, 0, "", border="T", ln=1)
+    pdf.cell(total_w, 0, "", border="T", ln=1)
     pdf.ln(2)
+
+
+def _po_table(pdf, lines):
+    _grid_table(pdf, [(38, "SKU", "L"), (74, "Description", "L"), (13, "Qty", "C"),
+                      (28, "Unit cost (ex VAT)", "R"), (33, "Line total", "R")], lines)
 
 
 def _sums(pdf, sums):
@@ -242,26 +292,7 @@ def _sums(pdf, sums):
 
 
 def _slip_table(pdf, lines):
-    cols = [(40, "SKU", "L"), (116, "Description", "L"), (30, "Qty", "C")]
-    pdf.set_x(12)
-    pdf.set_fill_color(*ORANGE)
-    pdf.set_text_color(*WHITE)
-    pdf.set_font("Helvetica", "B", 8)
-    for w, h, a in cols:
-        pdf.cell(w, 7, h, fill=True, align=a)
-    pdf.ln()
-    pdf.set_text_color(*INK)
-    pdf.set_font("Helvetica", "", 8.5)
-    for i, l in enumerate(lines):
-        vals = (list(l) + ["", "", ""])[:3]
-        pdf.set_x(12)
-        pdf.set_fill_color(*(PALE if i % 2 else WHITE))
-        for (w, h, a), v in zip(cols, vals):
-            pdf.cell(w, 6.5, ("  " + _S(v)) if a == "L" else _S(v), border="LR", align=a, fill=True)
-        pdf.ln()
-    pdf.set_x(12)
-    pdf.cell(186, 0, "", border="T", ln=1)
-    pdf.ln(2)
+    _grid_table(pdf, [(48, "SKU", "L"), (108, "Description", "L"), (30, "Qty", "C")], lines)
 
 
 def _notes(pdf, notes):
