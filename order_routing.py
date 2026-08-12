@@ -160,10 +160,21 @@ def route_order(lines, postcode=None):
     routes = [r["route"] for r in routed]
     distinct = list(dict.fromkeys(routes))
     groups = {rt: [r for r in routed if r["route"] == rt] for rt in distinct}
-    split = len(distinct) > 1
     conf_order = {"low": 0, "med": 1, "high": 2}
     conf = min((r["conf"] for r in routed), key=lambda c: conf_order[c], default="low")
 
+    # A PICK (unrouteable) line must NEVER trigger an automatic split. That would restructure the
+    # Shopify fulfilment for what is usually really a single-supplier order whose extra line is just
+    # tagged with our house-brand vendor "Trade Superstore Online" (e.g. an Ogee MDF architrave that
+    # belongs with its National Skirting skirting board). If anything can't be routed, hand the WHOLE
+    # order to the processor to assign — no split, no auto-supplier, no guess.
+    if "PICK" in distinct:
+        return {"split": False, "groups": groups, "overall_supplier": None, "branch": None,
+                "branch_email": None, "route": "PICK", "stage": "Needs Review",
+                "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf,
+                "lines": routed}
+
+    split = len(distinct) > 1
     if not split and distinct:
         r0 = routed[0]
         result = {"split": False, "groups": groups, "overall_supplier": r0["supplier"],
