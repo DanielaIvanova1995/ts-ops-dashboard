@@ -7104,6 +7104,9 @@ with st.sidebar:
     #   admin / manager : everything, including Invoice Check
     #   office          : Daily Ops only
     #   staff (others)  : Daily Ops, Daily Activity, Quotes, Pricing (no Invoice Check)
+    # A per-user `modules:` list in config.yaml overrides the role default for that one person
+    # (e.g. Natasha = Daily Ops + Order Processing only). It can only ever NARROW/pick from the
+    # full module set — never grants Invoice Check/Finance unless listed explicitly.
     all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check",
                    "Order Processing", "Finance")
     staff_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing")
@@ -7113,6 +7116,10 @@ with st.sidebar:
         menu = all_modules
     else:
         menu = staff_modules
+    user_modules = config["credentials"]["usernames"].get(username, {}).get("modules")
+    if user_modules:                                   # explicit per-user allow-list
+        _want = set(user_modules)
+        menu = tuple(m for m in all_modules if m in _want) or ("Daily Ops",)
     if "module" not in st.session_state or st.session_state.module not in menu:
         st.session_state.module = "Daily Ops"
     for _m in menu:
@@ -7179,6 +7186,8 @@ if role == "office":
     module = "Daily Ops"
 elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance"):
     module = "Daily Ops"
+if user_modules and module not in menu:            # per-user allow-list, enforced server-side
+    module = menu[0] if menu else "Daily Ops"
 
 # --- QuickBooks OAuth callback: Intuit redirects back to the app with ?code&state&realmId ---
 # One-shot (guarded) so it never re-processes the code and spins a redirect/rerun loop.

@@ -20,7 +20,9 @@ credentials:
       name: Natasha Stewart
       email: natasha@tradesuperstoreonline.co.uk
       role: staff
-      password: $2b$12$BwzJHH53p2pGtHbwgfKfqOLa78YIRdi12KRgYmt1zgUTTskk3hyse
+      # Restricted to just these two modules (order processor) — see app.py menu gating.
+      modules: [Daily Ops, Order Processing]
+      password: $2b$12$iLQRQNZvT4me/Dwra6zg.ONRjiFGOoJFhOku7NV37NQq.uBC0XBEe
     megan:
       name: Megan Steer
       email: megan@tradesuperstoreonline.co.uk
