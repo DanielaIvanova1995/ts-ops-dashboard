@@ -3347,6 +3347,20 @@ def op_duplicate_item(item_id, token: str | None = None):
     return ((p.get("data") or {}).get("duplicate_item") or {}).get("id")
 
 
+def op_archive_item(item_id, token: str | None = None):
+    """Archive an order item (used when merging split parts — the absorbed part is archived, not
+    hard-deleted, so it's recoverable from Monday's archive). Returns the archived item id."""
+    token = token or get_token()
+    q = "mutation($i:ID!){archive_item(item_id:$i){id}}"
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"i": str(item_id)}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if "errors" in p:
+        raise RuntimeError(f"Monday rejected archive: {p['errors']}")
+    return ((p.get("data") or {}).get("archive_item") or {}).get("id")
+
+
 def _shopify_admin_gql(query, variables, token=None):
     """POST a GraphQL query/mutation to the Shopify Admin API. Raises on transport/GraphQL error."""
     store = get_secret("SHOPIFY_STORE")

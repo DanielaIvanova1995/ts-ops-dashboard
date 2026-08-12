@@ -141,6 +141,31 @@ def _suggestion_box():
                 st.caption(f"{(r.get('created_at') or '')[:10]} — {txt[:220]}")
 
 
+def _order_label(o):
+    """What to show in the grid's 'Order' column. Split parts carry a Monday item name like
+    '30107-1' while the order-number column stays '30107' for all three — so prefer the part
+    name when it's a '{order_no}-N' split part, else the plain order number."""
+    nm = (o.get("name") or "").strip()
+    ono = (o.get("order_no") or "").strip()
+    if ono and nm.startswith(ono + "-") and nm[len(ono) + 1:].isdigit():
+        return nm
+    return ono or nm or ""
+
+
+def _split_parts(o, orders):
+    """The sibling split parts of an order (all Monday items whose name is '{order_no}-N'),
+    sorted by N. Returns [] when the order isn't a split part."""
+    ono = (o.get("order_no") or "").strip()
+    nm = (o.get("name") or "").strip()
+    if not (ono and nm.startswith(ono + "-") and nm[len(ono) + 1:].isdigit()):
+        return []
+    sibs = [s for s in orders
+            if (s.get("order_no") or "").strip() == ono
+            and (s.get("name") or "").strip().startswith(ono + "-")
+            and (s.get("name") or "").strip()[len(ono) + 1:].isdigit()]
+    return sorted(sibs, key=lambda s: int((s.get("name") or "").strip()[len(ono) + 1:]))
+
+
 def _parse_monday_items(txt):
     """Turn the Monday 'Order items' text ('Title | Quantity: N | SKU: XXX' per line) into
     [{Item, SKU, Qty}] so SKU and Qty sit in their own columns instead of one messy line."""
@@ -309,6 +334,10 @@ def _process_split(o, res):
     if len(groups) < 2:
         return "not actually a split"
     OP = data_sources.OP_COLS
+    try:
+        pc = (_ship(sid) or {}).get("postcode")           # for per-part branch resolution
+    except Exception:  # noqa: BLE001
+        pc = None
 
     def sub(lines):
         return sum((l.get("line_subtotal") or 0) for l in lines)
@@ -351,13 +380,17 @@ def _process_split(o, res):
             data_sources.set_order_number(pid, OP["items"], items_text)
             if gsup:
                 data_sources.op_set_supplier(pid, gsup)
-                if glines[0].get("branch") or glines[0].get("branch_email"):
-                    data_sources.op_set_branch(pid, branch=glines[0].get("branch"),
-                                               email=glines[0].get("branch_email"))
+                # Resolve THIS supplier's own branch + email and ALWAYS overwrite. Duplicated parts
+                # inherit the original (first supplier's) branch/email, so a GAP or Eurocell part
+                # would otherwise keep "UPB Aldridge" + UPB's email — clear/replace it every time.
+                gbranch = glines[0].get("branch")
+                gemail = glines[0].get("branch_email")
+                if not (gbranch or gemail):
+                    gbranch, gemail = _resolve_branch(gsup, pc)
+                data_sources.op_set_branch(pid, branch=(gbranch or ""), email=(gemail or ""))
+                _fix_po_email(pid, gsup)          # Molan/Vista email override (also overwrites)
             else:
-                data_sources.op_set_branch(pid, branch=route)
-            if gsup:
-                _fix_po_email(pid, gsup)          # correct email for Molan/Vista etc.
+                data_sources.op_set_branch(pid, branch=route, email="")   # in-house: clear inherited
             data_sources.op_set_status(pid, order_routing._stage_for(
                 gsup, route, glines[0].get("quote"), glines[0].get("portal")))
             if psell is not None:
@@ -441,6 +474,92 @@ def _stage_for_supplier(supplier):
     if supplier in order_routing.QUOTE_FIRST:
         return "Needs Quote"
     return "Needs Review"
+
+
+def _merge_parts(selected, target_supplier, all_siblings):
+    """Merge selected split parts of one order into a SINGLE part fulfilled by `target_supplier`
+    (e.g. UPB can also cover the GAP items → one delivery). Combines their line items, sums the
+    sell, sets the supplier + recomputes cost, regenerates the PO, and ARCHIVES the absorbed parts
+    (recoverable on Monday). If that leaves the order with a single part, drops the '-N' suffix.
+    Returns a summary string. Does NOT touch the Shopify fulfilment split."""
+    if len(selected) < 2:
+        return "pick at least two parts to merge"
+    OP = data_sources.OP_COLS
+    order_no = (selected[0].get("order_no") or "").strip()
+    # survivor: a selected part already on the target supplier, else the lowest-numbered one
+    survivor = next((p for p in selected if (p.get("supplier") or "") == target_supplier),
+                    selected[0])
+    iid = survivor["item_id"]
+    absorbed = [p for p in selected if p["item_id"] != iid]
+
+    items_text = "\n".join((p.get("items") or "").strip() for p in selected
+                           if (p.get("items") or "").strip())
+    sell = round(sum((_to_float(p.get("sell")) or 0.0) for p in selected), 2)
+
+    # supplier cost inc VAT for ALL merged lines at the target supplier's prices (blank if any gap)
+    pcost, priced = 0.0, True
+    for it in _parse_monday_items(items_text):
+        c = _line_cost(it.get("SKU"), target_supplier)
+        if c is None:
+            priced = False
+            break
+        try:
+            q = float(it.get("Qty") or 1)
+        except Exception:  # noqa: BLE001
+            q = 1
+        pcost += c * q
+    pcost = round(pcost * 1.2, 2) if priced else None
+
+    sid = (survivor.get("shopify_id") or "").strip()
+    try:
+        pc = (_ship(sid) or {}).get("postcode")
+    except Exception:  # noqa: BLE001
+        pc = None
+    branch, bemail = _resolve_branch(target_supplier, pc)
+
+    data_sources.set_order_number(iid, OP["items"], items_text)
+    data_sources.op_set_supplier(iid, target_supplier)
+    # Always overwrite branch + email for the target supplier (clear if it has none) so the merged
+    # part never keeps a previous supplier's branch/email.
+    data_sources.op_set_branch(iid, branch=(branch or ""), email=(bemail or ""))
+    _fix_po_email(iid, target_supplier)
+    data_sources.op_set_status(iid, _stage_for_supplier(target_supplier))
+    data_sources.set_order_number(iid, OP["sell"], sell)
+    if pcost is not None:
+        data_sources.set_order_number(iid, OP["cost_supplier"], pcost)
+
+    survivor = {**survivor, "items": items_text, "supplier": target_supplier,
+                "branch": branch, "branch_email": bemail, "sell": sell}
+    try:
+        kind, doc = _build_doc(survivor)
+        pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+            doc, date_str=datetime.date.today().strftime("%d %B %Y"))
+        nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
+             "Trade_Superstore_Online.pdf"
+        rr = data_sources.op_upload_po(iid, pdf, nm)
+        docmsg = "PO/slip ✓" if rr.get("ok") else "doc unverified"
+    except ValueError:
+        docmsg = "doc blocked — a price/field is missing (fix in Adjust)"
+    except Exception as e:  # noqa: BLE001
+        docmsg = "doc error: " + str(e)[:40]
+
+    for p in absorbed:
+        try:
+            data_sources.op_archive_item(p["item_id"])
+        except Exception as e:  # noqa: BLE001
+            return (f"merged onto {survivor.get('name')} ({docmsg}) but couldn't archive "
+                    f"{p.get('name')}: {str(e)[:50]} — archive it by hand on Monday")
+
+    remaining = len(all_siblings) - len(absorbed)
+    final_name = survivor.get("name")
+    if remaining == 1:                                   # order is whole again → drop the -N suffix
+        try:
+            data_sources.set_order_number(iid, "name", order_no)
+            final_name = order_no
+        except Exception:  # noqa: BLE001
+            pass
+    return (f"Merged {', '.join(p.get('name') for p in selected)} → {final_name} "
+            f"({target_supplier}, {docmsg}). Archived: {', '.join(p.get('name') for p in absorbed)}.")
 
 
 def _process_current(o):
@@ -921,7 +1040,7 @@ def render():
     for o in orders:
         rows.append({
             "Select": False,
-            "Order": o.get("order_no") or o.get("name") or "",
+            "Order": _order_label(o),
             "Open": _order_url((o.get("shopify_id") or "").strip()),
             "Fulfil": fcounts.get(o["item_id"], None),
             "Customer": o.get("customer") or "",
@@ -1042,6 +1161,42 @@ def render():
                    "*Place Order* are processed.** Nothing was emailed to a supplier — that stays the "
                    "team's send step. **Review on Monday and amend anything if needed.**")
 
+    # ---- Merge split parts (one supplier can cover another part's items → one delivery) ----
+    split_groups = {}
+    for o in orders:
+        sp = _split_parts(o, orders)
+        if len(sp) >= 2:
+            split_groups[(o.get("order_no") or "").strip()] = sp
+    if split_groups:
+        st.divider()
+        st.markdown("##### 🔗 Merge split parts")
+        st.caption("If one supplier can fulfil another part's items too, merge them into a single "
+                   "order + PO (one delivery instead of two). The absorbed part is **archived** on "
+                   "Monday (recoverable), and the surviving part's PO is regenerated with all the "
+                   "lines. The Shopify fulfilment split isn't changed.")
+        for ono, sp in split_groups.items():
+            with st.expander(f"{ono} — split into {len(sp)} parts"):
+                for p in sp:
+                    isum = "; ".join(i["Item"] for i in _parse_monday_items(p.get("items")))
+                    st.markdown(f"**{p.get('name')}** · {p.get('supplier') or '—'} — "
+                                f"<span style='color:var(--text-color,#888)'>{isum[:110]}</span>",
+                                unsafe_allow_html=True)
+                names = [p.get("name") for p in sp]
+                pick = st.multiselect("Parts to merge (pick 2 or more)", names,
+                                      key=f"mrg_pick_{ono}")
+                picked = [p for p in sp if p.get("name") in pick]
+                sup_choices = list(dict.fromkeys(
+                    [p.get("supplier") for p in picked if p.get("supplier")] + sup_opts))
+                tgt = st.selectbox("Fulfil the merged part with", sup_choices, key=f"mrg_sup_{ono}")
+                if st.button(f"Merge {len(pick)} part(s) → {tgt or '?'}", key=f"mrg_go_{ono}",
+                             type="primary", disabled=len(pick) < 2 or not tgt):
+                    with st.spinner("Merging…"):
+                        msg = _merge_parts(picked, tgt, sp)
+                    st.success(msg)
+                    for k in ("_op_orders", "_op_detail", "_op_routes", "_op_ship", "_op_fcounts"):
+                        st.session_state.pop(k, None)
+                    st.rerun()
+
     # Expand each ticked order right off the table — no dropdown. One ticked → opens fully.
     st.divider()
     if not ticked:
@@ -1050,6 +1205,6 @@ def render():
         only_one = len(ticked) == 1
         for i in ticked:
             o = orders[i]
-            with st.expander(f"{o.get('order_no') or o.get('name')} · {o.get('customer') or '—'}",
+            with st.expander(f"{_order_label(o)} · {o.get('customer') or '—'}",
                              expanded=only_one):
                 _order_detail(o)
