@@ -3329,9 +3329,10 @@ def op_upload_po(item_id, file_bytes: bytes, filename: str, replace: bool = True
             "n_assets": len(assets)}
 
 
-def op_set_branch(item_id, branch=None, email=None, token: str | None = None):
-    """Set the routed branch (text1) and/or branch email (email column) on an order. Pass email=""
-    to clear it (portal suppliers must keep it empty). Writes to Monday."""
+def op_set_branch(item_id, branch=None, email=None, phone=None, token: str | None = None):
+    """Set the routed branch (text1), branch email and/or branch phone on an order. Pass any of
+    them as "" to CLEAR that field (portal suppliers keep them empty); pass None to leave it
+    untouched. Writes to Monday."""
     import json as _json
     token = token or get_token()
     hdr = {"Authorization": token, "API-Version": "2024-10"}
@@ -3348,6 +3349,14 @@ def op_set_branch(item_id, branch=None, email=None, token: str | None = None):
              "board_id:$b,item_id:$i,column_id:$c,value:$v){id}}")
         r = requests.post(MONDAY_API, json={"query": q, "variables": {
             "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": OP_COLS["branch_email"],
+            "v": _json.dumps(val)}}, headers=hdr, timeout=30)
+        r.raise_for_status()
+    if phone is not None:
+        val = {} if not phone else {"phone": str(phone), "countryShortName": "GB"}
+        q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value("
+             "board_id:$b,item_id:$i,column_id:$c,value:$v){id}}")
+        r = requests.post(MONDAY_API, json={"query": q, "variables": {
+            "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": OP_COLS["branch_phone"],
             "v": _json.dumps(val)}}, headers=hdr, timeout=30)
         r.raise_for_status()
     return True

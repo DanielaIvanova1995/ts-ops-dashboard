@@ -191,7 +191,8 @@ def route_order(lines, postcode=None):
                 nb = branch_finder.nearest_branch(postcode, result["overall_supplier"])
                 if nb and nb.get("branch_name"):
                     result["branch"] = nb["branch_name"]
-                    result["branch_email"] = nb["email"]
+                    result["branch_email"] = nb.get("email")
+                    result["branch_phone"] = nb.get("phone")
                     result["needs_branch"] = False
                     for l in routed:
                         if l.get("supplier") == result["overall_supplier"]:

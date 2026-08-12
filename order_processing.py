@@ -335,7 +335,7 @@ def _process_split(o, res):
         return "not actually a split"
     OP = data_sources.OP_COLS
     try:
-        pc = (_ship(sid) or {}).get("postcode")           # for per-part branch resolution
+        pc = (_ship(sid) or {}).get("zip")                # shipping postcode ('zip') for branches
     except Exception:  # noqa: BLE001
         pc = None
 
@@ -385,12 +385,14 @@ def _process_split(o, res):
                 # would otherwise keep "UPB Aldridge" + UPB's email — clear/replace it every time.
                 gbranch = glines[0].get("branch")
                 gemail = glines[0].get("branch_email")
+                gphone = None
                 if not (gbranch or gemail):
-                    gbranch, gemail = _resolve_branch(gsup, pc)
-                data_sources.op_set_branch(pid, branch=(gbranch or ""), email=(gemail or ""))
+                    gbranch, gemail, gphone = _resolve_branch(gsup, pc)
+                data_sources.op_set_branch(pid, branch=(gbranch or ""), email=(gemail or ""),
+                                           phone=(gphone or ""))
                 _fix_po_email(pid, gsup)          # Molan/Vista email override (also overwrites)
             else:
-                data_sources.op_set_branch(pid, branch=route, email="")   # in-house: clear inherited
+                data_sources.op_set_branch(pid, branch=route, email="", phone="")  # clear inherited
             data_sources.op_set_status(pid, order_routing._stage_for(
                 gsup, route, glines[0].get("quote"), glines[0].get("portal")))
             if psell is not None:
@@ -454,18 +456,18 @@ def _fix_po_email(iid, supplier, o=None):
 
 
 def _resolve_branch(supplier, postcode):
-    """(branch, email) for a chosen supplier + postcode: nearest branch for Eurocell/Travis
-    Perkins, the UPB Hardie depot for UPB, else (None, None)."""
+    """(branch, email, phone) for a chosen supplier + postcode: nearest branch for Eurocell/Travis
+    Perkins, the UPB Hardie depot for UPB, else (None, None, None)."""
     if not postcode:
-        return None, None
+        return None, None, None
     if supplier in ("Eurocell", "Travis Perkins"):
         nb = branch_finder.nearest_branch(postcode, supplier)
         if nb and nb.get("branch_name"):
-            return nb["branch_name"], nb["email"]
+            return nb["branch_name"], nb.get("email"), nb.get("phone")
     if supplier == "UPB":
         hr = order_routing.hardie_route(postcode)
-        return hr.get("branch"), hr.get("branch_email")
-    return None, None
+        return hr.get("branch"), hr.get("branch_email"), None
+    return None, None, None
 
 
 def _stage_for_supplier(supplier):
@@ -512,16 +514,22 @@ def _merge_parts(selected, target_supplier, all_siblings):
 
     sid = (survivor.get("shopify_id") or "").strip()
     try:
-        pc = (_ship(sid) or {}).get("postcode")
+        pc = (_ship(sid) or {}).get("zip")           # shipping postcode is under 'zip'
     except Exception:  # noqa: BLE001
         pc = None
-    branch, bemail = _resolve_branch(target_supplier, pc)
+    branch, bemail, bphone = _resolve_branch(target_supplier, pc)
+    # Fall back to the survivor's existing branch/email if the postcode lookup came back empty for
+    # a branch supplier — never wipe a good branch just because we couldn't re-resolve it.
+    if target_supplier in ("Eurocell", "Travis Perkins", "UPB") and not (branch or bemail):
+        branch = branch or survivor.get("branch")
+        bemail = bemail or survivor.get("branch_email")
 
     data_sources.set_order_number(iid, OP["items"], items_text)
     data_sources.op_set_supplier(iid, target_supplier)
-    # Always overwrite branch + email for the target supplier (clear if it has none) so the merged
-    # part never keeps a previous supplier's branch/email.
-    data_sources.op_set_branch(iid, branch=(branch or ""), email=(bemail or ""))
+    # Always overwrite branch + email + phone for the target supplier (clear if it has none) so the
+    # merged part never keeps a previous supplier's branch/email.
+    data_sources.op_set_branch(iid, branch=(branch or ""), email=(bemail or ""),
+                               phone=(bphone or ""))
     _fix_po_email(iid, target_supplier)
     data_sources.op_set_status(iid, _stage_for_supplier(target_supplier))
     data_sources.set_order_number(iid, OP["sell"], sell)
@@ -577,12 +585,12 @@ def _process_current(o):
             pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
         except Exception:  # noqa: BLE001
             pc = None
-    br, em = _resolve_branch(supplier, pc)
+    br, em, ph = _resolve_branch(supplier, pc)
     stage = _stage_for_supplier(supplier)
     try:
         data_sources.op_set_supplier(iid, supplier)
-        if br or em:
-            data_sources.op_set_branch(iid, branch=br, email=em)
+        if br or em or ph:
+            data_sources.op_set_branch(iid, branch=br, email=em, phone=ph)
             if br:
                 o["branch"] = br
             if em:
@@ -644,9 +652,10 @@ def _process_one(o):
         if sup:
             data_sources.op_set_supplier(iid, sup)
             o["supplier"] = sup
-            if res.get("branch") or res.get("branch_email"):
+            if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
                 data_sources.op_set_branch(iid, branch=res.get("branch"),
-                                           email=res.get("branch_email"))
+                                           email=res.get("branch_email"),
+                                           phone=res.get("branch_phone"))
                 if res.get("branch"):
                     o["branch"] = res["branch"]
                 if res.get("branch_email"):
@@ -785,9 +794,10 @@ def _order_detail(o):
                         o["supplier"] = res["overall_supplier"]
                         data_sources.op_set_status(iid, res["stage"])
                         o["stage"] = res["stage"]
-                        if _br or res.get("branch_email"):
+                        if _br or res.get("branch_email") or res.get("branch_phone"):
                             data_sources.op_set_branch(iid, branch=_br,
-                                                       email=res.get("branch_email"))
+                                                       email=res.get("branch_email"),
+                                                       phone=res.get("branch_phone"))
                             if _br:
                                 o["branch"] = _br
                             if res.get("branch_email"):
