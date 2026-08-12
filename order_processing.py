@@ -79,11 +79,17 @@ def _orders():
 
 
 def _supplier_labels():
+    """Suppliers selectable in TradeHub. The LIVE Monday dropdown labels (authoritative order)
+    merged with every known supplier from the routing map, so a supplier that's on Monday but
+    missing from a stale/failed label fetch (e.g. Permaroof) is still always pickable. Every name
+    here is a real Monday label, so writing it back always succeeds."""
     if st.session_state.get("_op_suppliers") is None:
         try:
-            st.session_state["_op_suppliers"] = data_sources.op_board_supplier_labels()
+            live = data_sources.op_board_supplier_labels()
         except Exception:  # noqa: BLE001
-            st.session_state["_op_suppliers"] = []
+            live = []
+        known = sorted(set(order_routing.CANON.values()))
+        st.session_state["_op_suppliers"] = list(dict.fromkeys([s for s in live if s] + known))
     return st.session_state["_op_suppliers"]
 
 
@@ -1004,7 +1010,7 @@ def render():
     tc = st.columns([1.0, 1.0, 2.6, 1.3, 1.7])
     if tc[0].button(":material/refresh: Refresh"):
         for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship",
-                  "_op_results", "_op_split_pending"):
+                  "_op_results", "_op_split_pending", "_op_suppliers"):
             st.session_state.pop(k, None)
         st.rerun()
     load_fc = tc[1].button(
