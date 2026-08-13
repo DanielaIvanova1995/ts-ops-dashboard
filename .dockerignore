@@ -1,0 +1,13 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.env
+.streamlit/secrets.toml
+scratchpad
+*.md
+docs
+tests
