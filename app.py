@@ -487,7 +487,7 @@ def load_lookup():
         return json.load(f)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=512)
 def _live_price(sku):
     """Current Shopify price for a SKU. dict=sold, 'notsold'=confirmed not on
     Shopify, 'unavailable'=Shopify not configured / error (use daily fallback)."""
@@ -918,7 +918,7 @@ def _find_product(items, q):
     return None
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=21600, show_spinner=False, max_entries=128)
 def competitor_research(sku, title, code, vendor, your_price):
     """Cached AI competitor lookup (6 h) keyed on the product, to avoid re-billing."""
     try:
@@ -1065,7 +1065,7 @@ def _title_tokens(s):
     return out
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=256)
 def _shopify_order_lines(order_id):
     """Live Shopify order line items (cached). None if orders aren't readable."""
     try:
@@ -1074,7 +1074,7 @@ def _shopify_order_lines(order_id):
         return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=256)
 def _shopify_order_ship(order_id):
     """Live Shopify delivery postcode + country (cached), for Carron zone delivery. None
     if unreadable."""
@@ -1084,7 +1084,7 @@ def _shopify_order_ship(order_id):
         return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=256)
 def _shopify_fulfillment_split(order_id):
     """{norm_sku: fulfilment location name} for split (multi-supplier drop-ship) orders.
     Empty if the order isn't split or fulfilment orders aren't readable."""
@@ -1453,7 +1453,7 @@ def invoice_count(key):
         return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=128)
 def _order_discounts(order_ids):
     """{shopify_order_id: {amount, codes}} — customer discounts. {} if unavailable."""
     if not order_ids:
@@ -1464,7 +1464,7 @@ def _order_discounts(order_ids):
         return {}
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=86400, show_spinner=False, max_entries=48)
 def _read_invoice(asset_id, sub_id, nonce=0):
     """Read + cache one invoice's parsed PDF (keyed per asset/sub; nonce busts the
     cache to force a fresh re-read)."""
