@@ -1842,6 +1842,10 @@ SUPPLIER_RULES = {
                       "push_min": 10.0, "flag_high": False},
     # Decor8 auto-approve floor is 5%.
     "decor8": {"name": "Decor8", "push_min": 5.0},
+    # Southern Sheeting (roofing/cladding sheets) legitimately runs a WIDE margin, ~9% to ~55%.
+    # Lower the floor to 8% and turn off the high-margin flag so a fully-matched invoice across that
+    # whole range auto-pushes instead of being held (<10%) or flagged (>35%).
+    "southernsheeting": {"name": "Southern Sheeting", "push_min": 8.0, "flag_high": False},
     # Toolbank: no agreed delivery rate, so the ORDER MARGIN is the safeguard. Approve a matched
     # invoice (right products at the right prices) when order margin ≥ 12% — or ≥ 8% if the
     # customer used a discount code. Below that → leave for review (don't silently hold), and
