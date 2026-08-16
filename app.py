@@ -6056,8 +6056,11 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
         picked_lines = list(pay_lines)
     rem_total = sum(p["amt"] for p in picked_lines if isinstance(p["amt"], (int, float)))
     st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
+    # Short supplier name in front of the B-date so two same-day remittances don't collide on the
+    # QuickBooks Ref no. (DocNumber must be unique per bill payment), e.g. "PJH B160826".
     ref = st.text_input("Remittance / payment reference (also the QuickBooks Ref no.)",
-                        key=f"remref_{_pk}", value=f"B{now_uk().strftime('%d%m%y')}")
+                        key=f"remref_{_pk}",
+                        value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
     # Build the remittance-advice PDF the supplier receives (QuickBooks-style document).
     pdf_lines = [{"bill_no": p.get("bill_no") or p.get("inv"), "bill_date": p.get("bill_date"),
                   "due_date": p.get("due_date"),
