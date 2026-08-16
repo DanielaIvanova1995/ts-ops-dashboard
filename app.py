@@ -6478,15 +6478,22 @@ def _render_statement_recon():
                        "bills may be under a different vendor name.")
 
     # Missing-from-QB invoices: cross-check Monday — a Discrepancy there = awaiting a credit note.
-    def _mon_nos(key):
-        try:
-            return {_norm_inv_no(i.get("invoice_no"), sup)
-                    for i in (invoices_by_status(key).get("invoices") or []) if i.get("invoice_no")}
-        except Exception:  # noqa: BLE001
-            return set()
-    disc_nos = _mon_nos("discrepancy")
-    action_nos = _mon_nos("review") | _mon_nos("matched")   # on Monday but not yet approved to QB
-    approved_nos = _mon_nos("pushed")                       # Approved (To QB) — on Monday, approved
+    # Direct Monday lookup for EVERY statement invoice (exact number, ANY status) — not limited by
+    # the capped status buckets, so an older Approved invoice is still recognised. Search the raw
+    # number, the leading-zero-stripped form, and the normalised form (Eurocell drops a leading 0,
+    # PJH a leading I) so it matches however it was entered.
+    _cands = set()
+    for _ln in (stmt.get("lines") or []):
+        _iv = (_ln.get("invoice_no") or "").strip()
+        if _iv and (_ln.get("type") or "").lower() == "invoice":
+            _cands.update({_iv, _iv.lstrip("0"), _norm_inv_no(_iv, sup)})
+    try:
+        _found = data_sources.subitems_status_by_names([c for c in _cands if c])
+    except Exception:  # noqa: BLE001
+        _found = {}
+    mon_status = {}                              # normalised invoice no -> Monday Payment Status text
+    for _nm, _stt in _found.items():
+        mon_status[_norm_inv_no(_nm, sup)] = _stt
 
     bill_by_doc = {}
     for b in bills:
@@ -6534,16 +6541,18 @@ def _render_statement_recon():
                               "balance": bnum.get("balance")})
         else:
             _k = _norm_inv_no(inv, sup)
-            if _k in disc_nos:
+            _mst = mon_status.get(_k, "")
+            _ml = _mst.lower()
+            if "discrepancy" in _ml:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
                 disc_total += val
-            elif _k in approved_nos:
-                status, n_action = ("🟢 On Monday & approved — not yet matched to a QuickBooks "
-                                    "bill (check the invoice no.)"), n_action + 1
-                action_total += val
-                action_rows.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": amt})
-            elif _k in action_nos:
-                status, n_action = "🟠 On Monday, not yet approved — review/approve ASAP", n_action + 1
+            elif _mst:                          # on Monday in some status
+                if "approved" in _ml or "matched" in _ml:
+                    status = ("🟢 On Monday & approved — not yet matched to a QuickBooks bill "
+                              "(check the invoice no.)")
+                else:
+                    status = "🟠 On Monday, not yet approved — review/approve ASAP"
+                n_action += 1
                 action_total += val
                 action_rows.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": amt})
             elif bamt is not None:

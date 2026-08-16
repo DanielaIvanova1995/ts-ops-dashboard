@@ -1026,6 +1026,36 @@ def _mk_marked_time(ts):
         return s[:16].replace("T", " ")
 
 
+def subitems_status_by_names(names, token=None):
+    """Direct lookup on the invoices subitems board → {invoice name: Payment Status text} for the
+    given invoice numbers (exact-name match, any status). Used by statement reconciliation so it
+    checks Monday for EVERY statement invoice directly, instead of relying on the capped
+    status-bucket fetches that can miss older approved invoices."""
+    token = token or get_token()
+    uniq = list(dict.fromkeys(str(n).strip() for n in (names or []) if str(n).strip()))
+    out = {}
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    q = ("query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,"
+         "columns:[{column_id:\"name\",column_values:$vals}]){items{name "
+         "column_values(ids:[\"status7__1\"]){text}}}}")
+    for i in range(0, len(uniq), 50):
+        chunk = uniq[i:i + 50]
+        try:
+            r = requests.post(MONDAY_API, json={"query": q, "variables": {
+                "b": str(SUBITEMS_BOARD_ID), "vals": chunk}}, headers=headers, timeout=30)
+            r.raise_for_status()
+            p = r.json()
+        except Exception:  # noqa: BLE001
+            continue
+        if p.get("errors"):
+            continue
+        items = (((p.get("data") or {}).get("items_page_by_column_values") or {}).get("items") or [])
+        for it in items:
+            cv = it.get("column_values") or []
+            out[str(it.get("name") or "").strip()] = (cv[0].get("text") if cv else "") or ""
+    return out
+
+
 def _fetch_subitem_details(sub_ids, token):
     """{sub_id(str): {invoice_no, current_status, total, order_no, supplier}} for the given
     subitem ids (their CURRENT state + parent order/supplier). Batched by 100."""
