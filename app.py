@@ -6505,22 +6505,34 @@ def _render_statement_recon():
         val = (unpaid if isinstance(unpaid, (int, float))
                else (amt if isinstance(amt, (int, float)) else 0.0))
         stmt_total += val
-        b = bill_by_doc.get(_norm_inv_no(inv, sup))
-        if not b:                    # fallback: an unused bill with the same amount
-            b = next((x for x in bills if x["id"] not in used
-                      and isinstance(x["total"], (int, float)) and isinstance(amt, (int, float))
-                      and abs(x["total"] - amt) < 0.01), None)
+        bnum = bill_by_doc.get(_norm_inv_no(inv, sup))     # confident invoice-NUMBER match
+        bamt = None
+        if not bnum:                 # amount-only fallback — used ONLY to spot already-paid bills,
+            bamt = next((x for x in bills if x["id"] not in used   # NEVER to mark 'ready to pay'
+                         and isinstance(x["total"], (int, float)) and isinstance(amt, (int, float))
+                         and abs(x["total"] - amt) < 0.01), None)
+        b = bnum or bamt
         if b:
             used.add(b["id"])
         paid_ref = ""
         if b and b["paid"]:
-            # On the statement but already paid in QB — keep it (supplier may not have cleared it).
+            # Already paid in QB (matched by number or amount) — safe to recognise either way.
             paid_ref = (paymap.get(b["id"]) or {}).get("ref") or ""
             status = (f"🔵 Paid in QB — under payment {paid_ref}" if paid_ref
                       else "🔵 Marked paid in QB")
             n_paid += 1
             paid_total += val
-        elif not b:
+        elif bnum and not bnum["paid"]:
+            # ONLY an invoice-NUMBER match to an unpaid bill is trusted as ready to pay. An amount-
+            # only match to an unpaid bill is a coincidence, never auto-payable — it falls through.
+            status, n_pay = "✅ Approved — ready for payment", n_pay + 1
+            to_pay += val
+            pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
+                              "bill_id": bnum["id"], "due": _due_label(bnum.get("due")),
+                              "bill_no": bnum.get("doc_no") or inv, "bill_date": bnum.get("date"),
+                              "due_date": bnum.get("due"), "original": bnum.get("total"),
+                              "balance": bnum.get("balance")})
+        else:
             _k = _norm_inv_no(inv, sup)
             if _k in disc_nos:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
@@ -6534,20 +6546,17 @@ def _render_statement_recon():
                 status, n_action = "🟠 On Monday, not yet approved — review/approve ASAP", n_action + 1
                 action_total += val
                 action_rows.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": amt})
+            elif bamt is not None:
+                status, n_action = ("🟠 On QuickBooks by amount only — invoice number didn't match; "
+                                    "check it before paying"), n_action + 1
+                action_total += val
+                action_rows.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": amt})
             else:
                 status, n_missing = "🔴 Missing from Monday — not input yet", n_missing + 1
                 missing_total += val
-        else:
-            status, n_pay = "✅ Approved — ready for payment", n_pay + 1
-            to_pay += val
-            pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
-                              "bill_id": b["id"], "due": _due_label(b.get("due")),
-                              "bill_no": b.get("doc_no") or inv, "bill_date": b.get("date"),
-                              "due_date": b.get("due"), "original": b.get("total"),
-                              "balance": b.get("balance")})
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
                      "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
-                     "Due": (_due_label(b.get("due")) if b and not b["paid"] else ""),
+                     "Due": (_due_label(bnum.get("due")) if bnum and not bnum["paid"] else ""),
                      "Paid under": paid_ref, "vs QuickBooks": status})
 
     parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
@@ -6571,11 +6580,18 @@ def _render_statement_recon():
     # over-count. Fall back to the line-sum only if the statement gives no balance.
     stated = stmt.get("balance")
     on_stmt = stated if isinstance(stated, (int, float)) and stated > 0 else stmt_total
+    # QuickBooks' OWN outstanding total for this vendor (sum of unpaid bill balances) — the ground
+    # truth to sanity-check against, independent of statement matching.
+    qb_unpaid = round(sum(b["balance"] for b in bills
+                          if not b.get("paid") and isinstance(b.get("balance"), (int, float))), 2)
     st.markdown("---")
     t1, t2, t3 = st.columns(3)
     t1.metric("On the statement", f"£{on_stmt:,.2f}")
     t2.metric("Ready to pay in QuickBooks", f"£{to_pay:,.2f}")
     t3.metric("Not yet payable", f"£{max(on_stmt - to_pay, 0):,.2f}")
+    st.caption(f"QuickBooks' own outstanding total for this vendor (all unpaid bill balances) is "
+               f"**£{qb_unpaid:,.2f}** — 'ready to pay' should never exceed this or the statement "
+               f"balance.")
     st.caption(
         f"‘On the statement’ is the balance the statement itself states. The invoice lines I read "
         f"add up to £{stmt_total:,.2f} (higher when the statement also lists already-paid or aged "
