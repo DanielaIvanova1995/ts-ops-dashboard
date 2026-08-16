@@ -2922,9 +2922,10 @@ def qbo_bank_accounts():
     return [{"id": a.get("Id"), "name": a.get("Name")} for a in (rows.get("Account") or [])]
 
 
-def qbo_pay_bills(vendor_id, bank_account_id, lines, memo="", date=None):
+def qbo_pay_bills(vendor_id, bank_account_id, lines, memo="", date=None, doc_no=""):
     """Create a QuickBooks BillPayment that settles the given bills (marks them paid).
-    lines = [{bill_id, amount}]. memo goes in the payment's PrivateNote (the remittance ref)."""
+    lines = [{bill_id, amount}]. memo → the payment's PrivateNote; doc_no → its Ref no. (DocNumber,
+    e.g. 'B160826') so the payment is named in QuickBooks, not just noted."""
     total = round(sum(float(l["amount"]) for l in lines), 2)
     body = {
         "VendorRef": {"value": str(vendor_id)},
@@ -2935,6 +2936,8 @@ def qbo_pay_bills(vendor_id, bank_account_id, lines, memo="", date=None):
         "Line": [{"Amount": round(float(l["amount"]), 2),
                   "LinkedTxn": [{"TxnId": str(l["bill_id"]), "TxnType": "Bill"}]} for l in lines],
     }
+    if doc_no:
+        body["DocNumber"] = str(doc_no)[:21]      # QuickBooks caps DocNumber at 21 chars
     if date:
         body["TxnDate"] = date
     return qbo_create("billpayment", body)

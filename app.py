@@ -6056,8 +6056,8 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
         picked_lines = list(pay_lines)
     rem_total = sum(p["amt"] for p in picked_lines if isinstance(p["amt"], (int, float)))
     st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
-    ref = st.text_input("Remittance reference", key=f"remref_{_pk}",
-                        value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
+    ref = st.text_input("Remittance / payment reference (also the QuickBooks Ref no.)",
+                        key=f"remref_{_pk}", value=f"B{now_uk().strftime('%d%m%y')}")
     # Build the remittance-advice PDF the supplier receives (QuickBooks-style document).
     pdf_lines = [{"bill_no": p.get("bill_no") or p.get("inv"), "bill_date": p.get("bill_date"),
                   "due_date": p.get("due_date"),
@@ -6129,7 +6129,7 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
                     data_sources.qbo_pay_bills(
                         vid, bmap[bank],
                         [{"bill_id": p["bill_id"], "amount": p["amt"]} for p in picked_lines],
-                        memo=ref, date=now_uk().strftime("%Y-%m-%d"))
+                        memo=ref, doc_no=ref, date=now_uk().strftime("%Y-%m-%d"))
                     st.success(f"✅ Marked {len(picked_lines)} invoice(s) paid in QuickBooks "
                                f"(ref {ref}). Now pay £{rem_total:,.2f} via your bank.")
                     st.session_state.pop("_stmt_bills_cache", None)
@@ -6138,6 +6138,14 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
             if nn.button("Cancel", key=f"markno_{_pk}"):
                 st.session_state.pop(mpend, None)
                 st.rerun()
+
+
+@st.cache_data(ttl=86400, show_spinner=False, max_entries=64)
+def _parse_statement(content_hash, _pdf_bytes=None, _text=None):
+    """Read a statement with Claude, cached by CONTENT hash so the same statement is never parsed
+    twice — the parse is the slow, paid step of reconciliation. (_pdf_bytes/_text are underscore-
+    prefixed so Streamlit keys the cache on the hash alone, not the raw bytes.)"""
+    return data_sources.read_statement_pdf(pdf_bytes=_pdf_bytes, text=_text)
 
 
 def _bulk_reconcile_one(s, limits):
@@ -6149,10 +6157,12 @@ def _bulk_reconcile_one(s, limits):
         SUPPLIER_FROM_MAILBOX, s["message_id"], s["attachment_id"])
     if not by:
         return f"⚠ {s.get('supplier', '?')}: couldn't download the statement"
+    import hashlib
     if (nm or "").lower().endswith(".pdf"):
-        stmt = data_sources.read_statement_pdf(pdf_bytes=by)
+        stmt = _parse_statement(hashlib.sha1(by).hexdigest(), _pdf_bytes=by)
     else:
-        stmt = data_sources.read_statement_pdf(text=_statement_file_text(_PulledFile(nm, by)))
+        _txt = _statement_file_text(_PulledFile(nm, by))
+        stmt = _parse_statement(hashlib.sha1(_txt.encode("utf-8", "ignore")).hexdigest(), _text=_txt)
     sup = stmt.get("supplier") or s.get("supplier") or "?"
     # Resolve the QuickBooks vendor: learned mapping first, then auto-match by name.
     try:
@@ -6364,19 +6374,19 @@ def _render_statement_recon():
         st.caption("Pull a statement from the inbox above, or upload one, and I'll match every line "
                    "against QuickBooks — what's entered, paid, still owing, or missing.")
         return
-    sig = f"{up.name}:{up.size}"
-    cache = st.session_state.setdefault("_stmt_cache", {})
-    if sig not in cache:
-        with st.spinner("Reading the statement…"):
-            try:
-                if up.name.lower().endswith(".pdf"):
-                    cache[sig] = data_sources.read_statement_pdf(pdf_bytes=up.getvalue())
-                else:
-                    cache[sig] = data_sources.read_statement_pdf(text=_statement_file_text(up))
-            except Exception as e:  # noqa: BLE001
-                st.error("Couldn't read the statement: " + str(e)[:200])
-                return
-    stmt = cache[sig]
+    import hashlib
+    with st.spinner("Reading the statement…"):
+        try:
+            if up.name.lower().endswith(".pdf"):
+                raw = up.getvalue()
+                stmt = _parse_statement(hashlib.sha1(raw).hexdigest(), _pdf_bytes=raw)
+            else:
+                _txt = _statement_file_text(up)
+                stmt = _parse_statement(hashlib.sha1(_txt.encode("utf-8", "ignore")).hexdigest(),
+                                        _text=_txt)
+        except Exception as e:  # noqa: BLE001
+            st.error("Couldn't read the statement: " + str(e)[:200])
+            return
     sup = stmt.get("supplier") or "?"
     st.markdown(f"**{_esc(sup)}** · statement {stmt.get('statement_date') or ''} · "
                 f"outstanding **£{(stmt.get('balance') or 0):,.2f}**")
