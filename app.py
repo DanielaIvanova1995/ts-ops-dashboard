@@ -2789,6 +2789,11 @@ def _run_one_invoice(inv, lbsku):
               help="Reads the invoice PDF again and re-runs the match (a few pence).")
 
     res, om = _check_and_store(inv, parsed, lbsku, _pricelist_index())
+    # Monday's order-margin formula (formula_mkn9918j) is often blank (e.g. Carron); without a
+    # margin a MATCHED invoice can never clear the push floor and gets held forever. Fall back to
+    # the margin _check_and_store just computed from the order items + this invoice's costs.
+    if inv.get("order_margin_live") is None and om:
+        inv["order_margin_live"] = om["margin"]
     matched = res["n_issues"] == 0
 
     if res.get("incomplete"):
@@ -3470,7 +3475,11 @@ def _bulk_check(invs, lbsku):
         if parsed.get("error"):
             fail += 1
             continue
-        res, _om = _check_and_store(inv, parsed, lbsku, pidx)
+        res, om = _check_and_store(inv, parsed, lbsku, pidx)
+        # Fall back to the computed margin when Monday's formula margin is blank, so a fully
+        # matched invoice (e.g. Carron) can actually clear the push floor instead of being held.
+        if inv.get("order_margin_live") is None and om:
+            inv["order_margin_live"] = om["margin"]
         checked.append((inv, parsed, res))
         prog.progress(i / n, text=f"Checked {i}/{n}")
     # Pass 2 — decide with the FINAL reconciled verdicts. Only auto-APPROVE or auto-HOLD; never
