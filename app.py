@@ -6467,6 +6467,7 @@ def _render_statement_recon():
             return set()
     disc_nos = _mon_nos("discrepancy")
     action_nos = _mon_nos("review") | _mon_nos("matched")   # on Monday but not yet approved to QB
+    approved_nos = _mon_nos("pushed")                       # Approved (To QB) — on Monday, approved
 
     bill_by_doc = {}
     for b in bills:
@@ -6505,6 +6506,11 @@ def _render_statement_recon():
             if _k in disc_nos:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
                 disc_total += val
+            elif _k in approved_nos:
+                status, n_action = ("🟢 On Monday & approved — not yet matched to a QuickBooks "
+                                    "bill (check the invoice no.)"), n_action + 1
+                action_total += val
+                action_rows.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": amt})
             elif _k in action_nos:
                 status, n_action = "🟠 On Monday, not yet approved — review/approve ASAP", n_action + 1
                 action_total += val
