@@ -1005,12 +1005,19 @@ def _norm_code(s):
 
 
 def _norm_inv_no(inv, supplier=None):
-    """Normalise an invoice number for statement <-> QuickBooks/Monday matching. PJH statements
-    print a leading 'I' (e.g. I11656210) that our records almost always omit (11656210) — strip a
-    leading 'i' for PJH so both sides match whichever way round it was entered."""
+    """Normalise an invoice number for statement <-> QuickBooks/Monday matching, per-supplier:
+    - PJH statements print a leading 'I' (I11656210) our records omit (11656210) → strip a leading i.
+    - Eurocell statements print a leading '0' (0290105933) our records omit (290105933) → strip
+      leading zeros. Harmless to their composite numbers that start with a letter (SIN…, G…).
+    Applied to BOTH sides of every match, so it works whichever way round it was entered."""
     s = _norm_code(inv)
-    if s and s[0] == "i" and supplier and _norm_code(supplier).startswith("pjh"):
+    if not s:
+        return s
+    key = _norm_code(supplier) if supplier else ""
+    if key.startswith("pjh") and s[0] == "i":
         s = s[1:]
+    elif key.startswith("eurocell") and s[0] == "0":
+        s = s.lstrip("0") or s
     return s
 
 
