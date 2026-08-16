@@ -1004,6 +1004,16 @@ def _norm_code(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def _norm_inv_no(inv, supplier=None):
+    """Normalise an invoice number for statement <-> QuickBooks/Monday matching. PJH statements
+    print a leading 'I' (e.g. I11656210) that our records almost always omit (11656210) — strip a
+    leading 'i' for PJH so both sides match whichever way round it was entered."""
+    s = _norm_code(inv)
+    if s and s[0] == "i" and supplier and _norm_code(supplier).startswith("pjh"):
+        s = s[1:]
+    return s
+
+
 def _parse_order_items(text):
     """Order line text → {key: {sku, qty, name}}. Keyed by normalised SKU when the line has
     one, else a synthetic key so a product that's on the order but has NO SKU set is still a
@@ -6160,7 +6170,7 @@ def _bulk_reconcile_one(s, limits):
         paymap = data_sources.qbo_vendor_payments(vid)
     except Exception:  # noqa: BLE001
         paymap = {}
-    bmap = {_norm_code(b["doc_no"]): b for b in bills if b.get("doc_no")}
+    bmap = {_norm_inv_no(b["doc_no"], sup): b for b in bills if b.get("doc_no")}
     rows, pay_lines = [], []
     to_pay = stmt_total = 0.0
     n_pay = n_paid = n_missing = 0
@@ -6179,7 +6189,7 @@ def _bulk_reconcile_one(s, limits):
         except (TypeError, ValueError):
             val = amt
         stmt_total += amt
-        b = bmap.get(_norm_code(inv))
+        b = bmap.get(_norm_inv_no(inv, sup))
         paid_ref = ""
         if b and b.get("paid"):
             pm = paymap.get(str(b["id"]))
@@ -6438,7 +6448,7 @@ def _render_statement_recon():
     # Missing-from-QB invoices: cross-check Monday — a Discrepancy there = awaiting a credit note.
     def _mon_nos(key):
         try:
-            return {_norm_code(i.get("invoice_no"))
+            return {_norm_inv_no(i.get("invoice_no"), sup)
                     for i in (invoices_by_status(key).get("invoices") or []) if i.get("invoice_no")}
         except Exception:  # noqa: BLE001
             return set()
@@ -6448,7 +6458,7 @@ def _render_statement_recon():
     bill_by_doc = {}
     for b in bills:
         if b["doc_no"]:
-            bill_by_doc.setdefault(b["doc_no"].upper(), b)
+            bill_by_doc.setdefault(_norm_inv_no(b["doc_no"], sup), b)
 
     rows, action_rows, pay_lines = [], [], []
     n_pay = n_paid = n_missing = n_disc = n_action = 0
@@ -6462,7 +6472,7 @@ def _render_statement_recon():
         val = (unpaid if isinstance(unpaid, (int, float))
                else (amt if isinstance(amt, (int, float)) else 0.0))
         stmt_total += val
-        b = bill_by_doc.get(inv.upper())
+        b = bill_by_doc.get(_norm_inv_no(inv, sup))
         if not b:                    # fallback: an unused bill with the same amount
             b = next((x for x in bills if x["id"] not in used
                       and isinstance(x["total"], (int, float)) and isinstance(amt, (int, float))
@@ -6478,7 +6488,7 @@ def _render_statement_recon():
             n_paid += 1
             paid_total += val
         elif not b:
-            _k = _norm_code(inv)
+            _k = _norm_inv_no(inv, sup)
             if _k in disc_nos:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
                 disc_total += val
