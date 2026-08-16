@@ -6009,11 +6009,13 @@ def _statement_file_text(up):
     return "\n".join(out)
 
 
-def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
+def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None):
     """Tick invoices → build a remittance → send it → mark paid in QuickBooks. Reused by both a
     fresh reconciliation and a reopened saved one, so you never reconcile a statement twice.
     live_verify re-checks each line against QuickBooks first, so a bill that's been paid or cleared
-    since the statement was reconciled drops off before you'd pay it again."""
+    since the statement was reconciled drops off before you'd pay it again. stmt_balance = the
+    statement's own outstanding balance; if the ready-to-pay total dwarfs it, nothing is pre-ticked
+    (QuickBooks is probably out of sync — bills paid but not marked paid), so you can't overpay."""
     if live_verify and vid:
         try:
             fresh = {str(b["id"]): b for b in data_sources.qbo_vendor_bills(vid)}
@@ -6035,7 +6037,15 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False):
         return
     _pk = key
     st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
-    pay_df = pd.DataFrame([{"Pay": True, "Invoice": p["inv"], "Order": p["order"],
+    total_all = sum(p["amt"] for p in pay_lines if isinstance(p.get("amt"), (int, float)))
+    overpay = (stmt_balance is not None
+               and total_all > stmt_balance + max(1.0, 0.02 * stmt_balance))
+    if overpay:
+        st.error(f"⚠ **Ready-to-pay (£{total_all:,.2f}) is far above the statement's balance "
+                 f"(£{stmt_balance:,.2f}).** Nothing is pre-ticked — tick **only** what you're "
+                 "actually paying. This almost always means QuickBooks isn't reconciled (bills were "
+                 "paid but never marked paid in QuickBooks, so they still look open).")
+    pay_df = pd.DataFrame([{"Pay": not overpay, "Invoice": p["inv"], "Order": p["order"],
                             "Amount": _gbp(p["amt"]), "Due": p.get("due", ""),
                             "Approved": "✅ Approved" if p.get("bill_id") else "⚠ NOT approved"}
                            for p in pay_lines])
@@ -6294,7 +6304,8 @@ def _render_statement_recon():
                 if snap.get("pay_lines") and snap.get("vid"):
                     if st.toggle("💷 Pay this off", key=paytog):
                         _pay_workflow(snap["supplier"], snap["vid"], snap["pay_lines"],
-                                      f"saved_{_k}", live_verify=True)
+                                      f"saved_{_k}", live_verify=True,
+                                      stmt_balance=snap.get("stmt_total"))
                 elif snap.get("to_pay"):
                     st.caption("Reconcile this statement once more to enable paying it off from here "
                                "(it was saved before that feature existed).")
@@ -6378,6 +6389,7 @@ def _render_statement_recon():
                    "against QuickBooks — what's entered, paid, still owing, or missing.")
         return
     import hashlib
+    sig = f"{up.name}:{up.size}"          # used later to auto-save this reconciliation once
     with st.spinner("Reading the statement…"):
         try:
             if up.name.lower().endswith(".pdf"):
@@ -6564,6 +6576,17 @@ def _render_statement_recon():
         f"review/approve ({n_action}), £{disc_total:,.2f} awaiting credit note ({n_disc}), "
         f"£{missing_total:,.2f} missing from Monday ({n_missing}), £{paid_total:,.2f} already "
         f"paid ({n_paid}).")
+    # SAFETY: when QuickBooks shows far more 'open' than the statement says is owed, QB is out of
+    # sync (bills paid but not marked paid) — never let that read as 'pay this'.
+    if to_pay > on_stmt + max(1.0, 0.02 * on_stmt):
+        st.error(
+            f"⚠ **Stop — don't pay this whole list.** QuickBooks shows **£{to_pay:,.2f}** of open "
+            f"bills, but the statement's own balance is only **£{on_stmt:,.2f}** — a £"
+            f"{to_pay - on_stmt:,.2f} gap. That almost always means bills were paid but never "
+            "**marked paid in QuickBooks**, so they still look open. **You owe £"
+            f"{on_stmt:,.2f}.** Reconcile QuickBooks (mark the already-paid bills paid) so its open "
+            "bills match the statement — then only what's genuinely outstanding shows as ready to "
+            "pay.")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Statement date", stmt.get("statement_date") or "—")
@@ -6574,7 +6597,7 @@ def _render_statement_recon():
 
     # ---- Build a remittance from the ready-to-pay invoices, email it, mark paid in QB ----
     if pay_lines:
-        _pay_workflow(sup, vid, pay_lines, _norm_code(sup))
+        _pay_workflow(sup, vid, pay_lines, _norm_code(sup), stmt_balance=on_stmt)
 
     # ---- Keep it for later: auto-save this reconciliation (once per statement) so you can come
     # back in a day or two and pay off it without re-uploading. ----
