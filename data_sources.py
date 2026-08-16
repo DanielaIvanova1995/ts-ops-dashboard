@@ -424,7 +424,7 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title quantity sku variant { product { vendor productType } } "
+             "title variantTitle quantity sku variant { product { vendor productType } } "
              "product { vendor productType } "
              "discountedTotalSet { shopMoney { amount } } } } } } }")
     r = requests.post(
@@ -447,7 +447,14 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
                          .get("amount")))
         except (TypeError, ValueError):
             sub = None
-        out.append({"title": n.get("title") or "", "sku": (n.get("sku") or "").strip() or None,
+        # Fold the customer's chosen VARIANT (colour/size) into the title so it lands on the PO and
+        # the Monday order text — ordering the wrong variant causes real problems.
+        title = n.get("title") or ""
+        variant = (n.get("variantTitle") or "").strip()
+        if variant and variant.lower() != "default title" and variant.lower() not in title.lower():
+            title = f"{title} - {variant}"
+        out.append({"title": title, "variant": variant,
+                    "sku": (n.get("sku") or "").strip() or None,
                     "qty": n.get("quantity"), "vendor": (prod.get("vendor") or "").strip(),
                     "product_type": (prod.get("productType") or "").strip(),
                     "line_subtotal": sub})

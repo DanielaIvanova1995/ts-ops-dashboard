@@ -264,6 +264,23 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         notes += [n for n in notes_extra if n and str(n).strip()]
 
     items = items_override if items_override is not None else _parse_monday_items(o.get("items"))
+    # Ensure the customer's chosen VARIANT (colour/size) is on every PO line. Monday's order text can
+    # predate this / omit it, so pull the folded product+variant title from Shopify and match by SKU.
+    # (Skipped when the processor hand-edited the lines in Adjust — respect their wording.)
+    if sid and items_override is None:
+        _sl_cache = st.session_state.setdefault("_op_shoplines", {})
+        if sid not in _sl_cache:
+            try:
+                _sl_cache[sid] = data_sources.fetch_order_line_items(sid)
+            except Exception:  # noqa: BLE001
+                _sl_cache[sid] = []
+        _title_by_sku = {re.sub(r"[^a-z0-9]", "", (sl.get("sku") or "").lower()):
+                         (sl.get("title") or "").strip()
+                         for sl in (_sl_cache[sid] or []) if sl.get("sku") and sl.get("title")}
+        for _it in items:
+            _st = _title_by_sku.get(re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower()))
+            if _st:
+                _it["Item"] = _st
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
