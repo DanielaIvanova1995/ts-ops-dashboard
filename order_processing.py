@@ -114,7 +114,9 @@ def _suggestion_box():
     with st.expander("💡 Notes / suggestions (saved for Daniela)"):
         st.caption("Anything that doesn't work, or would help — this is **saved for Daniela** to "
                    "review here, and emailed too once email sending is switched on.")
-        who = st.text_input("Your name", value="Natasha", key="op_sugg_who")
+        who = st.text_input("Your name", value=(st.session_state.get("name") or ""),
+                            key="op_sugg_who", help="Pre-filled from your login — the note is saved "
+                            "under this name so Daniela knows who it's from.")
         msg = st.text_area("What's up?", key="op_sugg_msg", height=110,
                            placeholder="e.g. the supplier dropdown is missing X, or the PO for "
                                        "order 30xxx has the wrong branch…")
