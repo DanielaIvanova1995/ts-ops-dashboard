@@ -3372,23 +3372,42 @@ def _dup_identity(i):
     return (_norm_code(i.get("supplier")), no, round(t, 2) if isinstance(t, (int, float)) else None)
 
 
-def _auto_dedup(invs, tol=0.01):
-    """Remove duplicate invoices before checking (Eurocell send two copies of each). When 2+
-    subitems share the SAME supplier + invoice number + total, keep the first and DELETE the
-    rest from Monday — AND blank the duplicate's amount from the order's INV1..INV5 columns so
-    the order total isn't double-counted. Returns (kept, n_deleted, n_cleared)."""
-    seen, kept, dups = {}, [], []
+def _dedup_groups(invs):
+    """Group invoice copies by supplier + invoice number and decide which are deletable duplicates.
+    Eurocell send two identical copies of each invoice; the copies are duplicates when they share
+    the same total OR a copy's total is blank (not read yet). A group with 2+ genuinely DIFFERENT
+    amounts under one number (a real invoice split across orders) is left alone. Returns
+    (dups_to_delete, dup_group_sub_ids) — the extras to delete, and every sub_id in a duplicate
+    group (for the 🔁 marker). Keeps a PRICED copy in preference to a blank one."""
+    from collections import defaultdict
+    groups = defaultdict(list)
     for i in invs:
         no = (i.get("invoice_no") or "").strip().upper()
-        k = _dup_identity(i)
-        if no and k in seen:
-            dups.append(i)                 # a later copy of an already-seen invoice
-        else:
-            if no:
-                seen[k] = i
-            kept.append(i)
+        if no:
+            groups[(_norm_code(i.get("supplier")), no)].append(i)
+    dups, group_ids = [], set()
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        totals = {round(i["total"], 2) for i in items if isinstance(i.get("total"), (int, float))}
+        if len(totals) > 1:
+            continue                       # different amounts under one number → a real split, skip
+        items = sorted(items, key=lambda i: 0 if isinstance(i.get("total"), (int, float)) else 1)
+        group_ids.update(str(i.get("sub_id")) for i in items)
+        dups.extend(items[1:])             # keep the first (priced) copy, the rest are duplicates
+    return dups, group_ids
+
+
+def _auto_dedup(invs, tol=0.01):
+    """Delete duplicate invoice copies from Monday in ONE pass (Eurocell send two of each) and blank
+    each duplicate's amount from its order's INV1..INV5 columns so the order total isn't double-
+    counted. Grouping is by supplier + invoice number (see _dedup_groups), so a copy with a slightly
+    different or missing total is still caught. Returns (kept, n_deleted, n_cleared)."""
+    dups, _ = _dedup_groups(invs)
     if not dups:
         return invs, 0, 0
+    dup_ids = {str(d.get("sub_id")) for d in dups}
+    kept = [i for i in invs if str(i.get("sub_id")) not in dup_ids]
     gone = st.session_state.setdefault("inv_gone", set())
     order_state, deleted, cleared = {}, 0, 0
     for d in dups:
@@ -3657,23 +3676,21 @@ def _invoice_tab(key, is_queue):
     # duplicate subitem to delete. Counted across this tab PLUS the Discrepancy queue, so a
     # copy sitting in Discrepancy is caught even when we're looking at another tab.
     from collections import Counter as _Counter
-    def _dupkey(i):
-        return _dup_identity(i)
     dup_pool = {i["sub_id"]: i for i in invs}
     if key != "discrepancy":
         for i in (invoices_by_status("discrepancy").get("invoices") or []):
             dup_pool.setdefault(i["sub_id"], i)
-    _dupc = _Counter(_dupkey(i) for i in dup_pool.values() if (i.get("invoice_no") or "").strip())
+    _dups_del, _dup_group_ids = _dedup_groups(list(dup_pool.values()))
     _amtdup = _amount_dup_ids(list(dup_pool.values()))   # same order + same £, different number
     for i in fil:
-        i["_dup"] = _dupc.get(_dupkey(i), 0) >= 2
+        i["_dup"] = str(i.get("sub_id")) in _dup_group_ids
         # amount-duplicate (the other invoice's number), unless it's already an exact duplicate
         i["_dup_amt"] = None if i["_dup"] else _amtdup.get(str(i.get("sub_id")))
 
-    # One-click clean-up: exact-duplicate copies (same invoice number logged more than once on
-    # an order) can be deleted in one go — keeps one of each, deletes the extras and clears
-    # their INV amount. (Bulk-check does this automatically; this is for ones checked one-by-one.)
-    _extras = sum(c - 1 for c in _dupc.values() if c >= 2)
+    # One-click clean-up: duplicate copies (same supplier + invoice number) can be deleted in one
+    # go — keeps one of each, deletes the extras and clears their INV amount. (Bulk-check does this
+    # automatically; this is for ones checked one-by-one.)
+    _extras = len(_dups_del)
     if _extras:
         cda, cdb = st.columns([1, 2])
         if cda.button(f"🗑 Delete {_extras} duplicate cop{'y' if _extras == 1 else 'ies'}",
