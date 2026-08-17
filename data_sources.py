@@ -3498,20 +3498,36 @@ def split_fulfillment_by_supplier(order_id, key_to_supplier, token=None):
     return actions
 
 
+SUGGESTIONS_GROUP_PREFIX = "\U0001f4a1"     # 💡 — marks a note row on the config board
+
+
 def op_save_suggestion(who: str, msg: str, token: str | None = None) -> bool:
-    """Save a team note / suggestion durably as an update on a 'TradeHub Suggestions' config item
-    (so notes survive even while email sending is off). Returns True."""
+    """Save a team note / suggestion as a VISIBLE ROW on the TradeHub Config board (named
+    '💡 [who] message'), so Daniela can actually see them at a glance — not buried in an item's
+    Updates conversation. Full text also goes in the row's update in case the name is truncated.
+    Returns True (raises if Monday rejects the create)."""
     token = token or get_token()
-    item_id = _config_item_named("TradeHub Suggestions", token)
-    monday_post_update(item_id, f"[{(who or 'team').strip()}] {msg.strip()}", token)
-    return True
+    board_id = monday_find_or_create_board(QBO_CONFIG_BOARD, token)
+    who = (who or "team").strip()
+    msg = msg.strip()
+    name = f"{SUGGESTIONS_GROUP_PREFIX} [{who}] {msg}"[:250]
+    item_id = monday_create_item(board_id, name, token)
+    try:
+        monday_post_update(item_id, f"[{who}] {msg}", token)   # full text (name may be truncated)
+    except Exception:  # noqa: BLE001
+        pass
+    return bool(item_id)
 
 
 def op_load_suggestions(limit: int = 8, token: str | None = None) -> list:
-    """Recent saved notes → [{body, created_at}], newest first."""
+    """Recent saved notes → [{body, created_at}], newest first. Reads the 💡-prefixed rows on the
+    TradeHub Config board."""
     token = token or get_token()
-    item_id = _config_item_named("TradeHub Suggestions", token)
-    data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:%d){body created_at}}}"
-                       % int(limit), {"i": [str(item_id)]}, token)
-    ups = (((data.get("items") or [{}])[0]).get("updates") or [])
-    return [{"body": u.get("body") or "", "created_at": u.get("created_at") or ""} for u in ups]
+    board_id = monday_find_or_create_board(QBO_CONFIG_BOARD, token)
+    data = _monday_gql("query($b:[ID!]){boards(ids:$b){items_page(limit:100)"
+                       "{items{name created_at}}}}", {"b": [str(board_id)]}, token)
+    items = (((data.get("boards") or [{}])[0].get("items_page") or {}).get("items") or [])
+    notes = [i for i in items if (i.get("name") or "").startswith(SUGGESTIONS_GROUP_PREFIX)]
+    notes.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return [{"body": (i.get("name") or "").lstrip(SUGGESTIONS_GROUP_PREFIX).strip(),
+             "created_at": i.get("created_at") or ""} for i in notes[:int(limit)]]
