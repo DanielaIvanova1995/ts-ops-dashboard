@@ -1021,6 +1021,28 @@ def _norm_inv_no(inv, supplier=None):
     return s
 
 
+# Colour words that appear at the END of supplier SKUs, mapped to the short code used elsewhere, so
+# a pricelist SKU '…-BLACK' matches an order SKU '…-BK' (Southern's list mixes the two). Extend as
+# new colours turn up.
+_SKU_COLOUR = {
+    "black": "bk", "blk": "bk", "grey": "gy", "gray": "gy",
+    "galvanised": "gv", "galvanized": "gv", "galv": "gv",
+    "white": "wh", "anthracite": "ag", "brown": "bn", "cream": "cr",
+    "green": "gn", "blue": "bl", "goosewing": "gg", "juniper": "jg", "moss": "ms",
+}
+
+
+def _canon_sku(sku):
+    """Normalise a SKU for pricelist matching: lowercase + strip punctuation (so RA1ELEMENT125 ==
+    RA1ELEMENT-125) AND collapse a trailing full colour word to its short code (…BLACK -> …bk), so
+    both spellings match. Order SKUs already use the short code, so they're left unchanged."""
+    s = _norm_code(sku)
+    for word, code in _SKU_COLOUR.items():
+        if len(s) > len(word) and s.endswith(word):
+            return s[:-len(word)] + code
+    return s
+
+
 def _parse_order_items(text):
     """Order line text → {key: {sku, qty, name}}. Keyed by normalised SKU when the line has
     one, else a synthetic key so a product that's on the order but has NO SKU set is still a
@@ -1319,7 +1341,7 @@ def _pricelist_index():
     lk = load_lookup()
     idx = {}
     for it in (lk["items"] if lk else []):
-        sk = _norm_code(it.get("sku"))
+        sk = _canon_sku(it.get("sku"))
         if not sk:
             continue
         for o in (it.get("offers") or []):
@@ -2165,7 +2187,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                           "unit": unit, "cost": None, "issues": sissues})
             continue
 
-        sk = _norm_code(sku_raw)
+        sk = _canon_sku(sku_raw)
         issues = []
         cost = None
         title_note = None
