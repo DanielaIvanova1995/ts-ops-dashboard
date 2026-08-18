@@ -1562,10 +1562,13 @@ def _lookup_by_sku():
     return idx
 
 
-def _order_margin(order_items_text, lbsku, cost_override=None):
+def _order_margin(order_items_text, lbsku, cost_override=None, shipping_rev=0.0):
     """Margin we make on the order's items: revenue (our ex-VAT sell) vs cost.
     cost_override = {norm_sku: actual invoice unit cost}; otherwise falls back to
-    the cheapest pricelist cost. Returns {margin, rev, cost, matched, total} or None."""
+    the cheapest pricelist cost. shipping_rev = ex-VAT delivery the customer paid, added to
+    revenue so a supplier whose invoice bundles delivery (e.g. Travis Perkins under £100, £24.99
+    carriage) isn't scored as a loss on the goods alone. Returns {margin, rev, cost, matched,
+    total} or None."""
     order = _parse_order_items(order_items_text)
     rev = cost = 0.0
     matched = 0
@@ -1584,6 +1587,7 @@ def _order_margin(order_items_text, lbsku, cost_override=None):
         matched += 1
     if rev <= 0:
         return None
+    rev += shipping_rev or 0.0
     return {"margin": (rev - cost) / rev * 100, "rev": rev, "cost": cost,
             "matched": matched, "total": len(order)}
 
@@ -2489,7 +2493,19 @@ def _check_and_store(inv, parsed, lbsku, pidx):
     inv_costs = {_norm_code(l.get("sku")): l.get("unit_price")
                  for l in (parsed.get("lines") or [])
                  if isinstance(l.get("unit_price"), (int, float))}
-    om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
+    # No-pricelist suppliers (e.g. Travis Perkins) bundle delivery into the invoice, so the goods
+    # alone can read as a loss. Credit the shipping the customer actually paid on the order (they
+    # DO charge ~£24.99 delivery under £100) so the whole-order margin is judged, not goods-only.
+    ship_rev = 0.0
+    if (SUPPLIER_RULES.get(_norm_code(inv.get("supplier")), {}).get("no_pricelist")
+            and inv.get("shopify_order_id")):
+        try:
+            ship_rev = float((_shopify_order_ship(inv["shopify_order_id"]) or {}).get("shipping")
+                             or 0.0)
+        except (TypeError, ValueError):
+            ship_rev = 0.0
+    om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs,
+                       shipping_rev=ship_rev)
     v = _verdict(res)
     v["margin"] = round(om["margin"]) if om else None
     v["missing"] = res.get("missing") or []          # for the incomplete-invoice note on Monday

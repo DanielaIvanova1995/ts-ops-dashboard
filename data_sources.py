@@ -326,13 +326,16 @@ def fetch_order_discounts(order_ids, token: str | None = None) -> dict:
 
 
 def fetch_order_shipping(order_id, token: str | None = None) -> dict:
-    """Shopify order's delivery postcode + country — for zone-based delivery checks (Carron).
-    Returns {postcode, country}. Raises if the order can't be read (caller falls back)."""
+    """Shopify order's delivery postcode + country + shipping charged — for zone-based delivery
+    checks (Carron) and for crediting shipping revenue into the order margin (no-pricelist
+    suppliers like Travis Perkins, whose invoice bundles delivery). Returns
+    {postcode, country, shipping} where shipping is the ex-VAT delivery the customer paid
+    (0.0 if none). Raises if the order can't be read (caller falls back)."""
     store = get_secret("SHOPIFY_STORE")
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { shippingAddress { zip countryCodeV2 "
-             "country } } }")
+             "country } totalShippingPriceSet { shopMoney { amount } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": query, "variables": {"id": gid}},
@@ -343,8 +346,15 @@ def fetch_order_shipping(order_id, token: str | None = None) -> dict:
     payload = r.json()
     if payload.get("errors"):
         raise RuntimeError(f"Shopify error: {payload['errors']}")
-    sa = (((payload.get("data") or {}).get("order") or {}).get("shippingAddress") or {})
-    return {"postcode": sa.get("zip"), "country": sa.get("countryCodeV2") or sa.get("country")}
+    order = ((payload.get("data") or {}).get("order") or {})
+    sa = (order.get("shippingAddress") or {})
+    try:
+        ship = float((((order.get("totalShippingPriceSet") or {}).get("shopMoney") or {})
+                      .get("amount")) or 0.0)
+    except (TypeError, ValueError):
+        ship = 0.0
+    return {"postcode": sa.get("zip"), "country": sa.get("countryCodeV2") or sa.get("country"),
+            "shipping": ship}
 
 
 def fetch_order_shipping_full(order_id, token: str | None = None) -> dict:
