@@ -2100,10 +2100,54 @@ def _price_issues(supplier, unit, cost, tol, title_note=None):
     return issues
 
 
+# Map an invoice's printed company/supplier name -> our canonical supplier, to check it against
+# the Monday order's supplier. Distinctive substrings only; a supplier whose invoice name differs
+# from our label needs an alias here (Nuie invoices are headed "Ultra Finishing" / "Roxor Group").
+_SUPPLIER_IDENT = {
+    "ultrafinishing": "Nuie", "roxor": "Nuie", "nuie": "Nuie",
+    "pjh": "PJH", "eurocell": "Eurocell", "travisperkins": "Travis Perkins",
+    "molan": "Molan", "squaredeal": "Squaredeal", "southernsheeting": "Southern Sheeting",
+    "huwsgray": "Huws Gray", "jbkind": "JB Kind", "deanta": "Deanta", "carron": "Carron",
+    "toolbank": "Toolbank", "decor8": "Decor8", "nationalskirting": "National Skirting",
+    "velux": "Velux", "permaroof": "Permaroof", "gap": "GAP", "nbp": "NBP", "upb": "UPB",
+    "storm": "Storm", "lpddoors": "LPD DOORS", "chasehardware": "Chase Hardware",
+    "wallsandfloors": "Walls and Floors", "edmundson": "Edmundson", "brundle": "Brundle",
+}
+
+
+def _supplier_identity(name):
+    """Best-guess canonical supplier for a printed company/supplier name, or None if not
+    recognised. Longest (most specific) alias wins; unknown names return None (don't flag)."""
+    n = _norm_code(name)
+    if not n:
+        return None
+    for key in sorted(_SUPPLIER_IDENT, key=len, reverse=True):
+        if key in n:
+            return _SUPPLIER_IDENT[key]
+    return None
+
+
 def _check_invoice(parsed, meta, pidx, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
     order's SKUs/quantities. Known supplier delivery charges are recognised."""
     supplier = _norm_code(meta.get("supplier"))
+    # Supplier sanity check — the invoice's OWN printed supplier must match the Monday order's
+    # supplier. Misfiled invoices happen (e.g. a PJH invoice logged under a Nuie order); unchecked
+    # they'd be priced against the wrong pricelist. If the invoice clearly belongs to a DIFFERENT
+    # known supplier, stop and flag it to be moved to the right supplier's order.
+    _inv_sup = _supplier_identity(parsed.get("supplier"))
+    _mon_sup = _supplier_identity(meta.get("supplier"))
+    if _inv_sup and _mon_sup and _inv_sup != _mon_sup:
+        return {"lines": [{"sku": parsed.get("supplier") or "?",
+                           "desc": f"Invoice is from {_inv_sup}", "qty": None, "unit": None,
+                           "cost": None, "_okey": None,
+                           "issues": [("supplier",
+                                       f"this invoice is from {_inv_sup}, but the order is filed "
+                                       f"under {_mon_sup} on Monday — move it to the {_inv_sup} "
+                                       "order (or fix the supplier) before approving")]}],
+                "missing": [], "n_issues": 1, "incomplete": False, "covered": set(),
+                "order_map": {}, "inv_qty": {}, "ord_qty": {}, "short": {},
+                "supplier_mismatch": {"invoice": _inv_sup, "monday": _mon_sup}}
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     tidx = _supplier_title_index() if not no_pl else None
     cidx = _supplier_code_index() if not no_pl else None
@@ -2544,7 +2588,8 @@ def _verdict(res):
     fail it — that's 'incomplete', not a discrepancy). 'price' is tri-state: True (all OK),
     False (a mismatch), None (couldn't check — grey '?'). 'incomplete' = clean but missing
     some ordered items (expected on another invoice)."""
-    order_issue = any(t in ("qty", "notorder") for l in res["lines"] for t, _ in l["issues"])
+    order_issue = any(t in ("qty", "notorder", "supplier")
+                      for l in res["lines"] for t, _ in l["issues"])
     price_issue = any(t in ("price", "delivery") for l in res["lines"] for t, _ in l["issues"])
     price_unchecked = any(t == "noprice" for l in res["lines"] for t, _ in l["issues"])
     price = False if price_issue else (None if price_unchecked else True)
@@ -2954,7 +2999,17 @@ def _run_one_invoice(inv, lbsku):
         inv["order_margin_live"] = om["margin"]
     matched = res["n_issues"] == 0
 
-    if res.get("incomplete"):
+    mism = res.get("supplier_mismatch")
+    if mism:
+        st.markdown(
+            '<div style="background:#fef2f2;border:2px solid #dc2626;color:#991b1b;'
+            'font-weight:700;font-size:15px;padding:11px 14px;border-radius:6px;margin:2px 0 8px">'
+            f'&#9888; WRONG SUPPLIER — this invoice is from <u>{mism["invoice"]}</u> but it is '
+            f'filed under a <u>{mism["monday"]}</u> order on Monday. Move it onto the '
+            f'{mism["invoice"]} order (or fix the order&#39;s supplier) before approving — it '
+            'has NOT been price-checked, because it would be checked against the wrong '
+            'pricelist.</div>', unsafe_allow_html=True)
+    elif res.get("incomplete"):
         st.markdown(f'<div style="display:flex;align-items:center;gap:8px;background:#fff7ed;'
                     f'color:#9a3412;font-weight:700;padding:8px 12px;border-radius:4px;margin:2px 0 8px">'
                     f'&#9203; INCOMPLETE INVOICE — prices &amp; quantities are correct, but not all '
