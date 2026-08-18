@@ -1922,7 +1922,7 @@ def _is_toolbank(supplier):
 # Suppliers that re-code the same product, so their invoice SKU often differs slightly from ours.
 # For these we match on the exact SKU FIRST, then fall back to a lenient name/code match (rather
 # than saying 'not on the order'). Decor8 is handled separately — it has no SKUs at all.
-LENIENT_NAME_SUPPLIERS = ("eurocell", "gap", "jbkind")
+LENIENT_NAME_SUPPLIERS = ("eurocell", "gap", "jbkind", "squaredeal")
 
 
 # Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
@@ -2072,6 +2072,32 @@ def _ancillary_charge(supplier, sku_raw, desc):
         if any(k in t for k in rule["keywords"]):
             return rule
     return None
+
+
+def _price_issues(supplier, unit, cost, tol, title_note=None):
+    """Compare an invoice line's unit price against the pricelist cost; return issue tuples.
+    Mirrors the inline price check in _check_invoice so a cost resolved AFTER the order match
+    (via the matched order line's SKU) is checked identically."""
+    issues = []
+    if not (isinstance(unit, (int, float)) and isinstance(cost, (int, float))):
+        return issues
+    sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
+    allowed = cost * (1 + sur)
+    via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
+    if unit > allowed + tol:
+        if sur:
+            issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} +{sur * 100:.0f}% "
+                                    f"surcharge (£{allowed:,.2f}) — still over by "
+                                    f"£{unit - allowed:,.2f}{via}"))
+        else:
+            issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                                    f"(+£{unit - cost:,.2f}){via}"))
+    elif sur and unit > cost + tol:
+        issues.append(("name", f"£{unit:,.2f} = pricelist £{cost:,.2f} + {sur * 100:.0f}% "
+                               f"surcharge{via}"))
+    elif title_note:
+        issues.append(("name", f"price checked vs {title_note}"))
+    return issues
 
 
 def _check_invoice(parsed, meta, pidx, tol=0.01):
@@ -2414,6 +2440,28 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     for idx, rec in enumerate(pending):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
+
+    # Cost fallback via the MATCHED ORDER LINE's SKU. Suppliers that print their OWN product codes
+    # on the invoice (e.g. Squaredeal: VLAW5300754, TV38, AG5420121) never resolve a cost by the
+    # invoice SKU — but the order line each matched carries OUR Shopify SKU, which the durable price
+    # overrides ARE keyed to. So price those lines against the order-line SKU's cost. Still ONLY
+    # this supplier's own price (pidx.get(...).get(supplier)) — never another supplier's.
+    if not no_pl:
+        for rec in lines:
+            if rec.get("cost") is not None:
+                continue
+            okey = rec.get("_okey")
+            unit = rec.get("unit")
+            if okey is None or not isinstance(unit, (int, float)):
+                continue
+            oc = (pidx.get(_canon_sku(order[okey].get("sku"))) or {}).get(supplier)
+            if not isinstance(oc, (int, float)):
+                continue
+            rec["cost"] = oc
+            rec["issues"] = [i for i in rec["issues"] if i[0] != "noprice"]   # order SKU priced it
+            rec["issues"].extend(
+                _price_issues(supplier, unit, oc, tol,
+                              f"our SKU {order[okey]['sku']} (invoice uses their own code)"))
 
     # Quantity check on the TOTAL invoiced per order line. A product split across invoice lines
     # that sums to the ordered qty is fine. A SHORTFALL (invoiced < ordered) is NOT a discrepancy
