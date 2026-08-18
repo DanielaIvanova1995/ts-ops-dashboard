@@ -213,8 +213,10 @@ def _pricing():
     try:
         ov = json.load(open("price_overrides.json", encoding="utf-8"))
         for sup, skus in ov.items():
+            if sup == "_patterns" or not isinstance(skus, dict):   # patterns handled in _line_cost
+                continue
             sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
-            for sk, cost in (skus or {}).items():
+            for sk, cost in skus.items():
                 if isinstance(cost, (int, float)):
                     out.setdefault(re.sub(r"[^a-z0-9]", "", (sk or "").lower()), {})[sn] = cost
     except Exception:  # noqa: BLE001
@@ -222,14 +224,37 @@ def _pricing():
     return out
 
 
+def _price_patterns():
+    """{supplier_norm: [(prefix, cost)]} family price patterns — a supplier that prices by product
+    TYPE not colour (e.g. UPB: all trims one price, all boards one price). ALWAYS the same
+    supplier's own price; NEVER another supplier's."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_patterns") or {}).items():
+        sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
+        out[sn] = [(re.sub(r"[^a-z0-9]", "", (r.get("prefix") or "").lower()), r.get("cost"))
+                   for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
+    return out
+
+
 def _line_cost(sku, supplier):
-    """The routed supplier's cost for a SKU from the pricing feed, or None (→ 'confirm' on the PO;
-    never guessed — matches the rulebook)."""
+    """The routed supplier's OWN cost for a SKU, or None. STRICT RULE: a supplier's cost is only
+    ever that supplier's own price — never another supplier's (Daniela, 2026-08-18). If the supplier
+    has no price the line stays unpriced (→ packing slip), it never borrows another's."""
     key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
     sup = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
-    offers = _pricing().get(key) or {}
-    c = offers.get(sup)
-    return c if isinstance(c, (int, float)) else None
+    c = (_pricing().get(key) or {}).get(sup)
+    if isinstance(c, (int, float)):
+        return c
+    # Same-supplier family pattern (e.g. UPB prices all trims/boards one price per type). Still the
+    # SAME supplier's own price only.
+    for prefix, cost in _price_patterns().get(sup, []):
+        if prefix and key.startswith(prefix):
+            return cost
+    return None
 
 
 def _money(x):

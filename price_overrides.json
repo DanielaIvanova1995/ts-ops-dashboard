@@ -66,9 +66,47 @@
   "XT-BVS38": 7.5,
   "XT-BVS25": 12.5,
   "XT-TVS2538": 7.5,
-  "5951402": 16.31
+  "5951402": 16.31,
+  "5300755": 11.0,
+  "5300758": 11.0
  },
  "Chase Hardware": {
   "5101": 4.0
+ },
+ "_patterns": {
+  "UPB": [
+   {
+    "prefix": "hp3600",
+    "cost": 11.15
+   },
+   {
+    "prefix": "jhhpk",
+    "cost": 11.15
+   },
+   {
+    "prefix": "jhvl",
+    "cost": 22.0
+   },
+   {
+    "prefix": "jhmetalex5300284",
+    "cost": 23.5
+   },
+   {
+    "prefix": "jhmetalin5300252",
+    "cost": 15.75
+   },
+   {
+    "prefix": "jhedge",
+    "cost": 17.5
+   },
+   {
+    "prefix": "vl5",
+    "cost": 22.5
+   },
+   {
+    "prefix": "vl4",
+    "cost": 15.95
+   }
+  ]
  }
 }

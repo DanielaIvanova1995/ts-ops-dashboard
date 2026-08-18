@@ -1362,11 +1362,24 @@ def _pricelist_index():
             sup = _norm_code(o.get("s"))
             if sup and o.get("c") is not None:
                 idx.setdefault(sk, {})[sup] = o.get("c")
-    for sup, skus in _price_overrides().items():
+    ov = _price_overrides()
+    for sup, skus in ov.items():
+        if sup == "_patterns" or not isinstance(skus, dict):
+            continue
         sn = _norm_code(sup)
-        for sk, cost in (skus or {}).items():
+        for sk, cost in skus.items():
             if isinstance(cost, (int, float)):
                 idx.setdefault(_canon_sku(sk), {})[sn] = cost
+    # Same-supplier family patterns (e.g. UPB one price per product type). Fills ONLY that
+    # supplier's own cost — never borrows another supplier's price.
+    pats = [(_norm_code(s), _norm_code(r.get("prefix")), r.get("cost"))
+            for s, rules in (ov.get("_patterns") or {}).items()
+            for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
+    if pats:
+        for sk, offers in idx.items():
+            for sn, pref, cost in pats:
+                if pref and sk.startswith(pref):
+                    offers.setdefault(sn, cost)
     return idx
 
 
