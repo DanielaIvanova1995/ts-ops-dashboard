@@ -207,6 +207,18 @@ def _pricing():
         if sku:
             out[sku] = {re.sub(r"[^a-z0-9]", "", (o.get("s") or "").lower()): o.get("c")
                         for o in (it.get("offers") or [])}
+    # Durable code-side overrides (in the repo, so a feed rebuild can't wipe them) — e.g. UPB's
+    # Hardie prices keyed by OUR Shopify SKUs, which UPB's own 'any colour' pricelist SKUs don't
+    # match. Fills/overrides the supplier's cost for those SKUs.
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+        for sup, skus in ov.items():
+            sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
+            for sk, cost in (skus or {}).items():
+                if isinstance(cost, (int, float)):
+                    out.setdefault(re.sub(r"[^a-z0-9]", "", (sk or "").lower()), {})[sn] = cost
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 

@@ -1336,8 +1336,19 @@ def _supplier_title_cost(desc, supplier, tidx):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
+def _price_overrides():
+    """Durable per-supplier SKU cost overrides from price_overrides.json (in the repo, so a feed
+    rebuild can't wipe them) — e.g. UPB's Hardie prices keyed by our Shopify SKUs. {supplier:{sku:cost}}."""
+    try:
+        import json as _json
+        return _json.load(open(BASE / "price_overrides.json", encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _pricelist_index():
-    """{norm_sku: {norm_supplier: cost}} from the pricing lookup offers."""
+    """{norm_sku: {norm_supplier: cost}} from the pricing lookup offers + durable overrides."""
     lk = load_lookup()
     idx = {}
     for it in (lk["items"] if lk else []):
@@ -1348,6 +1359,11 @@ def _pricelist_index():
             sup = _norm_code(o.get("s"))
             if sup and o.get("c") is not None:
                 idx.setdefault(sk, {})[sup] = o.get("c")
+    for sup, skus in _price_overrides().items():
+        sn = _norm_code(sup)
+        for sk, cost in (skus or {}).items():
+            if isinstance(cost, (int, float)):
+                idx.setdefault(_canon_sku(sk), {})[sn] = cost
     return idx
 
 
