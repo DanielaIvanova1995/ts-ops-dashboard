@@ -235,7 +235,8 @@ def _price_patterns():
     out = {}
     for sup, rules in (ov.get("_patterns") or {}).items():
         sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
-        out[sn] = [(re.sub(r"[^a-z0-9]", "", (r.get("prefix") or "").lower()), r.get("cost"))
+        out[sn] = [(re.sub(r"[^a-z0-9]", "", (r.get("prefix") or "").lower()),
+                    re.sub(r"[^a-z0-9]", "", (r.get("suffix") or "").lower()), r.get("cost"))
                    for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
     return out
 
@@ -250,9 +251,10 @@ def _line_cost(sku, supplier):
     if isinstance(c, (int, float)):
         return c
     # Same-supplier family pattern (e.g. UPB prices all trims/boards one price per type). Still the
-    # SAME supplier's own price only.
-    for prefix, cost in _price_patterns().get(sup, []):
-        if prefix and key.startswith(prefix):
+    # SAME supplier's own price only. Optional suffix distinguishes families that share a prefix but
+    # differ in price (e.g. Squaredeal HardiePlank Cedar -CE vs Smooth -SM).
+    for prefix, suffix, cost in _price_patterns().get(sup, []):
+        if prefix and key.startswith(prefix) and (not suffix or key.endswith(suffix)):
             return cost
     return None
 

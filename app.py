@@ -1372,13 +1372,14 @@ def _pricelist_index():
                 idx.setdefault(_canon_sku(sk), {})[sn] = cost
     # Same-supplier family patterns (e.g. UPB one price per product type). Fills ONLY that
     # supplier's own cost — never borrows another supplier's price.
-    pats = [(_norm_code(s), _norm_code(r.get("prefix")), r.get("cost"))
+    pats = [(_norm_code(s), _norm_code(r.get("prefix")), _norm_code(r.get("suffix") or ""),
+             r.get("cost"))
             for s, rules in (ov.get("_patterns") or {}).items()
             for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
     if pats:
         for sk, offers in idx.items():
-            for sn, pref, cost in pats:
-                if pref and sk.startswith(pref):
+            for sn, pref, suf, cost in pats:
+                if pref and sk.startswith(pref) and (not suf or sk.endswith(suf)):
                     offers.setdefault(sn, cost)
     return idx
 
