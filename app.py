@@ -2169,6 +2169,22 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         desc = ln.get("description") or ""
         qty, unit = ln.get("qty"), ln.get("unit_price")
 
+        # Bundled COMPONENT line. Nuie / Ultra Finishing list a priced PARENT product (e.g.
+        # WRSB700 Wetroom Screen) followed by the parts included in it on indented lines whose
+        # code is prefixed with '..' (..WRSB700G glass, ..WRSF018 channel, ..FIX023 arm) and which
+        # carry a quantity but NO price — the whole price sits on the parent. These are not separate
+        # order lines, so don't price-check them and don't flag them 'not on the order'.
+        _lt = ln.get("line_total")
+        _no_price = not isinstance(unit, (int, float)) or unit == 0
+        _no_total = not isinstance(_lt, (int, float)) or _lt == 0
+        if str(sku_raw).lstrip().startswith(".") or (
+                _is_nuie(supplier) and _no_price and _no_total and isinstance(qty, (int, float))):
+            lines.append({"sku": str(sku_raw).lstrip(". "), "desc": desc, "qty": qty,
+                          "unit": None, "cost": None, "_okey": None,
+                          "issues": [("name", "included component of the product above "
+                                              "— no separate charge")]})
+            continue
+
         # Other agreed supplier charge (redelivery / returns collection / restocking).
         # Legitimate and never on the Shopify order. Checked BEFORE delivery so that a
         # 'redelivery' line isn't read as carriage and compared to the carriage rate.

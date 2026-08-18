@@ -2149,7 +2149,12 @@ def read_invoice_pdf(pdf_url: str) -> dict:
         "added). Use the product/SKU code exactly as printed on each line. Put any delivery, "
         "carriage, shipping or postage charge (ex-VAT) in 'carriage' — INCLUDING when it appears "
         "in the totals/summary section (e.g. 'Carriage Net') rather than the line-item table. If a "
-        "value is genuinely absent use null. Do not invent or merge lines."
+        "value is genuinely absent use null. Do not invent or merge lines. "
+        "Some invoices (e.g. Nuie / Ultra Finishing) list a priced PARENT product followed by the "
+        "components included in it on indented lines whose code is prefixed with '..' (for example "
+        "'..WRSB700G', '..WRSF018') and which have NO price — for those component lines KEEP the "
+        "'..' prefix in the sku and set unit_price and line_total to null (the price belongs to the "
+        "parent product above)."
     )
     body = {
         "model": INVOICE_MODEL, "max_tokens": 2500,

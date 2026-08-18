@@ -437,6 +437,15 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
         desc = ln.get("description") or ""
         qty, unit = ln.get("qty"), ln.get("unit_price")
 
+        # Bundled component line (e.g. Nuie '..WRSB700G', '..WRSF018') — included in the parent
+        # product's price above, not a separate order line. Don't price-check or flag it.
+        if str(sku_raw).lstrip().startswith("."):
+            lines.append({"sku": str(sku_raw).lstrip(". "), "desc": desc, "qty": qty,
+                          "unit": None, "cost": None, "_okey": None,
+                          "issues": [("name", "included component of the product above "
+                                              "— no separate charge")]})
+            continue
+
         chg = ancillary_charge(supplier, sku_raw, desc)
         if chg:
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
