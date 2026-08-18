@@ -1892,8 +1892,10 @@ SUPPLIER_EMAILS = {
 # don't hold one); push_min = margin % to push above (else hold); flag_high =
 # whether to flag suspiciously-high margins.
 SUPPLIER_RULES = {
+    # Travis Perkins: no pricelist, so the ORDER MARGIN is the safeguard. Auto-approve anything
+    # that isn't under 8% (approve >= 8%); below 8% stays in Needs Review to check. No high flag.
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
-                      "push_min": 10.0, "flag_high": False},
+                      "push_min": 8.0, "flag_high": False, "flag_below": True},
     # Decor8 auto-approve floor is 5%.
     "decor8": {"name": "Decor8", "push_min": 5.0},
     # Southern Sheeting (roofing/cladding sheets) legitimately runs a WIDE margin, ~9% to ~55%.

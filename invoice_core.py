@@ -52,7 +52,7 @@ CARRON_AREA_ZONE = {
 
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
-                      "push_min": 10.0, "flag_high": False},
+                      "push_min": 8.0, "flag_high": False, "flag_below": True},
     "decor8": {"name": "Decor8", "push_min": 5.0},
 }
 SUPPLIER_EMAILS = {
