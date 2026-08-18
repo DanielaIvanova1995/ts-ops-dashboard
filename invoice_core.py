@@ -75,6 +75,8 @@ SUPPLIER_CHARGES = {
 PRODUCT_EQUIV = [
     {"inv_sku": "PJ40WLO1", "order_sku": "GHSIO"},
     {"supplier": "upb", "inv_sku": "5300303", "order_name_has": ["fixing", "screws"]},
+    # UPB 'VL7 HardiePlank Screw 4.2x40mm' (5300319) = our 'VL (Coloured) Fixing Screws' order line.
+    {"supplier": "upb", "inv_sku": "5300319", "order_name_has": ["fixing", "screws"]},
 ]
 
 _TOK_ABBREV = {

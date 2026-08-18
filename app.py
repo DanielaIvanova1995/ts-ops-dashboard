@@ -1193,6 +1193,9 @@ PRODUCT_EQUIV = [
     # UPB 'Hardiepanel Screws (Timber)' (5300303) = our 'James Hardie VL ... Fixing Screws'
     # (the order line carries no SKU, so target it by name).
     {"supplier": "upb", "inv_sku": "5300303", "order_name_has": ["fixing", "screws"]},
+    # UPB 'VL7 HardiePlank Screw 4.2x40mm' (5300319) = our 'James Hardie VL (Coloured) Fixing
+    # Screws (Box of 250)' — the order line carries no SKU, so target it by name.
+    {"supplier": "upb", "inv_sku": "5300319", "order_name_has": ["fixing", "screws"]},
 ]
 
 
