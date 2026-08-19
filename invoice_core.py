@@ -61,6 +61,7 @@ SUPPLIER_EMAILS = {
     "upbuildingproducts": "janetwitt@upbuildingproducts.com",
     "pjh": "accounts@pjh.uk",
     "gap": "carrie.morris@gap.uk.com",
+    "toolbank": "abasterfield@toolbank.com",            # Alison Basterfield
 }
 SUPPLIER_CHARGES = {
     "gap": (
