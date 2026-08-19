@@ -385,16 +385,22 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     supplier = (o.get("supplier") or "").strip()
     sid = (o.get("shopify_id") or "").strip()
     ship = _ship(sid) if sid else None
-    # Suppliers who don't deliver to site (e.g. Plastivan) always ship to OUR address — unless the
-    # processor hand-edited the address in Adjust (respect that).
-    deliver_to_us = supplier in DELIVER_TO_US and not address_override
+    # Ship to OUR address (not the customer) when: the supplier doesn't deliver to site (e.g.
+    # Plastivan), OR the order is marked "TO POST" (we bring it in and post it ourselves). A
+    # hand-edited Adjust address still wins.
+    to_post = (o.get("branch") or "").strip().upper() == "TO POST"
+    deliver_to_us = (supplier in DELIVER_TO_US or to_post) and not address_override
     dl = list(OUR_ADDRESS_LINES) if deliver_to_us else (
         address_override or (ship or {}).get("lines")
         or [x.strip() for x in (o.get("address") or "").split(",") if x.strip()])
     order_no = o.get("order_no") or o.get("name") or ""
     contact = f"{o.get('customer') or ''}".strip()
     phone = (ship or {}).get("phone") or o.get("phone") or ""
-    if deliver_to_us:
+    if to_post:
+        notes = [f"Deliver to the address above (Trade Superstore Online) — we post this small order "
+                 "to the customer ourselves.",
+                 f"Quote TSO order {order_no} on all paperwork."]
+    elif deliver_to_us:
         notes = [f"Deliver to the address above — {supplier} does not deliver to site; we forward "
                  "to the customer.",
                  f"Quote TSO order {order_no} on all paperwork."]
@@ -496,6 +502,80 @@ def _mark_del_method(iid, supplier):
             data_sources.op_set_status(iid, "To Post", column_id=DEL_METHOD_COL)
         except Exception:  # noqa: BLE001
             pass
+
+
+_UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
+
+
+def _max_dim_mm(text):
+    """Largest length dimension (mm) stated in a product title, else 0. Handles '3600mm', '3.6m',
+    '1981 x 762mm', '50mm x 50mm'."""
+    best = 0.0
+    for m in re.finditer(r"([\d.]+(?:\s*[x×]\s*[\d.]+)*)\s*(mm|cm|m)\b", (text or "").lower()):
+        unit = _UNIT_MM.get(m.group(2), 0)
+        for n in re.findall(r"[\d.]+", m.group(1)):
+            try:
+                best = max(best, float(n) * unit)
+            except ValueError:
+                pass
+    return best
+
+
+def _is_postable(items):
+    """True if every line is small enough to post ourselves — nothing longer than 1 metre. Lines
+    with no stated size are treated as small (hardware/fixings/handles)."""
+    return all(_max_dim_mm(it.get("Item") or it.get("title") or "") <= 1000
+               for it in (items or []))
+
+
+def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
+    """If it's cheaper to POST a small order ourselves than have the supplier deliver it, mark the
+    Branch column 'TO POST' (NOT the Del Method status, which would move the order on) and point the
+    order at where we bring stock in to OURSELVES — the local Derby branch for Eurocell / Travis
+    Perkins, the supplier's central email otherwise. Trigger: postable (<=1 m) AND the supplier's
+    delivery would cost MORE than the shipping the customer paid. Returns True if marked to post."""
+    if not (supplier and sid and _is_postable(items)):
+        return False
+    try:
+        sh = data_sources.fetch_order_shipping(sid) or {}
+    except Exception:  # noqa: BLE001
+        return False
+    cust = sh.get("shipping")
+    if not isinstance(cust, (int, float)):
+        return False
+    goods = 0.0
+    for it in items:
+        c = _line_cost(it.get("SKU") or it.get("sku"), supplier, it.get("Item") or it.get("title"))
+        if isinstance(c, (int, float)):
+            try:
+                goods += c * float(it.get("Qty") or it.get("qty") or 1)
+            except (TypeError, ValueError):
+                goods += c
+    dlines = [{"sku": it.get("SKU") or it.get("sku"),
+               "description": it.get("Item") or it.get("title"),
+               "qty": (float(it.get("Qty") or it.get("qty"))
+                       if str(it.get("Qty") or it.get("qty") or "").replace(".", "", 1).isdigit()
+                       else 1)} for it in items]
+    d = delivery_rules.expected_delivery(
+        supplier, goods, {"postcode": sh.get("postcode"), "country": sh.get("country")}, dlines)
+    if not (isinstance(d, (int, float)) and d > cust + 0.01):
+        return False
+    email = None                                     # Derby branch email for branch suppliers
+    if supplier in ("Eurocell", "Travis Perkins"):
+        try:
+            import branch_finder
+            email = (branch_finder.nearest_branch("DE21 4ED", supplier) or {}).get("email")
+        except Exception:  # noqa: BLE001
+            email = None
+    try:
+        data_sources.op_set_branch(iid, branch="TO POST", email=email)   # email=None → keep central
+    except Exception:  # noqa: BLE001
+        return False
+    if o is not None:
+        o["branch"] = "TO POST"
+        if email:
+            o["branch_email"] = email
+    return True
 
 
 def _write_po_total(iid, kind, doc):
@@ -802,6 +882,7 @@ def _process_current(o):
             if em:
                 o["branch_email"] = em
         _fix_po_email(iid, supplier, o)           # correct email for Molan/Vista etc.
+        _apply_post_if_cheaper(iid, supplier, _parse_monday_items(o.get("items")), sid, o)
         data_sources.op_set_status(iid, stage)
         o["stage"] = stage
     except Exception as e:  # noqa: BLE001
@@ -868,6 +949,7 @@ def _process_one(o):
                 if res.get("branch_email"):
                     o["branch_email"] = res["branch_email"]
             _fix_po_email(iid, sup, o)           # correct email for Molan/Vista etc.
+            _apply_post_if_cheaper(iid, sup, _parse_monday_items(o.get("items")), sid, o)
         else:                                    # SAMPLES / CLEARANCE
             data_sources.op_set_branch(iid, branch=route)
         _mark_del_method(iid, sup or route)      # samples → "To Post" on the Del Method column
