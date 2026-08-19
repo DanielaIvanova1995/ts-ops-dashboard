@@ -26,13 +26,29 @@ import order_routing
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / safe to process
-# Correct PO email per supplier (set on Monday after the supplier, overriding any wrong auto-fill).
+# Correct PO email per supplier (set on Monday after the supplier). Filled from the supplier
+# rulebook's po_email. EXCLUDES suppliers whose email is resolved elsewhere: Eurocell / Travis
+# Perkins / UPB (nearest branch or depot), GAP (Monday auto-fills from the GAP tag), and portal-only
+# PJH / Toolbank. Suppliers the rulebook marks "confirm" are left out until Daniela gives the email.
 SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills transport@ (wrong)
-                     "Vista": "orders@vistaeng.co.uk",
+                     "Vista": "orders@vistaeng.co.uk",   # rulebook says sales@ — confirm w/ Daniela
                      "Plastivan": "becky.thompson@plastivan.co.uk",   # Becky Thompson
                      "Bricklink": "tessallingham@bricklink.co.uk",    # Tess Allingham
                      "MB Decor": "orders@mbdecor.co.uk",              # DecorOrders
-                     "Decor8": "hello@paintersworld.co.uk"}           # Painters World
+                     "Decor8": "hello@paintersworld.co.uk",           # Painters World
+                     "Etills": "info@etills.com",
+                     "NBP": "sales@nbp.co.uk",
+                     "Southern Sheeting": "jordan@southernsheeting.co.uk",
+                     "Huws Gray": "colin.tansley@huwsgray.co.uk",     # Colin Tansley, Derby
+                     "Storm": "sales@stormbuildingproducts.com",
+                     "Rexel": "adam.mussa@rexel.co.uk",
+                     "LPD DOORS": "sales@lpddoors.co.uk",
+                     "JB Kind": "jordan.lees@jbkind.com",
+                     "Deanta": "ecommerce@deanta.co.uk",
+                     "Carron": "sales@carronheating.co.uk",
+                     "Chase Hardware": "matt.jenkinson@chase-hardware.co.uk",
+                     "Dolle": "uksales@dolle.com",
+                     "Evolve": "sales@evolveflooring.co.uk"}
 
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
 # we forward). Address used verbatim on the PO's delivery block.
