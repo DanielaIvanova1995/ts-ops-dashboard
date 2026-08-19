@@ -29,7 +29,9 @@ PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / s
 # Correct PO email per supplier (set on Monday after the supplier, overriding any wrong auto-fill).
 SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills transport@ (wrong)
                      "Vista": "orders@vistaeng.co.uk",
-                     "Plastivan": "becky.thompson@plastivan.co.uk"}   # Becky Thompson
+                     "Plastivan": "becky.thompson@plastivan.co.uk",   # Becky Thompson
+                     "Bricklink": "tessallingham@bricklink.co.uk",    # Tess Allingham
+                     "MB Decor": "orders@mbdecor.co.uk"}              # DecorOrders
 
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
 # we forward). Address used verbatim on the PO's delivery block.
