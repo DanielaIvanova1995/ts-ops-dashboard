@@ -31,7 +31,7 @@ CANON = {
     "jameshardie": "UPB", "hardie": "UPB", "freefoam": "UPB", "fortex": "UPB", "cladco": "UPB",
 }
 
-PORTAL = {"PJH", "Toolbank", "Velux", "MB Decor", "Nuie", "National Skirting"}
+PORTAL = {"PJH", "Toolbank", "Velux", "MB Decor", "Nuie", "National Skirting", "Rexel"}
 QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
