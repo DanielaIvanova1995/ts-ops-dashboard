@@ -1486,6 +1486,7 @@ def _push_decision(matched, is_cn, live_margin, supplier=None, has_discount=Fals
     lo, hi = _thresholds()
     rule = SUPPLIER_RULES.get(_norm_code(supplier), {}) if supplier else {}
     lo = rule.get("push_min", lo)
+    hi = rule.get("push_max", hi)            # per-supplier high ceiling (e.g. Decor8 65%)
     if has_discount and rule.get("push_min_discount") is not None:
         lo = rule["push_min_discount"]       # customer used a discount code → lower floor allowed
     flag_high = rule.get("flag_high", True)
@@ -1912,7 +1913,9 @@ SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 8.0, "flag_high": False, "flag_below": True},
     # Decor8 auto-approve floor is 5%.
-    "decor8": {"name": "Decor8", "push_min": 5.0},
+    # Decor8: auto-approve anything 8%-65% margin; below 8% or above 65% -> Needs Review (the
+    # existing checks stay as the backstop while Daniela re-sorts Decor8 prices).
+    "decor8": {"name": "Decor8", "push_min": 8.0, "push_max": 65.0, "flag_below": True},
     # Southern Sheeting (roofing/cladding sheets) legitimately runs a WIDE margin, ~9% to ~55%.
     # Lower the floor to 8% and turn off the high-margin flag so a fully-matched invoice across that
     # whole range auto-pushes instead of being held (<10%) or flagged (>35%).

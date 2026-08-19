@@ -53,7 +53,7 @@ CARRON_AREA_ZONE = {
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 8.0, "flag_high": False, "flag_below": True},
-    "decor8": {"name": "Decor8", "push_min": 5.0},
+    "decor8": {"name": "Decor8", "push_min": 8.0, "push_max": 65.0, "flag_below": True},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",
@@ -676,6 +676,7 @@ def push_decision(matched, is_cn, live_margin, supplier=None,
     but thresholds are passed in (defaults MARGIN_PUSH_MIN/MAX) since there's no UI session."""
     rule = SUPPLIER_RULES.get(norm_code(supplier), {}) if supplier else {}
     lo = rule.get("push_min", lo)
+    hi = rule.get("push_max", hi)            # per-supplier high ceiling (e.g. Decor8 65%)
     flag_high = rule.get("flag_high", True)
     if not matched:
         return None, None
