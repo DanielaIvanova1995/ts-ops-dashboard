@@ -434,8 +434,8 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title variantTitle quantity sku variant { product { vendor productType } } "
-             "product { vendor productType } "
+             "title variantTitle quantity sku variant { product { vendor productType tags } } "
+             "product { vendor productType tags } "
              "discountedTotalSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
@@ -467,6 +467,7 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
                     "sku": (n.get("sku") or "").strip() or None,
                     "qty": n.get("quantity"), "vendor": (prod.get("vendor") or "").strip(),
                     "product_type": (prod.get("productType") or "").strip(),
+                    "tags": prod.get("tags") or [],
                     "line_subtotal": sub})
     return out
 

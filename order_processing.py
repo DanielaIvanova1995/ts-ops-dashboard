@@ -759,6 +759,30 @@ def _fix_po_email(iid, supplier, o=None):
         pass
 
 
+def _fix_lpd_home_email(iid, supplier, sid, o=None, lines=None):
+    """LPD's Home Furniture range (Shopify tag 'Home Furniture', vendor LPD) is ordered from LPD's
+    home division, not the doors branch — send those POs to orders@lpdhome.co.uk instead of
+    sales@lpddoors.co.uk. Run AFTER _fix_po_email so it overrides the default LPD email."""
+    if _canon_sup(supplier) != _canon_sup("LPD DOORS"):
+        return
+    if lines is None:
+        if not sid:
+            return
+        try:
+            lines = data_sources.fetch_order_lines_with_vendor(sid)
+        except Exception:  # noqa: BLE001
+            return
+    if not any("home furniture" in (t or "").lower()
+               for ln in (lines or []) for t in (ln.get("tags") or [])):
+        return
+    try:
+        data_sources.op_set_branch(iid, email="orders@lpdhome.co.uk")
+        if o is not None:
+            o["branch_email"] = "orders@lpdhome.co.uk"
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _resolve_branch(supplier, postcode):
     """(branch, email, phone) for a chosen supplier + postcode: nearest branch for Eurocell/Travis
     Perkins, the UPB Hardie depot for UPB, else (None, None, None)."""
@@ -903,6 +927,7 @@ def _process_current(o):
             if em:
                 o["branch_email"] = em
         _fix_po_email(iid, supplier, o)           # correct email for Molan/Vista etc.
+        _fix_lpd_home_email(iid, supplier, sid, o)   # LPD Home Furniture → orders@lpdhome.co.uk
         _apply_post_if_cheaper(iid, supplier, _parse_monday_items(o.get("items")), sid, o)
         data_sources.op_set_status(iid, stage)
         o["stage"] = stage
@@ -970,6 +995,7 @@ def _process_one(o):
                 if res.get("branch_email"):
                     o["branch_email"] = res["branch_email"]
             _fix_po_email(iid, sup, o)           # correct email for Molan/Vista etc.
+            _fix_lpd_home_email(iid, sup, sid, o, lines=res.get("lines"))   # LPD Home → lpdhome
             _apply_post_if_cheaper(iid, sup, _parse_monday_items(o.get("items")), sid, o)
         else:                                    # SAMPLES / CLEARANCE
             data_sources.op_set_branch(iid, branch=route)
