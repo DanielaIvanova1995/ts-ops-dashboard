@@ -90,10 +90,12 @@ def _norm(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
-def route_line(line, area_pc=None):
+def route_line(line, area_pc=None, sku_supplier=None):
     """Route a single line → {supplier, route, branch, branch_email, portal, quote, needs_branch,
     reason, conf}. `route` is the supplier label, or 'SAMPLES'/'CLEARANCE'/'PICK'. supplier is
-    None for the in-house/PICK routes. `area_pc` is the order's delivery postcode (for Hardie)."""
+    None for the in-house/PICK routes. `area_pc` is the order's delivery postcode (for Hardie).
+    `sku_supplier(sku)` (optional) returns the sole supplier that prices a SKU in the feed — a
+    fallback when the Shopify vendor is our house brand and reveals nothing."""
     title = line.get("title") or ""
     sku = (line.get("sku") or "").strip()
     vendor = line.get("vendor") or ""
@@ -127,6 +129,15 @@ def route_line(line, area_pc=None):
                    needs_branch=(lbl in NEEDS_BRANCH))
 
     # Fallbacks ONLY when the vendor didn't resolve:
+    # Pricing feed: a house-brand line (vendor "Trade Superstore Online") carries no supplier, but
+    # if the feed prices this SKU from exactly ONE supplier, that IS its supplier — evidence, not a
+    # guess (e.g. window handle WEH5460-40RST is priced only by Eurocell).
+    if sku_supplier and sku:
+        fs = sku_supplier(sku)
+        if fs:
+            return out(fs, fs, f"Only {fs} prices SKU {sku} in the feed → {fs}", "med",
+                       portal=(fs in PORTAL), quote=(fs in QUOTE_FIRST),
+                       needs_branch=(fs in NEEDS_BRANCH))
     if any(k in blob for k in ("polycarbonate", "multiwall", "twinwall", "ezglaze",
                                "solidpolycarbonate")):
         return out("Molan", "Molan", "Polycarbonate (no known vendor) — Molan", "med")
@@ -148,13 +159,14 @@ def _stage_for(supplier, route, quote, portal):
     return "Needs Review"
 
 
-def route_order(lines, postcode=None):
+def route_order(lines, postcode=None, sku_supplier=None):
     """Route a whole order → {split, groups, overall_supplier, branch, branch_email, stage,
     needs_branch, conf, lines}. `groups` maps each distinct route → its lines (for a split).
-    `overall_supplier`/`branch` are set only when the whole order routes to ONE supplier."""
+    `overall_supplier`/`branch` are set only when the whole order routes to ONE supplier.
+    `sku_supplier` is an optional feed-based supplier resolver (see route_line)."""
     routed = []
     for ln in (lines or []):
-        r = route_line(ln, area_pc=postcode)
+        r = route_line(ln, area_pc=postcode, sku_supplier=sku_supplier)
         routed.append({**ln, **r})
 
     routes = [r["route"] for r in routed]

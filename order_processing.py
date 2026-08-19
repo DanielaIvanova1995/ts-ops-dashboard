@@ -306,6 +306,25 @@ def _price_titles():
     return out
 
 
+def _sole_feed_supplier(sku):
+    """If the pricing feed prices this SKU from exactly ONE supplier, return that supplier's label
+    (routing fallback for a house-brand line whose Shopify vendor reveals no supplier). Matches the
+    exact SKU, else colour-suffix variants (feed has WEH5460-40RST-WH etc. for order
+    WEH5460-40RST). None if unpriced or ambiguous (2+ suppliers)."""
+    key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
+    if len(key) < 5:
+        return None
+    pr = _pricing()
+    offers = pr.get(key)
+    if not offers:                      # colour-suffix tolerance (order SKU vs feed's -WH/-PCH etc.)
+        offers = {}
+        for k, v in pr.items():
+            if len(k) >= 5 and (k.startswith(key) or key.startswith(k)):
+                offers.update(v)
+    sups = {s for s, c in (offers or {}).items() if isinstance(c, (int, float))}
+    return order_routing.CANON.get(next(iter(sups))) if len(sups) == 1 else None
+
+
 def _line_cost(sku, supplier, name=None):
     """The routed supplier's OWN cost for a SKU (or, failing that, its product title), or None.
     STRICT RULE: a supplier's cost is only ever that supplier's own price — never another
@@ -824,7 +843,7 @@ def _process_one(o):
                 pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
             except Exception:  # noqa: BLE001
                 pc = None
-            res = order_routing.route_order(lines, postcode=pc)
+            res = order_routing.route_order(lines, postcode=pc, sku_supplier=_sole_feed_supplier)
             routes[iid] = res
         except Exception as e:  # noqa: BLE001
             return {"Order": tag, "Supplier": "", "Result": "couldn't route: " + str(e)[:60]}
@@ -1322,7 +1341,7 @@ def render():
                                 pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
                             except Exception:  # noqa: BLE001
                                 pc = None
-                            rts[iid] = order_routing.route_order(lines, postcode=pc)
+                            rts[iid] = order_routing.route_order(lines, postcode=pc, sku_supplier=_sole_feed_supplier)
                         except Exception as e:  # noqa: BLE001
                             rts[iid] = {"error": str(e)[:100], "lines": []}
                 run_ids, results = [], []
