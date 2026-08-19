@@ -525,9 +525,9 @@ def _max_dim_mm(text):
     return best
 
 
-# Rolled/coiled goods whose title states a long ROLL length (e.g. "EPDM Tape 20m") but pack down
-# small — post fine regardless of the stated length.
-_ROLLED_POSTABLE = ("tape", "coil")
+# Small items that post fine regardless of any length in their title — rolled/coiled goods whose
+# title states a long ROLL length (e.g. "EPDM Tape 20m"), and small tins like touch-up paint.
+_ROLLED_POSTABLE = ("tape", "coil", "touch up paint", "touch-up paint")
 
 
 def _is_postable(items):
