@@ -325,9 +325,12 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
-    # Price every line for an email-order supplier. RULE: all prices in → PO; ANY price missing →
-    # packing slip (never a PO with 'confirm' prices).
-    po_lines, goods, all_priced = [], 0.0, True
+    # Price every line for an email-order supplier. A line we can't price (no SKU, or the supplier
+    # has no price for it) is shown on the PO with a blank "—" cost for the supplier to confirm —
+    # we do NOT borrow another supplier's price. RULE: a packing slip is only for portal / in-house
+    # orders or when NOTHING on the order can be priced; if even one line is priced, make a PO so a
+    # single un-priced line (e.g. a variant with no SKU) never blocks the whole PO.
+    po_lines, goods, n_priced, n_unpriced = [], 0.0, 0, 0
     for it in items:
         qty = it.get("Qty") or "1"
         try:
@@ -337,14 +340,16 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         cost = it.get("Cost") if isinstance(it.get("Cost"), (int, float)) \
             else _line_cost(it.get("SKU"), supplier)
         if cost is None:
-            all_priced = False
+            n_unpriced += 1
+            po_lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, "—", "—"])
         else:
+            n_priced += 1
             lt = round(cost * q, 2)
             goods += lt
             po_lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, _money(cost),
                              _money(lt)])
 
-    make_slip = is_portal or in_house or (not all_priced)
+    make_slip = is_portal or in_house or (n_priced == 0)
 
     if make_slip:
         lines = [[(it.get("SKU") or "-"), it.get("Item") or "", (it.get("Qty") or "1")]
@@ -360,7 +365,11 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                         "lines": lines, "notes": head + notes,
                         "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
-    # PO — every line priced. VAT is ALWAYS 20%; a missing delivery rate is just £0.
+    # PO. VAT is ALWAYS 20% (on the priced goods + delivery); a missing delivery rate is just £0.
+    # Any un-priced line shows "—" and is excluded from the goods total until the supplier confirms.
+    if n_unpriced:
+        notes = [f"{n_unpriced} line(s) shown with '—' have no agreed price on file — please "
+                 "confirm the price on your order acknowledgement."] + notes
     dlines = [{"sku": it.get("SKU"), "description": it.get("Item"),
                "qty": (float(it.get("Qty")) if str(it.get("Qty") or "").replace(".", "", 1)
                        .isdigit() else 1)}
