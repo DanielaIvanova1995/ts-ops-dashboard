@@ -28,7 +28,13 @@ FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / safe to process
 # Correct PO email per supplier (set on Monday after the supplier, overriding any wrong auto-fill).
 SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills transport@ (wrong)
-                     "Vista": "orders@vistaeng.co.uk"}
+                     "Vista": "orders@vistaeng.co.uk",
+                     "Plastivan": "becky.thompson@plastivan.co.uk"}   # Becky Thompson
+
+# Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
+# we forward). Address used verbatim on the PO's delivery block.
+DELIVER_TO_US = {"Plastivan"}
+OUR_ADDRESS_LINES = ["Trade Superstore Online", "Unit 8, Alfreton Road", "Derby", "DE21 4ED"]
 
 # Colour cue on the Stage dropdown (an editable grid cell can't have a coloured background, so we
 # prefix the label with a coloured dot). Maps the plain Monday label ↔ the coloured display label.
@@ -317,13 +323,22 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     supplier = (o.get("supplier") or "").strip()
     sid = (o.get("shopify_id") or "").strip()
     ship = _ship(sid) if sid else None
-    dl = address_override or (ship or {}).get("lines") or \
-        [x.strip() for x in (o.get("address") or "").split(",") if x.strip()]
+    # Suppliers who don't deliver to site (e.g. Plastivan) always ship to OUR address — unless the
+    # processor hand-edited the address in Adjust (respect that).
+    deliver_to_us = supplier in DELIVER_TO_US and not address_override
+    dl = list(OUR_ADDRESS_LINES) if deliver_to_us else (
+        address_override or (ship or {}).get("lines")
+        or [x.strip() for x in (o.get("address") or "").split(",") if x.strip()])
     order_no = o.get("order_no") or o.get("name") or ""
     contact = f"{o.get('customer') or ''}".strip()
     phone = (ship or {}).get("phone") or o.get("phone") or ""
-    notes = [f"Kerbside delivery to: {contact}" + (f", {phone}" if phone else "") + ".",
-             f"Quote TSO order {order_no} on all paperwork."]
+    if deliver_to_us:
+        notes = [f"Deliver to the address above — {supplier} does not deliver to site; we forward "
+                 "to the customer.",
+                 f"Quote TSO order {order_no} on all paperwork."]
+    else:
+        notes = [f"Kerbside delivery to: {contact}" + (f", {phone}" if phone else "") + ".",
+                 f"Quote TSO order {order_no} on all paperwork."]
     if notes_extra:
         notes += [n for n in notes_extra if n and str(n).strip()]
 
@@ -398,12 +413,28 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         _d = delivery_rules.expected_delivery(supplier, goods, ship_pc, dlines)
         deliv = _d if isinstance(_d, (int, float)) else 0.0
     vat = round((goods + deliv) * 0.20, 2)
+    total_inc_vat = round(goods + deliv + vat, 2)
     sums = [["Goods (ex VAT)", _money(goods), False], ["Delivery (ex VAT)", _money(deliv), False],
             ["VAT @20%", _money(vat), False],
-            ["Total (inc VAT)", _money(goods + deliv + vat), True]]
+            ["Total (inc VAT)", _money(total_inc_vat), True]]
     return "po", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
                   "acct": order_docs.account_for(supplier), "lines": po_lines, "sums": sums,
+                  "total": total_inc_vat, "goods": round(goods, 2),
                   "notes": notes, "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
+
+
+def _write_po_total(iid, kind, doc):
+    """Write the generated PO's inc-VAT total to Monday `numbers6` (£ to supplier), so the board
+    shows what the order costs from the supplier. POs only — a packing slip has no prices, so we
+    leave numbers6 untouched. Best-effort: a Monday write hiccup never breaks processing."""
+    if kind != "po":
+        return
+    total = (doc or {}).get("total")
+    if isinstance(total, (int, float)):
+        try:
+            data_sources.set_order_number(iid, OP["cost_supplier"], round(total, 2))
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _to_float(x):
@@ -487,8 +518,7 @@ def _process_split(o, res):
                 gsup, route, glines[0].get("quote"), glines[0].get("portal")))
             if psell is not None:
                 data_sources.set_order_number(pid, OP["sell"], psell)
-            if pcost is not None:
-                data_sources.set_order_number(pid, OP["cost_supplier"], pcost)
+            # numbers6 (£ to supplier) is set from the generated PO's inc-VAT total below.
         except Exception as e:  # noqa: BLE001
             parts.append(f"{order_no}-{idx} {gsup or route}: Monday write failed")
             continue
@@ -502,6 +532,7 @@ def _process_split(o, res):
             nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{order_no}-{idx}_" \
                  "Trade_Superstore_Online.pdf"
             rr = data_sources.op_upload_po(pid, pdf, nm)
+            _write_po_total(pid, kind, doc)          # numbers6 = the PO's inc-VAT total
             dm = "doc ✓" if rr.get("ok") else "doc unverified"
         except ValueError:
             dm = "doc BLOCKED"
@@ -623,8 +654,7 @@ def _merge_parts(selected, target_supplier, all_siblings):
     _fix_po_email(iid, target_supplier)
     data_sources.op_set_status(iid, _stage_for_supplier(target_supplier))
     data_sources.set_order_number(iid, OP["sell"], sell)
-    if pcost is not None:
-        data_sources.set_order_number(iid, OP["cost_supplier"], pcost)
+    # numbers6 (£ to supplier) is set from the generated PO's inc-VAT total below.
 
     survivor = {**survivor, "items": items_text, "supplier": target_supplier,
                 "branch": branch, "branch_email": bemail, "sell": sell}
@@ -635,6 +665,7 @@ def _merge_parts(selected, target_supplier, all_siblings):
         nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
              "Trade_Superstore_Online.pdf"
         rr = data_sources.op_upload_po(iid, pdf, nm)
+        _write_po_total(iid, kind, doc)          # numbers6 = the PO's inc-VAT total
         docmsg = "PO/slip ✓" if rr.get("ok") else "doc unverified"
     except ValueError:
         docmsg = "doc blocked — a price/field is missing (fix in Adjust)"
@@ -697,6 +728,7 @@ def _process_current(o):
         nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
              "Trade_Superstore_Online.pdf"
         r = data_sources.op_upload_po(iid, pdf, nm)
+        _write_po_total(iid, kind, doc)          # numbers6 = the PO's inc-VAT total
         docmsg = f"{kind.upper()} attached ✓" if r.get("ok") else f"{kind} attach UNVERIFIED"
     except ValueError:
         docmsg = "doc BLOCKED — a field is missing (use Adjust)"
@@ -765,6 +797,7 @@ def _process_one(o):
         name = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
                "Trade_Superstore_Online.pdf"
         r = data_sources.op_upload_po(iid, pdf, name)
+        _write_po_total(iid, kind, doc)          # numbers6 = the PO's inc-VAT total
         docmsg = f"{kind.upper()} attached ✓" if r.get("ok") else f"{kind} attach UNVERIFIED"
     except ValueError:                           # validation gate blocked it
         docmsg = "doc BLOCKED — missing a field"
@@ -1021,7 +1054,7 @@ def _order_detail(o):
             pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
                 doc, date_str=date_str)
             st.session_state[f"op_gen_pdf_{iid}"] = {
-                "bytes": pdf, "kind": kind,
+                "bytes": pdf, "kind": kind, "total": doc.get("total"),
                 "name": f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_"
                         "Trade_Superstore_Online.pdf"}
         except ValueError as e:      # the validation gate blocked it — show exactly what's missing
@@ -1043,6 +1076,7 @@ def _order_detail(o):
                 try:
                     r = data_sources.op_upload_po(iid, gen["bytes"], gen["name"])
                     if r.get("ok"):
+                        _write_po_total(iid, gen.get("kind"), gen)   # numbers6 = PO inc-VAT total
                         st.success(f"Attached & verified ({r['size']:,} bytes).")
                         st.session_state["_op_orders"] = None
                     else:
