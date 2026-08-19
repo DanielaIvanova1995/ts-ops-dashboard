@@ -26,15 +26,19 @@ headroom:
 (Railway or Fly.io also work with the same `Dockerfile` and can be a little cheaper with tuning —
 tell me if you'd prefer one of those and I'll adjust the steps.)
 
-### 2. Create the service
+### 2. Create the service — the easy (Blueprint) way
+The repo now has a **`render.yaml`** blueprint, so Render sets everything up for you (Docker, 2 GB,
+health check, branch, auto-deploy). You only paste the secrets.
+
 1. Sign up at **render.com** (log in with the GitHub account that owns the repo).
-2. **New → Web Service** → connect the repo **`DanielaIvanova1995/ts-ops-dashboard`**.
-3. Render detects the **`Dockerfile`** → Runtime = **Docker** (leave build/start commands blank —
-   the Dockerfile handles them).
-4. Instance type = **Standard (2 GB)**.
-5. **Health Check Path** = `/_stcore/health`  ← important so Render knows when it's ready.
-6. Branch = **`platform/hosting`** for the first test build. Once we're happy, we merge it into
-   `main` and switch Render to `main`.
+2. **New → Blueprint** → connect the repo **`DanielaIvanova1995/ts-ops-dashboard`**.
+3. Render reads `render.yaml`, shows the **tradehub** service already configured, and lists the 13
+   secrets with empty boxes → paste each value (see step 3 below) → **Apply**.
+4. That's it — Render builds from the `Dockerfile` on the **`main`** branch and gives you a URL.
+
+*(Manual alternative if you'd rather not use the blueprint: **New → Web Service** → connect the repo
+→ Render detects the Dockerfile (Runtime = Docker) → Instance type **Standard (2 GB)** → Health Check
+Path `/_stcore/health` → Branch **`main`** → add the secrets. Same result.)*
 
 ### 3. Add the secrets (Environment tab)
 Copy each value from your **current** Streamlit Cloud secrets (Manage app → Settings → Secrets) into

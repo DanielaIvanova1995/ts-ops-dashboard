@@ -1,0 +1,44 @@
+# Render Blueprint — near one-click deploy of TradeHub to an always-on host.
+#
+# In Render:  New  →  Blueprint  →  connect this repo (DanielaIvanova1995/ts-ops-dashboard).
+# Render reads this file, creates the service already configured (Docker, 2 GB, health check),
+# and then PROMPTS you to paste each secret below. The secrets are NEVER stored in the repo —
+# `sync: false` means "ask me in the dashboard", same rule as always.
+#
+# Streamlit Community Cloud ignores this file, so leaving it in the repo changes nothing there.
+services:
+  - type: web
+    name: tradehub
+    runtime: docker              # builds from the Dockerfile in this repo
+    plan: standard               # 2 GB RAM — headroom so it can't OOM like the free tier did
+    region: frankfurt            # Render's EU region (closest to the UK)
+    branch: main                 # deploys the live code; auto-redeploys on every push
+    autoDeploy: true
+    healthCheckPath: /_stcore/health   # so Render knows when the app is actually ready
+    envVars:
+      - key: COOKIE_KEY
+        sync: false
+      - key: MONDAY_API_TOKEN
+        sync: false
+      - key: SHOPIFY_ADMIN_TOKEN
+        sync: false
+      - key: SHOPIFY_STORE
+        sync: false
+      - key: SHOPIFY_STORE_DOMAIN
+        sync: false
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false
+      - key: MS_TENANT_ID
+        sync: false
+      - key: QBO_CLIENT_ID
+        sync: false
+      - key: QBO_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
