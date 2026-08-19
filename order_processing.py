@@ -821,9 +821,12 @@ def _merge_parts(selected, target_supplier, all_siblings):
     except Exception:  # noqa: BLE001
         pc = None
     branch, bemail, bphone = _resolve_branch(target_supplier, pc)
-    # Fall back to the survivor's existing branch/email if the postcode lookup came back empty for
-    # a branch supplier — never wipe a good branch just because we couldn't re-resolve it.
-    if target_supplier in ("Eurocell", "Travis Perkins", "UPB") and not (branch or bemail):
+    # Fall back to the survivor's existing branch/email ONLY if that part was ALREADY the target
+    # supplier — never borrow a DIFFERENT supplier's branch (e.g. merging to UPB must not keep the
+    # survivor's Eurocell Crawley branch when the UPB depot couldn't be re-resolved). Better to leave
+    # it blank for the processor than to send the PO to the wrong supplier's branch.
+    if (target_supplier in ("Eurocell", "Travis Perkins", "UPB") and not (branch or bemail)
+            and (survivor.get("supplier") or "") == target_supplier):
         branch = branch or survivor.get("branch")
         bemail = bemail or survivor.get("branch_email")
 
@@ -1502,9 +1505,14 @@ def render():
                 pick = st.multiselect("Parts to merge (pick 2 or more)", names,
                                       key=f"mrg_pick_{ono}")
                 picked = [p for p in sp if p.get("name") in pick]
-                sup_choices = list(dict.fromkeys(
+                # Blank first option forces an explicit choice — the selectbox must NOT silently
+                # default to the first picked part's supplier (that merged 30376 to Eurocell when
+                # UPB was intended). Merge stays disabled until a real supplier is chosen.
+                sup_choices = [""] + list(dict.fromkeys(
                     [p.get("supplier") for p in picked if p.get("supplier")] + sup_opts))
-                tgt = st.selectbox("Fulfil the merged part with", sup_choices, key=f"mrg_sup_{ono}")
+                tgt = st.selectbox("Fulfil the merged part with", sup_choices,
+                                   format_func=lambda s: s or "— choose supplier —",
+                                   key=f"mrg_sup_{ono}")
                 if st.button(f"Merge {len(pick)} part(s) → {tgt or '?'}", key=f"mrg_go_{ono}",
                              type="primary", disabled=len(pick) < 2 or not tgt):
                     with st.spinner("Merging…"):
