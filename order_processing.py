@@ -504,9 +504,10 @@ def _mark_del_method(iid, supplier):
             pass
 
 
-# Local Derby branch email for suppliers not in the branch finder — used when we bring a "TO POST"
-# order in to ourselves rather than dropship it.
-_DERBY_BRANCH_EMAIL = {"GAP": "derby@gaptrade.com"}
+# Local (to-us, Derby/Midlands) branch email for suppliers not in the branch finder — used when we
+# bring a "TO POST" order in to ourselves rather than dropship it.
+_DERBY_BRANCH_EMAIL = {"GAP": "derby@gaptrade.com",
+                       "UPB": "martinmelaney@upbuildingproducts.com"}   # UPB Aldridge (nearest us)
 
 _UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
 
