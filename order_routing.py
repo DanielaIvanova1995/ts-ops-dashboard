@@ -45,7 +45,7 @@ _UPB_IPSWICH = {"NR", "IP", "CO", "SS", "OX", "HP", "AL", "LU", "RG", "SL", "RH"
                 "TN", "ME", "CT", "IG"}
 _UPB_ALDRIDGE = {"YO", "BD", "HG", "PR", "BB", "HD", "LS", "WF", "HU", "L", "WN", "OL", "HX",
                  "WA", "M", "SK", "CH", "CW", "ST", "DE", "NG", "S", "LN", "LE", "TF", "WS",
-                 "B", "WV", "DY", "CV"}
+                 "B", "WV", "DY", "CV", "LA", "CA"}    # LA=Lancaster, CA=Carlisle (NW, nearest Aldridge)
 _SQUAREDEAL = {"TR", "PL", "TQ", "EX", "TA", "DT", "BH", "BA", "BS", "SP", "SO", "PO", "SN",
                "GL", "DA", "BR", "CR", "KT", "SM", "CM", "N", "NW", "E", "EC", "SE", "SW", "W",
                "WC", "RM", "TW", "UB", "HA", "WD", "NP", "CF",
