@@ -31,7 +31,7 @@ PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / s
 # Perkins / UPB (nearest branch or depot), GAP (Monday auto-fills from the GAP tag), and portal-only
 # PJH / Toolbank. Suppliers the rulebook marks "confirm" are left out until Daniela gives the email.
 SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills transport@ (wrong)
-                     "Vista": "orders@vistaeng.co.uk",   # rulebook says sales@ — confirm w/ Daniela
+                     "Vista": "orders@vistaeng.co.uk",   # confirmed (not the rulebook's sales@)
                      "Plastivan": "becky.thompson@plastivan.co.uk",   # Becky Thompson
                      "Bricklink": "tessallingham@bricklink.co.uk",    # Tess Allingham
                      "MB Decor": "orders@mbdecor.co.uk",              # DecorOrders
@@ -48,7 +48,15 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Carron": "sales@carronheating.co.uk",
                      "Chase Hardware": "matt.jenkinson@chase-hardware.co.uk",
                      "Dolle": "uksales@dolle.com",
-                     "Evolve": "sales@evolveflooring.co.uk"}
+                     "Evolve": "sales@evolveflooring.co.uk",
+                     "Squaredeal": "info@squaredealupvc.co.uk",
+                     "Nuie": "sales@roxorgroup.com",                  # Roxor Group
+                     "Walls and Floors": "wholesale@wallsandfloors.co.uk",
+                     "Velux": "customer.support@velux.co.uk",
+                     "Permaroof": "sales@permaroof.co.uk",
+                     "Newplas": "toby@newplas.co.uk",                 # Toby
+                     "Brickservices": "tessallingham@bricklink.co.uk",  # Tess Allingham
+                     "Brundle": "connor.branigan@brundle.com"}        # Connor Branigan
 
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
 # we forward). Address used verbatim on the PO's delivery block.
@@ -610,10 +618,14 @@ def _process_split(o, res):
     return "split into " + str(n) + " parts: " + "; ".join(parts) + fmsg
 
 
+_PO_EMAIL_BY_NORM = {re.sub(r"[^a-z0-9]", "", k.lower()): v for k, v in SUPPLIER_PO_EMAIL.items()}
+
+
 def _fix_po_email(iid, supplier, o=None):
-    """Set the correct PO email for suppliers with a known override (e.g. Molan orders@, Vista
-    orders@) after the supplier is set — overriding any wrong Monday auto-fill."""
-    em = SUPPLIER_PO_EMAIL.get(supplier)
+    """Set the correct PO email for a supplier with a known address (from SUPPLIER_PO_EMAIL) after
+    the supplier is set — overriding any wrong/blank Monday auto-fill. Matched case/spacing-
+    insensitively, so 'Newplas'/'newplas' and 'LPD DOORS'/'LPD Doors' all resolve."""
+    em = _PO_EMAIL_BY_NORM.get(re.sub(r"[^a-z0-9]", "", (supplier or "").lower()))
     if not em:
         return
     try:
