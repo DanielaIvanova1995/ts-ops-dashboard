@@ -148,8 +148,9 @@ def _block(pdf, title, lines, x, w, fill=None):
     pdf.set_text_color(*INK)
     pdf.set_font("Helvetica", "", 8.5)
     for ln in lines:
-        pdf.set_x(x)
-        pdf.cell(w, 4.6, _S(ln), ln=2, fill=bool(fill))
+        for wl in _wrap(pdf, ln, w - 2):     # wrap long names/addresses so nothing overflows
+            pdf.set_x(x)
+            pdf.cell(w, 4.6, wl, ln=2, fill=bool(fill))
 
 
 def _header(pdf, title, ref):
@@ -198,7 +199,14 @@ def _meta(pdf, acct, order, req, contact):
     pdf.set_text_color(*INK)
     pdf.set_font("Helvetica", "", 8.5)
     for v in vals:
-        pdf.cell(w, 6, _S(v), border="LR", align="C")
+        t = _S(v)
+        sz = 8.5
+        while sz > 6 and pdf.get_string_width(t) > w - 2:   # shrink to fit a long value
+            sz -= 0.5
+            pdf.set_font("Helvetica", "", sz)
+        pdf.cell(w, 6, t, border="LR", align="C")
+        if sz != 8.5:
+            pdf.set_font("Helvetica", "", 8.5)
     pdf.ln()
     pdf.set_x(12)
     pdf.cell(186, 0, "", border="T", ln=1)
