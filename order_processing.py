@@ -31,7 +31,8 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Vista": "orders@vistaeng.co.uk",
                      "Plastivan": "becky.thompson@plastivan.co.uk",   # Becky Thompson
                      "Bricklink": "tessallingham@bricklink.co.uk",    # Tess Allingham
-                     "MB Decor": "orders@mbdecor.co.uk"}              # DecorOrders
+                     "MB Decor": "orders@mbdecor.co.uk",              # DecorOrders
+                     "Decor8": "hello@paintersworld.co.uk"}           # Painters World
 
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
 # we forward). Address used verbatim on the PO's delivery block.
@@ -202,9 +203,20 @@ def _parse_monday_items(txt):
     return out
 
 
+def _canon_sup(s):
+    """Normalise a supplier name to ONE canonical key, so the feed/Airtable name and our order
+    label match even when they differ (the feed calls it 'LPD', we label orders 'LPD DOORS').
+    Uses the routing CANON map (which already knows lpd == lpddoors)."""
+    n = re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    lbl = order_routing.CANON.get(n)
+    return re.sub(r"[^a-z0-9]", "", lbl.lower()) if lbl else n
+
+
 @st.cache_data(show_spinner=False)
 def _pricing():
-    """{normalised SKU: {supplier_norm: cost}} from the pricing feed (Airtable-derived)."""
+    """{normalised SKU: {supplier_canon: cost}} from the pricing feed (Airtable-derived).
+    Supplier names are canonicalised (see _canon_sup) so 'LPD' in the feed matches 'LPD DOORS'
+    on the order."""
     try:
         d = json.load(open("pricing_lookup.json", encoding="utf-8"))
     except Exception:  # noqa: BLE001
@@ -213,8 +225,7 @@ def _pricing():
     for it in d.get("items", []):
         sku = re.sub(r"[^a-z0-9]", "", (it.get("sku") or "").lower())
         if sku:
-            out[sku] = {re.sub(r"[^a-z0-9]", "", (o.get("s") or "").lower()): o.get("c")
-                        for o in (it.get("offers") or [])}
+            out[sku] = {_canon_sup(o.get("s")): o.get("c") for o in (it.get("offers") or [])}
     # Durable code-side overrides (in the repo, so a feed rebuild can't wipe them) — e.g. UPB's
     # Hardie prices keyed by OUR Shopify SKUs, which UPB's own 'any colour' pricelist SKUs don't
     # match. Fills/overrides the supplier's cost for those SKUs.
@@ -223,7 +234,7 @@ def _pricing():
         for sup, skus in ov.items():
             if sup in ("_patterns", "_titles") or not isinstance(skus, dict):   # handled in _line_cost
                 continue
-            sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
+            sn = _canon_sup(sup)
             for sk, cost in skus.items():
                 if isinstance(cost, (int, float)):
                     out.setdefault(re.sub(r"[^a-z0-9]", "", (sk or "").lower()), {})[sn] = cost
@@ -271,7 +282,7 @@ def _line_cost(sku, supplier, name=None):
     supplier's (Daniela, 2026-08-18). If the supplier has no price the line stays unpriced (→
     packing slip), it never borrows another's."""
     key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
-    sup = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
+    sup = _canon_sup(supplier)
     c = (_pricing().get(key) or {}).get(sup)
     if isinstance(c, (int, float)):
         return c
@@ -425,6 +436,19 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                   "notes": notes, "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
 
+DEL_METHOD_COL = "color_mm06fnhe"    # Orders board "Del Method" status column
+
+
+def _mark_del_method(iid, supplier):
+    """Samples orders are posted from Head Office, so flag the Del Method column 'To Post'.
+    Best-effort — never breaks processing."""
+    if (supplier or "").strip().upper() == "SAMPLES":
+        try:
+            data_sources.op_set_status(iid, "To Post", column_id=DEL_METHOD_COL)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _write_po_total(iid, kind, doc):
     """Write the generated PO's inc-VAT total to Monday `numbers6` (£ to supplier), so the board
     shows what the order costs from the supplier. POs only — a packing slip has no prices, so we
@@ -516,6 +540,7 @@ def _process_split(o, res):
                 _fix_po_email(pid, gsup)          # Molan/Vista email override (also overwrites)
             else:
                 data_sources.op_set_branch(pid, branch=route, email="", phone="")  # clear inherited
+            _mark_del_method(pid, gsup or route)     # samples part → "To Post" on Del Method
             data_sources.op_set_status(pid, order_routing._stage_for(
                 gsup, route, glines[0].get("quote"), glines[0].get("portal")))
             if psell is not None:
@@ -534,7 +559,12 @@ def _process_split(o, res):
             nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{order_no}-{idx}_" \
                  "Trade_Superstore_Online.pdf"
             rr = data_sources.op_upload_po(pid, pdf, nm)
-            _write_po_total(pid, kind, doc)          # numbers6 = the PO's inc-VAT total
+            if kind == "po":
+                _write_po_total(pid, kind, doc)      # numbers6 = the PO's inc-VAT total
+            else:
+                # A duplicated split part inherits the original's numbers6; a packing slip has no
+                # price, so CLEAR it rather than leave the wrong inherited cost showing.
+                data_sources.set_order_number(pid, OP["cost_supplier"], "")
             dm = "doc ✓" if rr.get("ok") else "doc unverified"
         except ValueError:
             dm = "doc BLOCKED"
@@ -787,6 +817,7 @@ def _process_one(o):
             _fix_po_email(iid, sup, o)           # correct email for Molan/Vista etc.
         else:                                    # SAMPLES / CLEARANCE
             data_sources.op_set_branch(iid, branch=route)
+        _mark_del_method(iid, sup or route)      # samples → "To Post" on the Del Method column
         data_sources.op_set_status(iid, res.get("stage") or "Needs Review")
         o["stage"] = res.get("stage") or "Needs Review"
     except Exception as e:  # noqa: BLE001

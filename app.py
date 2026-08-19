@@ -1351,7 +1351,16 @@ def _price_overrides():
 
 
 def _pricelist_index():
-    """{norm_sku: {norm_supplier: cost}} from the pricing lookup offers + durable overrides."""
+    """{norm_sku: {canon_supplier: cost}} from the pricing lookup offers + durable overrides.
+    Supplier names are canonicalised via the routing map so the feed's name and the invoice/order
+    label match even when they differ (feed 'LPD' == our 'LPD DOORS')."""
+    import order_routing as _rt
+
+    def _csup(s):
+        n = _norm_code(s)
+        lbl = _rt.CANON.get(n)
+        return _norm_code(lbl) if lbl else n
+
     lk = load_lookup()
     idx = {}
     for it in (lk["items"] if lk else []):
@@ -1359,7 +1368,7 @@ def _pricelist_index():
         if not sk:
             continue
         for o in (it.get("offers") or []):
-            sup = _norm_code(o.get("s"))
+            sup = _csup(o.get("s"))
             if sup and o.get("c") is not None:
                 idx.setdefault(sk, {})[sup] = o.get("c")
     ov = _price_overrides()
