@@ -504,6 +504,10 @@ def _mark_del_method(iid, supplier):
             pass
 
 
+# Local Derby branch email for suppliers not in the branch finder — used when we bring a "TO POST"
+# order in to ourselves rather than dropship it.
+_DERBY_BRANCH_EMAIL = {"GAP": "derby@gaptrade.com"}
+
 _UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
 
 
@@ -521,11 +525,22 @@ def _max_dim_mm(text):
     return best
 
 
+# Rolled/coiled goods whose title states a long ROLL length (e.g. "EPDM Tape 20m") but pack down
+# small — post fine regardless of the stated length.
+_ROLLED_POSTABLE = ("tape", "coil")
+
+
 def _is_postable(items):
     """True if every line is small enough to post ourselves — nothing longer than 1 metre. Lines
-    with no stated size are treated as small (hardware/fixings/handles)."""
-    return all(_max_dim_mm(it.get("Item") or it.get("title") or "") <= 1000
-               for it in (items or []))
+    with no stated size are treated as small (hardware/fixings/handles); rolled goods like tape are
+    postable regardless of their roll length."""
+    for it in (items or []):
+        title = (it.get("Item") or it.get("title") or "")
+        if any(w in title.lower() for w in _ROLLED_POSTABLE):
+            continue
+        if _max_dim_mm(title) > 1000:
+            return False
+    return True
 
 
 def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
@@ -567,6 +582,8 @@ def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
             email = (branch_finder.nearest_branch("DE21 4ED", supplier) or {}).get("email")
         except Exception:  # noqa: BLE001
             email = None
+    elif supplier in _DERBY_BRANCH_EMAIL:
+        email = _DERBY_BRANCH_EMAIL[supplier]
     try:
         data_sources.op_set_branch(iid, branch="TO POST", email=email)   # email=None → keep central
     except Exception:  # noqa: BLE001
