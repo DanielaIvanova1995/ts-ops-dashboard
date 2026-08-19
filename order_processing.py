@@ -56,7 +56,13 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Permaroof": "sales@permaroof.co.uk",
                      "Newplas": "toby@newplas.co.uk",                 # Toby
                      "Brickservices": "tessallingham@bricklink.co.uk",  # Tess Allingham
-                     "Brundle": "connor.branigan@brundle.com"}        # Connor Branigan
+                     "Brundle": "connor.branigan@brundle.com",        # Connor Branigan
+                     "Edmundson": "steve.hallsworth@eel.co.uk",       # Steve Hallsworth
+                     "Mercardo": "mark.jackson@mercado.co.uk",        # Mark Jackson
+                     "C TIE": "sales@ctie.co.uk",
+                     "Hurlingham Baths": "sales@hurlinghambaths.co.uk",
+                     "Hurlingham": "sales@hurlinghambaths.co.uk",
+                     "National Skirting": "info@nationalskirting.co.uk"}
 
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
 # we forward). Address used verbatim on the PO's delivery block.
