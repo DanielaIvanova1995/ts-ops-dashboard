@@ -173,5 +173,13 @@
   "HAR5300448": 48.64,
   "5951402": 18.63,
   "HAR5300157": 30.0
+ },
+ "_titles": {
+  "UPB": [
+   {
+    "contains": "coloured fixing screw",
+    "cost": 45.0
+   }
+  ]
  }
 }

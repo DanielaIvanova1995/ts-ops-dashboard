@@ -1364,7 +1364,7 @@ def _pricelist_index():
                 idx.setdefault(sk, {})[sup] = o.get("c")
     ov = _price_overrides()
     for sup, skus in ov.items():
-        if sup == "_patterns" or not isinstance(skus, dict):
+        if sup in ("_patterns", "_titles") or not isinstance(skus, dict):
             continue
         sn = _norm_code(sup)
         for sk, cost in skus.items():

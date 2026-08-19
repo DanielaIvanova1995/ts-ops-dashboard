@@ -213,7 +213,7 @@ def _pricing():
     try:
         ov = json.load(open("price_overrides.json", encoding="utf-8"))
         for sup, skus in ov.items():
-            if sup == "_patterns" or not isinstance(skus, dict):   # patterns handled in _line_cost
+            if sup in ("_patterns", "_titles") or not isinstance(skus, dict):   # handled in _line_cost
                 continue
             sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
             for sk, cost in skus.items():
@@ -241,10 +241,27 @@ def _price_patterns():
     return out
 
 
-def _line_cost(sku, supplier):
-    """The routed supplier's OWN cost for a SKU, or None. STRICT RULE: a supplier's cost is only
-    ever that supplier's own price — never another supplier's (Daniela, 2026-08-18). If the supplier
-    has no price the line stays unpriced (→ packing slip), it never borrows another's."""
+def _price_titles():
+    """{supplier_norm: [(needle_norm, cost)]} — price a line by its PRODUCT TITLE, for products
+    whose Shopify variant carries no SKU (e.g. UPB 'VL Coloured Fixing Screws'). Same supplier's
+    own price only; from price_overrides.json '_titles'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_titles") or {}).items():
+        sn = re.sub(r"[^a-z0-9]", "", (sup or "").lower())
+        out[sn] = [(re.sub(r"[^a-z0-9]", "", (r.get("contains") or "").lower()), r.get("cost"))
+                   for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
+    return out
+
+
+def _line_cost(sku, supplier, name=None):
+    """The routed supplier's OWN cost for a SKU (or, failing that, its product title), or None.
+    STRICT RULE: a supplier's cost is only ever that supplier's own price — never another
+    supplier's (Daniela, 2026-08-18). If the supplier has no price the line stays unpriced (→
+    packing slip), it never borrows another's."""
     key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
     sup = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
     c = (_pricing().get(key) or {}).get(sup)
@@ -256,6 +273,12 @@ def _line_cost(sku, supplier):
     for prefix, suffix, cost in _price_patterns().get(sup, []):
         if prefix and key.startswith(prefix) and (not suffix or key.endswith(suffix)):
             return cost
+    # Title fallback — for products with no/uncatalogued SKU. Same supplier's own price only.
+    nm = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    if nm:
+        for needle, cost in _price_titles().get(sup, []):
+            if needle and needle in nm:
+                return cost
     return None
 
 
@@ -325,12 +348,10 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
-    # Price every line for an email-order supplier. A line we can't price (no SKU, or the supplier
-    # has no price for it) is shown on the PO with a blank "—" cost for the supplier to confirm —
-    # we do NOT borrow another supplier's price. RULE: a packing slip is only for portal / in-house
-    # orders or when NOTHING on the order can be priced; if even one line is priced, make a PO so a
-    # single un-priced line (e.g. a variant with no SKU) never blocks the whole PO.
-    po_lines, goods, n_priced, n_unpriced = [], 0.0, 0, 0
+    # Price every line for an email-order supplier. RULE: all prices in → PO; ANY price missing →
+    # packing slip (never a PO with 'confirm' prices, and never another supplier's price). When a
+    # line can't be priced we NOTE it by name on the slip so it can be filled in.
+    po_lines, goods, unpriced_items = [], 0.0, []
     for it in items:
         qty = it.get("Qty") or "1"
         try:
@@ -338,18 +359,16 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         except (TypeError, ValueError):
             q = 1
         cost = it.get("Cost") if isinstance(it.get("Cost"), (int, float)) \
-            else _line_cost(it.get("SKU"), supplier)
+            else _line_cost(it.get("SKU"), supplier, it.get("Item"))
         if cost is None:
-            n_unpriced += 1
-            po_lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, "—", "—"])
+            unpriced_items.append((it.get("Item") or it.get("SKU") or "?").strip())
         else:
-            n_priced += 1
             lt = round(cost * q, 2)
             goods += lt
             po_lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, _money(cost),
                              _money(lt)])
 
-    make_slip = is_portal or in_house or (n_priced == 0)
+    make_slip = is_portal or in_house or bool(unpriced_items)
 
     if make_slip:
         lines = [[(it.get("SKU") or "-"), it.get("Item") or "", (it.get("Qty") or "1")]
@@ -361,15 +380,13 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         else:
             head = ["Some line prices aren't on file yet — packing slip (no prices). Please "
                     "confirm prices on your order confirmation."]
+            # List exactly which lines have no price on file, so they can be filled in.
+            head.append("No price on file — fill in: " + "; ".join(unpriced_items) + ".")
         return "slip", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
                         "lines": lines, "notes": head + notes,
                         "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
-    # PO. VAT is ALWAYS 20% (on the priced goods + delivery); a missing delivery rate is just £0.
-    # Any un-priced line shows "—" and is excluded from the goods total until the supplier confirms.
-    if n_unpriced:
-        notes = [f"{n_unpriced} line(s) shown with '—' have no agreed price on file — please "
-                 "confirm the price on your order acknowledgement."] + notes
+    # PO — every line priced. VAT is ALWAYS 20%; a missing delivery rate is just £0.
     dlines = [{"sku": it.get("SKU"), "description": it.get("Item"),
                "qty": (float(it.get("Qty")) if str(it.get("Qty") or "").replace(".", "", 1)
                        .isdigit() else 1)}
