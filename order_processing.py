@@ -461,12 +461,9 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         elif in_house:
             head = ["In-house — post / fulfil from Head Office."]
         else:
-            head = ["Some line prices aren't on file yet — packing slip (no prices). Please "
-                    "confirm prices on your order confirmation."]
-            # List exactly which lines have no price on file, so they can be filled in.
-            head.append("No price on file — fill in: " + "; ".join(unpriced_items) + ".")
+            head = []            # no internal price chatter on the supplier-facing slip
         return "slip", {"order": order_no, "po": order_no, "supplier": supplier, "dl": dl,
-                        "lines": lines, "notes": head + notes,
+                        "lines": lines, "notes": head + notes, "unpriced": unpriced_items,
                         "contact": (contact + (f" - {phone}" if phone else "")) or "TSO"}
 
     # PO — every line priced. VAT is ALWAYS 20%; a missing delivery rate is just £0.
@@ -1302,6 +1299,7 @@ def _order_detail(o):
                 doc, date_str=date_str)
             st.session_state[f"op_gen_pdf_{iid}"] = {
                 "bytes": pdf, "kind": kind, "total": doc.get("total"),
+                "unpriced": doc.get("unpriced") or [],
                 "name": f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_"
                         "Trade_Superstore_Online.pdf"}
         except ValueError as e:      # the validation gate blocked it — show exactly what's missing
@@ -1314,6 +1312,9 @@ def _order_detail(o):
     if gen:
         st.success(f"Built a **{'Purchase Order' if gen['kind'] == 'po' else 'Packing Slip'}** — "
                    "download to check it, or attach it to Monday.")
+        if gen.get("unpriced"):          # for YOU only — not printed on the supplier's document
+            st.caption("ℹ️ No price on file for: " + "; ".join(gen["unpriced"])
+                       + " — fill these in on the supplier's confirmation.")
         g1, g2 = st.columns(2)
         g1.download_button(":material/download: Download", gen["bytes"], file_name=gen["name"],
                            mime="application/pdf", key=f"op_gendl_{iid}", use_container_width=True)
