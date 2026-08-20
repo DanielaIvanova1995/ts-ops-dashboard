@@ -526,20 +526,37 @@ def _max_dim_mm(text):
     return best
 
 
-# Small items that post fine regardless of any length in their title — rolled/coiled goods whose
-# title states a long ROLL length (e.g. "EPDM Tape 20m"), and small tins like touch-up paint.
-_ROLLED_POSTABLE = ("tape", "coil", "touch up paint", "touch-up paint")
+# Small consumables/hardware that always post fine (checked FIRST, so "door handle" is postable
+# even though "door" is a never-post word). Includes rolled tape and small touch-up paint tins.
+_ALWAYS_POST = ("tape", "coil", "touch up paint", "touch-up paint", "handle", "spindle",
+                "escutcheon", "hinge", "screw", "fixing", "pin", "clip", "bracket", "cap",
+                "washer", "bolt", "gasket", "sealant", "silicone", "adhesive", "sample", "key",
+                "latch", "knob", "letterplate", "numeral")
+# Bulky / heavy things that must NEVER be posted — fireplaces, sheets, doors, furniture, bathrooms.
+_NEVER_POST = ("fireplace", "surround", "radiator", "stove", "sleeper", "door", "panel", "board",
+               "sheet", "cladding", "bath", "wardrobe", "bed", "drawers", "table", "chair", "sofa",
+               "cill", "gate", "ladder", "stair", "canopy", "decking", "fence", "membrane", "felt",
+               "furniture", "worktop", "mirror", "cistern", "basin", "toilet", "shower", "tray",
+               "flooring", "tile", "plank", "beam", "joist", "pergola")
+# TO POST only applies to these suppliers (small roofline/hardware goods, ordered in to our Derby
+# branch). Never bulky suppliers like Carron.
+_POSTABLE_SUPPLIERS = {"Eurocell", "GAP", "Travis Perkins"}
+_POST_MAX_MM = 600            # "fits in a small box" — a stated dimension must be within this
 
 
 def _is_postable(items):
-    """True if every line is small enough to post ourselves — nothing longer than 1 metre. Lines
-    with no stated size are treated as small (hardware/fixings/handles); rolled goods like tape are
-    postable regardless of their roll length."""
+    """True ONLY if every line really fits in a small postable box. A line qualifies on a small-
+    hardware keyword or a stated dimension within _POST_MAX_MM; a bulky keyword — or NO stated size
+    at all — disqualifies it. So a 'Fireplace Surround' (bulky word, no dimension) is never
+    postable, while 'EPDM Tape 20m' or a '40mm window handle' is."""
     for it in (items or []):
-        title = (it.get("Item") or it.get("title") or "")
-        if any(w in title.lower() for w in _ROLLED_POSTABLE):
+        title = (it.get("Item") or it.get("title") or "").lower()
+        if any(w in title for w in _ALWAYS_POST):
             continue
-        if _max_dim_mm(title) > 1000:
+        if any(w in title for w in _NEVER_POST):
+            return False
+        dim = _max_dim_mm(title)
+        if dim == 0 or dim > _POST_MAX_MM:    # no stated size, or too big for a small box → don't post
             return False
     return True
 
@@ -550,7 +567,7 @@ def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
     order at where we bring stock in to OURSELVES — the local Derby branch for Eurocell / Travis
     Perkins, the supplier's central email otherwise. Trigger: postable (<=1 m) AND the supplier's
     delivery would cost MORE than the shipping the customer paid. Returns True if marked to post."""
-    if not (supplier and sid and _is_postable(items)):
+    if not (supplier in _POSTABLE_SUPPLIERS and sid and _is_postable(items)):
         return False
     try:
         sh = data_sources.fetch_order_shipping(sid) or {}
