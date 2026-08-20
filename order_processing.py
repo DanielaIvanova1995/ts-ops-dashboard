@@ -509,6 +509,16 @@ def _mark_del_method(iid, supplier):
 _DERBY_BRANCH_EMAIL = {"GAP": "derby@gaptrade.com",
                        "UPB": "martinmelaney@upbuildingproducts.com"}   # UPB Aldridge (nearest us)
 
+
+def _all_touch_up_paint(items):
+    """True if EVERY line on the order is James Hardie touch-up paint — the one UPB item small
+    enough that we post it ourselves (UPB isn't otherwise a posting supplier)."""
+    if not items:
+        return False
+    return all(any(w in (it.get("Item") or it.get("title") or "").lower()
+                   for w in ("touch up paint", "touch-up paint")) for it in items)
+
+
 _UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
 
 
@@ -567,7 +577,10 @@ def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
     order at where we bring stock in to OURSELVES — the local Derby branch for Eurocell / Travis
     Perkins, the supplier's central email otherwise. Trigger: postable (<=1 m) AND the supplier's
     delivery would cost MORE than the shipping the customer paid. Returns True if marked to post."""
-    if not (supplier in _POSTABLE_SUPPLIERS and sid and _is_postable(items)):
+    # Eligible suppliers: Eurocell/GAP/Travis Perkins for small items — plus UPB, but ONLY when the
+    # whole order is James Hardie touch-up paint.
+    eligible = supplier in _POSTABLE_SUPPLIERS or (supplier == "UPB" and _all_touch_up_paint(items))
+    if not (eligible and sid and _is_postable(items)):
         return False
     try:
         sh = data_sources.fetch_order_shipping(sid) or {}
