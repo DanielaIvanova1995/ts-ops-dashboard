@@ -180,6 +180,14 @@
    {
     "contains": "coloured fixing screw",
     "cost": 45.0
+   },
+   {
+    "contains": "hardie plank external corner",
+    "cost": 23.5
+   },
+   {
+    "contains": "hardie plank internal corner",
+    "cost": 15.75
    }
   ]
  },
