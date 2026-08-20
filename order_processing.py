@@ -477,6 +477,8 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country")}
     if delivery_override is not None:
         deliv = float(delivery_override)
+    elif to_post:
+        deliv = 0.0        # TO POST → GAP/Eurocell/TP/UPB deliver to US free; we pay only postage
     else:
         _d = delivery_rules.expected_delivery(supplier, goods, ship_pc, dlines)
         deliv = _d if isinstance(_d, (int, float)) else 0.0
