@@ -1317,6 +1317,100 @@ def _order_detail(o):
                 st.error("Upload failed: " + str(e)[:180])
 
 
+def _quote_to_po(orders, sup_opts):
+    """Build a PO from a supplier's QUOTE — for when one supplier quotes a whole order (e.g. Molan
+    quoting a Storm+Molan mix). Enter the order number, pick the supplier, type the quoted unit
+    prices, generate a branded PO to download or attach. Prices come from YOU (the quote), not the
+    feed, so it works even for lines that supplier doesn't normally price."""
+    with st.expander("📝 Quote → PO — a supplier quoted the whole order? Build its PO here"):
+        st.caption("Enter the order number, choose who quoted, type the quoted **ex-VAT unit price** "
+                   "on each line, then Generate. Prices come from your quote — not the pricelist — "
+                   "so a supplier can quote lines they don't normally stock. (For a split order, "
+                   "Merge the parts to that supplier first, then quote the whole thing here.)")
+        c1, c2 = st.columns(2)
+        ono = c1.text_input("Order number", key="qpo_ono", placeholder="e.g. 30348").strip()
+        sup = c2.selectbox("Supplier that quoted", [""] + list(sup_opts),
+                           format_func=lambda s: s or "— choose —", key="qpo_sup")
+        match = next((o for o in orders if (o.get("order_no") or "").strip() == ono
+                      or (o.get("name") or "").strip() == ono), None) if ono else None
+        if ono and not match:
+            st.warning(f"No order “{ono}” in the current list — check the number or hit Refresh.")
+        if not (match and sup):
+            return
+        sid = (match.get("shopify_id") or "").strip()
+        try:
+            sl = data_sources.fetch_order_line_items(sid) if sid else []
+        except Exception:  # noqa: BLE001
+            sl = []
+        base = ([{"Description": (l.get("title") or ""), "SKU": (l.get("sku") or ""),
+                  "Qty": l.get("qty") or 1} for l in sl]
+                or [{"Description": it["Item"], "SKU": it["SKU"], "Qty": it["Qty"] or "1"}
+                    for it in _parse_monday_items(match.get("items"))])
+        for r in base:
+            r["Quoted unit £ (ex VAT)"] = _line_cost(r["SKU"], sup)     # prefill if known, else blank
+        edit = st.data_editor(
+            pd.DataFrame(base), num_rows="dynamic", hide_index=True, use_container_width=True,
+            key=f"qpo_lines_{ono}",
+            column_config={"Quoted unit £ (ex VAT)":
+                           st.column_config.NumberColumn("Quoted unit £ (ex VAT)", format="%.2f")})
+        addr0 = "\n".join((_ship(sid) or {}).get("lines") or
+                          [x.strip() for x in (match.get("address") or "").split(",") if x.strip()])
+        a = st.text_area("Delivery address", value=addr0, key=f"qpo_addr_{ono}", height=95)
+        d1, d2 = st.columns(2)
+        dov = d1.number_input("Delivery £ (ex VAT) from the quote", min_value=0.0, step=1.0,
+                              value=0.0, key=f"qpo_dov_{ono}")
+        note = d2.text_input("Quote ref / note on the PO", key=f"qpo_note_{ono}")
+        if st.button(f":material/description: Generate PO for {ono} → {sup}",
+                     key=f"qpo_gen_{ono}", type="primary"):
+            rows = [{"SKU": (r.get("SKU") or ""), "Item": (r.get("Description") or ""),
+                     "Qty": str(r.get("Qty") or "1"),
+                     "Cost": (float(r["Quoted unit £ (ex VAT)"])
+                              if pd.notna(r.get("Quoted unit £ (ex VAT)")) else None)}
+                    for _, r in edit.iterrows() if (r.get("Description") or r.get("SKU"))]
+            qo = {"order_no": ono, "name": ono, "supplier": sup, "shopify_id": sid,
+                  "customer": match.get("customer"), "phone": match.get("phone"),
+                  "items": match.get("items")}
+            try:
+                kind, doc = _build_doc(
+                    qo, items_override=rows,
+                    address_override=[ln.strip() for ln in a.splitlines() if ln.strip()] or None,
+                    delivery_override=float(dov),
+                    notes_extra=([f"Against our quote {note}"] if note.strip() else None))
+                pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+                    doc, date_str=datetime.date.today().strftime("%d %B %Y"))
+                st.session_state["qpo_pdf"] = {
+                    "bytes": pdf, "kind": kind, "total": doc.get("total"), "iid": match["item_id"],
+                    "sup": sup, "ono": ono, "name": f"PO_{ono}_Trade_Superstore_Online.pdf"}
+            except ValueError as e:
+                st.session_state.pop("qpo_pdf", None)
+                st.error("Can't generate yet — " + str(e))
+            except Exception as e:  # noqa: BLE001
+                st.session_state.pop("qpo_pdf", None)
+                st.error("Couldn't build the PO: " + str(e)[:200])
+        qp = st.session_state.get("qpo_pdf")
+        if qp and qp.get("ono") == ono:
+            if qp["kind"] != "po":
+                st.warning("Some lines have no price, so this came out as a packing slip — fill in "
+                           "every quoted unit price to get a PO.")
+            g1, g2 = st.columns(2)
+            g1.download_button(":material/download: Download PO", qp["bytes"], file_name=qp["name"],
+                               mime="application/pdf", key="qpo_dl", use_container_width=True)
+            if g2.button(":material/attach_file: Attach to Monday + set supplier",
+                         key="qpo_att", use_container_width=True):
+                with st.spinner("Uploading + verifying…"):
+                    try:
+                        r = data_sources.op_upload_po(qp["iid"], qp["bytes"], qp["name"])
+                        if r.get("ok"):
+                            data_sources.op_set_supplier(qp["iid"], qp["sup"])
+                            _write_po_total(qp["iid"], qp["kind"], qp)
+                            st.success("Attached, supplier set to " + qp["sup"] + ". ↻ Refresh.")
+                            st.session_state["_op_orders"] = None
+                        else:
+                            st.error("Upload didn't verify — try again.")
+                    except Exception as e:  # noqa: BLE001
+                        st.error("Upload failed: " + str(e)[:180])
+
+
 def render():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -1377,6 +1471,7 @@ def render():
     stage_opts = [_stage_disp(s) for s in
                   list(dict.fromkeys(data_sources.OP_STAGES
                                      + [o.get("stage") for o in orders if o.get("stage")]))]
+    _quote_to_po(orders, sup_opts)
     fcounts = st.session_state.get("_op_fcounts", {})
     store = (data_sources.get_secret("SHOPIFY_STORE") or "").strip()
 
