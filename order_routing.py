@@ -53,7 +53,7 @@ _SQUAREDEAL = {"TR", "PL", "TQ", "EX", "TA", "DT", "BH", "BA", "BS", "SP", "SO",
                "AL", "SG", "MK", "EN",
                "SA", "SY", "LD"}    # southern NBP-excluded patch → Squaredeal (quote first)
 _UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
-              "UPB Ipswich": "ipswich@upbuildingproducts.co.uk",
+              "UPB Ipswich": "ipswich@upbuildingproducts.com",
               "UPB Aldridge": "martinmelaney@upbuildingproducts.com"}
 
 
