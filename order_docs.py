@@ -281,10 +281,15 @@ def _grid_table(pdf, cols, lines, line_h=4.4, pad=1.8):
             x += w
         x = x0
         for (w, _, a), parts in zip(cols, wrapped):              # render each pre-wrapped line as-is
+            variant_bold = False                                 # the "Variant: …" line(s) go bold
             for j, ln_txt in enumerate(parts):                   # (cell() never re-wraps → no distortion)
+                if ln_txt.startswith("Variant:"):
+                    variant_bold = True
+                pdf.set_font("Helvetica", "B" if variant_bold else "", 8.5)
                 pdf.set_xy(x + pad, y0 + 1.1 + j * line_h)
                 pdf.cell(w - 2 * pad, line_h, ln_txt, align=a)
             x += w
+        pdf.set_font("Helvetica", "", 8.5)                       # reset for the next row
         pdf.set_xy(x0, y0 + row_h)
     pdf.set_x(12)
     pdf.cell(total_w, 0, "", border="T", ln=1)
