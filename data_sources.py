@@ -411,16 +411,21 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
         n = e.get("node") or {}
         # Fold the variant (usually the colour) into the name so it's present on EVERY line —
         # that lets the matcher spot the colour as an order-wide 'common' token and ignore it.
-        title = n.get("title") or ""
+        # ALSO return the base title + variant separately, so a PO can put the variant on its own
+        # line instead of one long run-on.
+        base_title = n.get("title") or ""
         variant = (n.get("variantTitle") or "").strip()
-        if variant and variant.lower() != "default title" and variant.lower() not in title.lower():
-            title = f"{title} {variant}"
+        if variant.lower() == "default title":
+            variant = ""
+        title = base_title
+        if variant and variant.lower() not in base_title.lower():
+            title = f"{base_title} {variant}"
         try:
             price = float((((n.get("originalUnitPriceSet") or {}).get("shopMoney") or {})
                            .get("amount")))
         except (TypeError, ValueError):
             price = None
-        out.append({"title": title,
+        out.append({"title": title, "base_title": base_title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
                     "qty": n.get("quantity"), "price": price})
     return out

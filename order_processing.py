@@ -375,6 +375,15 @@ def _delivery_charge(supplier, goods):
     return float(flat), True
 
 
+def _po_desc(it):
+    """Description for a PO/slip line: the product name, with the customer's chosen VARIANT
+    (colour/size) on its OWN line so it's unmistakable to the supplier (the renderer honours the
+    newline and wraps each line inside its box)."""
+    base = (it.get("Item") or "").strip()
+    v = (it.get("Variant") or "").strip()
+    return f"{base}\nVariant: {v}" if v and v.lower() not in base.lower() else base
+
+
 def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                address_override=None):
     """Assemble the (kind, doc) for order `o`: a priced PO for email-order suppliers, a packing
@@ -421,13 +430,13 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                 _sl_cache[sid] = data_sources.fetch_order_line_items(sid)
             except Exception:  # noqa: BLE001
                 _sl_cache[sid] = []
-        _title_by_sku = {re.sub(r"[^a-z0-9]", "", (sl.get("sku") or "").lower()):
-                         (sl.get("title") or "").strip()
-                         for sl in (_sl_cache[sid] or []) if sl.get("sku") and sl.get("title")}
+        _by_sku = {re.sub(r"[^a-z0-9]", "", (sl.get("sku") or "").lower()): sl
+                   for sl in (_sl_cache[sid] or []) if sl.get("sku")}
         for _it in items:
-            _st = _title_by_sku.get(re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower()))
-            if _st:
-                _it["Item"] = _st
+            sl = _by_sku.get(re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower()))
+            if sl:                                # base title + variant kept separate for the PO
+                _it["Item"] = (sl.get("base_title") or sl.get("title") or "").strip()
+                _it["Variant"] = (sl.get("variant") or "").strip()
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
@@ -448,13 +457,13 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         else:
             lt = round(cost * q, 2)
             goods += lt
-            po_lines.append([(it.get("SKU") or "-"), it.get("Item") or "", qty, _money(cost),
+            po_lines.append([(it.get("SKU") or "-"), _po_desc(it), qty, _money(cost),
                              _money(lt)])
 
     make_slip = is_portal or in_house or bool(unpriced_items)
 
     if make_slip:
-        lines = [[(it.get("SKU") or "-"), it.get("Item") or "", (it.get("Qty") or "1")]
+        lines = [[(it.get("SKU") or "-"), _po_desc(it), (it.get("Qty") or "1")]
                  for it in items]
         if is_portal:
             head = ["Portal order - place on the supplier portal."]

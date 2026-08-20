@@ -215,8 +215,15 @@ def _meta(pdf, acct, order, req, contact):
 
 def _wrap(pdf, text, max_w):
     """Word-wrap `text` to fit `max_w` mm at the current font; hard-breaks any single word (e.g. a
-    long hyphenated SKU) that's still too wide, so nothing ever overflows its column."""
-    words = _S(str(text)).split()
+    long hyphenated SKU) that's still too wide, so nothing ever overflows its column. Explicit
+    newlines are honoured — each becomes its own line (so a variant can sit on its own row)."""
+    raw = _S(str(text))
+    if "\n" in raw:                     # split on hard newlines first, then word-wrap each part
+        out = []
+        for seg in raw.split("\n"):
+            out.extend(_wrap(pdf, seg, max_w))
+        return out or [""]
+    words = raw.split()
     if not words:
         return [""]
     lines, cur = [], ""
