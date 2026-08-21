@@ -1152,9 +1152,9 @@ def _order_detail(o):
                 for rt, lns in res["groups"].items():
                     st.markdown(f"- **{rt}** — " + ", ".join(
                         (l.get("sku") or l.get("title") or "")[:26] for l in lns))
-                st.caption("Splitting an order (duplicate the Monday item + split the Shopify "
-                           "fulfilment) is the next piece of the build — for now set the main "
-                           "supplier and note the split.")
+                st.caption("Processing this order splits it automatically. To split it by hand "
+                           "(choose which line goes to which supplier), use **✂️ Split this order "
+                           "across suppliers** below.")
             elif res.get("overall_supplier"):
                 _br = res.get("branch")
                 st.markdown(f"→ **{res['overall_supplier']}**"
@@ -1205,6 +1205,47 @@ def _order_detail(o):
                 column_config={"Routes to": st.column_config.TextColumn(
                     "Routes to", help="The supplier this line is sent to. 'PICK' = couldn't "
                     "identify — choose a supplier in the grid.")})
+
+    # ---- Manual split — assign each line to a supplier, then split the order across them ----
+    if sid and st.checkbox("✂️ Split this order across suppliers", key=f"op_msplit_{iid}"):
+        st.caption("Set the supplier for each line, then Split. Lines with the SAME supplier become "
+                   "one part; each part gets its own Monday item (30xxx-1, -2 …) and its own PO. "
+                   "No need to delete anything — just assign suppliers.")
+        try:
+            slines = (st.session_state.get("_op_routes", {}).get(iid, {}) or {}).get("lines") \
+                or data_sources.fetch_order_lines_with_vendor(sid)
+        except Exception:  # noqa: BLE001
+            slines = []
+        supopts = [s for s in _supplier_labels() if s]
+        if not slines:
+            st.caption("Couldn't read the order lines to split.")
+        else:
+            sdf = pd.DataFrame([{"Item": (l.get("title") or "")[:70], "SKU": l.get("sku") or "",
+                                 "Qty": l.get("qty"),
+                                 "Supplier": (l.get("supplier") if l.get("supplier") in supopts
+                                              else None)} for l in slines])
+            sedit = st.data_editor(
+                sdf, hide_index=True, use_container_width=True, key=f"op_msplit_ed_{iid}",
+                disabled=["Item", "SKU", "Qty"],
+                column_config={"Supplier": st.column_config.SelectboxColumn(
+                    "Supplier", options=supopts, required=False,
+                    help="Who fulfils THIS line. Lines sharing a supplier are combined.")})
+            assigned = [(str(s).strip() if pd.notna(s) else "") for s in list(sedit["Supplier"])]
+            distinct = [s for s in dict.fromkeys(assigned) if s]
+            if not all(assigned):
+                st.caption("⚠ Assign a supplier to every line before splitting.")
+            if st.button(f"✂️ Split into {len(distinct)} part(s)", key=f"op_msplitgo_{iid}",
+                         type="primary", disabled=not (all(assigned) and len(distinct) >= 2)):
+                lines2 = [{**l, "supplier": s, "route": s, "branch": None, "branch_email": None}
+                          for l, s in zip(slines, assigned)]
+                groups = {}
+                for l in lines2:
+                    groups.setdefault(l["supplier"], []).append(l)
+                with st.spinner("Splitting…"):
+                    msg = _process_split(o, {"groups": groups, "lines": lines2, "split": True})
+                st.success("Split done — " + msg + ". Hit ↻ Refresh to see the parts.")
+                for _k in ("_op_orders", "_op_detail", "_op_routes", "_op_fcounts"):
+                    st.session_state.pop(_k, None)
 
     # Live-from-Shopify: the Monday items above are a snapshot from when the order synced. This
     # pulls the CURRENT order (in case it was edited) and adds unit prices, variants + fulfilments.
@@ -1291,7 +1332,9 @@ def _order_detail(o):
             rows = [{"SKU": (r.get("SKU") or ""), "Item": (r.get("Description") or ""),
                      "Qty": str(r.get("Qty") or ""),
                      "Cost": (float(r["Unit cost £"]) if pd.notna(r.get("Unit cost £")) else None)}
-                    for _, r in edited_lines.iterrows()]
+                    for _, r in edited_lines.iterrows()
+                    # skip blanked-out rows so deleting a line's text just removes it (no empty-line error)
+                    if str(r.get("SKU") or "").strip() or str(r.get("Description") or "").strip()]
             if rows != [{"SKU": it["SKU"], "Item": it["Item"], "Qty": it["Qty"] or "1",
                          "Cost": (_line_cost(it["SKU"], sup_now))} for it in base]:
                 items_override = rows
