@@ -123,6 +123,12 @@ def route_line(line, area_pc=None, sku_supplier=None):
     # Storm polycarbonate (vendor "Storm") or a Toolbank tool never gets grabbed by a brand/SKU
     # rule below.
     lbl = CANON.get(_norm(vendor))
+    # Storm is too expensive right now, so Storm products go to MOLAN for a quote instead (Molan
+    # quote them well). Temporary redirect — remove this block to route Storm to Storm again.
+    if lbl == "Storm":
+        return out("Molan", "Molan", f"Storm (vendor “{vendor}”) → Molan for a quote — Storm too "
+                   "expensive; Molan quote nicely", "med", quote=True,
+                   branch_email="quotes@molan-uk.com")
     if lbl:
         return out(lbl, lbl, f"Shopify vendor “{vendor}” → {lbl}", "high",
                    portal=(lbl in PORTAL), quote=(lbl in QUOTE_FIRST),

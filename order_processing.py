@@ -811,6 +811,10 @@ def _fix_po_email(iid, supplier, o=None):
     key = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
     em = _PO_EMAIL_BY_NORM.get(key)
     ph = _HEAD_OFFICE_BY_NORM.get(key)
+    # Don't clobber a quote email the router already set (Storm→Molan uses quotes@molan-uk.com for
+    # the quote, not Molan's orders@ PO address).
+    if em and o and (o.get("branch_email") or "").lower().startswith("quotes@"):
+        em = None
     try:
         if em:
             data_sources.op_set_branch(iid, email=em)
