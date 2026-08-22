@@ -54,6 +54,10 @@ SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 8.0, "flag_high": False, "flag_below": True},
     "decor8": {"name": "Decor8", "push_min": 8.0, "push_max": 65.0, "flag_below": True},
+    # Rexel: no pricelist held yet, so the ORDER MARGIN is the safeguard. Auto-approve a matched
+    # invoice when order margin is 10%–60%; below 10% → Needs Review, above 60% → flagged.
+    "rexel": {"name": "Rexel", "no_pricelist": True, "push_min": 10.0, "push_max": 60.0,
+              "flag_below": True},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",

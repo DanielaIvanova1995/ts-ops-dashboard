@@ -1926,6 +1926,10 @@ SUPPLIER_RULES = {
     # don't flag a high margin (approve at 12%+ regardless of ceiling).
     "toolbank": {"name": "Toolbank", "push_min": 12.0, "push_min_discount": 8.0,
                  "flag_high": False, "flag_below": True},
+    # Rexel: no pricelist held yet, so the ORDER MARGIN is the safeguard. Auto-approve a matched
+    # invoice when order margin is 10%–60%; below 10% → Needs Review, above 60% → flagged.
+    "rexel": {"name": "Rexel", "no_pricelist": True, "push_min": 10.0, "push_max": 60.0,
+              "flag_below": True},
 }
 
 
