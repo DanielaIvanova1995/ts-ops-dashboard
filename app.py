@@ -6923,6 +6923,92 @@ def _render_statement_recon():
                                + ("" if sent else " (sending needs Mail.Send)") + "." + link)
 
 
+def _render_month_end_forecast(data):
+    """What has to be cleared by this month-end: QuickBooks open bills that are overdue or fall due
+    on/before the last day of the month (per supplier, with credit-limit flags), PLUS invoices still
+    sitting in Needs Review / Discrepancy that are dated before this month — so they can be sorted
+    and be ready to pay. Lets Daniela prepare for the month-end run in advance."""
+    import calendar
+    from datetime import date
+    vendors, bills = data["vendors"], data["bills"]
+    limits = {_norm_code(k): v for k, v in (data.get("limits") or {}).items()}
+    today = now_uk().date()
+    eom = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    som = today.replace(day=1)
+    m = lambda x: f"£{(x or 0):,.2f}"                    # noqa: E731
+    eom_lbl = f"{eom.day} {eom:%b}"
+
+    per, overdue, due_now, owed_all = {}, 0.0, 0.0, 0.0
+    for b in bills:
+        bal = b.get("Balance")
+        if not (isinstance(bal, (int, float)) and bal > 0.005):
+            continue
+        name = (vendors.get((b.get("VendorRef") or {}).get("value")) or {}).get("name") or "?"
+        p = per.setdefault(name, {"owed": 0.0, "overdue": 0.0, "due_eom": 0.0})
+        p["owed"] += bal
+        owed_all += bal
+        try:
+            dd = date.fromisoformat(str(b.get("DueDate"))[:10])
+        except Exception:  # noqa: BLE001
+            dd = None
+        if dd and dd < today:
+            p["overdue"] += bal
+            overdue += bal
+        elif dd and dd <= eom:
+            p["due_eom"] += bal
+            due_now += bal
+
+    # Monday invoices still to review, dated before this month (so due at the upcoming month-end).
+    def _idt(i):
+        d = (i.get("invoice_date") or i.get("created") or "")[:10]
+        try:
+            return date.fromisoformat(d)
+        except Exception:  # noqa: BLE001
+            return None
+    review = []
+    for k in ("review", "discrepancy"):
+        r = invoices_by_status(k)
+        review += (r.get("invoices") or []) if isinstance(r, dict) else []
+    to_review = [i for i in review if (_idt(i) and _idt(i) < som)]
+    review_tot = sum(i.get("total") or 0 for i in to_review if isinstance(i.get("total"), (int, float)))
+
+    st.markdown(f"#### 📅 Month-end forecast — to clear by {eom_lbl}")
+    t = st.columns(4)
+    t[0].metric("Overdue now", m(overdue))
+    t[1].metric(f"Due by {eom_lbl}", m(due_now))
+    t[2].metric("→ Pay by month-end", m(overdue + due_now))
+    t[3].metric("Total owed (all open)", m(owed_all))
+
+    rows = []
+    for name, p in sorted(per.items(), key=lambda kv: -(kv[1]["overdue"] + kv[1]["due_eom"])):
+        due = p["overdue"] + p["due_eom"]
+        if due <= 0.005:
+            continue
+        lim = limits.get(_norm_code(name))
+        flag = "🔴 OVER LIMIT" if (lim and p["owed"] > lim) else (
+            "🟠 near limit" if (lim and p["owed"] > 0.9 * lim) else "")
+        rows.append({"Supplier": name, "Overdue": m(p["overdue"]), "Due by month-end": m(p["due_eom"]),
+                     "Pay by month-end": m(due), "Total owed": m(p["owed"]),
+                     "Credit limit": (m(lim) if lim else "—"), "⚠": flag})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    else:
+        st.success("Nothing falls due by month-end.")
+
+    if to_review:
+        with st.expander(f"⚠️ Still to review before month-end — {len(to_review)} invoice(s), "
+                         f"~{m(review_tot)}", expanded=True):
+            st.caption(f"Invoices dated before {som:%B} still in Needs Review / Discrepancy — sort "
+                       "these so they're approved and ready to pay at month-end.")
+            rr = [{"Supplier": i.get("supplier") or "?", "Invoice": i.get("invoice_no") or "",
+                   "Date": (i.get("invoice_date") or i.get("created") or "")[:10],
+                   "Amount": (m(i.get("total")) if isinstance(i.get("total"), (int, float)) else ""),
+                   "Status": i.get("status") or ""}
+                  for i in sorted(to_review, key=lambda x: (x.get("supplier") or "", x.get("invoice_no") or ""))]
+            st.dataframe(pd.DataFrame(rr), hide_index=True, use_container_width=True)
+    st.divider()
+
+
 def _render_payables_live():
     """Live all-suppliers payables from QuickBooks open bills + Monday credit limits."""
     if not _qbo_connected_quiet():
@@ -6954,6 +7040,7 @@ def _render_payables_live():
 
     from datetime import date
     vendors, bills = data["vendors"], data["bills"]
+    _render_month_end_forecast(data)          # month-end "what's owed / to review" summary up top
     limits = {_norm_code(k): v for k, v in (data["limits"] or {}).items()}
     today = now_uk().date()
     # Saved reconciliations, keyed by QuickBooks vendor id — lets Payables show the statement date
