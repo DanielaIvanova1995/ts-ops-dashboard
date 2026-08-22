@@ -64,6 +64,19 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Hurlingham": "sales@hurlinghambaths.co.uk",
                      "National Skirting": "info@nationalskirting.co.uk"}
 
+# Head-office contact number per supplier, for the Branch contact number when the order ISN'T a
+# branch order (Eurocell/Travis Perkins get the nearest branch's number from the branch finder
+# instead). Seeded from the rulebook's confident landlines — Daniela to confirm/complete the rest
+# from the supplier & contacts sheet.
+SUPPLIER_HEAD_OFFICE_PHONE = {
+    "Southern Sheeting": "01342 337119", "Decor8": "0161 763 7007", "Rexel": "0330 045 0606",
+    "LPD DOORS": "0113 251 3948", "JB Kind": "01283 554197", "Carron": "01400 263 310",
+    "Hurlingham": "01400 263 310", "Hurlingham Baths": "01400 263 310",
+    "Walls and Floors": "01536 410484", "Permaroof": "01773 608808", "Newplas": "01332 322160",
+    "Bricklink": "0141 286 3600", "Brickservices": "0141 286 3600", "Plastivan": "0117 300 5625",
+    "Brundle": "0115 930 2070", "Dolle": "01332 811611", "Nuie": "01422 417100",
+}
+
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
 # we forward). Address used verbatim on the PO's delivery block.
 DELIVER_TO_US = {"Plastivan"}
@@ -780,19 +793,27 @@ def _process_split(o, res):
 
 
 _PO_EMAIL_BY_NORM = {re.sub(r"[^a-z0-9]", "", k.lower()): v for k, v in SUPPLIER_PO_EMAIL.items()}
+_HEAD_OFFICE_BY_NORM = {re.sub(r"[^a-z0-9]", "", k.lower()): v
+                        for k, v in SUPPLIER_HEAD_OFFICE_PHONE.items()}
 
 
 def _fix_po_email(iid, supplier, o=None):
-    """Set the correct PO email for a supplier with a known address (from SUPPLIER_PO_EMAIL) after
-    the supplier is set — overriding any wrong/blank Monday auto-fill. Matched case/spacing-
-    insensitively, so 'Newplas'/'newplas' and 'LPD DOORS'/'LPD Doors' all resolve."""
-    em = _PO_EMAIL_BY_NORM.get(re.sub(r"[^a-z0-9]", "", (supplier or "").lower()))
-    if not em:
-        return
+    """Set the supplier's known PO email AND head-office contact number after the supplier is set
+    (overriding any wrong/blank Monday auto-fill). Branch orders — Eurocell/Travis Perkins — keep
+    the nearest branch's email + number (set from the branch finder) instead, as they're in neither
+    map. Matched case/spacing-insensitively ('Newplas'/'newplas', 'LPD DOORS'/'LPD Doors')."""
+    key = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
+    em = _PO_EMAIL_BY_NORM.get(key)
+    ph = _HEAD_OFFICE_BY_NORM.get(key)
     try:
-        data_sources.op_set_branch(iid, email=em)
-        if o is not None:
-            o["branch_email"] = em
+        if em:
+            data_sources.op_set_branch(iid, email=em)
+            if o is not None:
+                o["branch_email"] = em
+        if ph:
+            data_sources.op_set_branch(iid, phone=ph)
+            if o is not None:
+                o["branch_phone"] = ph
     except Exception:  # noqa: BLE001
         pass
 
