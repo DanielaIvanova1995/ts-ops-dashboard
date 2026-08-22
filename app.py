@@ -3581,13 +3581,21 @@ def _dup_identity(i):
     return (_norm_code(i.get("supplier")), no, round(t, 2) if isinstance(t, (int, float)) else None)
 
 
+def _is_pushed_inv(i):
+    """True if this invoice copy has already been Approved / pushed to QuickBooks — so it must
+    NEVER be auto-deleted (the QB bill exists); we keep it and delete the un-pushed duplicate."""
+    s = (i.get("status") or "").lower()
+    return "approved" in s or "to qb" in s
+
+
 def _dedup_groups(invs):
     """Group invoice copies by supplier + invoice number and decide which are deletable duplicates.
     Eurocell send two identical copies of each invoice; the copies are duplicates when they share
     the same total OR a copy's total is blank (not read yet). A group with 2+ genuinely DIFFERENT
     amounts under one number (a real invoice split across orders) is left alone. Returns
     (dups_to_delete, dup_group_sub_ids) — the extras to delete, and every sub_id in a duplicate
-    group (for the 🔁 marker). Keeps a PRICED copy in preference to a blank one."""
+    group (for the 🔁 marker). If a copy is already Approved/pushed to QuickBooks we KEEP that one
+    and delete only the un-pushed duplicate(s); otherwise keep a PRICED copy over a blank one."""
     from collections import defaultdict
     groups = defaultdict(list)
     for i in invs:
@@ -3601,9 +3609,13 @@ def _dedup_groups(invs):
         totals = {round(i["total"], 2) for i in items if isinstance(i.get("total"), (int, float))}
         if len(totals) > 1:
             continue                       # different amounts under one number → a real split, skip
-        items = sorted(items, key=lambda i: 0 if isinstance(i.get("total"), (int, float)) else 1)
         group_ids.update(str(i.get("sub_id")) for i in items)
-        dups.extend(items[1:])             # keep the first (priced) copy, the rest are duplicates
+        if any(_is_pushed_inv(i) for i in items):
+            # One copy is already in QuickBooks → keep every pushed copy, delete the un-pushed extras.
+            dups.extend(i for i in items if not _is_pushed_inv(i))
+        else:
+            items = sorted(items, key=lambda i: 0 if isinstance(i.get("total"), (int, float)) else 1)
+            dups.extend(items[1:])         # keep the first (priced) copy, the rest are duplicates
     return dups, group_ids
 
 
@@ -3895,12 +3907,15 @@ def _invoice_tab(key, is_queue):
         i["_discount"] = (disc.get(i.get("shopify_order_id")) or {}).get("amount")
 
     # Duplicate detection: the SAME invoice number logged twice on the SAME order = a
-    # duplicate subitem to delete. Counted across this tab PLUS the Discrepancy queue, so a
-    # copy sitting in Discrepancy is caught even when we're looking at another tab.
+    # duplicate subitem to delete. Counted across this tab PLUS the Discrepancy, Approved (pushed)
+    # and Matched queues — so a copy whose twin has ALREADY been approved (common now that some
+    # suppliers auto-push) is still caught even though the twin isn't in the tab we're looking at.
     from collections import Counter as _Counter
     dup_pool = {i["sub_id"]: i for i in invs}
-    if key != "discrepancy":
-        for i in (invoices_by_status("discrepancy").get("invoices") or []):
+    for _dk in ("discrepancy", "pushed", "matched"):
+        if _dk == key:
+            continue
+        for i in (invoices_by_status(_dk).get("invoices") or []):
             dup_pool.setdefault(i["sub_id"], i)
     _dups_del, _dup_group_ids = _dedup_groups(list(dup_pool.values()))
     _amtdup = _amount_dup_ids(list(dup_pool.values()))   # same order + same £, different number
@@ -3977,6 +3992,7 @@ def _invoice_tab(key, is_queue):
                              else _INV_ICON["warn"] if v else None)
         row["Invoice"] = inv.get("invoice_no") or ""
         omark = ("  · DUPLICATE" if inv.get("_dup")
+                 else f"  · DUP? same £ as {inv['_dup_amt']}" if inv.get("_dup_amt")
                  else f"  · ×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
         row["Order"] = (inv.get("order_no") or "") + omark
         row["Supplier"] = inv.get("supplier") or ""
@@ -4132,6 +4148,7 @@ def _invoice_tab(key, is_queue):
                         or bool(st.session_state.get(f"delpend_{sid}")))
             is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
             mark = ("   ·   DUPLICATE" if inv.get("_dup")
+                    else f"   ·   POSSIBLE DUP (same £ as {inv['_dup_amt']})" if inv.get("_dup_amt")
                     else f"   ·   ×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
             head = (f"{'CRN' if is_cn else 'INV'}   {inv.get('invoice_no')}   ·   "
                     f"{inv.get('supplier') or '—'}   ·   order {inv.get('order_no') or '—'}"
