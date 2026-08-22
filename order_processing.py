@@ -416,7 +416,7 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     # Ship to OUR address (not the customer) when: the supplier doesn't deliver to site (e.g.
     # Plastivan), OR the order is marked "TO POST" (we bring it in and post it ourselves). A
     # hand-edited Adjust address still wins.
-    to_post = (o.get("branch") or "").strip().upper() == "TO POST"
+    to_post = (o.get("branch") or "").strip().upper().startswith("TO POST")
     deliver_to_us = (supplier in DELIVER_TO_US or to_post) and not address_override
     dl = list(OUR_ADDRESS_LINES) if deliver_to_us else (
         address_override or (ship or {}).get("lines")
@@ -561,9 +561,10 @@ def _force_to_post(iid, supplier, o=None):
             email = None
     elif supplier in _DERBY_BRANCH_EMAIL:
         email = _DERBY_BRANCH_EMAIL[supplier]
-    data_sources.op_set_branch(iid, branch="TO POST", email=email)   # email None → keep head office
+    branch_lbl = "TO POST - UPB Aldridge" if supplier == "UPB" else "TO POST"
+    data_sources.op_set_branch(iid, branch=branch_lbl, email=email)  # email None → keep head office
     if o is not None:
-        o["branch"] = "TO POST"
+        o["branch"] = branch_lbl
         if email:
             o["branch_email"] = email
 
@@ -664,12 +665,13 @@ def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
             email = None
     elif supplier in _DERBY_BRANCH_EMAIL:
         email = _DERBY_BRANCH_EMAIL[supplier]
+    branch_lbl = "TO POST - UPB Aldridge" if supplier == "UPB" else "TO POST"
     try:
-        data_sources.op_set_branch(iid, branch="TO POST", email=email)   # email=None → keep central
+        data_sources.op_set_branch(iid, branch=branch_lbl, email=email)   # email=None → keep central
     except Exception:  # noqa: BLE001
         return False
     if o is not None:
-        o["branch"] = "TO POST"
+        o["branch"] = branch_lbl
         if email:
             o["branch_email"] = email
     return True
