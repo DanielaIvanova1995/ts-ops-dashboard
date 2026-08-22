@@ -124,8 +124,12 @@ def route_line(line, area_pc=None, sku_supplier=None):
     # rule below.
     lbl = CANON.get(_norm(vendor))
     # Storm is too expensive right now, so Storm products go to MOLAN for a quote instead (Molan
-    # quote them well). Temporary redirect — remove this block to route Storm to Storm again.
+    # quote them well). EXCEPT Triton decking/cladding, which only Storm do — those quote from
+    # Storm. Temporary redirect — remove this block to route all Storm to Storm again.
     if lbl == "Storm":
+        if "triton" in blob:
+            return out("Storm", "Storm", f"Triton ({vendor}) — Storm-only, quote from Storm",
+                       "med", quote=True, branch_email="sales@stormbuildingproducts.com")
         return out("Molan", "Molan", f"Storm (vendor “{vendor}”) → Molan for a quote — Storm too "
                    "expensive; Molan quote nicely", "med", quote=True,
                    branch_email="quotes@molan-uk.com")
