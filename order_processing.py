@@ -75,6 +75,10 @@ SUPPLIER_HEAD_OFFICE_PHONE = {
     "Walls and Floors": "01536 410484", "Permaroof": "01773 608808", "Newplas": "01332 322160",
     "Bricklink": "0141 286 3600", "Brickservices": "0141 286 3600", "Plastivan": "0117 300 5625",
     "Brundle": "0115 930 2070", "Dolle": "01332 811611", "Nuie": "01422 417100",
+    "GAP": "01332 410004", "Molan": "01529 461867", "Vista": "01663 736 700",
+    "PJH": "0345 450 8932", "Deanta": "01353 698602", "MB Decor": "01642 455945",
+    "Toolbank": "0344 463 6050", "Etills": "01763 261 781", "C TIE": "01737 760645",
+    "Chase Hardware": "01889 598630",
 }
 
 # Suppliers who DON'T deliver to site — every PO ships to our own address (they deliver to us and
