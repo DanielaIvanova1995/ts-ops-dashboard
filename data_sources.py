@@ -3413,7 +3413,10 @@ def op_set_branch(item_id, branch=None, email=None, phone=None, token: str | Non
             "v": _json.dumps(val)}}, headers=hdr, timeout=30)
         r.raise_for_status()
     if phone is not None:
-        val = {} if not phone else {"phone": str(phone), "countryShortName": "GB"}
+        import re as _re
+        # Monday's phone column needs DIGITS ONLY — a formatted "0333 032 3229" is rejected.
+        _digits = _re.sub(r"\D", "", str(phone))
+        val = {} if not _digits else {"phone": _digits, "countryShortName": "GB"}
         q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value("
              "board_id:$b,item_id:$i,column_id:$c,value:$v){id}}")
         r = requests.post(MONDAY_API, json={"query": q, "variables": {
