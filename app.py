@@ -3870,6 +3870,19 @@ def _invoice_tab(key, is_queue):
         st.info("No invoices match that filter/search.")
         return
 
+    # Discrepancies tab: collate one supplier's open discrepancies into a single query email.
+    # Uses the tab's Supplier filter — pick a supplier above and it collates theirs directly.
+    if key == "discrepancy":
+        _pre = sup if sup != "All suppliers" else None
+        _title = (f"📧 Collate & email {sup}'s open discrepancies"
+                  if _pre else "📧 Collate & email one supplier's open discrepancies")
+        with st.expander(_title, expanded=bool(_pre)):
+            if not _pre:
+                st.caption("Choose a **Supplier** above to jump straight to theirs, or pick one "
+                           "here. Shows only invoices still open as a discrepancy — **push/clear "
+                           "the ones you'll approve first, then 🔄 Refresh**.")
+            _collate_supplier_discrepancies(invs, preset_sup=_pre, key_ns=f"tab_{key}")
+
     # Customer discounts on the Shopify orders (annotate each invoice). Keyed off the
     # rows we'll actually show (fil), so the Recent tab doesn't fan out 800 Shopify calls.
     disc = _order_discounts(tuple(sorted({i["shopify_order_id"] for i in fil
@@ -4250,6 +4263,86 @@ def _matched_email_body(rows, days, tot):
     return "\n".join(lines)
 
 
+def _collate_supplier_discrepancies(rows, preset_sup=None, key_ns="disc"):
+    """Gather ONE supplier's still-open discrepancies into a single query — the `rows` passed in
+    are already the open/Discrepancy set, so anything pushed or cleared has dropped off. Shows the
+    supplier's list, a CSV, and a one-click draft email (to their discrepancy contact) listing every
+    open invoice + reason. If preset_sup is given, collate it directly; otherwise show a picker."""
+    by_sup: dict[str, list] = {}
+    for r in rows:
+        by_sup.setdefault((r.get("supplier") or "—").strip() or "—", []).append(r)
+    if not by_sup:
+        st.caption("No open discrepancies to collate.")
+        return
+
+    def _tot(s):
+        return sum(x["total"] for x in by_sup[s] if isinstance(x.get("total"), (int, float)))
+
+    if preset_sup and preset_sup in by_sup:
+        sup = preset_sup
+    else:
+        order = sorted(by_sup, key=lambda s: (-_tot(s), s))
+        labels = [f"{s}  —  {len(by_sup[s])} open · £{_tot(s):,.2f}" for s in order]
+        pick = st.selectbox("Supplier", ["— choose a supplier —"] + labels,
+                            key=f"{key_ns}_collate_sup")
+        if pick == "— choose a supplier —":
+            return
+        sup = order[labels.index(pick)]
+
+    srows = by_sup[sup]
+    stot = _tot(sup)
+    n = len(srows)
+    st.markdown(f"**{sup}** — {n} open discrepanc{'y' if n == 1 else 'ies'} · £{stot:,.2f}")
+    st.dataframe(
+        [{"Invoice": r.get("invoice_no") or "—", "Order": r.get("order_no") or "—",
+          "£": r.get("total"), "Reason": (r.get("query_note") or "").strip() or "—",
+          "Flagged": _fmt_actioned(r.get("actioned_at"))} for r in srows],
+        use_container_width=True, hide_index=True)
+
+    import csv as _csv2
+    import io as _io2
+    _buf = _io2.StringIO()
+    _w = _csv2.writer(_buf)
+    _w.writerow(["Invoice", "Order", "Supplier", "£", "Reason", "Flagged"])
+    for r in srows:
+        _w.writerow([r.get("invoice_no"), r.get("order_no"), r.get("supplier"),
+                     r.get("total"), r.get("query_note"), _fmt_actioned(r.get("actioned_at"))])
+    _safe = re.sub(r"[^A-Za-z0-9]+", "_", sup).strip("_") or "supplier"
+    default_to = SUPPLIER_EMAILS.get(_norm_code(sup), "")
+    to_sup = st.text_input("Send the query to (supplier's email)", value=default_to,
+                           key=f"{key_ns}_sup_to",
+                           help="Pre-filled with the supplier's discrepancy contact where we have "
+                                "one — edit if needed. The draft lands in your Outlook to review "
+                                "before it's sent.")
+    mailbox = _signed_in_email()
+    ca, cb = st.columns([1, 1])
+    ca.download_button("⬇ Download CSV", _buf.getvalue(), file_name=f"discrepancies_{_safe}.csv",
+                       mime="text/csv", use_container_width=True, key=f"{key_ns}_sup_csv")
+    if cb.button(f"📧 Draft one email to {sup}", use_container_width=True,
+                 key=f"{key_ns}_sup_email", disabled=not (mailbox and (to_sup or "").strip())):
+        try:
+            body = ["Hi,", "",
+                    f"We've found discrepancies on the following {n} invoice(s) from {sup}, "
+                    f"totalling £{stot:,.2f}. Please review and send a corrected invoice or credit "
+                    "as appropriate:", ""]
+            for r in srows:
+                a = (f"£{r['total']:,.2f}" if isinstance(r.get("total"), (int, float)) else "—")
+                body.append(f"- Invoice {r.get('invoice_no') or '—'} "
+                            f"(our order {r.get('order_no') or '—'}, {a}): "
+                            f"{(r.get('query_note') or 'please see invoice').strip()}")
+            body += ["", "Many thanks,", "Trade Superstore Online"]
+            link = data_sources.create_supplier_draft(
+                mailbox, to_sup.strip(),
+                f"Invoice discrepancies to query — {sup} — {n} invoice(s) (£{stot:,.2f})",
+                "\n".join(body))
+            st.success(f"Draft to {to_sup.strip()} created in your Outlook — review and send "
+                       "from Drafts.")
+            if link:
+                st.markdown(f"[Open the draft in Outlook]({link})")
+        except Exception as e:  # noqa: BLE001
+            st.error("Couldn't create the draft: " + str(e)[:200])
+
+
 def render_discrepancy_log():
     """A durable list of every invoice TradeHub flagged as a Discrepancy, with the reason
     saved on Monday — so open discrepancies can be worked without re-checking each invoice.
@@ -4337,73 +4430,6 @@ def render_discrepancy_log():
                 st.error("Couldn't create the draft: " + str(e)[:200])
     else:
         st.caption("Everything flagged has been queried with the supplier. 🎉")
-
-    # ── Collate ONE supplier's open discrepancies into a single query ──────────
-    st.divider()
-    st.markdown("### 📑 Collate by supplier — open discrepancies only")
-    st.caption("Pick a supplier to gather **all of its still-open discrepancies** into one list you "
-               "can query in a single email. **Push or clear the ones you're going to resolve first, "
-               "then ↻ Refresh** — only the ones left open show here.")
-    by_sup: dict[str, list] = {}
-    for r in rows:
-        by_sup.setdefault((r.get("supplier") or "—").strip() or "—", []).append(r)
-
-    def _sup_tot(s):
-        return sum(x["total"] for x in by_sup[s] if isinstance(x.get("total"), (int, float)))
-    sup_order = sorted(by_sup, key=lambda s: (-_sup_tot(s), s))
-    labels = [f"{s}  —  {len(by_sup[s])} open · £{_sup_tot(s):,.2f}" for s in sup_order]
-    pick = st.selectbox("Supplier", ["— choose a supplier —"] + labels, key="disc_collate_sup")
-    if pick != "— choose a supplier —":
-        sup = sup_order[labels.index(pick)]
-        srows = by_sup[sup]
-        stot = _sup_tot(sup)
-        n = len(srows)
-        st.markdown(f"**{sup}** — {n} open discrepanc{'y' if n == 1 else 'ies'} · £{stot:,.2f}")
-        st.markdown(_ptable(base_head, "".join(_rowhtml(r, False) for r in srows)),
-                    unsafe_allow_html=True)
-        import csv as _csv2
-        import io as _io2
-        _buf = _io2.StringIO()
-        _w = _csv2.writer(_buf)
-        _w.writerow(["Invoice", "Order", "Supplier", "£", "Reason", "Flagged"])
-        for r in srows:
-            _w.writerow([r.get("invoice_no"), r.get("order_no"), r.get("supplier"),
-                         r.get("total"), r.get("query_note"), _fmt_actioned(r.get("actioned_at"))])
-        _safe = re.sub(r"[^A-Za-z0-9]+", "_", sup).strip("_") or "supplier"
-        st.download_button("⬇ Download this supplier's list (CSV)", _buf.getvalue(),
-                           file_name=f"discrepancies_{_safe}.csv", mime="text/csv",
-                           use_container_width=True, key="disc_sup_csv")
-        default_to = SUPPLIER_EMAILS.get(_norm_code(sup), "")
-        to_sup = st.text_input("Send the query to (supplier's email)", value=default_to,
-                               key="disc_sup_to",
-                               help="Pre-filled with the supplier's discrepancy contact where we "
-                                    "have one — edit if needed. The draft lands in your Outlook to "
-                                    "review before it's sent.")
-        mailbox = _signed_in_email()
-        if st.button(f"📧 Draft one email to {sup} — {n} invoice{'s' if n != 1 else ''} "
-                     f"(£{stot:,.2f})", use_container_width=True, key="disc_sup_email",
-                     disabled=not (mailbox and (to_sup or "").strip())):
-            try:
-                body = ["Hi,", "",
-                        f"We've found discrepancies on the following {n} invoice(s) from {sup}, "
-                        f"totalling £{stot:,.2f}. Please review and send a corrected invoice or "
-                        "credit as appropriate:", ""]
-                for r in srows:
-                    a = (f"£{r['total']:,.2f}" if isinstance(r.get("total"), (int, float)) else "—")
-                    body.append(f"- Invoice {r.get('invoice_no') or '—'} "
-                                f"(our order {r.get('order_no') or '—'}, {a}): "
-                                f"{(r.get('query_note') or 'please see invoice').strip()}")
-                body += ["", "Many thanks,", "Trade Superstore Online"]
-                link = data_sources.create_supplier_draft(
-                    mailbox, to_sup.strip(),
-                    f"Invoice discrepancies to query — {sup} — {n} invoice(s) (£{stot:,.2f})",
-                    "\n".join(body))
-                st.success(f"Draft to {to_sup.strip()} created in your Outlook — review and send "
-                           "from Drafts.")
-                if link:
-                    st.markdown(f"[Open the draft in Outlook]({link})")
-            except Exception as e:  # noqa: BLE001
-                st.error("Couldn't create the draft: " + str(e)[:200])
 
     with st.expander(f"Already queried — {len(sent)}"):
         if sent:
