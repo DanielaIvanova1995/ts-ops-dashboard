@@ -338,7 +338,9 @@ def _sole_feed_supplier(sku):
         for k, v in pr.items():
             if len(k) >= 5 and (k.startswith(key) or key.startswith(k)):
                 offers.update(v)
-    sups = {s for s, c in (offers or {}).items() if isinstance(c, (int, float))}
+    excl = {re.sub(r"[^a-z0-9]", "", s.lower()) for s in order_routing.EXCLUDED_SUPPLIERS}
+    sups = {s for s, c in (offers or {}).items()
+            if isinstance(c, (int, float)) and s not in excl}   # ignore paused suppliers (NBP)
     return order_routing.CANON.get(next(iter(sups))) if len(sups) == 1 else None
 
 
@@ -544,6 +546,26 @@ def _all_touch_up_paint(items):
         return False
     return all(any(w in (it.get("Item") or it.get("title") or "").lower()
                    for w in ("touch up paint", "touch-up paint")) for it in items)
+
+
+def _force_to_post(iid, supplier, o=None):
+    """Manually mark an order TO POST: Branch = 'TO POST' (so the PO ships to OUR address) and set
+    the ordering email — the local DERBY branch for Eurocell/GAP/Travis Perkins (and UPB Aldridge);
+    a head-office supplier keeps its existing head-office email (left untouched)."""
+    email = None
+    if supplier in ("Eurocell", "Travis Perkins"):
+        try:
+            import branch_finder
+            email = (branch_finder.nearest_branch("DE21 4ED", supplier) or {}).get("email")
+        except Exception:  # noqa: BLE001
+            email = None
+    elif supplier in _DERBY_BRANCH_EMAIL:
+        email = _DERBY_BRANCH_EMAIL[supplier]
+    data_sources.op_set_branch(iid, branch="TO POST", email=email)   # email None → keep head office
+    if o is not None:
+        o["branch"] = "TO POST"
+        if email:
+            o["branch_email"] = email
 
 
 _UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
@@ -1322,6 +1344,29 @@ def _order_detail(o):
                 msg = _process_current(o)
             st.success("Processed → " + msg + ". Hit ↻ Refresh to see the board.")
             st.session_state["_op_orders"] = None
+
+    # ---- Reprocess as TO POST — we bring it in and post it ourselves (deliver to OUR address) ----
+    _tp_sup = (o.get("supplier") or "").strip()
+    if st.button("📮 Reprocess as TO POST (deliver to us; order from Derby for EC/GAP/TP, else head "
+                 "office)", key=f"op_topost_{iid}",
+                 help="Marks the order TO POST, sets the delivery address to ours, points Eurocell/"
+                      "GAP/Travis Perkins/UPB at the Derby branch (head-office suppliers keep their "
+                      "head-office email), and regenerates the PO."):
+        with st.spinner("Marking TO POST + regenerating the PO…"):
+            try:
+                _force_to_post(iid, _tp_sup, o)
+                kind, doc = _build_doc(o)
+                pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
+                    doc, date_str=datetime.date.today().strftime("%d %B %Y"))
+                nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \
+                     "Trade_Superstore_Online.pdf"
+                r = data_sources.op_upload_po(iid, pdf, nm)
+                _write_po_total(iid, kind, doc)
+                st.success(f"TO POST set (Branch = TO POST, delivers to us) + {kind.upper()} "
+                           "regenerated. " + ("Attached ✓" if r.get("ok") else "attach unverified"))
+                st.session_state["_op_orders"] = None
+            except Exception as e:  # noqa: BLE001
+                st.error("Marked TO POST, but couldn't regenerate the PO: " + str(e)[:150])
 
     # ---- Adjust anything before generating (fix a missed qty / address / price, add a line) ----
     # A checkbox, not an expander — this whole panel already renders inside the order's expander,

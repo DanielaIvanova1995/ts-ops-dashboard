@@ -35,6 +35,9 @@ PORTAL = {"PJH", "Toolbank", "Velux", "MB Decor", "Nuie", "National Skirting", "
 QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
+# Suppliers we're NOT buying from right now — never route to them or count their feed prices (kept
+# on file with all their rules; just remove from this set to switch them back on). NBP paused.
+EXCLUDED_SUPPLIERS = {"NBP"}
 
 # ---- James Hardie / Freefoam / Fortex / Cladco postcode routing (Aug 2026 map, avoid NBP) ----
 # Postcode AREAS (the leading letters of a postcode) → who supplies.
@@ -123,6 +126,8 @@ def route_line(line, area_pc=None, sku_supplier=None):
     # Storm polycarbonate (vendor "Storm") or a Toolbank tool never gets grabbed by a brand/SKU
     # rule below.
     lbl = CANON.get(_norm(vendor))
+    if lbl in EXCLUDED_SUPPLIERS:        # not buying from them — don't route here, fall through
+        lbl = None
     # Storm is too expensive right now, so Storm products go to MOLAN for a quote instead (Molan
     # quote them well). EXCEPT Triton decking/cladding, which only Storm do — those quote from
     # Storm. Temporary redirect — remove this block to route all Storm to Storm again.
