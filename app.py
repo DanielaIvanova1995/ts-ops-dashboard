@@ -6976,8 +6976,14 @@ def _render_month_end_forecast(data):
     t = st.columns(4)
     t[0].metric("Overdue now", m(overdue))
     t[1].metric(f"Due by {eom_lbl}", m(due_now))
-    t[2].metric("→ Pay by month-end", m(overdue + due_now))
+    t[2].metric("→ Pay by month-end (approved)", m(overdue + due_now))
     t[3].metric("Total owed (all open)", m(owed_all))
+    if to_review:
+        st.info(f"The £ tiles above are **approved** bills in QuickBooks only. Adding the "
+                f"**{len(to_review)}** invoice(s) still to review (~{m(review_tot)}), the month-end "
+                f"run could be up to **{m(overdue + due_now + review_tot)}** once they're approved.")
+    else:
+        st.caption("£ tiles are approved QuickBooks bills. Nothing else is awaiting review.")
 
     rows = []
     for name, p in sorted(per.items(), key=lambda kv: -(kv[1]["overdue"] + kv[1]["due_eom"])):
