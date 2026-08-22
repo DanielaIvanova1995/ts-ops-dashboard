@@ -422,6 +422,8 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     order_no = o.get("order_no") or o.get("name") or ""
     contact = f"{o.get('customer') or ''}".strip()
     phone = (ship or {}).get("phone") or o.get("phone") or ""
+    if supplier == "Eurocell":
+        phone = "0333 090 9217"    # Eurocell POs: ALWAYS our number, never the customer's
     if to_post:
         notes = [f"Deliver to the address above (Trade Superstore Online) — we post this small order "
                  "to the customer ourselves.",
