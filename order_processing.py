@@ -562,11 +562,16 @@ def _force_to_post(iid, supplier, o=None):
     elif supplier in _DERBY_BRANCH_EMAIL:
         email = _DERBY_BRANCH_EMAIL[supplier]
     branch_lbl = "TO POST - UPB Aldridge" if supplier == "UPB" else "TO POST"
-    data_sources.op_set_branch(iid, branch=branch_lbl, email=email)  # email None → keep head office
-    if o is not None:
-        o["branch"] = branch_lbl
-        if email:
+    if email:                              # Eurocell/GAP/TP/UPB → the Derby branch email
+        data_sources.op_set_branch(iid, branch=branch_lbl, email=email)
+        if o is not None:
+            o["branch"] = branch_lbl
             o["branch_email"] = email
+    else:                                  # head-office supplier → keep it at its correct PO email
+        data_sources.op_set_branch(iid, branch=branch_lbl)
+        if o is not None:
+            o["branch"] = branch_lbl
+        _fix_po_email(iid, supplier, o)    # e.g. Vista is always orders@vistaeng.co.uk
 
 
 _UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
@@ -1565,6 +1570,7 @@ def _quote_to_po(orders, sup_opts):
                         r = data_sources.op_upload_po(qp["iid"], qp["bytes"], qp["name"])
                         if r.get("ok"):
                             data_sources.op_set_supplier(qp["iid"], qp["sup"])
+                            _fix_po_email(qp["iid"], qp["sup"])   # lock supplier's PO email (e.g. Vista)
                             _write_po_total(qp["iid"], qp["kind"], qp)
                             st.success("Attached, supplier set to " + qp["sup"] + ". ↻ Refresh.")
                             st.session_state["_op_orders"] = None
