@@ -1089,6 +1089,18 @@ def _persqm_cost(sku, supplier, *texts):
     return round(area * rates[base], 2)
 
 
+def _persqm_rate(sku, supplier):
+    """The £/m² RATE for a per-m²-billed line (Molan QNET), or None — NOT multiplied by area.
+    Used on the invoice side, where Molan already bills qty = total sheet area, so the effective
+    £/m² (line_total ÷ qty) is compared directly to this rate."""
+    rates = _persqm_rates().get(_norm_code(supplier))
+    if not rates:
+        return None
+    key = _norm_code(sku)
+    base = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+    return rates[base] if base else None
+
+
 def _parse_order_items(text):
     """Order line text → {key: {sku, qty, name}}. Keyed by normalised SKU when the line has
     one, else a synthetic key so a product that's on the order but has NO SKU set is still a
@@ -2379,6 +2391,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
         issues = []
         cost = None
         title_note = None
+        area_billed = False
         if _is_decor8(supplier):
             # Decor8 have NO SKUs and no cost pricelist — priced vs OUR OWN price, taken from the
             # Shopify order line they match by NAME. Resolved after the order match, below.
@@ -2397,7 +2410,25 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                 c2, mt = _supplier_title_cost(desc, supplier, tidx)
                 if c2 is not None:
                     cost, title_note = c2, mt
-            if not no_pl:                             # suppliers with no pricelist: skip price check
+            # Molan QNET multiwall polycarbonate is invoiced PER m² — the invoice's Quantity is the
+            # TOTAL sheet area (not pieces) and the unit is £/m². Validate the effective £/m²
+            # (line_total ÷ qty) against our rate, and flag the line as area-billed so the generic
+            # unit-price and piece-quantity checks are skipped for it.
+            _rate = _persqm_rate(sku_raw, supplier) if cost is None else None
+            if _rate is not None:
+                area_billed = True
+                cost = _rate
+                _lt = ln.get("line_total")
+                _eff = (_lt / qty if isinstance(_lt, (int, float)) and isinstance(qty, (int, float))
+                        and qty else unit)
+                if isinstance(_eff, (int, float)):
+                    _q = f" × {qty:g} m²" if isinstance(qty, (int, float)) else ""
+                    if _eff > _rate + tol:
+                        issues.append(("price", f"£{_eff:,.2f}/m² vs our £{_rate:,.2f}/m² rate "
+                                                f"(+£{_eff - _rate:,.2f}/m²){_q}"))
+                    else:
+                        issues.append(("name", f"£{_eff:,.2f}/m² = our £{_rate:,.2f}/m² rate{_q}"))
+            if not no_pl and not area_billed:         # suppliers with no pricelist: skip price check
                 if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                     sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)   # e.g. Eurocell temporary 5%
                     allowed = cost * (1 + sur)                    # pricelist + expected surcharge
@@ -2419,7 +2450,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                     issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
                "unit": unit, "line_total": ln.get("line_total"), "cost": cost,
-               "issues": issues, "_okey": None}
+               "issues": issues, "_okey": None, "_areaqty": area_billed}
         lines.append(rec)
 
         # Order match. Exact SKU and embedded-code matches are certain, so assign them now.
@@ -2577,20 +2608,14 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             unit = rec.get("unit")
             if okey is None or not isinstance(unit, (int, float)):
                 continue
-            osku = order[okey].get("sku")
-            oc = (pidx.get(_canon_sku(osku)) or {}).get(supplier)
-            via = f"our SKU {osku} (invoice uses their own code)"
-            if not isinstance(oc, (int, float)):
-                # Per-m² sheets (Molan QNET): compute from the ordered size × the £/m² rate — covers
-                # sizes the feed doesn't list. Size comes from the order line's SKU/name.
-                oc = _persqm_cost(osku, supplier, order[okey].get("name"))
-                if isinstance(oc, (int, float)):
-                    via = f"our SKU {osku} (per-m² rate × sheet area)"
+            oc = (pidx.get(_canon_sku(order[okey].get("sku"))) or {}).get(supplier)
             if not isinstance(oc, (int, float)):
                 continue
             rec["cost"] = oc
             rec["issues"] = [i for i in rec["issues"] if i[0] != "noprice"]   # order SKU priced it
-            rec["issues"].extend(_price_issues(supplier, unit, oc, tol, via))
+            rec["issues"].extend(
+                _price_issues(supplier, unit, oc, tol,
+                              f"our SKU {order[okey]['sku']} (invoice uses their own code)"))
 
     # Quantity check on the TOTAL invoiced per order line. A product split across invoice lines
     # that sums to the ordered qty is fine. A SHORTFALL (invoiced < ordered) is NOT a discrepancy
@@ -2599,6 +2624,10 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
     # single invoice is a hard quantity discrepancy here. One note per order line.
     short = {}   # order key → (invoiced_here, ordered)  when this invoice is short on that line
     for k in hit:
+        # Skip lines billed by area (Molan QNET m²): the invoice qty is a sheet area, not a piece
+        # count, so a piece-quantity comparison is meaningless (checked on £/m² instead).
+        if any(r.get("_areaqty") for r in lines if r.get("_okey") == k):
+            continue
         exp, tot = order[k]["qty"], inv_qty.get(k)
         if exp is None or tot is None or int(round(tot)) == exp:
             continue
