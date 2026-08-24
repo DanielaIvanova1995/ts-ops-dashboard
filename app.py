@@ -2591,6 +2591,42 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
                    else "invoice SKU differs slightly — matched by product name/code")
             pending[idx]["issues"].append(
                 ("name", f"matched to order line {order[k]['sku']} — {why}"))
+    # Cross-supplier substitute (Daniela, 2026-08-24): a small item that is normally ANOTHER
+    # supplier's product but got fulfilled by THIS supplier because ~all of the order is theirs
+    # anyway (e.g. GAP cladding pins GP30DG supplied by Eurocell as their own EPIN30GY1 — cheaper
+    # than shipping the pins separately). If leftover invoice AND order lines remain after every
+    # real match, pair them when the names 'more or less' match (a shared 4+ char word) AND the
+    # price is similar (invoice unit within 30% of the order line's sell price). Only leftovers
+    # reach here, so it can't steal a proper match; a split sub-order wouldn't carry the other
+    # supplier's line at all, so this only ever fires on an unsplit order.
+    for idx, iv in enumerate(pending):
+        if idx in done or not isinstance(iv.get("unit"), (int, float)):
+            continue
+        iu = iv["unit"]
+        dt = _title_tokens(iv.get("desc"))
+        best = None
+        for k, v in order.items():
+            if k in hit:
+                continue
+            ref = v.get("price")
+            if not isinstance(ref, (int, float)):
+                oc = pidx.get(_canon_sku(v.get("sku"))) or {}
+                ref = next((c for c in oc.values() if isinstance(c, (int, float))), None)
+            if not isinstance(ref, (int, float)) or ref <= 0:
+                continue
+            if not any(len(t) >= 4 for t in (dt & _title_tokens(v.get("name")))):
+                continue                                  # names must 'more or less' match
+            diff = abs(iu - ref) / ref
+            if diff <= 0.30 and (best is None or diff < best[0]):   # …and the price is similar
+                best = (diff, k)
+        if best:
+            k = best[1]
+            done.add(idx)
+            _hit(iv, k)
+            iv["issues"].append(
+                ("name", f"matched to order line {order[k]['sku']} — cross-supplier substitute "
+                         f"({supplier} supplied their own equivalent of another supplier's item; "
+                         "names & price align)"))
     for idx, rec in enumerate(pending):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
