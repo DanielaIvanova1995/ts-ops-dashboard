@@ -2948,6 +2948,33 @@
    }
   ]
  },
+ "_persqm": {
+  "Molan": {
+   "QNET04122C": 5.53,
+   "QNET06CLR": 9.02,
+   "QNET10BRZ": 10.40,
+   "QNET10CLR": 10.40,
+   "QNET10OPL": 10.40,
+   "QNET16BRZ": 17.35,
+   "QNET16CLR": 17.35,
+   "QNET16OPL": 17.35,
+   "QS16HEATNET": 18.73,
+   "QNET25BRZ": 21.58,
+   "QNET25CLR": 21.58,
+   "QNET25OPL": 21.58,
+   "QSBO25PNET": 23.33,
+   "QSHO25PNET": 23.33,
+   "QNET32BRZ": 24.97,
+   "QNET32CLR": 24.95,
+   "QNET32HOGSM": 26.94,
+   "QNET32OPL": 24.97,
+   "QNET35BOGSM": 28.47,
+   "QNET35BRZ": 26.29,
+   "QNET35CLR": 26.28,
+   "QNET35HOGSM": 28.47,
+   "QNET35OPL": 26.29
+  }
+ },
  "MB Decor": {
   "QMB01": 4.71,
   "QMB02": 4.71,

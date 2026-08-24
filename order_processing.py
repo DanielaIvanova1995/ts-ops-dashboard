@@ -299,7 +299,7 @@ def _pricing_table(stamp):
     try:
         ov = json.load(open("price_overrides.json", encoding="utf-8"))
         for sup, skus in ov.items():
-            if sup in ("_patterns", "_titles") or not isinstance(skus, dict):   # handled in _line_cost
+            if sup in ("_patterns", "_titles", "_persqm") or not isinstance(skus, dict):  # see _line_cost
                 continue
             sn = _canon_sup(sup)
             for sk, cost in skus.items():
@@ -343,6 +343,54 @@ def _price_titles():
     return out
 
 
+def _persqm_rates():
+    """{supplier_norm: {base_sku_norm: £ per m²}} — suppliers who charge by SHEET AREA rather than
+    a flat per-item cost (Molan QNET multiwall polycarbonate). From price_overrides.json '_persqm'.
+    The line cost = the ordered sheet's area (m²) × the base SKU's £/m² rate."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_persqm") or {}).items():
+        sn = _canon_sup(sup)
+        out[sn] = {re.sub(r"[^a-z0-9]", "", (k or "").lower()): v
+                   for k, v in (rules or {}).items() if isinstance(v, (int, float))}
+    return out
+
+
+_DIM_RE = re.compile(r"(\d{2,5})\s*[x×*]\s*(\d{2,5})")
+
+
+def _sheet_area_m2(*texts):
+    """Largest W×H (mm) found across the given texts, as an area in m² — the ordered sheet size is
+    usually in the variant/SKU (e.g. '1220x610mm', 'QNET06CLR-1220x610mm'). None if no size found."""
+    best = 0.0
+    for t in texts:
+        for m in _DIM_RE.finditer(str(t or "")):
+            w, h = int(m.group(1)), int(m.group(2))
+            if 50 <= w <= 6000 and 50 <= h <= 6000:      # sane sheet dims in mm
+                best = max(best, (w / 1000.0) * (h / 1000.0))
+    return best or None
+
+
+def _persqm_cost(sku, supplier, *texts):
+    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan QNET). The size is read
+    from the SKU/variant/name (any of `texts`). Returns None if this supplier/SKU isn't per-m²
+    priced or no size can be found — so pricing falls through to the normal SKU lookup."""
+    rates = _persqm_rates().get(_canon_sup(supplier))
+    if not rates:
+        return None
+    key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
+    base = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+    if not base:
+        return None
+    area = _sheet_area_m2(sku, *texts)
+    if not area:
+        return None
+    return round(area * rates[base], 2)
+
+
 def _sole_feed_supplier(sku):
     """If the pricing feed prices this SKU from exactly ONE supplier, return that supplier's label
     (routing fallback for a house-brand line whose Shopify vendor reveals no supplier). Matches the
@@ -364,11 +412,15 @@ def _sole_feed_supplier(sku):
     return order_routing.CANON.get(next(iter(sups))) if len(sups) == 1 else None
 
 
-def _line_cost(sku, supplier, name=None):
+def _line_cost(sku, supplier, name=None, variant=None):
     """The routed supplier's OWN cost for a SKU (or, failing that, its product title), or None.
     STRICT RULE: a supplier's cost is only ever that supplier's own price — never another
     supplier's (Daniela, 2026-08-18). If the supplier has no price the line stays unpriced (→
     packing slip), it never borrows another's."""
+    # Per-m² sheets (Molan QNET multiwall polycarbonate): cost = ordered area × the base £/m² rate.
+    pq = _persqm_cost(sku, supplier, variant, name)
+    if pq is not None:
+        return pq
     key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
     sup = _canon_sup(supplier)
     c = (_pricing().get(key) or {}).get(sup)
@@ -493,7 +545,7 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         except (TypeError, ValueError):
             q = 1
         cost = it.get("Cost") if isinstance(it.get("Cost"), (int, float)) \
-            else _line_cost(it.get("SKU"), supplier, it.get("Item"))
+            else _line_cost(it.get("SKU"), supplier, it.get("Item"), it.get("Variant"))
         if cost is None:
             unpriced_items.append((it.get("Item") or it.get("SKU") or "?").strip())
         else:
@@ -667,7 +719,8 @@ def _apply_post_if_cheaper(iid, supplier, items, sid, o=None):
         return False
     goods = 0.0
     for it in items:
-        c = _line_cost(it.get("SKU") or it.get("sku"), supplier, it.get("Item") or it.get("title"))
+        c = _line_cost(it.get("SKU") or it.get("sku"), supplier,
+                       it.get("Item") or it.get("title"), it.get("Variant") or it.get("variant"))
         if isinstance(c, (int, float)):
             try:
                 goods += c * float(it.get("Qty") or it.get("qty") or 1)

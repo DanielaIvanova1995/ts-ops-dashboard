@@ -1043,6 +1043,52 @@ def _canon_sku(sku):
     return s
 
 
+def _persqm_rates():
+    """{supplier_norm: {base_sku_norm: £ per m²}} — suppliers who charge by SHEET AREA not a flat
+    per-item cost (Molan QNET multiwall polycarbonate). From price_overrides.json '_persqm'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_persqm") or {}).items():
+        sn = _norm_code(sup)
+        out[sn] = {_norm_code(k): v for k, v in (rules or {}).items()
+                   if isinstance(v, (int, float))}
+    return out
+
+
+_SHEET_DIM_RE = re.compile(r"(\d{2,5})\s*[x×*]\s*(\d{2,5})")
+
+
+def _sheet_area_m2(*texts):
+    """Largest W×H (mm) across the texts → area in m² (the ordered sheet size is usually in the
+    variant/SKU, e.g. '1220x610mm'). None if no plausible size is found."""
+    best = 0.0
+    for t in texts:
+        for m in _SHEET_DIM_RE.finditer(str(t or "")):
+            w, h = int(m.group(1)), int(m.group(2))
+            if 50 <= w <= 6000 and 50 <= h <= 6000:
+                best = max(best, (w / 1000.0) * (h / 1000.0))
+    return best or None
+
+
+def _persqm_cost(sku, supplier, *texts):
+    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan QNET). Size read from the
+    SKU/variant/name. None if this supplier/SKU isn't per-m² priced or no size is found."""
+    rates = _persqm_rates().get(_norm_code(supplier))
+    if not rates:
+        return None
+    key = _norm_code(sku)
+    base = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+    if not base:
+        return None
+    area = _sheet_area_m2(sku, *texts)
+    if not area:
+        return None
+    return round(area * rates[base], 2)
+
+
 def _parse_order_items(text):
     """Order line text → {key: {sku, qty, name}}. Keyed by normalised SKU when the line has
     one, else a synthetic key so a product that's on the order but has NO SKU set is still a
@@ -1373,7 +1419,7 @@ def _pricelist_index():
                 idx.setdefault(sk, {})[sup] = o.get("c")
     ov = _price_overrides()
     for sup, skus in ov.items():
-        if sup in ("_patterns", "_titles") or not isinstance(skus, dict):
+        if sup in ("_patterns", "_titles", "_persqm") or not isinstance(skus, dict):
             continue
         sn = _norm_code(sup)
         for sk, cost in skus.items():
@@ -2531,14 +2577,20 @@ def _check_invoice(parsed, meta, pidx, tol=0.01):
             unit = rec.get("unit")
             if okey is None or not isinstance(unit, (int, float)):
                 continue
-            oc = (pidx.get(_canon_sku(order[okey].get("sku"))) or {}).get(supplier)
+            osku = order[okey].get("sku")
+            oc = (pidx.get(_canon_sku(osku)) or {}).get(supplier)
+            via = f"our SKU {osku} (invoice uses their own code)"
+            if not isinstance(oc, (int, float)):
+                # Per-m² sheets (Molan QNET): compute from the ordered size × the £/m² rate — covers
+                # sizes the feed doesn't list. Size comes from the order line's SKU/name.
+                oc = _persqm_cost(osku, supplier, order[okey].get("name"))
+                if isinstance(oc, (int, float)):
+                    via = f"our SKU {osku} (per-m² rate × sheet area)"
             if not isinstance(oc, (int, float)):
                 continue
             rec["cost"] = oc
             rec["issues"] = [i for i in rec["issues"] if i[0] != "noprice"]   # order SKU priced it
-            rec["issues"].extend(
-                _price_issues(supplier, unit, oc, tol,
-                              f"our SKU {order[okey]['sku']} (invoice uses their own code)"))
+            rec["issues"].extend(_price_issues(supplier, unit, oc, tol, via))
 
     # Quantity check on the TOTAL invoiced per order line. A product split across invoice lines
     # that sums to the ordered qty is fine. A SHORTFALL (invoiced < ordered) is NOT a discrepancy
