@@ -6674,11 +6674,15 @@ def _bulk_reconcile_one(s, limits):
     except Exception:  # noqa: BLE001
         mp = None
     vid = mp["id"] if mp else None
+    vname = mp.get("name") if mp else None
     if not vid:
         auto = data_sources.qbo_find_vendor(sup)
-        vid = auto["id"] if auto else None
+        if auto:
+            vid, vname = auto["id"], auto.get("name")
     if not vid:
         return f"⚠ {sup}: no QuickBooks vendor match — open it manually to pick one"
+    if vname:                          # the QuickBooks vendor name is the authoritative payee
+        sup = vname
     bills = data_sources.qbo_vendor_bills(vid)
     try:
         paymap = data_sources.qbo_vendor_payments(vid)
@@ -6932,6 +6936,11 @@ def _render_statement_recon():
             data_sources.qbo_vendor_map_save(sup_key, vid, picked)
         except Exception:  # noqa: BLE001
             pass
+    # The chosen QuickBooks vendor is the authoritative payee — use its name everywhere downstream
+    # (remittance payee, reference, filename, invoice-number normalisation), so a statement the
+    # parser couldn't identify (supplier defaults to 'unknown') still produces a correctly-named
+    # remittance once it's mapped to a vendor.
+    sup = picked
     with st.spinner("Reading QuickBooks bills & payments…"):
         try:
             bills = data_sources.qbo_vendor_bills(vid)
