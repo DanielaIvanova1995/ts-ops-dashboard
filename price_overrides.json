@@ -2938,6 +2938,10 @@
    {
     "contains": "hardie plank internal corner",
     "cost": 15.75
+   },
+   {
+    "contains": "james hardie architectural panel",
+    "cost": 123.0
    }
   ]
  },
