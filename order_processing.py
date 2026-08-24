@@ -259,11 +259,31 @@ def _canon_sup(s):
     return re.sub(r"[^a-z0-9]", "", lbl.lower()) if lbl else n
 
 
-@st.cache_data(show_spinner=False)
+def _prices_stamp():
+    """Newest mtime across the price files — passed into the cached table so a pushed price edit
+    (feed or price_overrides.json) is picked up on the next rerun WITHOUT needing a full reboot."""
+    import os
+    latest = 0.0
+    for f in ("pricing_lookup.json", "price_overrides.json"):
+        try:
+            latest = max(latest, os.path.getmtime(f))
+        except OSError:
+            pass
+    return latest
+
+
 def _pricing():
+    """{normalised SKU: {supplier_canon: cost}} — thin wrapper that busts the cache when the price
+    files change (see _prices_stamp)."""
+    return _pricing_table(_prices_stamp())
+
+
+@st.cache_data(show_spinner=False)
+def _pricing_table(stamp):
     """{normalised SKU: {supplier_canon: cost}} from the pricing feed (Airtable-derived).
     Supplier names are canonicalised (see _canon_sup) so 'LPD' in the feed matches 'LPD DOORS'
-    on the order."""
+    on the order. `stamp` (the price files' newest mtime) is part of the cache key, so the table
+    is rebuilt whenever a price file changes rather than living for the whole session."""
     try:
         d = json.load(open("pricing_lookup.json", encoding="utf-8"))
     except Exception:  # noqa: BLE001
