@@ -90,8 +90,8 @@ def hardie_route(pc, smooth=False):
     note = (" — SMOOTH finish: confirm UPB stock, else Squaredeal always have Smooth"
             if smooth else "")
     if not area:
-        return {"supplier": "UPB", "reason": "Hardie/Freefoam — no postcode to route on; "
-                "confirm branch" + note, "needs_branch": True, "conf": "low"}
+        return {"supplier": "National Plastics", "reason": "Hardie/Freefoam — no postcode to route "
+                "on; National Plastics do Hardie nationwide" + note, "conf": "low"}
     if area in _SCOTLAND:
         return {"supplier": "Bricklink", "reason": f"Scotland ({area}) → Bricklink (quote first)"
                 + note, "quote": True, "conf": "med"}
@@ -103,8 +103,8 @@ def hardie_route(pc, smooth=False):
     if area in _SQUAREDEAL:
         return {"supplier": "Squaredeal", "reason": f"Squaredeal south ({area}) — quote first"
                 + note, "quote": True, "conf": "med"}
-    return {"supplier": "UPB", "reason": f"Postcode {area} not on the Hardie map — try "
-            "UPB/Squaredeal/Bricklink, confirm" + note, "needs_branch": True, "conf": "low"}
+    return {"supplier": "National Plastics", "reason": f"{area} not covered by UPB or Squaredeal "
+            "→ National Plastics (they do Hardie nationwide)" + note, "conf": "med"}
 
 
 def _norm(s):
