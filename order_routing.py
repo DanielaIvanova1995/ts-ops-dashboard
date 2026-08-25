@@ -59,6 +59,23 @@ _SQUAREDEAL = {"TR", "PL", "TQ", "EX", "TA", "DT", "BH", "BA", "BS", "SP", "SO",
 _UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
               "UPB Ipswich": "ipswich@upbuildingproducts.com",
               "UPB Aldridge": "martinmelaney@upbuildingproducts.com"}
+_UPB_DEPOT_PHONE = {"UPB Newmarket": "01638501927"}   # Ipswich / Aldridge TBC
+
+
+def upb_depot_for(pc):
+    """UPB Hardie depot (branch label, order email, phone) for a postcode. ALWAYS returns a depot —
+    defaults to Aldridge (the main one, nearest us) when the area isn't in a specific depot's patch
+    — so FORCING UPB on any order (even one that auto-routed to Squaredeal/Bricklink, or a postcode
+    not on the Hardie map) still gets a UPB branch + contact details."""
+    area = postcode_area(pc)
+    for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
+                        ("UPB Aldridge", _UPB_ALDRIDGE)):
+        if area in keys:
+            return depot, _UPB_DEPOT[depot], _UPB_DEPOT_PHONE.get(depot)
+    # Not in a specific depot patch. The uncovered areas are the southern Squaredeal patch — served
+    # from Newmarket (East Anglia/South-East); anything else falls back to Aldridge (nearest us).
+    fb = "UPB Newmarket" if area in _SQUAREDEAL else "UPB Aldridge"
+    return fb, _UPB_DEPOT[fb], _UPB_DEPOT_PHONE.get(fb)
 
 
 def postcode_area(pc):

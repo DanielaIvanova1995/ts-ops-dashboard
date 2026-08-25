@@ -965,8 +965,9 @@ def _resolve_branch(supplier, postcode):
         if nb and nb.get("branch_name"):
             return nb["branch_name"], nb.get("email"), nb.get("phone")
     if supplier == "UPB":
-        hr = order_routing.hardie_route(postcode)
-        return hr.get("branch"), hr.get("branch_email"), None
+        # ALWAYS resolve a UPB depot (branch + email + phone) — even when the postcode auto-routed
+        # to Squaredeal/Bricklink or isn't on the Hardie map — so forcing UPB fills the branch.
+        return order_routing.upb_depot_for(postcode)
     return None, None, None
 
 
