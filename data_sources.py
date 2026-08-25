@@ -3323,8 +3323,10 @@ def op_set_supplier(item_id, label: str, token: str | None = None):
     import json as _json
     token = token or get_token()
     val = {"labels": [label]} if (label or "").strip() else {"labels": []}   # empty list clears
+    # create_labels_if_missing → a brand-new supplier (e.g. National Plastics) auto-creates its
+    # Monday dropdown label the first time it's written, so adding a supplier only needs the code.
     q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,item_id:$i,"
-         "column_id:$c,value:$v){id}}")
+         "column_id:$c,value:$v,create_labels_if_missing:true){id}}")
     r = requests.post(MONDAY_API, json={"query": q, "variables": {
         "b": str(ORDERS_BOARD_ID), "i": str(item_id), "c": OP_SUPPLIER_COL,
         "v": _json.dumps(val)}},

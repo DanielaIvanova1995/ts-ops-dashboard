@@ -27,6 +27,7 @@ CANON = {
     "mbdiy": "MB Decor", "permaroof": "Permaroof", "newplas": "newplas", "bricklink": "Bricklink",
     "brickservices": "Brickservices", "plastivan": "Plastivan", "brundle": "Brundle",
     "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "C TIE",
+    "nationalplastics": "National Plastics",   # distinct from NBP
     # brand locks
     "jameshardie": "UPB", "hardie": "UPB", "freefoam": "UPB", "fortex": "UPB", "cladco": "UPB",
 }
