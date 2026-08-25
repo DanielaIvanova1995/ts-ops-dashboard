@@ -38,7 +38,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Decor8": "hello@paintersworld.co.uk",           # Painters World
                      "Etills": "info@etills.com",
                      "NBP": "sales@nbp.co.uk",
-                     "Southern Sheeting": "jordan@southernsheeting.co.uk",
+                     "Southern Sheeting": "jordan.toogood@southernsheeting.co.uk",
                      "Huws Gray": "colin.tansley@huwsgray.co.uk",     # Colin Tansley, Derby
                      "Storm": "sales@stormbuildingproducts.com",
                      "Rexel": "adam.mussa@rexel.co.uk",
@@ -69,7 +69,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
 # instead). Seeded from the rulebook's confident landlines — Daniela to confirm/complete the rest
 # from the supplier & contacts sheet.
 SUPPLIER_HEAD_OFFICE_PHONE = {
-    "Southern Sheeting": "01342 337119", "Decor8": "0161 763 7007", "Rexel": "0330 045 0606",
+    "Southern Sheeting": "01342315300", "Decor8": "0161 763 7007", "Rexel": "0330 045 0606",
     "LPD DOORS": "0113 251 3948", "JB Kind": "01283 554197", "Carron": "01400 263 310",
     "Hurlingham": "01400 263 310", "Hurlingham Baths": "01400 263 310",
     "Walls and Floors": "01536 410484", "Permaroof": "01773 608808", "Newplas": "01332 322160",
@@ -1774,6 +1774,24 @@ def render():
             if new_sup != (o.get("supplier") or None):
                 data_sources.op_set_supplier(o["item_id"], new_sup or "")   # "" clears the dropdown
                 o["supplier"] = new_sup or ""
+                if new_sup:
+                    # Changing the supplier in the grid also refreshes the branch + contact details
+                    # (nearest branch for Eurocell/TP/UPB, else the supplier's PO email + head-office
+                    # phone) — so you don't have to click "Process this order as…" just for contacts.
+                    try:
+                        sid = (o.get("shopify_id") or "").strip()
+                        pc = ((data_sources.fetch_order_shipping(sid) or {}).get("postcode")
+                              if sid else None)
+                        br, em, ph = _resolve_branch(new_sup, pc)
+                        if br or em or ph:
+                            data_sources.op_set_branch(o["item_id"], branch=br, email=em, phone=ph)
+                            if br:
+                                o["branch"] = br
+                            if em:
+                                o["branch_email"] = em
+                        _fix_po_email(o["item_id"], new_sup, o)
+                    except Exception:  # noqa: BLE001
+                        pass
                 st.toast(f"{o.get('order_no')} · supplier → {new_sup or '(cleared)'}")
             raw_stage = _stage_plain(edited.iloc[i]["Stage"])
             new_stage = raw_stage.strip() if isinstance(raw_stage, str) and raw_stage.strip() \
