@@ -120,6 +120,7 @@ def route_line(line, area_pc=None, sku_supplier=None):
     title = line.get("title") or ""
     sku = (line.get("sku") or "").strip()
     vendor = line.get("vendor") or ""
+    tags = _norm(" ".join(line.get("tags") or []))
     blob = _norm(title) + " " + _norm(vendor)
 
     def out(route, supplier, reason, conf, portal=False, quote=False, needs_branch=False,
@@ -140,6 +141,11 @@ def route_line(line, area_pc=None, sku_supplier=None):
         return out(hr["supplier"], hr["supplier"], hr["reason"], hr["conf"],
                    quote=hr.get("quote", False), needs_branch=hr.get("needs_branch", False),
                    branch=hr.get("branch"), branch_email=hr.get("branch_email"))
+    # Zest wall/shower panels (tagged "Zest…", currently vendor UPB) are now sourced from National
+    # Plastics (Daniela, 2026-08-24) — check the tag so it OVERRIDES the UPB vendor below.
+    if "zest" in tags or "zest" in blob:
+        return out("National Plastics", "National Plastics",
+                   "Zest panel → National Plastics", "high")
     # Shopify VENDOR is the authoritative router for everything else — check it FIRST, so a
     # Storm polycarbonate (vendor "Storm") or a Toolbank tool never gets grabbed by a brand/SKU
     # rule below.

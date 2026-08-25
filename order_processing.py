@@ -37,6 +37,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "MB Decor": "orders@mbdecor.co.uk",              # DecorOrders
                      "Decor8": "hello@paintersworld.co.uk",           # Painters World
                      "Etills": "info@etills.com",
+                     "National Plastics": "wchammings@specbd.co.uk",   # Will Chammings (Zest panels)
                      "NBP": "sales@nbp.co.uk",
                      "Southern Sheeting": "jordan.toogood@southernsheeting.co.uk",
                      "Huws Gray": "colin.tansley@huwsgray.co.uk",     # Colin Tansley, Derby
@@ -70,6 +71,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
 # from the supplier & contacts sheet.
 SUPPLIER_HEAD_OFFICE_PHONE = {
     "Southern Sheeting": "01342315300", "Decor8": "0161 763 7007", "Rexel": "0330 045 0606",
+    "National Plastics": "07836 273 948",   # Will Chammings
     "LPD DOORS": "0113 251 3948", "JB Kind": "01283 554197", "Carron": "01400 263 310",
     "Hurlingham": "01400 263 310", "Hurlingham Baths": "01400 263 310",
     "Walls and Floors": "01536 410484", "Permaroof": "01773 608808", "Newplas": "01332 322160",
