@@ -38,6 +38,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Decor8": "hello@paintersworld.co.uk",           # Painters World
                      "Etills": "info@etills.com",
                      "National Plastics": "wchammings@specbd.co.uk",   # Will Chammings (Zest panels)
+                     "AJW": "kevin.addison@ajwdistribution.co.uk",     # Kevin Addison — Cedral quotes
                      "NBP": "sales@nbp.co.uk",
                      "Southern Sheeting": "jordan.toogood@southernsheeting.co.uk",
                      "Huws Gray": "colin.tansley@huwsgray.co.uk",     # Colin Tansley, Derby

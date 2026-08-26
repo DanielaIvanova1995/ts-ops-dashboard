@@ -28,12 +28,13 @@ CANON = {
     "brickservices": "Brickservices", "plastivan": "Plastivan", "brundle": "Brundle",
     "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "C TIE",
     "nationalplastics": "National Plastics",   # distinct from NBP
+    "ajw": "AJW", "ajwdistribution": "AJW",     # AJW Distribution — Cedral quotes
     # brand locks
     "jameshardie": "UPB", "hardie": "UPB", "freefoam": "UPB", "fortex": "UPB", "cladco": "UPB",
 }
 
 PORTAL = {"PJH", "Toolbank", "Velux", "MB Decor", "Nuie", "National Skirting", "Rexel"}
-QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices"}
+QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices", "AJW"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
 # Suppliers we're NOT buying from right now — never route to them or count their feed prices (kept
@@ -146,6 +147,11 @@ def route_line(line, area_pc=None, sku_supplier=None):
     if "zest" in tags or "zest" in blob:
         return out("National Plastics", "National Plastics",
                    "Zest panel → National Plastics", "high")
+    # Cedral (fibre-cement cladding) → quote from AJW Distribution until we get their pricelist
+    # (Daniela, 2026-08-24). Tag/name check overrides whatever vendor it sits under.
+    if "cedral" in tags or "cedral" in blob:
+        return out("AJW", "AJW", "Cedral → AJW Distribution for a quote (no pricelist yet)",
+                   "high", quote=True, branch_email="kevin.addison@ajwdistribution.co.uk")
     # Shopify VENDOR is the authoritative router for everything else — check it FIRST, so a
     # Storm polycarbonate (vendor "Storm") or a Toolbank tool never gets grabbed by a brand/SKU
     # rule below.
