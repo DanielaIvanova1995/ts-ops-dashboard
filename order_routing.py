@@ -45,38 +45,25 @@ EXCLUDED_SUPPLIERS = {"NBP"}
 # Postcode AREAS (the leading letters of a postcode) → who supplies.
 _SCOTLAND = {"AB", "DD", "DG", "EH", "FK", "G", "HS", "IV", "KA", "KW", "KY", "ML", "PA", "PH",
              "TD", "ZE"}
-_UPB_NEWMARKET = {"PE", "CB", "SG", "NN", "MK", "EN"}
-_UPB_IPSWICH = {"NR", "IP", "CO", "SS", "OX", "HP", "AL", "LU", "RG", "SL", "RH", "GU", "BN",
-                "TN", "ME", "CT", "IG"}
-_UPB_ALDRIDGE = {"YO", "BD", "HG", "PR", "BB", "HD", "LS", "WF", "HU", "L", "WN", "OL", "HX",
-                 "WA", "M", "SK", "CH", "CW", "ST", "DE", "NG", "S", "LN", "LE", "TF", "WS",
-                 "B", "WV", "DY", "CV", "LA", "CA"}    # LA=Lancaster, CA=Carlisle (NW, nearest Aldridge)
-_SQUAREDEAL = {"TR", "PL", "TQ", "EX", "TA", "DT", "BH", "BA", "BS", "SP", "SO", "PO", "SN",
-               "GL", "DA", "BR", "CR", "KT", "SM", "CM", "N", "NW", "E", "EC", "SE", "SW", "W",
-               "WC", "RM", "TW", "UB", "HA", "WD", "NP", "CF",
-               "OX", "RG", "GU", "RH", "BN", "TN", "ME", "CT", "IG", "SS", "SL", "HP", "LU",
-               "AL", "SG", "MK", "EN",
-               "SA", "SY", "LD"}    # southern NBP-excluded patch → Squaredeal (quote first)
-_UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
-              "UPB Ipswich": "ipswich@upbuildingproducts.com",
+# Definitive James Hardie map (Daniela, Aug 2026). Yellow = UPB Newmarket · Purple = UPB Ipswich ·
+# Red = UPB Aldridge (midlands only, up to the ST/NG/DE line). Each supplier prices from its OWN list.
+_UPB_NEWMARKET = {"NR", "PE", "CB", "NN", "MK", "SG", "AL", "CM", "EN", "SM"}
+_UPB_IPSWICH = {"IP", "CO", "SS", "OX", "HP", "SL", "RG", "GU", "RH", "BN", "TN", "ME", "CT", "LU",
+                "N", "NW", "E", "EC", "SE", "SW", "W", "WC", "WD", "HA", "UB", "TW", "KT", "CR",
+                "BR", "DA", "RM", "IG"}
+_UPB_ALDRIDGE = {"ST", "NG", "DE", "TF", "WS", "WV", "DY", "B", "CV", "LE", "WR", "HR", "GL"}
+# North of the Aldridge line (LN/SY/CW/SK and up) → National Plastics (Hardie nationwide).
+_NP_NORTH = {"CW", "SK", "S", "DN", "LN", "SY", "YO", "HG", "BD", "HU", "PR", "BB", "LS", "HX",
+             "WF", "BL", "OL", "HD", "L", "WN", "WA", "M", "CH", "FY", "LA", "CA",
+             "NE", "DL", "TS", "SR", "DH"}
+# Pink + green south (and up to Swansea) → Squaredeal. Squaredeal is also always the SMOOTH supplier.
+_SQUAREDEAL = {"SA", "CF", "NP", "LD", "TA", "EX", "PL", "TQ", "TR", "DT",
+               "BS", "BA", "SP", "SO", "BH", "SN", "PO"}
+# Depot ordering emails — per Daniela's map (Newmarket/Ipswich are .co.uk, Aldridge is .com).
+_UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.co.uk",
+              "UPB Ipswich": "ipswich@upbuildingproducts.co.uk",
               "UPB Aldridge": "martinmelaney@upbuildingproducts.com"}
 _UPB_DEPOT_PHONE = {"UPB Newmarket": "01638501927"}   # Ipswich / Aldridge TBC
-
-
-def upb_depot_for(pc):
-    """UPB Hardie depot (branch label, order email, phone) for a postcode. ALWAYS returns a depot —
-    defaults to Aldridge (the main one, nearest us) when the area isn't in a specific depot's patch
-    — so FORCING UPB on any order (even one that auto-routed to Squaredeal/Bricklink, or a postcode
-    not on the Hardie map) still gets a UPB branch + contact details."""
-    area = postcode_area(pc)
-    for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
-                        ("UPB Aldridge", _UPB_ALDRIDGE)):
-        if area in keys:
-            return depot, _UPB_DEPOT[depot], _UPB_DEPOT_PHONE.get(depot)
-    # Not in a specific depot patch. The uncovered areas are the southern Squaredeal patch — served
-    # from Newmarket (East Anglia/South-East); anything else falls back to Aldridge (nearest us).
-    fb = "UPB Newmarket" if area in _SQUAREDEAL else "UPB Aldridge"
-    return fb, _UPB_DEPOT[fb], _UPB_DEPOT_PHONE.get(fb)
 
 
 def postcode_area(pc):
@@ -84,28 +71,48 @@ def postcode_area(pc):
     return m.group(1).upper() if m else ""
 
 
-def hardie_route(pc, smooth=False):
-    """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (avoiding NBP). Returns
-    {supplier, branch, branch_email, reason, conf, quote, needs_branch}."""
+def upb_depot_for(pc):
+    """UPB Hardie depot (branch, order email, phone) for a postcode. ALWAYS returns a depot so
+    FORCING UPB on any order still fills the branch + contact: the matching depot, else Newmarket
+    for the southern Squaredeal patch, else Aldridge (midlands/north)."""
     area = postcode_area(pc)
-    note = (" — SMOOTH finish: confirm UPB stock, else Squaredeal always have Smooth"
-            if smooth else "")
+    for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
+                        ("UPB Aldridge", _UPB_ALDRIDGE)):
+        if area in keys:
+            return depot, _UPB_DEPOT[depot], _UPB_DEPOT_PHONE.get(depot)
+    fb = "UPB Newmarket" if area in _SQUAREDEAL else "UPB Aldridge"
+    return fb, _UPB_DEPOT[fb], _UPB_DEPOT_PHONE.get(fb)
+
+
+def hardie_route(pc, smooth=False):
+    """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (definitive Aug 2026 map).
+    Each supplier prices from its OWN list. Returns {supplier, branch, branch_email, branch_phone,
+    reason, conf, quote}."""
+    area = postcode_area(pc)
+    # Smooth-finish Hardie: Squaredeal always hold Smooth boards → route there whatever the area.
+    if smooth:
+        return {"supplier": "Squaredeal", "reason": "Smooth finish — Squaredeal always supply Smooth",
+                "quote": True, "conf": "high"}
     if not area:
-        return {"supplier": "National Plastics", "reason": "Hardie/Freefoam — no postcode to route "
-                "on; National Plastics do Hardie nationwide" + note, "conf": "low"}
+        return {"supplier": "National Plastics", "reason": "Hardie — no postcode; National Plastics "
+                "do Hardie nationwide", "conf": "low"}
     if area in _SCOTLAND:
-        return {"supplier": "Bricklink", "reason": f"Scotland ({area}) → Bricklink (quote first)"
-                + note, "quote": True, "conf": "med"}
+        return {"supplier": "Bricklink", "reason": f"Scotland ({area}) → Bricklink (quote; free "
+                "collection, Glasgow)", "quote": True, "conf": "high"}
     for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
                         ("UPB Aldridge", _UPB_ALDRIDGE)):
         if area in keys:
             return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
-                    "reason": f"{depot} ({area})" + note, "conf": "high"}
+                    "branch_phone": _UPB_DEPOT_PHONE.get(depot),
+                    "reason": f"{depot} ({area})", "conf": "high"}
+    if area in _NP_NORTH:
+        return {"supplier": "National Plastics",
+                "reason": f"{area} (north of the Aldridge line) → National Plastics", "conf": "high"}
     if area in _SQUAREDEAL:
-        return {"supplier": "Squaredeal", "reason": f"Squaredeal south ({area}) — quote first"
-                + note, "quote": True, "conf": "med"}
-    return {"supplier": "National Plastics", "reason": f"{area} not covered by UPB or Squaredeal "
-            "→ National Plastics (they do Hardie nationwide)" + note, "conf": "med"}
+        return {"supplier": "Squaredeal", "reason": f"Squaredeal ({area}) — south/Wales, quote first",
+                "quote": True, "conf": "high"}
+    return {"supplier": "National Plastics", "reason": f"{area} not on the Hardie map → National "
+            "Plastics (nationwide)", "conf": "med"}
 
 
 def _norm(s):
@@ -125,10 +132,10 @@ def route_line(line, area_pc=None, sku_supplier=None):
     blob = _norm(title) + " " + _norm(vendor)
 
     def out(route, supplier, reason, conf, portal=False, quote=False, needs_branch=False,
-            branch=None, branch_email=None):
+            branch=None, branch_email=None, branch_phone=None):
         return {"route": route, "supplier": supplier, "reason": reason, "conf": conf,
                 "portal": portal, "quote": quote, "needs_branch": needs_branch,
-                "branch": branch, "branch_email": branch_email}
+                "branch": branch, "branch_email": branch_email, "branch_phone": branch_phone}
 
     tl = title.lower()
     if "sample" in tl or sku.lower().startswith("sample"):
@@ -141,7 +148,8 @@ def route_line(line, area_pc=None, sku_supplier=None):
         hr = hardie_route(area_pc, smooth="smooth" in tl)
         return out(hr["supplier"], hr["supplier"], hr["reason"], hr["conf"],
                    quote=hr.get("quote", False), needs_branch=hr.get("needs_branch", False),
-                   branch=hr.get("branch"), branch_email=hr.get("branch_email"))
+                   branch=hr.get("branch"), branch_email=hr.get("branch_email"),
+                   branch_phone=hr.get("branch_phone"))
     # Zest wall/shower panels (tagged "Zest…", currently vendor UPB) are now sourced from National
     # Plastics (Daniela, 2026-08-24) — check the tag so it OVERRIDES the UPB vendor below.
     if "zest" in tags or "zest" in blob:
@@ -236,6 +244,7 @@ def route_order(lines, postcode=None, sku_supplier=None):
         r0 = routed[0]
         result = {"split": False, "groups": groups, "overall_supplier": r0["supplier"],
                   "branch": r0.get("branch"), "branch_email": r0.get("branch_email"),
+                  "branch_phone": r0.get("branch_phone"),
                   "route": r0["route"], "stage": _stage_for(r0["supplier"], r0["route"],
                                                             r0["quote"], r0["portal"]),
                   "needs_branch": any(r["needs_branch"] for r in routed), "conf": conf,
