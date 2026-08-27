@@ -3331,6 +3331,36 @@
     "prefix": "vl4",
     "cost": 17.2
    }
+  ],
+  "National Plastics": [
+   {
+    "prefix": "hp3600",
+    "cost": 11.4
+   },
+   {
+    "prefix": "jhhpk",
+    "cost": 11.4
+   },
+   {
+    "prefix": "jhvl",
+    "cost": 23.0
+   },
+   {
+    "prefix": "vl5",
+    "cost": 23.0
+   },
+   {
+    "prefix": "jhmetalex5300284",
+    "cost": 24.1
+   },
+   {
+    "prefix": "jhmetalin5300252",
+    "cost": 16.24
+   },
+   {
+    "prefix": "jhedge",
+    "cost": 17.88
+   }
   ]
  },
  "Squaredeal": {
@@ -3381,6 +3411,36 @@
    {
     "contains": "james hardie architectural panel",
     "cost": 123.0
+   }
+  ],
+  "National Plastics": [
+   {
+    "contains": "coloured fixing screw",
+    "cost": 47.5
+   },
+   {
+    "contains": "hardie plank external corner",
+    "cost": 24.1
+   },
+   {
+    "contains": "hardie plank internal corner",
+    "cost": 16.24
+   },
+   {
+    "contains": "window reveal",
+    "cost": 22.96
+   },
+   {
+    "contains": "window head",
+    "cost": 16.3
+   },
+   {
+    "contains": "j profile",
+    "cost": 11.47
+   },
+   {
+    "contains": "vl starter",
+    "cost": 10.27
    }
   ]
  },
@@ -4884,5 +4944,29 @@
   "TIVAGREYDESK": 66.11,
   "TIVAOAKDESK": 66.11,
   "TIVAWHIDESK": 66.11
+ },
+ "National Plastics": {
+  "JHHPK5420121": 11.4,
+  "5300190": 11.4,
+  "5300753": 11.4,
+  "5300754": 11.4,
+  "5300755": 11.4,
+  "5300756": 11.4,
+  "5300757": 11.4,
+  "5300758": 11.4,
+  "5300759": 11.4,
+  "5300762": 11.4,
+  "5300779": 30.2,
+  "EPDM100": 27.5,
+  "JHPROFP255300182-25": 13.87,
+  "JHPROFP255300182-38": 14.27,
+  "JHPROFP255300182-50": 14.85,
+  "XT-BVS25": 13.87,
+  "XT-BVS38": 14.27,
+  "XT-BVS50": 14.85,
+  "JHVENT5300185": 11.26,
+  "JHVENT5300186": 11.86,
+  "JHVENT5300187": 12.58,
+  "HAR5300448": 41.0
  }
 }
