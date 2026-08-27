@@ -1973,7 +1973,7 @@ SUPPLIER_RULES = {
     # Decor8 auto-approve floor is 5%.
     # Decor8: auto-approve anything 8%-65% margin; below 8% or above 65% -> Needs Review (the
     # existing checks stay as the backstop while Daniela re-sorts Decor8 prices).
-    "decor8": {"name": "Decor8", "push_min": 8.0, "push_max": 65.0, "flag_below": True},
+    "decor8": {"name": "Decor8", "push_min": 5.0, "push_max": 55.0, "flag_below": True},
     # Southern Sheeting (roofing/cladding sheets) legitimately runs a WIDE margin, ~9% to ~55%.
     # Lower the floor to 8% and turn off the high-margin flag so a fully-matched invoice across that
     # whole range auto-pushes instead of being held (<10%) or flagged (>35%).
@@ -1985,9 +1985,11 @@ SUPPLIER_RULES = {
     "toolbank": {"name": "Toolbank", "push_min": 12.0, "push_min_discount": 8.0,
                  "flag_high": False, "flag_below": True},
     # Rexel: no pricelist held yet, so the ORDER MARGIN is the safeguard. Auto-approve a matched
-    # invoice when order margin is 10%–60%; below 10% → Needs Review, above 60% → flagged.
-    "rexel": {"name": "Rexel", "no_pricelist": True, "push_min": 10.0, "push_max": 60.0,
-              "flag_below": True},
+    # invoice at 10%+ with NO upper cap (Daniela — approve even over 35%); below 10% → Needs Review.
+    "rexel": {"name": "Rexel", "no_pricelist": True, "push_min": 10.0,
+              "flag_high": False, "flag_below": True},
+    # PJH: approve every matched invoice regardless of how HIGH the margin is (no 35% cap).
+    "pjh": {"name": "PJH", "flag_high": False},
 }
 
 
