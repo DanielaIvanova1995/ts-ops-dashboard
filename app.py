@@ -1506,8 +1506,11 @@ MARGIN_PUSH_MAX = 35.0          # in SUPPLIER_RULES) — editable in the Invoice
 
 
 def _thresholds():
-    return (float(st.session_state.get("inv_margin_min", MARGIN_PUSH_MIN)),
-            float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX)))
+    lo = float(st.session_state.get("inv_margin_min", MARGIN_PUSH_MIN))
+    hi = float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX))
+    if hi <= lo:               # an empty/invalid band (e.g. a stray 0/0) would flag everything —
+        return MARGIN_PUSH_MIN, MARGIN_PUSH_MAX   # fall back to the safe defaults instead
+    return lo, hi
 
 
 def _recent_result(status_text):
@@ -4622,6 +4625,11 @@ def render_invoice_check():
     )
     st.session_state.setdefault("inv_margin_min", MARGIN_PUSH_MIN)
     st.session_state.setdefault("inv_margin_max", MARGIN_PUSH_MAX)
+    # Self-heal a broken band (a stray 0/0 or max ≤ min would flag every invoice) — snap it back to
+    # the safe defaults BEFORE the number inputs render, so the boxes show the corrected values too.
+    if float(st.session_state["inv_margin_max"]) <= float(st.session_state["inv_margin_min"]):
+        st.session_state["inv_margin_min"] = MARGIN_PUSH_MIN
+        st.session_state["inv_margin_max"] = MARGIN_PUSH_MAX
     lo, hi = _thresholds()
     st.caption(f"Check supplier invoices from Monday (price vs pricelist, SKUs/qty vs the Shopify "
                f"order, margins). Fully-matched with **order margin {lo:.0f}–{hi:.0f}%** → pushed "
@@ -4636,8 +4644,9 @@ def render_invoice_check():
         sb.number_input("…and no more than (%)", min_value=0.0, max_value=100.0, step=1.0,
                         key="inv_margin_max",
                         help="Above this, a matched invoice is flagged as a discrepancy.")
-        st.caption("Applies to single and bulk processing. Resets to 5 / 35 when the app reboots — "
-                   "tell me if you'd like different permanent defaults.")
+        st.caption(f"Applies to single and bulk processing. Resets to {MARGIN_PUSH_MIN:.0f} / "
+                   f"{MARGIN_PUSH_MAX:.0f} when the app reboots (and an impossible band auto-corrects "
+                   "back to it). Tell me if you'd like different permanent defaults.")
 
     flash = st.session_state.pop("inv_flash", None)
     if flash:
