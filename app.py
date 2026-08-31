@@ -3867,7 +3867,11 @@ def _bulk_check(invs, lbsku):
     verds = st.session_state.get("inv_verdict", {})
     for inv, parsed, res in checked:
         v = verds.get(inv["sub_id"], {})
-        matched = res["n_issues"] == 0 and v.get("order") is not False   # reconciled over → not matched
+        # Suppliers with their OWN margin rule are safeguarded by the order margin, so bulk-push them
+        # on margin alone even if the lines don't fully match (Daniela 2026-08-24). Every other
+        # supplier still needs a full match before it can auto-push.
+        has_rule = _norm_code(inv.get("supplier")) in SUPPLIER_RULES
+        matched = has_rule or (res["n_issues"] == 0 and v.get("order") is not False)
         is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
         label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
                                        inv.get("supplier"), has_discount=bool(inv.get("_discount")))
@@ -4084,9 +4088,12 @@ def _invoice_tab(key, is_queue):
             n = len(checkable)
             lo, hi = _thresholds()
             st.warning(f"This will check **{n}** invoices (~£{n * 0.01:.2f}–£{n * 0.04:.2f}) and then "
-                       f"automatically **push fully-matched invoices with order margin {lo:.0f}–"
-                       f"{hi:.0f}% to QuickBooks**, hold under-{lo:.0f}% as Matched (TradeHub), flag "
-                       f"over-{hi:.0f}% as a discrepancy, and leave mismatches for review. "
+                       f"automatically **push invoices with order margin {lo:.0f}–{hi:.0f}% to "
+                       f"QuickBooks**, hold under-{lo:.0f}% as Matched (TradeHub), flag over-{hi:.0f}% "
+                       "as a discrepancy, and leave the rest for review. Suppliers with their own "
+                       "margin rule (Travis Perkins, Rexel, PJH, Toolbank, Southern Sheeting, Decor8) "
+                       "push on **margin alone — they don't have to be fully matched** (order margin "
+                       "is their safeguard). Every other supplier must fully match first. "
                        "Already-checked reads are free (cached).")
             yc, nc = st.columns([1, 1])
             if yc.button(f"Yes — check & process {n}", key=f"bulkyes_{key}", type="primary",
