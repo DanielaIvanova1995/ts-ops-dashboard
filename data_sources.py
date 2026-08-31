@@ -2718,7 +2718,14 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
         '"unpaid":<amount still outstanding on this line, number, or null>}],'
         '"aged":{"current":<n>,"m1":<n>,"m2":<n>,"m3":<n>,"m4plus":<n>}}\n'
         "All amounts GBP. Credits and payments MUST be negative. Include EVERY line on the "
-        "statement. If a value is genuinely absent use null. Do not invent lines or totals."
+        "statement. If a value is genuinely absent use null. Do not invent lines or totals.\n"
+        "INVOICE NUMBER — pick the right column: invoice_no must be the supplier's INVOICE/DOCUMENT "
+        "number (the one printed on their actual invoices), NOT an internal finance/ledger "
+        "reference. If a line shows several codes, choose the one that reads like an invoice number. "
+        "**TOOLBANK statements specifically** have an 'Internal Ref.' column (e.g. FIN-2-000326856) "
+        "AND a 'Transaction' column (e.g. 6006173): use the **Transaction** number as invoice_no "
+        "(it matches their invoice, e.g. Invoice6006173) and NEVER use the FIN-2-... Internal Ref — "
+        "put that internal ref in order_ref if you like, but not in invoice_no."
     )
     if text is not None:                         # Excel/CSV statement: send the extracted text
         content = [{"type": "text",
