@@ -3280,19 +3280,33 @@ OP_STAGES = ["Needs Review", "Go To Portal", "Needs Quote", "SEND PO", "SEND QUO
              "Cancelled with Supplier", "STOP"]
 
 
-def fetch_new_orders(limit: int = 60, token: str | None = None) -> list:
+def fetch_new_orders(limit: int = 2000, token: str | None = None) -> list:
     """Orders in the NATASHA new-orders group with everything the processor needs:
     [{item_id, name, order_no, customer, address, phone, cust_email, items, shopify_id,
       supplier, branch, branch_email, cost_supplier, sell, stage, po_assets:[{id,name,url,size}]}].
-    Reads straight from Monday — nothing is written here."""
+    Reads straight from Monday (paginated — pulls the WHOLE group, not just the first 60)."""
     token = token or get_token()
     ids = ",".join(f'"{c}"' for c in OP_COLS.values())
-    q = ("query($b:[ID!],$g:[String!]){boards(ids:$b){groups(ids:$g){items_page(limit:%d){items{"
-         "id name assets{id name url file_size} "
-         "column_values(ids:[%s]){id text}}}}}}" % (int(limit), ids))
-    data = _monday_gql(q, {"b": [str(ORDERS_BOARD_ID)], "g": [ORDERS_NEW_GROUP]}, token)
+    fields = ("id name assets{id name url file_size} "
+              "column_values(ids:[%s]){id text}" % ids)
+    first_q = ("query($b:[ID!],$g:[String!],$lim:Int!){boards(ids:$b){groups(ids:$g){"
+               "items_page(limit:$lim){cursor items{%s}}}}}" % fields)
+    next_q = ("query($c:String!,$lim:Int!){next_items_page(cursor:$c,limit:$lim){cursor items{%s}}}"
+              % fields)
+    page_size = min(int(limit), 500)          # Monday caps a page at 500 — follow the cursor for more
+    data = _monday_gql(first_q, {"b": [str(ORDERS_BOARD_ID)], "g": [ORDERS_NEW_GROUP],
+                                 "lim": page_size}, token)
     groups = (((data.get("boards") or [{}])[0]).get("groups") or [])
-    items = ((groups[0].get("items_page") if groups else {}) or {}).get("items") or []
+    page = ((groups[0].get("items_page") if groups else {}) or {})
+    items = list(page.get("items") or [])
+    cursor, pages = page.get("cursor"), 1
+    while cursor and len(items) < limit and pages < 20:      # page through the rest of the group
+        nd = _monday_gql(next_q, {"c": cursor, "lim": page_size}, token)
+        npage = (nd.get("next_items_page") or {})
+        items.extend(npage.get("items") or [])
+        cursor = npage.get("cursor")
+        pages += 1
+    items = items[:limit]
     inv = {v: k for k, v in OP_COLS.items()}
     out = []
     for it in items:
