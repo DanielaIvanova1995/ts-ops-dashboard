@@ -1009,6 +1009,8 @@ def _norm_inv_no(inv, supplier=None):
     - PJH statements print a leading 'I' (I11656210) our records omit (11656210) → strip a leading i.
     - Eurocell statements print a leading '0' (0290105933) our records omit (290105933) → strip
       leading zeros. Harmless to their composite numbers that start with a letter (SIN…, G…).
+    - Toolbank INVOICES/QuickBooks carry a leading '0' (06016444) their STATEMENT 'Transaction'
+      column omits (6016444) → strip leading zeros so the two sides match.
     Applied to BOTH sides of every match, so it works whichever way round it was entered."""
     s = _norm_code(inv)
     if not s:
@@ -1016,7 +1018,7 @@ def _norm_inv_no(inv, supplier=None):
     key = _norm_code(supplier) if supplier else ""
     if key.startswith("pjh") and s[0] == "i":
         s = s[1:]
-    elif key.startswith("eurocell") and s[0] == "0":
+    elif key.startswith("eurocell") or key.startswith("toolbank"):
         s = s.lstrip("0") or s
     return s
 
