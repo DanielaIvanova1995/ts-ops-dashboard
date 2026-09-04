@@ -7060,11 +7060,29 @@ def _render_statement_recon():
             _k = _norm_inv_no(inv, sup)
             _mst = mon_status.get(_k, "")
             _ml = _mst.lower()
+            _mon_ok = ("approved" in _ml or "matched" in _ml)
+            # Unpaid QB bills (not already used) whose amount matches this line.
+            _amt_hits = [x for x in bills if x["id"] not in used and not x["paid"]
+                         and isinstance(x["total"], (int, float)) and isinstance(amt, (int, float))
+                         and abs(x["total"] - amt) < 0.01]
             if "discrepancy" in _ml:
                 status, n_disc = "🟣 Discrepancy (Monday) — awaiting credit note", n_disc + 1
                 disc_total += val
+            elif _mon_ok and len(_amt_hits) == 1:
+                # Approved on Monday AND exactly ONE unpaid QuickBooks bill matches the amount → it's
+                # the same bill even though its QB DocNumber didn't match the statement number (e.g.
+                # PJH's leading 'I', or a bill entered without the number). Safe to pay.
+                _bb = _amt_hits[0]
+                used.add(_bb["id"])
+                status, n_pay = "✅ Approved — matched by amount (Monday-confirmed)", n_pay + 1
+                to_pay += val
+                pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "",
+                                  "amt": round(val, 2), "bill_id": _bb["id"],
+                                  "due": _due_label(_bb.get("due")), "bill_no": _bb.get("doc_no") or inv,
+                                  "bill_date": _bb.get("date"), "due_date": _bb.get("due"),
+                                  "original": _bb.get("total"), "balance": _bb.get("balance")})
             elif _mst:                          # on Monday in some status
-                if "approved" in _ml or "matched" in _ml:
+                if _mon_ok:
                     status = ("🟢 On Monday & approved — not yet matched to a QuickBooks bill "
                               "(check the invoice no.)")
                 else:
