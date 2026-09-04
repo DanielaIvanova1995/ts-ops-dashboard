@@ -1016,9 +1016,13 @@ def _norm_inv_no(inv, supplier=None):
     if not s:
         return s
     key = _norm_code(supplier) if supplier else ""
-    if key.startswith("pjh") and s[0] == "i":
+    # PJH-style invoices print a leading 'I' before the digits (I11671333) that Monday/QuickBooks
+    # drop (11671333). Strip a leading 'i' that's directly followed by a digit — done for ANY
+    # supplier (it's applied to both sides of a match, so it's safe even if the vendor name on the
+    # statement didn't resolve to 'pjh').
+    if s[:1] == "i" and s[1:2].isdigit():
         s = s[1:]
-    elif key.startswith("eurocell") or key.startswith("toolbank"):
+    if key.startswith("eurocell") or key.startswith("toolbank"):
         s = s.lstrip("0") or s
     return s
 
