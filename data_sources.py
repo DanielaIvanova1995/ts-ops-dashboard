@@ -167,10 +167,18 @@ def fetch_shopify_chargebacks(token: str | None = None, domain: str | None = Non
     """Return {'count': int, 'age': int} for active Shopify Payments disputes.
     Raises on missing token / no payments account / API error so the caller can
     fall back to the Monday-mirrored number."""
+    # Prefer a static admin token if provided, else reuse the store's existing client-credentials
+    # app token (SHOPIFY_CLIENT_ID/SECRET) — so live Shopify data works from the credentials already
+    # configured, no separate admin token needed. (Needs the app to hold the payments/disputes read
+    # scope; without it Shopify 401s and the caller falls back to the Monday-mirrored figure.)
     token = token or get_secret("SHOPIFY_ADMIN_TOKEN")
     if not token:
-        raise RuntimeError("No SHOPIFY_ADMIN_TOKEN configured")
-    domain = domain or get_secret("SHOPIFY_STORE_DOMAIN") or SHOPIFY_DOMAIN_DEFAULT
+        try:
+            token = shopify_products_token()
+        except Exception as _e:  # noqa: BLE001
+            raise RuntimeError("No Shopify token configured") from _e
+    domain = (domain or get_secret("SHOPIFY_STORE_DOMAIN") or get_secret("SHOPIFY_STORE")
+              or SHOPIFY_DOMAIN_DEFAULT)
 
     url = f"https://{domain}/admin/api/{SHOPIFY_API_VERSION}/graphql.json"
     query = """
