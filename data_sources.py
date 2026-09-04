@@ -2739,7 +2739,7 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
         content = [{"type": "document",
                     "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
                    {"type": "text", "text": prompt}]
-    body = {"model": INVOICE_MODEL, "max_tokens": 8000,
+    body = {"model": INVOICE_MODEL, "max_tokens": 32000,   # long statements → lots of line JSON
             "messages": [{"role": "user", "content": content}]}
     r = requests.post(ANTHROPIC_API,
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01",
@@ -2751,7 +2751,35 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
     m = _re.search(r"\{.*\}", txt, _re.S)
     if not m:
         raise RuntimeError("Could not read the statement PDF")
-    return _json.loads(m.group(0))
+    raw = m.group(0)
+    try:
+        return _json.loads(raw)
+    except _json.JSONDecodeError:
+        # Very long statement → the model's JSON came back truncated/malformed. Salvage: rebuild
+        # from the header fields + every COMPLETE line object we can parse, so reconciliation still
+        # works on what we could read (better than failing the whole statement).
+        def _fld(name):
+            mm = _re.search(r'"%s"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d[\d.]*|null)' % name, raw)
+            try:
+                return _json.loads(mm.group(1)) if mm else None
+            except Exception:  # noqa: BLE001
+                return None
+        seg = raw[raw.find('"lines"'):] if '"lines"' in raw else ""
+        line_objs = []
+        for lm in _re.finditer(r"\{[^{}]*\}", seg):        # line objects have no nested braces
+            try:
+                obj = _json.loads(lm.group(0))
+            except _json.JSONDecodeError:
+                continue
+            if obj.get("invoice_no") or obj.get("amount") is not None:
+                line_objs.append(obj)
+        if not line_objs:
+            raise RuntimeError("Couldn't read the statement — the parse came back malformed "
+                               "(the statement may be very long). Reboot and try again.")
+        return {"supplier": _fld("supplier"), "customer_ref": _fld("customer_ref"),
+                "statement_date": _fld("statement_date"), "currency": _fld("currency") or "GBP",
+                "balance": _fld("balance"), "lines": line_objs, "aged": {},
+                "_partial": True}
 
 
 def qbo_find_vendor(name: str):
