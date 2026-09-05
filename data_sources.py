@@ -2506,7 +2506,15 @@ def analyze_customer_mood(emails: list) -> dict:
 # on a private Monday "TradeHub Config" item. intuit_tid is logged on errors.
 # ---------------------------------------------------------------------------
 QBO_SCOPE = "com.intuit.quickbooks.accounting"
-QBO_REDIRECT_URI = "https://tradesuperstoreonline.streamlit.app/"
+QBO_REDIRECT_DEFAULT = "https://tradesuperstoreonline.streamlit.app/"
+
+
+def qbo_redirect_uri() -> str:
+    """The OAuth redirect back to THIS app. Driven by the APP_BASE_URL env var so it works on
+    whichever host serves the app (Render sets its own URL; the old Streamlit Cloud app has none set
+    → falls back to the Streamlit URL). Must be registered in the Intuit app's redirect URIs."""
+    u = (get_secret("APP_BASE_URL") or QBO_REDIRECT_DEFAULT).strip()
+    return u if u.endswith("/") else u + "/"
 QBO_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2"
 QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 QBO_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
@@ -2591,7 +2599,7 @@ def qbo_auth_url(state: str) -> str:
     cid, _ = _qbo_creds()
     auth, _t, _r = qbo_endpoints()
     q = urllib.parse.urlencode({"client_id": cid, "response_type": "code", "scope": QBO_SCOPE,
-                                "redirect_uri": QBO_REDIRECT_URI, "state": state})
+                                "redirect_uri": qbo_redirect_uri(), "state": state})
     return f"{auth}?{q}"
 
 
@@ -2623,7 +2631,7 @@ def qbo_exchange_code(code: str, realm_id: str) -> dict:
     """Swap the authorization code for tokens and persist them."""
     import time as _t
     j = _qbo_token_request({"grant_type": "authorization_code", "code": code,
-                            "redirect_uri": QBO_REDIRECT_URI})
+                            "redirect_uri": qbo_redirect_uri()})
     tokens = {"refresh_token": j["refresh_token"], "access_token": j.get("access_token"),
               "access_expiry": int(_t.time()) + int(j.get("expires_in", 3600)) - 60,
               "realm_id": str(realm_id)}
