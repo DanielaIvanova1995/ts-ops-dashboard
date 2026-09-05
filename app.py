@@ -6381,7 +6381,7 @@ def _month_label(m):
 
 
 def _render_qbo_panel():
-    """QuickBooks connection (read-only) — Connect / status / Disconnect. Used by Finance."""
+    """QuickBooks connection — Connect / status / Disconnect. Used by Finance."""
     flash = st.session_state.pop("qbo_flash", None)
     if flash:
         st.success(flash)
@@ -6395,7 +6395,8 @@ def _render_qbo_panel():
         return
     if connected:
         co = data_sources.qbo_company_name()
-        st.success(f"QuickBooks is connected{f' — **{co}**' if co else ''} · read-only.")
+        st.success(f"QuickBooks is connected{f' — **{co}**' if co else ''} · reads your bills, and "
+                   "records bill payments only when you confirm.")
         if st.button("Disconnect QuickBooks"):
             try:
                 data_sources.qbo_disconnect()
@@ -7327,7 +7328,7 @@ def _render_month_end_forecast(data):
 def _render_payables_live():
     """Live all-suppliers payables from QuickBooks open bills + Monday credit limits."""
     if not _qbo_connected_quiet():
-        with st.expander("QuickBooks connection (read-only)", expanded=True):
+        with st.expander("QuickBooks connection", expanded=True):
             _render_qbo_panel()
         return
     if st.button("↻ Refresh", key="pay_refresh"):
@@ -7478,7 +7479,7 @@ def render_finance():
         _render_payables_live()
         return
     if _fv == "Statement Reconciliation":
-        with st.expander("QuickBooks connection (read-only)",
+        with st.expander("QuickBooks connection",
                          expanded=not _qbo_connected_quiet()):
             _render_qbo_panel()
         _render_statement_recon()
