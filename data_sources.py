@@ -51,14 +51,25 @@ def get_secret(name: str) -> str | None:
     """Read a secret from the environment first, then Streamlit secrets (only if
     a secrets file exists, so we never trigger the 'No secrets found' error).
     Returns None if unset."""
+    def _clean(v):
+        # Tolerate a value pasted with surrounding quotes or a stray space/newline (a common slip
+        # when copying from a TOML secrets file into a host's env-var box) — else it 401s.
+        if v is None:
+            return None
+        v = str(v).strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            v = v[1:-1].strip()
+        return v or None
     env = os.environ.get(name)
     if env:
-        return env
+        c = _clean(env)
+        if c:
+            return c
     if _secrets_file_exists():
         try:
             import streamlit as st  # lazy so this module is testable standalone
 
-            return st.secrets.get(name)
+            return _clean(st.secrets.get(name))
         except Exception:  # noqa: BLE001
             return None
     return None
