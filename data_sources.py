@@ -2981,6 +2981,16 @@ def recon_save(supplier_key: str, snapshot: dict, token=None):
     m[supplier_key] = snapshot
     item_id = _config_item_named(QBO_RECON_ITEM, token)
     monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
+    # Platform Phase 1: ALSO write to Supabase (durable history) — best-effort, never blocks the
+    # Monday save. Inert until SUPABASE_URL/SERVICE_KEY are set, so behaviour is unchanged otherwise.
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.recon_save(vid or supplier_key, snapshot)
+            supabase_db.audit("", "recon_save",
+                              str(snapshot.get("supplier") or supplier_key), supplier_key)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _config_file_column(token=None):
