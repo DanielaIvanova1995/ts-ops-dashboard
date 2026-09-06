@@ -7193,6 +7193,21 @@ def _render_statement_recon():
         snap["statement_asset"] = _saved_set.get(sig)
         st.caption("💾 Kept under **Saved reconciliations** at the top.")
 
+    # Phase 1 database status — makes it visible whether reconciliation history is reaching Supabase.
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            st.caption("🗄️ Database (Supabase): **not connected on this host** (SUPABASE_URL / "
+                       "SUPABASE_SERVICE_KEY not set here).")
+        elif supabase_db.recon_latest(vid) is not None:
+            st.caption("🗄️ Database (Supabase): **saved ✓** — reconciliation history is in the "
+                       "database.")
+        else:
+            st.caption("🗄️ Database (Supabase): connected, but nothing saved for this vendor yet "
+                       "(reconcile a **fresh** statement — the write is once per statement/session).")
+    except Exception as _dbe:  # noqa: BLE001
+        st.caption("🗄️ Database (Supabase): error — " + str(_dbe)[:140])
+
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
                    "they've never been input. (Mailbox search + supplier-chase draft coming next.)")
