@@ -131,13 +131,12 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
 def _handle_message(mailbox, msg, folder_name, dry_run, summary, token, archive_folder_id=None):
     """Process one email: may hold more than one invoice PDF (each handled separately)."""
     try:
-        atts = ds.fetch_message_attachments(mailbox, msg["id"], token=token, max_items=6)
+        pdfs = ds.fetch_message_pdf_attachments(mailbox, msg["id"], token=token, max_items=6)
     except Exception as e:  # noqa: BLE001
         summary["failed"] += 1
         summary["items"].append({"folder": folder_name, "subject": msg.get("subject"),
                                  "status": "failed", "detail": f"couldn't read attachments: {e}"})
         return
-    pdfs = [a for a in atts if a.get("media_type") == "application/pdf"]
     if not pdfs:
         return  # nothing to import (email without a PDF)
 
@@ -167,7 +166,7 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
     rec = {"folder": folder_name, "subject": msg.get("subject"), "from": msg.get("from"),
            "file": a.get("name")}
     try:
-        parsed = ds.parse_invoice_header(a["data"])
+        parsed = ds.parse_invoice_header(base64.b64encode(a["bytes"]).decode())
     except Exception as e:  # noqa: BLE001
         rec.update(status="failed", detail=f"couldn't read the PDF: {str(e)[:120]}")
         _finish(key, "failed", rec, summary, dry_run)
@@ -221,7 +220,7 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
         sub_id = sub.get("id")
         try:
             attached = ds.add_pdf_to_subitem_file(
-                sub_id, base64.b64decode(a["data"]), a.get("name") or f"{inv_no}.pdf")
+                sub_id, a["bytes"], a.get("name") or f"{inv_no}.pdf")
             rec["detail"] = "PDF attached" if attached else "subitem made (PDF unverified)"
         except Exception as e:  # noqa: BLE001
             rec["detail"] = f"subitem made but PDF attach failed: {str(e)[:100]}"

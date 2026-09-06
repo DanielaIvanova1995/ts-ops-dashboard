@@ -2378,6 +2378,44 @@ def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
     return out
 
 
+def fetch_message_pdf_attachments(mailbox: str, message_id: str, token: str | None = None,
+                                  max_bytes: int = 8_000_000, max_items: int = 6) -> list:
+    """A message's PDF attachments as [{name, bytes}]. Two-step (list without contentBytes, then
+    download each) — selecting contentBytes on the attachments collection 400s (it lives on the
+    fileAttachment subtype). This is the robust pattern the statement reader uses."""
+    import base64 as _b64
+    token = token or ms_token()
+    r = requests.get(f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments",
+                     headers={"Authorization": f"Bearer {token}"},
+                     params={"$select": "id,name,contentType,size"}, timeout=30)
+    r.raise_for_status()
+    out = []
+    for a in r.json().get("value", []):
+        ctype = (a.get("contentType") or "").split(";")[0].strip().lower()
+        nm = a.get("name") or ""
+        if ctype != "application/pdf" and not nm.lower().endswith(".pdf"):
+            continue
+        if (a.get("size") or 0) > max_bytes:
+            continue
+        dr = requests.get(
+            f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments/{a['id']}",
+            headers={"Authorization": f"Bearer {token}"}, timeout=60)
+        dr.raise_for_status()
+        data = dr.json().get("contentBytes")
+        if data:
+            raw = _b64.b64decode(data)
+        else:                                   # not a file attachment → pull raw bytes
+            rv = requests.get(
+                f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments/{a['id']}/$value",
+                headers={"Authorization": f"Bearer {token}"}, timeout=60)
+            rv.raise_for_status()
+            raw = rv.content
+        out.append({"name": nm or "invoice.pdf", "bytes": raw})
+        if len(out) >= max_items:
+            break
+    return out
+
+
 def find_order_item_by_number(order_no: str, token: str | None = None) -> dict | None:
     """Find an order on the Orders board by its order number (column text_mkv6z0nt).
     Returns {id, name} of the first match, or None. Used to attach an imported invoice as a
