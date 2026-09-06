@@ -4742,9 +4742,10 @@ def _start_background_jobs():
                 if (cfg.get("auto_enabled") and cfg.get("folders")
                         and supabase_db.configured()):
                     res = invoice_import.run_import(
-                        folders=cfg["folders"], dry_run=False,
+                        folders=cfg.get("folders"), dry_run=False,
                         limit_per_folder=int(cfg.get("limit") or 60),
-                        archive_folder_id=cfg.get("archive_folder_id"))
+                        since_days=int(cfg.get("since_days") or 5),
+                        max_total=int(cfg.get("max_total") or 40))
                     supabase_db.config_set("invoice_import_status", {
                         "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                         "imported": res.get("imported"), "failed": res.get("failed"),
@@ -4813,7 +4814,8 @@ def _render_invoice_import():
     if st.button("💾 Save automatic settings", key="ii_savecfg",
                  disabled=not (supabase_db and supabase_db.configured())):
         supabase_db.config_set("invoice_import", {
-            "auto_enabled": bool(auto_on), "interval_min": int(every)})
+            "auto_enabled": bool(auto_on), "interval_min": int(every),
+            "since_days": int(st.session_state.get("ii_days", 5)), "max_total": 40})
         st.success(("Saved — automatic import is ON, checking every "
                     f"{int(every)} min." if auto_on else
                     "Saved. (Automatic import is OFF — use the buttons below, or toggle it on.)"))
@@ -4828,20 +4830,26 @@ def _render_invoice_import():
                        f"archived {_stat.get('archived', 0)}."
                        + (f" ⚠️ {_stat.get('error')}" if _stat.get("error") else ""))
 
-    # Run — preview first, then live. Folders default to all Suppliers subfolders (folders=None).
-    c1, c2, c3 = st.columns([1, 1, 2])
-    limit = c3.number_input("Max emails per folder", 5, 200, 40, step=5, key="ii_limit")
-    if c1.button("👀 Preview (dry run)", key="ii_preview", use_container_width=True):
-        with st.spinner("Reading invoices (no changes made)…"):
+    # Run — preview first, then live. Bounded by a date window + a per-run cap so a big backlog is
+    # done in safe chunks (an all-history pass froze the app). Folders default to all Suppliers subs.
+    c1, c2, c3 = st.columns([1, 1, 1])
+    days = c3.number_input("Only last N days", 1, 60, 5, step=1, key="ii_days",
+                           help="Only reads invoices from the last N days — old ones were done by "
+                                "Make. Keeps each run fast.")
+    if c1.button("👀 Preview (dry run)", key="ii_preview", use_container_width=True,
+                 help="Reads a small batch and shows what it WOULD do — changes nothing."):
+        with st.spinner("Reading recent invoices (no changes made)…"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=None, dry_run=True, limit_per_folder=int(limit))
+                folders=None, dry_run=True, since_days=int(days), max_total=20)
     live_ok = supabase_db and supabase_db.configured()
-    if c2.button("✅ Import now (live)", key="ii_live", type="primary", use_container_width=True,
-                 disabled=not live_ok,
+    if c2.button("✅ Import a batch (live)", key="ii_live", type="primary",
+                 use_container_width=True, disabled=not live_ok,
                  help=None if live_ok else "Connect Supabase first (de-dup tracking)"):
-        with st.spinner("Importing invoices to Monday…"):
+        with st.spinner("Importing a batch to Monday… (repeat for more, or turn on automatic)"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=None, dry_run=False, limit_per_folder=int(limit))
+                folders=None, dry_run=False, since_days=int(days), max_total=25)
+    st.caption("Each click does up to ~25 to stay quick — press again for the next batch, or turn "
+               "on **Run automatically** and it'll clear the rest on its own.")
 
     res = st.session_state.get("ii_result")
     if res:
@@ -4850,7 +4858,11 @@ def _render_invoice_import():
         else:
             verb = "Would import" if res.get("dry_run") else "Imported"
             st.success(f"{verb} **{res['imported']}** · skipped {res['skipped']} · "
-                       f"failed {res['failed']} (scanned {res['scanned']}).")
+                       f"failed {res['failed']} · archived {res.get('archived', 0)} "
+                       f"(scanned {res['scanned']}).")
+            if res.get("capped"):
+                st.info("Reached this batch's limit — more invoices remain. Click again for the "
+                        "next batch, or turn on automatic import to clear them.")
         rows = res.get("items") or []
         if rows:
             df = pd.DataFrame([{

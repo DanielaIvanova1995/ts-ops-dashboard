@@ -75,19 +75,24 @@ def _norm_no(s: str) -> str:
 
 def run_import(folders: list[str] | None = None, dry_run: bool = False,
                limit_per_folder: int = 40, mailbox: str | None = None,
-               archive_folder_id: str | None = None) -> dict:
+               archive_folder_id: str | None = None, since_days: int = 5,
+               max_total: int | None = None) -> dict:
     """Scan the invoice folders and import each new invoice as a Monday subitem.
 
-    folders: folder NAMES to scan (defaults to INVOICE_SCAN_FOLDERS).
+    folders: folder NAMES to scan (defaults to all Inbox/Suppliers subfolders).
     dry_run: parse + match + report, but write NOTHING and don't mark anything handled.
     archive_folder_id: if set (and not a dry run), a fully-handled email is MOVED here so the
         invoice folders empty out and it can't be re-read.
-    Returns a summary: {ok, scanned, imported, skipped, failed, archived, items:[{...}]}.
+    since_days: only look at emails received within the last N days (recent invoices only).
+    max_total: stop after this many emails have been handled this run (keeps each run bounded so a
+        big backlog is chewed through over several runs instead of one giant, session-freezing pass).
+    Returns a summary: {ok, scanned, imported, skipped, failed, archived, capped, items:[{...}]}.
     """
     mailbox = mailbox or ds.INVOICE_IMPORT_MAILBOX
     names = folders if folders is not None else (INVOICE_SCAN_FOLDERS or None)
     summary = {"ok": True, "dry_run": dry_run, "scanned": 0, "imported": 0,
-               "skipped": 0, "failed": 0, "archived": 0, "items": [], "error": None}
+               "skipped": 0, "failed": 0, "archived": 0, "capped": False, "items": [],
+               "error": None}
     try:
         token = ds.ms_token()
     except Exception as e:  # noqa: BLE001
@@ -115,16 +120,24 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
         except Exception:  # noqa: BLE001
             archive_folder_id = None
 
+    handled = 0
     for fol in folders_resolved:
+        if max_total and handled >= max_total:
+            summary["capped"] = True
+            break
         try:
             msgs = ds.list_folder_invoice_messages(mailbox, fol["id"], limit=limit_per_folder,
-                                                   token=token)
+                                                   token=token, since_days=since_days)
         except Exception as e:  # noqa: BLE001
             summary["items"].append({"folder": fol["name"], "status": "folder_error",
                                      "detail": str(e)[:160]})
             continue
         for m in msgs:
+            if max_total and handled >= max_total:
+                summary["capped"] = True
+                break
             _handle_message(mailbox, m, fol["name"], dry_run, summary, token, archive_folder_id)
+            handled += 1
     return summary
 
 

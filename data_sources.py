@@ -2352,12 +2352,16 @@ def list_child_folders(mailbox: str, parent_name: str, token: str | None = None)
 
 
 def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
-                                 token: str | None = None) -> list:
+                                 token: str | None = None, since_days: int | None = None) -> list:
     """Recent messages in a folder (by id) that HAVE attachments → [{id, internet_id, subject,
-    from, received, has_attachments}]. Newest first. Used by the importer to find invoice emails."""
+    from, received, has_attachments}]. Newest first. `since_days` limits to emails received within
+    the last N days (we only ever want recent invoices — old ones were done by Make). Used by the
+    importer to find invoice emails."""
+    from datetime import datetime as _dtm, timedelta as _td, timezone as _tz
     token = token or ms_token()
+    cutoff = (_dtm.now(_tz.utc) - _td(days=since_days)) if since_days else None
     # NOTE: Graph rejects ($filter hasAttachments) + ($orderby) together with a 400 ("too complex"),
-    # so we sort newest-first and filter to attachment-bearing emails in code instead.
+    # so we sort newest-first and filter (attachments + date) in code instead.
     r = requests.get(
         f"{GRAPH}/users/{mailbox}/mailFolders/{folder_id}/messages",
         headers={"Authorization": f"Bearer {token}"},
@@ -2368,13 +2372,19 @@ def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
     r.raise_for_status()
     out = []
     for m in r.json().get("value", []):
+        rec = m.get("receivedDateTime") or ""
+        if cutoff and rec:
+            try:
+                if _dtm.fromisoformat(rec.replace("Z", "+00:00")) < cutoff:
+                    break            # ordered newest-first → everything after is older too
+            except ValueError:
+                pass
         if not m.get("hasAttachments"):
             continue
         frm = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
         out.append({"id": m.get("id"), "internet_id": m.get("internetMessageId") or m.get("id"),
                     "subject": (m.get("subject") or "").strip(), "from": frm,
-                    "received": m.get("receivedDateTime"),
-                    "has_attachments": True})
+                    "received": rec, "has_attachments": True})
     return out
 
 
