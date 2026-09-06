@@ -75,7 +75,7 @@ def _norm_no(s: str) -> str:
 
 def run_import(folders: list[str] | None = None, dry_run: bool = False,
                limit_per_folder: int = 40, mailbox: str | None = None,
-               archive_folder_id: str | None = None, since_days: int = 5,
+               archive_folder_id: str | None = None, since_days: int | None = None,
                max_total: int | None = None) -> dict:
     """Scan the invoice folders and import each new invoice as a Monday subitem.
 

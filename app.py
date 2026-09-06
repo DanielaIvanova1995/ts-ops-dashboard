@@ -4744,7 +4744,7 @@ def _start_background_jobs():
                     res = invoice_import.run_import(
                         folders=cfg.get("folders"), dry_run=False,
                         limit_per_folder=int(cfg.get("limit") or 60),
-                        since_days=int(cfg.get("since_days") or 5),
+                        since_days=cfg.get("since_days"),
                         max_total=int(cfg.get("max_total") or 40))
                     supabase_db.config_set("invoice_import_status", {
                         "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
@@ -4814,8 +4814,7 @@ def _render_invoice_import():
     if st.button("💾 Save automatic settings", key="ii_savecfg",
                  disabled=not (supabase_db and supabase_db.configured())):
         supabase_db.config_set("invoice_import", {
-            "auto_enabled": bool(auto_on), "interval_min": int(every),
-            "since_days": int(st.session_state.get("ii_days", 5)), "max_total": 40})
+            "auto_enabled": bool(auto_on), "interval_min": int(every), "max_total": 40})
         st.success(("Saved — automatic import is ON, checking every "
                     f"{int(every)} min." if auto_on else
                     "Saved. (Automatic import is OFF — use the buttons below, or toggle it on.)"))
@@ -4830,26 +4829,23 @@ def _render_invoice_import():
                        f"archived {_stat.get('archived', 0)}."
                        + (f" ⚠️ {_stat.get('error')}" if _stat.get("error") else ""))
 
-    # Run — preview first, then live. Bounded by a date window + a per-run cap so a big backlog is
-    # done in safe chunks (an all-history pass froze the app). Folders default to all Suppliers subs.
-    c1, c2, c3 = st.columns([1, 1, 1])
-    days = c3.number_input("Only last N days", 1, 60, 5, step=1, key="ii_days",
-                           help="Only reads invoices from the last N days — old ones were done by "
-                                "Make. Keeps each run fast.")
+    # Run — processes whatever's in the folders (archiving empties them). Bounded per run so a big
+    # folder like Eurocell can't freeze the app — it's done in batches / by the automatic run.
+    c1, c2 = st.columns(2)
     if c1.button("👀 Preview (dry run)", key="ii_preview", use_container_width=True,
                  help="Reads a small batch and shows what it WOULD do — changes nothing."):
-        with st.spinner("Reading recent invoices (no changes made)…"):
+        with st.spinner("Reading invoices (no changes made)…"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=None, dry_run=True, since_days=int(days), max_total=20)
+                folders=None, dry_run=True, max_total=20)
     live_ok = supabase_db and supabase_db.configured()
     if c2.button("✅ Import a batch (live)", key="ii_live", type="primary",
                  use_container_width=True, disabled=not live_ok,
                  help=None if live_ok else "Connect Supabase first (de-dup tracking)"):
         with st.spinner("Importing a batch to Monday… (repeat for more, or turn on automatic)"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=None, dry_run=False, since_days=int(days), max_total=25)
-    st.caption("Each click does up to ~25 to stay quick — press again for the next batch, or turn "
-               "on **Run automatically** and it'll clear the rest on its own.")
+                folders=None, dry_run=False, max_total=25)
+    st.caption("Each click does up to ~25 to stay quick, then archives them out of the folders — "
+               "press again for the next batch, or turn on **Run automatically** to clear the rest.")
 
     res = st.session_state.get("ii_result")
     if res:
