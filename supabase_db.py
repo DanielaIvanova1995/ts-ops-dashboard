@@ -57,6 +57,15 @@ def recon_save(vid: str, snapshot: dict) -> bool:
         return False
 
 
+def recon_save_strict(vid: str, snapshot: dict):
+    """Like recon_save but RAISES on failure — used by the on-screen diagnostic so a write problem
+    (RLS, key perms, a non-JSON snapshot) is surfaced instead of silently swallowed."""
+    _client().table("reconciliations").insert({
+        "vendor_id": str(vid), "supplier": snapshot.get("supplier"),
+        "saved_at": _now(), "snapshot": snapshot,
+    }).execute()
+
+
 def recon_latest(vid: str) -> dict | None:
     """The most recent saved reconciliation snapshot for a vendor, or None."""
     if not configured():

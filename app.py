@@ -7203,8 +7203,14 @@ def _render_statement_recon():
             st.caption("🗄️ Database (Supabase): **saved ✓** — reconciliation history is in the "
                        "database.")
         else:
-            st.caption("🗄️ Database (Supabase): connected, but nothing saved for this vendor yet "
-                       "(reconcile a **fresh** statement — the write is once per statement/session).")
+            # Connected but no row yet — write it now and surface any error, so we know if it's the
+            # once-per-session guard or a genuine write failure.
+            try:
+                supabase_db.recon_save_strict(vid, snap)
+                st.caption("🗄️ Database (Supabase): **saved ✓** (written just now).")
+            except Exception as _we:  # noqa: BLE001
+                st.caption("🗄️ Database (Supabase): connected, but the write **FAILED** — "
+                           + str(_we)[:260])
     except Exception as _dbe:  # noqa: BLE001
         st.caption("🗄️ Database (Supabase): error — " + str(_dbe)[:140])
 
