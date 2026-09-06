@@ -2575,12 +2575,28 @@ def qbo_store_tokens(tokens: dict, token=None):
     item_id = _qbo_config_item(token)
     blob = _b64.b64encode(_json.dumps(tokens).encode()).decode()
     monday_post_update(item_id, blob, token)
+    # Phase 1: also keep the token in the database (durable) — best-effort; Monday stays the fallback.
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.qbo_tokens_set(tokens)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def qbo_load_tokens(token=None):
     import base64 as _b64
     import json as _json
     import re as _re
+    # Database first when connected (durable) — falls back to the Monday store below.
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            _t = supabase_db.qbo_tokens_get()
+            if _t:
+                return _t
+    except Exception:  # noqa: BLE001
+        pass
     token = token or get_token()
     item_id = _qbo_config_item(token)
     data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:1){body}}}",
@@ -2590,10 +2606,18 @@ def qbo_load_tokens(token=None):
         return None
     b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
     try:
-        out = _json.loads(_b64.b64decode(b64).decode())
-        return out or None
+        out = _json.loads(_b64.b64decode(b64).decode()) or None
     except Exception:  # noqa: BLE001
-        return None
+        out = None
+    # Backfill the database from the Monday store so the next load is durable and self-migrating.
+    if out:
+        try:
+            import supabase_db
+            if supabase_db.configured():
+                supabase_db.qbo_tokens_set(out)
+        except Exception:  # noqa: BLE001
+            pass
+    return out
 
 
 def qbo_is_connected() -> bool:
