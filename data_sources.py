@@ -2922,13 +2922,25 @@ def qbo_vendor_map_load(token=None):
     data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:1){body}}}",
                        {"i": [str(item_id)]}, token)
     ups = (((data.get("items") or [{}])[0]).get("updates") or [])
-    if not ups:
-        return {}
-    b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
+    out = {}
+    if ups:
+        b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
+        try:
+            out = _json.loads(_b64.b64decode(b64).decode()) or {}
+        except Exception:  # noqa: BLE001
+            out = {}
+    # Merge with the database (DB authoritative), backfilling any Monday-only entries into it.
     try:
-        return _json.loads(_b64.b64decode(b64).decode()) or {}
+        import supabase_db
+        if supabase_db.configured():
+            db = supabase_db.vendor_map_load() or {}
+            for k, v in out.items():
+                if k not in db and isinstance(v, dict) and v.get("id"):
+                    supabase_db.vendor_map_save(k, v["id"], v.get("name") or "")
+            return {**out, **db}
     except Exception:  # noqa: BLE001
-        return {}
+        pass
+    return out
 
 
 def qbo_vendor_map_save(supplier_key: str, vendor_id, vendor_name: str, token=None):
@@ -2940,6 +2952,13 @@ def qbo_vendor_map_save(supplier_key: str, vendor_id, vendor_name: str, token=No
     m[supplier_key] = {"id": str(vendor_id), "name": vendor_name}
     item_id = _config_item_named(QBO_VENDORMAP_ITEM, token)
     monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
+    # Also keep it in the database (durable) — best-effort, Monday stays the fallback.
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.vendor_map_save(supplier_key, vendor_id, vendor_name)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def fetch_supplier_credit_limits(token=None):

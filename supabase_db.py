@@ -173,6 +173,18 @@ def vendor_map_save(supplier_key: str, vendor_id: str, vendor_name: str) -> bool
 
 
 # ---- Audit log (append-only) ---------------------------------------------------------------
+def audit_recent(limit: int = 50) -> list:
+    """Recent audit-log entries (newest first) — [{at, actor, action, detail, ref}]."""
+    if not configured():
+        return []
+    try:
+        r = (_client().table("audit_log").select("at,actor,action,detail,ref")
+             .order("at", desc=True).limit(limit).execute())
+        return r.data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def audit(actor: str, action: str, detail: str = "", ref: str = "") -> bool:
     if not configured():
         return False

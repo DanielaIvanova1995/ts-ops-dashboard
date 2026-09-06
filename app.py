@@ -6662,6 +6662,13 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
                     st.success(f"✅ Marked {len(picked_lines)} invoice(s) paid in QuickBooks "
                                f"(ref {ref}). Now pay £{rem_total:,.2f} via your bank.")
                     st.session_state.pop("_stmt_bills_cache", None)
+                    try:                       # audit trail (best-effort)
+                        import supabase_db
+                        supabase_db.audit(_signed_in_email(), "bill_payment",
+                                          f"{sup} — {len(picked_lines)} invoice(s), £{rem_total:,.2f}",
+                                          ref)
+                    except Exception:  # noqa: BLE001
+                        pass
                 except Exception as e:  # noqa: BLE001
                     st.error("Couldn't mark paid: " + str(e)[:250])
             if nn.button("Cancel", key=f"markno_{_pk}"):
@@ -6837,6 +6844,22 @@ def _render_statement_recon():
                     st.caption("Reconcile this statement once more to enable paying it off from here "
                                "(it was saved before that feature existed).")
         st.markdown("---")
+
+    # ---- Audit log (who did what, when) — from the database ----
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            _entries = supabase_db.audit_recent(50)
+            if _entries:
+                with st.expander(f"🧾 Recent activity (audit log) — {len(_entries)}"):
+                    st.dataframe(
+                        [{"When": (e.get("at") or "")[:16].replace("T", " "),
+                          "Who": e.get("actor") or "—", "Action": e.get("action") or "",
+                          "Detail": e.get("detail") or "", "Ref": e.get("ref") or ""}
+                         for e in _entries],
+                        hide_index=True, use_container_width=True)
+    except Exception:  # noqa: BLE001
+        pass
 
     # ---- Pull the latest statement per supplier straight from the accounts@ inbox ----
     with st.expander("📥 Pull latest statements from your accounts@ inbox"):
