@@ -42,3 +42,7 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Turns ON the always-on background jobs (the automatic invoice importer) — set only here on
+      # Render, so the old Streamlit Community Cloud copy never runs them (no double-importing).
+      - key: ENABLE_BACKGROUND_JOBS
+        value: "1"

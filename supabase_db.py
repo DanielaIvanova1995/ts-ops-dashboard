@@ -185,6 +185,91 @@ def audit_recent(limit: int = 50) -> list:
         return []
 
 
+# ---- Small key/value config store (so the scheduled job reads the UI's settings) -----------
+def config_get(key: str, default=None):
+    """Read a JSON config value by key (e.g. the invoice-import folder selection). default if unset."""
+    if not configured():
+        return default
+    try:
+        r = _client().table("app_config").select("value").eq("key", key).limit(1).execute()
+        rows = r.data or []
+        return rows[0]["value"] if rows else default
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def config_set(key: str, value) -> bool:
+    """Store a JSON config value by key (upsert)."""
+    if not configured():
+        return False
+    try:
+        _client().table("app_config").upsert({"key": key, "value": _json_safe(value),
+                                              "updated_at": _now()}).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ---- Invoice import (de-dup + failure log for the native invoice importer) -----------------
+def invoice_import_seen(internet_id: str) -> bool:
+    """True if this email (by internetMessageId) has already been handled — the de-dup guard so an
+    invoice is never imported twice. When Supabase isn't configured, returns False (the importer
+    then relies on Monday's own duplicate detection as a backstop)."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        r = (_client().table("invoice_imports").select("internet_id")
+             .eq("internet_id", internet_id).limit(1).execute())
+        return bool(r.data)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def invoice_import_log(internet_id: str, status: str, **fields) -> bool:
+    """Record the outcome of handling one invoice email: status = 'imported' | 'failed' |
+    'skipped'. Extra fields (supplier, order_no, invoice_no, subitem_id, total, detail) are stored
+    for the on-screen recent/failed lists. Upsert on internet_id so a retry overwrites."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        row = {"internet_id": internet_id, "status": status, "at": _now()}
+        for k in ("supplier", "order_no", "invoice_no", "subitem_id", "detail"):
+            if k in fields and fields[k] is not None:
+                row[k] = str(fields[k])[:500]
+        if isinstance(fields.get("total"), (int, float)):
+            row["total"] = fields["total"]
+        _client().table("invoice_imports").upsert(row).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def invoice_import_recent(limit: int = 50, status: str | None = None) -> list:
+    """Recent invoice-import outcomes (newest first). Pass status='failed' for the retry list."""
+    if not configured():
+        return []
+    try:
+        q = (_client().table("invoice_imports")
+             .select("internet_id,status,supplier,order_no,invoice_no,subitem_id,total,detail,at")
+             .order("at", desc=True).limit(limit))
+        if status:
+            q = q.eq("status", status)
+        return q.execute().data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def invoice_import_delete(internet_id: str) -> bool:
+    """Forget one email (so the next run re-tries it) — used by the 'retry' button on a failure."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        _client().table("invoice_imports").delete().eq("internet_id", internet_id).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def audit(actor: str, action: str, detail: str = "", ref: str = "") -> bool:
     if not configured():
         return False

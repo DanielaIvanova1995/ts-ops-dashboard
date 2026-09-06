@@ -2240,6 +2240,204 @@ def read_invoice_pdf(pdf_url: str) -> dict:
     return _json.loads(m.group(0))
 
 
+# ---------------------------------------------------------------------------
+# Native invoice IMPORT (replaces the ~24 Make "Process Invoices - <supplier>"
+# scenarios). All supplier invoices arrive in ONE mailbox — accounts@ — each in
+# its own subfolder. The importer scans those folders, reads each new PDF with
+# Claude (same schema Make used), matches the order by number, and creates the
+# invoice subitem (total / due date / Needs Review / PDF). See invoice_import.py
+# for the orchestration + de-dup; these are the building blocks.
+# ---------------------------------------------------------------------------
+INVOICE_IMPORT_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
+INVOICE_IMPORT_MODEL = INVOICE_MODEL     # capable model — it reads a PDF
+
+# The exact extraction contract the Make scenarios used, so the native parse is a
+# like-for-like replacement (invoice + credit note, negatives for credit notes,
+# po_number stripped to the bare reference).
+_INVOICE_HEADER_SYSTEM = (
+    "You are an invoice and credit note data extractor. You will receive a PDF document. "
+    "Return ONLY a valid JSON object matching this schema. No preamble, no markdown, no code "
+    "fences. Use null for missing fields. NEVER use placeholder strings like \"N/A\", \"Not "
+    "provided\", \"Unknown\", \"see attached\", \"TBC\", or similar - if a field is not present or "
+    "not legible, return null. Dates as YYYY-MM-DD. Currency as ISO 4217. Numbers as plain numerics "
+    "without symbols or commas. Set document_type to one of: \"invoice\" (standard charge for "
+    "goods/services), \"credit_note\" (a credit note, credit memo, refund, or adjustment - "
+    "recognise these by explicit text such as \"Credit Note\", \"Credit Memo\", \"Refund\", or by "
+    "all-negative line items reducing a previous invoice; IMPORTANT - suppliers often reuse their "
+    "invoice template for credit notes so the header may still say \"INVOICE\" - always check the "
+    "body of the document for the true type), \"statement\" (a statement of account), or \"other\" "
+    "for anything else. For credit notes, total, subtotal, and vat_amount MUST be returned as "
+    "negative numbers. If the document already shows negative amounts, return them as negative (do "
+    "not double-negate). If the document shows positive amounts but is labelled as a credit, convert "
+    "them to negative. The po_number field must contain ONLY the numeric reference itself, stripped "
+    "of any prefixes or labels. Strip prefixes like \"PO\", \"P/O\", \"PO#\", \"PO Number:\", "
+    "\"Order:\", \"Order No:\", \"Ref:\", \"#\". Examples: \"PO26222\" becomes \"26222\", \"P/O "
+    "26226-1\" becomes \"26226-1\". If the document does not contain a clearly identifiable "
+    "PO/order number, set po_number to null. Schema: {\"document_type\": string, \"supplier_name\": "
+    "string|null, \"invoice_number\": string|null, \"invoice_date\": string|null, \"due_date\": "
+    "string|null, \"po_number\": string|null, \"currency\": string|null, \"subtotal\": number|null, "
+    "\"vat_amount\": number|null, \"total\": number|null}"
+)
+
+
+def parse_invoice_header(pdf_b64: str) -> dict:
+    """Read a supplier invoice/credit-note PDF (base64) with Claude and return the HEADER fields
+    the importer needs: {document_type, supplier_name, invoice_number, invoice_date, due_date,
+    po_number, currency, subtotal, vat_amount, total}. Same contract the Make scenarios used.
+    Raises if ANTHROPIC_API_KEY is missing or the model returns no JSON."""
+    import json as _json
+    import re
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    body = {
+        "model": INVOICE_IMPORT_MODEL, "max_tokens": 1500,
+        "system": _INVOICE_HEADER_SYSTEM,
+        "messages": [{"role": "user", "content": [
+            {"type": "document",
+             "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}},
+            {"type": "text", "text": "Extract the fields and return the JSON object."}]}],
+    }
+    r = requests.post(ANTHROPIC_API,
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
+                      json=body, timeout=150)
+    r.raise_for_status()
+    blocks = r.json().get("content", [])
+    txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise RuntimeError("Could not read the invoice PDF")
+    return _json.loads(m.group(0))
+
+
+def list_mail_folders_tree(mailbox: str, token: str | None = None, max_folders: int = 2000) -> list:
+    """Every mail folder in a mailbox as [{id, name, path, count, unread, has_children}] — used to
+    discover which accounts@ subfolders hold supplier invoices (so the importer can scan them by
+    name). Walks the whole tree once."""
+    token = token or ms_token()
+    out: list = []
+    queue = [(f, "") for f in _graph_children(mailbox, None, token)]
+    visited = 0
+    while queue and visited < max_folders:
+        visited += 1
+        f, parent_path = queue.pop(0)
+        name = f.get("displayName") or ""
+        path = f"{parent_path}/{name}" if parent_path else name
+        out.append({"id": f["id"], "name": name, "path": path,
+                    "count": f.get("totalItemCount", 0), "unread": f.get("unreadItemCount", 0),
+                    "has_children": bool(f.get("childFolderCount", 0))})
+        if f.get("childFolderCount", 0) > 0:
+            queue += [(c, path) for c in _graph_children(mailbox, f["id"], token)]
+    return out
+
+
+def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
+                                 token: str | None = None) -> list:
+    """Recent messages in a folder (by id) that HAVE attachments → [{id, internet_id, subject,
+    from, received, has_attachments}]. Newest first. Used by the importer to find invoice emails."""
+    token = token or ms_token()
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/mailFolders/{folder_id}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"$top": str(limit), "$orderby": "receivedDateTime desc",
+                "$select": "id,internetMessageId,subject,from,receivedDateTime,hasAttachments",
+                "$filter": "hasAttachments eq true"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("value", []):
+        frm = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
+        out.append({"id": m.get("id"), "internet_id": m.get("internetMessageId") or m.get("id"),
+                    "subject": (m.get("subject") or "").strip(), "from": frm,
+                    "received": m.get("receivedDateTime"),
+                    "has_attachments": bool(m.get("hasAttachments"))})
+    return out
+
+
+def find_order_item_by_number(order_no: str, token: str | None = None) -> dict | None:
+    """Find an order on the Orders board by its order number (column text_mkv6z0nt).
+    Returns {id, name} of the first match, or None. Used to attach an imported invoice as a
+    subitem of the right order."""
+    order_no = (order_no or "").strip()
+    if not order_no:
+        return None
+    q = ("query($b:ID!,$col:String!,$val:String!){items_page_by_column_values(board_id:$b,"
+         "limit:5,columns:[{column_id:$col,column_values:[$val]}]){items{id name}}}")
+    data = _monday_gql(q, {"b": str(ORDERS_BOARD_ID), "col": "text_mkv6z0nt", "val": order_no}, token)
+    items = ((data.get("items_page_by_column_values") or {}).get("items") or [])
+    return {"id": items[0]["id"], "name": items[0].get("name")} if items else None
+
+
+def order_subitem_invoice_numbers(order_item_id, token: str | None = None) -> list:
+    """The invoice numbers (subitem names) already logged under an order → [name, …]. Used to skip
+    an invoice whose number is ALREADY on the order (a re-sent email, or one Make already created),
+    so the importer never creates a duplicate subitem for the same invoice."""
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){subitems{name}}}",
+                       {"i": [str(order_item_id)]}, token)
+    subs = (((data.get("items") or [{}])[0]).get("subitems") or [])
+    return [(s.get("name") or "").strip() for s in subs if s.get("name")]
+
+
+def create_invoice_subitem(parent_item_id, invoice_no: str, total, due_date: str | None = None,
+                           status_label: str = "Needs Review", token: str | None = None) -> dict:
+    """Create the invoice subitem under an order — the native replacement for the Make
+    createSubitem step. Sets total (numbers4), Payment Status (status7__1) and, if given, the due
+    date (date0). Returns {id, board_id}. The PDF is attached separately via
+    add_pdf_to_subitem_file. Raises on Monday error."""
+    import json as _json
+    cv: dict = {"status7__1": {"label": status_label}}
+    if isinstance(total, (int, float)):
+        cv["numbers4"] = total
+    if due_date:
+        cv["date0"] = {"date": str(due_date)[:10]}
+    q = ("mutation($p:ID!,$n:String!,$cv:JSON!){create_subitem(parent_item_id:$p,item_name:$n,"
+         "column_values:$cv,create_labels_if_missing:false){id board{id}}}")
+    data = _monday_gql(q, {"p": str(parent_item_id), "n": (invoice_no or "invoice")[:255],
+                           "cv": _json.dumps(cv)}, token)
+    sub = data.get("create_subitem") or {}
+    return {"id": sub.get("id"), "board_id": (sub.get("board") or {}).get("id")}
+
+
+def add_pdf_to_subitem_file(subitem_id, pdf_bytes: bytes, filename: str,
+                            column_id: str = "file_mm38gx3j", token: str | None = None) -> bool:
+    """Attach the invoice PDF to the subitem's file column (file_mm38gx3j), then VERIFY the byte
+    size read back (never trust the upload response). Returns True on verified success."""
+    token = token or get_token()
+    want = len(pdf_bytes)
+    q = ('mutation ($file: File!){add_file_to_column(item_id:%s,column_id:"%s",file:$file){id}}'
+         % (int(subitem_id), column_id))
+    r = requests.post("https://api.monday.com/v2/file", headers={"Authorization": token},
+                      data={"query": q, "map": '{"file":"variables.file"}'},
+                      files={"file": (filename, pdf_bytes, "application/pdf")}, timeout=180)
+    r.raise_for_status()
+    if "errors" in r.json():
+        raise RuntimeError(f"Monday rejected invoice PDF upload: {r.json()['errors']}")
+    d = _monday_gql("query($i:[ID!]){items(ids:$i){assets{name file_size}}}",
+                    {"i": [str(subitem_id)]}, token)
+    for a in (((d.get("items") or [{}])[0]).get("assets") or []):
+        try:
+            sz = int(a.get("file_size") or 0)
+        except (TypeError, ValueError):
+            sz = 0
+        if a.get("name") == filename and abs(sz - want) <= 2:
+            return True
+    return False
+
+
+def move_message_to_folder(mailbox: str, message_id: str, dest_folder_id: str,
+                           token: str | None = None) -> bool:
+    """Move a processed invoice email to a 'done' folder (optional — the importer's real de-dup is
+    in the database). Needs Mail.ReadWrite. Returns True on success."""
+    token = token or ms_token()
+    r = requests.post(f"{GRAPH}/users/{mailbox}/messages/{message_id}/move",
+                      headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                      json={"destinationId": dest_folder_id}, timeout=30)
+    r.raise_for_status()
+    return True
+
+
 def set_invoice_status(sub_id, label: str, token: str | None = None) -> bool:
     """Set a subitem's Payment Status (status7__1) to a label, e.g.
     'Approved (To QB)' or 'Discrepancy'. Uses change_column_value with {label} (the

@@ -57,6 +57,33 @@ create table if not exists audit_log (
   detail  text,
   ref     text
 );
+
+-- Native invoice importer: de-dup + outcome log (one row per handled invoice email)
+create table if not exists invoice_imports (
+  internet_id text primary key,     -- Outlook internetMessageId (+ #idx if the email has several PDFs)
+  status      text not null,        -- imported | failed | skipped
+  supplier    text,
+  order_no    text,
+  invoice_no  text,
+  subitem_id  text,
+  total       numeric,
+  detail      text,
+  at          timestamptz not null default now()
+);
+create index if not exists invoice_imports_status_idx on invoice_imports (status, at desc);
+
+-- Small key/value config store (e.g. the invoice-import folder selection + schedule)
+create table if not exists app_config (
+  key        text primary key,
+  value      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+```
+
+**Because "auto-expose new tables" is OFF, grant the new table to the service role too** (same as we did for the others), else writes get "permission denied":
+```sql
+grant all on invoice_imports to service_role;
+grant all on app_config to service_role;
 ```
 
 ## Code
