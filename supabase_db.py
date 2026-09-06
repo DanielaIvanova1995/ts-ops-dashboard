@@ -212,14 +212,18 @@ def config_set(key: str, value) -> bool:
 
 # ---- Invoice import (de-dup + failure log for the native invoice importer) -----------------
 def invoice_import_seen(internet_id: str) -> bool:
-    """True if this email (by internetMessageId) has already been handled — the de-dup guard so an
-    invoice is never imported twice. When Supabase isn't configured, returns False (the importer
-    then relies on Monday's own duplicate detection as a backstop)."""
+    """True if this email (by internetMessageId) has already been successfully handled
+    (imported or skipped) — the de-dup guard so an invoice is never imported twice. A previous
+    FAILED row does NOT count as seen, so failures auto-retry on the next run (a transient glitch
+    self-heals; a genuine problem stays in the failed list for review). When Supabase isn't
+    configured, returns False (the importer relies on Monday's own duplicate detection as a
+    backstop)."""
     if not configured() or not internet_id:
         return False
     try:
-        r = (_client().table("invoice_imports").select("internet_id")
-             .eq("internet_id", internet_id).limit(1).execute())
+        r = (_client().table("invoice_imports").select("status")
+             .eq("internet_id", internet_id).in_("status", ["imported", "skipped"])
+             .limit(1).execute())
         return bool(r.data)
     except Exception:  # noqa: BLE001
         return False
