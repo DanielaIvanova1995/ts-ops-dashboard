@@ -188,6 +188,7 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
     inv_no = (parsed.get("invoice_number") or "").strip() or (a.get("name") or "invoice")
     total = parsed.get("total")
     due = parsed.get("due_date")
+    inv_date = parsed.get("invoice_date")
     po = parsed.get("po_number")
     rec.update(invoice_no=inv_no, supplier=parsed.get("supplier_name"), total=total,
                doc_type=parsed.get("document_type"))
@@ -229,7 +230,8 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
 
     # Live: create subitem + attach PDF.
     try:
-        sub = ds.create_invoice_subitem(order["id"], inv_no, total, due_date=due)
+        sub = ds.create_invoice_subitem(order["id"], inv_no, total, due_date=due,
+                                        invoice_date=inv_date)
         sub_id = sub.get("id")
         try:
             attached = ds.add_pdf_to_subitem_file(

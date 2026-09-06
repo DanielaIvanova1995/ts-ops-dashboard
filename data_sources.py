@@ -2455,15 +2455,18 @@ def order_subitem_invoice_numbers(order_item_id, token: str | None = None) -> li
 
 
 def create_invoice_subitem(parent_item_id, invoice_no: str, total, due_date: str | None = None,
-                           status_label: str = "Needs Review", token: str | None = None) -> dict:
+                           invoice_date: str | None = None, status_label: str = "Needs Review",
+                           token: str | None = None) -> dict:
     """Create the invoice subitem under an order — the native replacement for the Make
-    createSubitem step. Sets total (numbers4), Payment Status (status7__1) and, if given, the due
-    date (date0). Returns {id, board_id}. The PDF is attached separately via
-    add_pdf_to_subitem_file. Raises on Monday error."""
+    createSubitem step. Sets total (numbers4), Payment Status (status7__1), the invoice date
+    (date_mm3d1ear) and, if given, the due date (date0). Returns {id, board_id}. The PDF is
+    attached separately via add_pdf_to_subitem_file. Raises on Monday error."""
     import json as _json
     cv: dict = {"status7__1": {"label": status_label}}
     if isinstance(total, (int, float)):
         cv["numbers4"] = total
+    if invoice_date:
+        cv["date_mm3d1ear"] = {"date": str(invoice_date)[:10]}
     if due_date:
         cv["date0"] = {"date": str(due_date)[:10]}
     q = ("mutation($p:ID!,$n:String!,$cv:JSON!){create_subitem(parent_item_id:$p,item_name:$n,"
