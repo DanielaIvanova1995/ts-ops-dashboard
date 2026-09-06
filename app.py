@@ -7209,8 +7209,10 @@ def _render_statement_recon():
                 supabase_db.recon_save_strict(vid, snap)
                 st.caption("🗄️ Database (Supabase): **saved ✓** (written just now).")
             except Exception as _we:  # noqa: BLE001
+                _det = (getattr(_we, "message", "") or getattr(_we, "details", "")
+                        or getattr(_we, "hint", "") or repr(_we))
                 st.caption("🗄️ Database (Supabase): connected, but the write **FAILED** — "
-                           + str(_we)[:260])
+                           + str(_det)[:280])
     except Exception as _dbe:  # noqa: BLE001
         st.caption("🗄️ Database (Supabase): error — " + str(_dbe)[:140])
 

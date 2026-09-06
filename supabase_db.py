@@ -39,6 +39,21 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
 
+def _json_safe(o):
+    """Make a value valid JSON for a jsonb column: NaN/Infinity → null (they aren't valid JSON and
+    make PostgREST 400), and anything non-primitive (datetime, Decimal, numpy, sets…) → str."""
+    import math
+    if isinstance(o, bool) or o is None or isinstance(o, (str, int)):
+        return o
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {str(k): _json_safe(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_json_safe(v) for v in o]
+    return str(o)
+
+
 # ---- Saved reconciliations (first slice) ----------------------------------------------------
 def recon_save(vid: str, snapshot: dict) -> bool:
     """Append a reconciliation snapshot for a QuickBooks vendor id. Keeps history (one row per
@@ -50,7 +65,7 @@ def recon_save(vid: str, snapshot: dict) -> bool:
             "vendor_id": str(vid),
             "supplier": snapshot.get("supplier"),
             "saved_at": _now(),
-            "snapshot": snapshot,
+            "snapshot": _json_safe(snapshot),
         }).execute()
         return True
     except Exception:  # noqa: BLE001
@@ -62,7 +77,7 @@ def recon_save_strict(vid: str, snapshot: dict):
     (RLS, key perms, a non-JSON snapshot) is surfaced instead of silently swallowed."""
     _client().table("reconciliations").insert({
         "vendor_id": str(vid), "supplier": snapshot.get("supplier"),
-        "saved_at": _now(), "snapshot": snapshot,
+        "saved_at": _now(), "snapshot": _json_safe(snapshot),
     }).execute()
 
 
@@ -107,7 +122,7 @@ def qbo_tokens_set(tokens: dict) -> bool:
     if not configured():
         return False
     try:
-        _client().table("qbo_tokens").upsert({"id": 1, "tokens": tokens,
+        _client().table("qbo_tokens").upsert({"id": 1, "tokens": _json_safe(tokens),
                                               "updated_at": _now()}).execute()
         return True
     except Exception:  # noqa: BLE001
