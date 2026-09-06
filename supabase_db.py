@@ -222,7 +222,7 @@ def invoice_import_seen(internet_id: str) -> bool:
         return False
     try:
         r = (_client().table("invoice_imports").select("status")
-             .eq("internet_id", internet_id).in_("status", ["imported", "skipped"])
+             .eq("internet_id", internet_id).in_("status", ["imported", "skipped", "ignored"])
              .limit(1).execute())
         return bool(r.data)
     except Exception:  # noqa: BLE001

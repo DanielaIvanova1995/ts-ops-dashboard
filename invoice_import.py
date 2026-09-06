@@ -91,8 +91,8 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
     mailbox = mailbox or ds.INVOICE_IMPORT_MAILBOX
     names = folders if folders is not None else (INVOICE_SCAN_FOLDERS or None)
     summary = {"ok": True, "dry_run": dry_run, "scanned": 0, "imported": 0,
-               "skipped": 0, "failed": 0, "archived": 0, "capped": False, "items": [],
-               "error": None}
+               "skipped": 0, "failed": 0, "ignored": 0, "archived": 0, "capped": False,
+               "items": [], "error": None}
     try:
         token = ds.ms_token()
     except Exception as e:  # noqa: BLE001
@@ -190,8 +190,21 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
     due = parsed.get("due_date")
     inv_date = parsed.get("invoice_date")
     po = parsed.get("po_number")
+    doc_type = (parsed.get("document_type") or "").strip().lower()
     rec.update(invoice_no=inv_no, supplier=parsed.get("supplier_name"), total=total,
-               doc_type=parsed.get("document_type"))
+               doc_type=doc_type)
+
+    # Only invoices and credit notes become subitems. Statements (and anything else — order
+    # confirmations, delivery notes) are IGNORED, not failed: logged so they aren't re-read, and
+    # left in the folder (not archived) in case they're needed elsewhere.
+    if doc_type not in ("invoice", "credit_note"):
+        rec.update(status="ignored", detail=f"ignored ({doc_type or 'not an invoice'})")
+        summary["ignored"] = summary.get("ignored", 0) + 1
+        summary["items"].append(rec)
+        if not dry_run and supabase_db:
+            supabase_db.invoice_import_log(key, "ignored", invoice_no=inv_no,
+                                           supplier=parsed.get("supplier_name"), detail=rec["detail"])
+        return "ignored"
 
     order = None
     for c in _order_no_candidates(po):

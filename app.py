@@ -4882,8 +4882,8 @@ def _render_invoice_import():
         else:
             verb = "Would import" if res.get("dry_run") else "Imported"
             st.success(f"{verb} **{res['imported']}** · skipped {res['skipped']} · "
-                       f"failed {res['failed']} · archived {res.get('archived', 0)} "
-                       f"(scanned {res['scanned']}).")
+                       f"ignored {res.get('ignored', 0)} · failed {res['failed']} · "
+                       f"archived {res.get('archived', 0)} (scanned {res['scanned']}).")
             if res.get("capped"):
                 st.info("Reached this batch's limit — more invoices remain. Click again for the "
                         "next batch, or turn on automatic import to clear them.")
