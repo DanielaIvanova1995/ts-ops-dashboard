@@ -94,6 +94,25 @@ def recon_latest(vid: str) -> dict | None:
         return None
 
 
+def recon_load_all() -> dict:
+    """{f"v{vendor_id}": latest snapshot} — the most recent saved reconciliation per vendor, read
+    from the database. Mirrors data_sources.recon_load_all()'s shape so the saved-list UI is
+    unchanged, just backed by durable storage."""
+    if not configured():
+        return {}
+    try:
+        r = (_client().table("reconciliations").select("vendor_id,snapshot")
+             .order("saved_at", desc=True).limit(1000).execute())
+        out = {}
+        for row in (r.data or []):
+            key = f"v{row['vendor_id']}"
+            if key not in out:            # rows come newest-first, so the first seen is the latest
+                out[key] = row["snapshot"]
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def recon_history(vid: str, limit: int = 50) -> list:
     """Recent saved reconciliations for a vendor (newest first) — the real history."""
     if not configured():

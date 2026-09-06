@@ -6778,11 +6778,18 @@ def _render_statement_recon():
         st.info("Connect QuickBooks above first — reconciliation reads your bills from it.")
         return
 
-    # Saved reconciliations — visible on login without re-uploading.
+    # Saved reconciliations — visible on login without re-uploading. Read from the database when
+    # connected (durable history), with the old Monday store filling any gaps from before Supabase.
     try:
         saved = data_sources.recon_load_all()
     except Exception:  # noqa: BLE001
         saved = {}
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            saved = {**(saved or {}), **(supabase_db.recon_load_all() or {})}
+    except Exception:  # noqa: BLE001
+        pass
     jump = st.session_state.pop("_open_saved_pay", None)   # arrived here from Payables "Pay"
     if saved:
         st.markdown("##### 📌 Saved reconciliations")
@@ -7193,28 +7200,24 @@ def _render_statement_recon():
         snap["statement_asset"] = _saved_set.get(sig)
         st.caption("💾 Kept under **Saved reconciliations** at the top.")
 
-    # Phase 1 database status — makes it visible whether reconciliation history is reaching Supabase.
+    # Reconciliation history is kept in the database (Supabase). Quiet confirmation on success; a
+    # loud message only if a write actually fails, so problems still surface.
     try:
         import supabase_db
-        if not supabase_db.configured():
-            st.caption("🗄️ Database (Supabase): **not connected on this host** (SUPABASE_URL / "
-                       "SUPABASE_SERVICE_KEY not set here).")
-        elif supabase_db.recon_latest(vid) is not None:
-            st.caption("🗄️ Database (Supabase): **saved ✓** — reconciliation history is in the "
-                       "database.")
-        else:
-            # Connected but no row yet — write it now and surface any error, so we know if it's the
-            # once-per-session guard or a genuine write failure.
-            try:
-                supabase_db.recon_save_strict(vid, snap)
-                st.caption("🗄️ Database (Supabase): **saved ✓** (written just now).")
-            except Exception as _we:  # noqa: BLE001
-                _det = (getattr(_we, "message", "") or getattr(_we, "details", "")
-                        or getattr(_we, "hint", "") or repr(_we))
-                st.caption("🗄️ Database (Supabase): connected, but the write **FAILED** — "
-                           + str(_det)[:280])
-    except Exception as _dbe:  # noqa: BLE001
-        st.caption("🗄️ Database (Supabase): error — " + str(_dbe)[:140])
+        if supabase_db.configured():
+            _ok = supabase_db.recon_latest(vid) is not None
+            if not _ok:
+                try:
+                    supabase_db.recon_save_strict(vid, snap)
+                    _ok = True
+                except Exception as _we:  # noqa: BLE001
+                    _det = (getattr(_we, "message", "") or getattr(_we, "details", "")
+                            or getattr(_we, "hint", "") or repr(_we))
+                    st.caption("🗄️ Couldn't save to the database — " + str(_det)[:280])
+            if _ok:
+                st.caption("🗄️ Saved.")
+    except Exception:  # noqa: BLE001
+        pass
 
     if n_missing:
         st.warning(f"⚠ {n_missing} invoice(s) are on the statement but **not on Monday at all** — "
@@ -7388,6 +7391,12 @@ def _render_payables_live():
         saved = data_sources.recon_load_all() or {}
     except Exception:  # noqa: BLE001
         saved = {}
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            saved = {**saved, **(supabase_db.recon_load_all() or {})}
+    except Exception:  # noqa: BLE001
+        pass
     vid_snap = {s["vid"]: (k, s) for k, s in saved.items() if s.get("vid")}
     # Owed per supplier is derived straight from the OPEN bills (Balance > 0) — more reliable than
     # the Vendor.Balance field, which QuickBooks often returns as 0 in a query.
