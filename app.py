@@ -4719,50 +4719,71 @@ def render_invoice_check():
 
 
 @st.cache_resource(show_spinner=False)
-def _start_background_jobs():
-    """Start the always-on background scheduler ONCE per server process (st.cache_resource makes it
-    a singleton). Currently runs the automatic invoice importer on the interval saved in Supabase.
+def _bg_worker():
+    """The always-on background worker (ONE per server process via st.cache_resource). It runs the
+    invoice importer OFF the page thread — so a big folder can never freeze/reset the UI — driven by
+    two things: a manual trigger (the Import button sets an Event) and the saved auto schedule.
     Gated on ENABLE_BACKGROUND_JOBS so ONLY the Render host runs it (never the old Community Cloud
-    copy → no double-importing). Returns a small status dict; the thread does the work."""
+    copy → no double-importing). Returns a shared state dict the UI uses to trigger + read status."""
     import threading
     import time as _time
 
-    if not data_sources.get_secret("ENABLE_BACKGROUND_JOBS"):
-        return {"started": False, "reason": "disabled on this host"}
+    state = {"trigger": threading.Event(), "running": False,
+             "enabled": bool(data_sources.get_secret("ENABLE_BACKGROUND_JOBS"))}
+    if not state["enabled"]:
+        return state
 
-    def _loop():
+    def _run_once(reason):
         import datetime as _dt
         import invoice_import
         import supabase_db
+        if state["running"]:
+            return
+        state["running"] = True
+        try:
+            cfg = supabase_db.config_get("invoice_import") or {}
+            res = invoice_import.run_import(
+                folders=None, dry_run=False, since_days=cfg.get("since_days"),
+                max_total=int(cfg.get("max_total") or 25))
+            supabase_db.config_set("invoice_import_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "imported": res.get("imported"), "failed": res.get("failed"),
+                "skipped": res.get("skipped"), "archived": res.get("archived"),
+                "capped": res.get("capped"), "ok": res.get("ok"),
+                "error": res.get("error"), "reason": reason})
+            if res.get("imported") or res.get("failed"):
+                supabase_db.audit("scheduler" if reason == "auto" else "manual", "invoice_import",
+                                  f"imported {res.get('imported')}, failed {res.get('failed')}, "
+                                  f"skipped {res.get('skipped')}", "")
+        except Exception as e:  # noqa: BLE001
+            try:
+                supabase_db.config_set("invoice_import_status", {
+                    "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ok": False, "error": str(e)[:200], "reason": reason})
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            state["running"] = False
+
+    def _loop():
+        import supabase_db
+        next_auto = 0.0
         while True:
-            interval = 15
+            fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
+            state["trigger"].clear()
+            if fired:
+                _run_once("manual")
+                continue
             try:
                 cfg = supabase_db.config_get("invoice_import") or {}
-                interval = int(cfg.get("interval_min") or 15)
-                if (cfg.get("auto_enabled") and cfg.get("folders")
-                        and supabase_db.configured()):
-                    res = invoice_import.run_import(
-                        folders=cfg.get("folders"), dry_run=False,
-                        limit_per_folder=int(cfg.get("limit") or 60),
-                        since_days=cfg.get("since_days"),
-                        max_total=int(cfg.get("max_total") or 40))
-                    supabase_db.config_set("invoice_import_status", {
-                        "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-                        "imported": res.get("imported"), "failed": res.get("failed"),
-                        "skipped": res.get("skipped"), "archived": res.get("archived"),
-                        "ok": res.get("ok"), "error": res.get("error")})
-                    if res.get("imported") or res.get("failed"):
-                        supabase_db.audit(
-                            "scheduler", "invoice_import",
-                            f"imported {res.get('imported')}, failed {res.get('failed')}, "
-                            f"skipped {res.get('skipped')}", "")
+                if cfg.get("auto_enabled") and _time.time() >= next_auto:
+                    next_auto = _time.time() + max(300, int(cfg.get("interval_min") or 15) * 60)
+                    _run_once("auto")
             except Exception:  # noqa: BLE001 — never let the loop die
-                interval = 15
-            _time.sleep(max(60, interval * 60))
+                next_auto = _time.time() + 900
 
-    t = threading.Thread(target=_loop, name="invoice-import-scheduler", daemon=True)
-    t.start()
-    return {"started": True}
+    threading.Thread(target=_loop, name="invoice-import-worker", daemon=True).start()
+    return state
 
 
 def _render_invoice_import():
@@ -4824,28 +4845,35 @@ def _render_invoice_import():
         _stat = supabase_db.config_get("invoice_import_status") or {}
         if _stat.get("at"):
             when = str(_stat["at"])[:16].replace("T", " ")
-            st.caption(f"🤖 Last automatic run {when} UTC — imported {_stat.get('imported', 0)}, "
-                       f"skipped {_stat.get('skipped', 0)}, failed {_stat.get('failed', 0)}, "
-                       f"archived {_stat.get('archived', 0)}."
+            st.caption(f"🤖 Last run ({_stat.get('reason', '?')}) {when} UTC — imported "
+                       f"{_stat.get('imported', 0)}, skipped {_stat.get('skipped', 0)}, failed "
+                       f"{_stat.get('failed', 0)}, archived {_stat.get('archived', 0)}."
+                       + (" More remain — it'll continue." if _stat.get("capped") else "")
                        + (f" ⚠️ {_stat.get('error')}" if _stat.get("error") else ""))
 
-    # Run — processes whatever's in the folders (archiving empties them). Bounded per run so a big
-    # folder like Eurocell can't freeze the app — it's done in batches / by the automatic run.
-    c1, c2 = st.columns(2)
-    if c1.button("👀 Preview (dry run)", key="ii_preview", use_container_width=True,
-                 help="Reads a small batch and shows what it WOULD do — changes nothing."):
-        with st.spinner("Reading invoices (no changes made)…"):
+    # Run. The LIVE import runs in the background worker (off the page thread) so a big folder can
+    # never freeze/reset the UI. Preview stays on-page but reads only a tiny sample to eyeball.
+    _bg = _bg_worker()
+    running = bool(_bg.get("running"))
+    c1, c2, c3 = st.columns([1, 1, 1])
+    if c1.button("👀 Preview a few (dry run)", key="ii_preview", use_container_width=True,
+                 help="Reads a small sample and shows what it WOULD do — changes nothing."):
+        with st.spinner("Reading a few invoices (no changes made)…"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=None, dry_run=True, max_total=20)
-    live_ok = supabase_db and supabase_db.configured()
-    if c2.button("✅ Import a batch (live)", key="ii_live", type="primary",
-                 use_container_width=True, disabled=not live_ok,
-                 help=None if live_ok else "Connect Supabase first (de-dup tracking)"):
-        with st.spinner("Importing a batch to Monday… (repeat for more, or turn on automatic)"):
-            st.session_state["ii_result"] = invoice_import.run_import(
-                folders=None, dry_run=False, max_total=25)
-    st.caption("Each click does up to ~25 to stay quick, then archives them out of the folders — "
-               "press again for the next batch, or turn on **Run automatically** to clear the rest.")
+                folders=None, dry_run=True, max_total=5)
+    live_ok = _bg.get("enabled") and supabase_db and supabase_db.configured()
+    if c2.button("✅ Import now (background)", key="ii_live", type="primary",
+                 use_container_width=True, disabled=not live_ok or running,
+                 help=None if live_ok else "Runs on the Render host (background jobs must be on)"):
+        _bg["trigger"].set()
+        st.session_state["inv_flash"] = None
+        st.success("Import started on the server — it runs in the background, so this page won't "
+                   "freeze. Watch the status line below (hit Refresh) and Monday. Runs a batch at a "
+                   "time; press again or turn on automatic to clear the rest.")
+    if c3.button("🔄 Refresh status", key="ii_refresh_stat", use_container_width=True):
+        st.rerun()
+    if running:
+        st.info("⏳ An import is running in the background right now…")
 
     res = st.session_state.get("ii_result")
     if res:
@@ -8120,7 +8148,7 @@ with st.sidebar:
                     ["Payables (Live)", "Statement Reconciliation", "Margins"])
     module = st.session_state.module
 
-    _start_background_jobs()   # idempotent — starts the automatic importer once (Render only)
+    _bg_worker()   # idempotent — starts the background invoice worker once (Render only)
 
     st.write("")
 
