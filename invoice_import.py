@@ -26,8 +26,12 @@ try:
 except Exception:  # noqa: BLE001 — importer still runs without Supabase (Monday dedup is the backstop)
     supabase_db = None
 
-# Folder NAMES under accounts@ to scan for supplier invoices. Filled once we've listed the tree in
-# the app (Invoice Import → "List accounts@ folders"). The UI can also pass an explicit list.
+# Where invoices live: every subfolder under Inbox's "Suppliers" folder (Daniela 2026-09-06). When
+# no explicit folder list is given, the importer scans ALL of these automatically.
+INVOICE_PARENT_FOLDER = "Suppliers"
+# Processed emails are always moved here (created if missing) — one fixed archive, no per-run choice.
+DEFAULT_ARCHIVE_FOLDER = "Fully Processed - Claude"
+# Optional explicit override (folder NAMES). Normally left empty so all Suppliers subfolders scan.
 INVOICE_SCAN_FOLDERS: list[str] = []
 
 
@@ -81,7 +85,7 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
     Returns a summary: {ok, scanned, imported, skipped, failed, archived, items:[{...}]}.
     """
     mailbox = mailbox or ds.INVOICE_IMPORT_MAILBOX
-    names = folders if folders is not None else INVOICE_SCAN_FOLDERS
+    names = folders if folders is not None else (INVOICE_SCAN_FOLDERS or None)
     summary = {"ok": True, "dry_run": dry_run, "scanned": 0, "imported": 0,
                "skipped": 0, "failed": 0, "archived": 0, "items": [], "error": None}
     try:
@@ -89,15 +93,27 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
     except Exception as e:  # noqa: BLE001
         summary.update(ok=False, error=f"Outlook not reachable: {str(e)[:160]}")
         return summary
-    if not names:
-        summary.update(ok=False, error="No invoice folders configured to scan.")
-        return summary
 
-    folders_resolved = _resolve_folder_ids(names, mailbox, token)
+    if names:                                          # explicit folder names given
+        folders_resolved = _resolve_folder_ids(names, mailbox, token)
+    else:                                              # default: all Inbox/Suppliers subfolders
+        try:
+            folders_resolved = [{"id": f["id"], "name": f["name"]}
+                                for f in ds.list_child_folders(mailbox, INVOICE_PARENT_FOLDER, token)]
+        except Exception as e:  # noqa: BLE001
+            summary.update(ok=False, error=f"Couldn't list Suppliers folders: {str(e)[:160]}")
+            return summary
     if not folders_resolved:
         summary.update(ok=False,
-                       error=f"None of the folders {names} were found in {mailbox}.")
+                       error=f"No invoice folders found (looked under '{INVOICE_PARENT_FOLDER}').")
         return summary
+
+    # Resolve the fixed archive folder for live runs (create it if it doesn't exist).
+    if not dry_run and not archive_folder_id:
+        try:
+            archive_folder_id = ds.find_or_create_mail_folder(mailbox, DEFAULT_ARCHIVE_FOLDER, token)
+        except Exception:  # noqa: BLE001
+            archive_folder_id = None
 
     for fol in folders_resolved:
         try:

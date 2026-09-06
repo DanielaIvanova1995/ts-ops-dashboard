@@ -4783,58 +4783,40 @@ def _render_invoice_import():
         st.warning("Supabase isn't connected — de-dup tracking is off, so run **Preview** only "
                    "until it's set (otherwise a re-run could create duplicate subitems).")
 
-    # 1) Discover the accounts@ folders so she can pick which to scan.
-    with st.expander("① Choose which folders to scan", expanded=not st.session_state.get("ii_folders")):
-        if st.button("List accounts@ folders", key="ii_list"):
+    st.caption(f"Scans every supplier subfolder under **Inbox/{invoice_import.INVOICE_PARENT_FOLDER}** "
+               f"and moves each processed email to **{invoice_import.DEFAULT_ARCHIVE_FOLDER}** "
+               "(created automatically). Nothing to pick.")
+
+    # Optional: peek at which folders will be scanned.
+    with st.expander("Which folders will be scanned?"):
+        if st.button("List supplier folders", key="ii_list"):
             try:
-                tree = data_sources.list_mail_folders_tree(data_sources.INVOICE_IMPORT_MAILBOX)
-                # Keep leaf-ish invoice folders (skip obvious system folders).
-                skip = {"inbox", "drafts", "sent items", "deleted items", "junk email",
-                        "outbox", "archive", "conversation history", "clutter", "rss feeds"}
-                st.session_state["ii_tree"] = [f for f in tree
-                                               if f["name"].lower() not in skip]
+                st.session_state["ii_child"] = data_sources.list_child_folders(
+                    data_sources.INVOICE_IMPORT_MAILBOX, invoice_import.INVOICE_PARENT_FOLDER)
             except Exception as e:  # noqa: BLE001
                 st.error(f"Couldn't list folders: {str(e)[:200]}")
-        tree = st.session_state.get("ii_tree") or []
-        if tree:
-            names = [f"{f['path']}  ({f['count']})" for f in tree]
-            name_by_label = {f"{f['path']}  ({f['count']})": f["name"] for f in tree}
-            picked = st.multiselect("Folders with supplier invoices", names,
-                                    default=st.session_state.get("ii_pick_labels", []),
-                                    key="ii_pick")
-            st.session_state["ii_pick_labels"] = picked
-            st.session_state["ii_folders"] = [name_by_label[p] for p in picked]
-        chosen = st.session_state.get("ii_folders") or []
-        if chosen:
-            st.caption(f"Will scan **{len(chosen)}** folder(s): {', '.join(chosen)}")
-        # Archive folder — processed emails get moved here so the folders empty out.
-        if tree:
-            arch_opts = ["— don't move emails —"] + [f"{f['path']}" for f in tree]
-            path_to_id = {f["path"]: f["id"] for f in tree}
-            cur = st.session_state.get("ii_archive_path", "— don't move emails —")
-            sel = st.selectbox("Archive processed emails to", arch_opts,
-                               index=arch_opts.index(cur) if cur in arch_opts else 0,
-                               key="ii_archive_sel")
-            st.session_state["ii_archive_path"] = sel
-            st.session_state["ii_archive_id"] = path_to_id.get(sel)
-        cfg_ok = chosen and supabase_db and supabase_db.configured()
-        _saved = (supabase_db.config_get("invoice_import") if (supabase_db
-                  and supabase_db.configured()) else None) or {}
-        auto_on = st.toggle("Run automatically (hands-off)", value=bool(_saved.get("auto_enabled")),
-                            key="ii_auto",
-                            help="When on, TradeHub checks these folders on a schedule and imports "
-                                 "new invoices with no clicks. Runs on the always-on Render host.")
-        every = st.number_input("…every (minutes)", 5, 120,
-                                int(_saved.get("interval_min") or 15), step=5, key="ii_interval")
-        if st.button("💾 Save settings" + (" & turn on automatic import" if auto_on else ""),
-                     key="ii_savecfg", disabled=not cfg_ok):
-            supabase_db.config_set("invoice_import", {
-                "folders": chosen, "archive_folder_id": st.session_state.get("ii_archive_id"),
-                "archive_path": st.session_state.get("ii_archive_path"),
-                "auto_enabled": bool(auto_on), "interval_min": int(every)})
-            st.success(("Saved — automatic import is ON. TradeHub will check every "
-                        f"{int(every)} min." if auto_on else
-                        "Saved. (Automatic import is OFF — use the buttons below, or toggle it on.)"))
+        kids = st.session_state.get("ii_child") or []
+        if kids:
+            st.dataframe(pd.DataFrame([{"Folder": f["name"], "Emails": f["count"]} for f in kids]),
+                         use_container_width=True, hide_index=True)
+
+    # Automatic-run settings.
+    _saved = (supabase_db.config_get("invoice_import") if (supabase_db
+              and supabase_db.configured()) else None) or {}
+    ca, cb = st.columns([2, 1])
+    auto_on = ca.toggle("Run automatically (hands-off)", value=bool(_saved.get("auto_enabled")),
+                        key="ii_auto",
+                        help="When on, TradeHub checks the folders on a schedule and imports new "
+                             "invoices with no clicks. Runs on the always-on Render host.")
+    every = cb.number_input("Every (min)", 5, 120, int(_saved.get("interval_min") or 15),
+                            step=5, key="ii_interval")
+    if st.button("💾 Save automatic settings", key="ii_savecfg",
+                 disabled=not (supabase_db and supabase_db.configured())):
+        supabase_db.config_set("invoice_import", {
+            "auto_enabled": bool(auto_on), "interval_min": int(every)})
+        st.success(("Saved — automatic import is ON, checking every "
+                    f"{int(every)} min." if auto_on else
+                    "Saved. (Automatic import is OFF — use the buttons below, or toggle it on.)"))
 
     # Last automatic run status.
     if supabase_db and supabase_db.configured():
@@ -4846,24 +4828,20 @@ def _render_invoice_import():
                        f"archived {_stat.get('archived', 0)}."
                        + (f" ⚠️ {_stat.get('error')}" if _stat.get("error") else ""))
 
-    # 2) Run — preview first, then live.
-    chosen = st.session_state.get("ii_folders") or []
-    archive_id = st.session_state.get("ii_archive_id")
+    # Run — preview first, then live. Folders default to all Suppliers subfolders (folders=None).
     c1, c2, c3 = st.columns([1, 1, 2])
     limit = c3.number_input("Max emails per folder", 5, 200, 40, step=5, key="ii_limit")
-    if c1.button("👀 Preview (dry run)", key="ii_preview", use_container_width=True,
-                 disabled=not chosen):
+    if c1.button("👀 Preview (dry run)", key="ii_preview", use_container_width=True):
         with st.spinner("Reading invoices (no changes made)…"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=chosen, dry_run=True, limit_per_folder=int(limit))
-    live_ok = chosen and supabase_db and supabase_db.configured()
+                folders=None, dry_run=True, limit_per_folder=int(limit))
+    live_ok = supabase_db and supabase_db.configured()
     if c2.button("✅ Import now (live)", key="ii_live", type="primary", use_container_width=True,
                  disabled=not live_ok,
-                 help=None if live_ok else "Pick folders and connect Supabase first"):
+                 help=None if live_ok else "Connect Supabase first (de-dup tracking)"):
         with st.spinner("Importing invoices to Monday…"):
             st.session_state["ii_result"] = invoice_import.run_import(
-                folders=chosen, dry_run=False, limit_per_folder=int(limit),
-                archive_folder_id=archive_id)
+                folders=None, dry_run=False, limit_per_folder=int(limit))
 
     res = st.session_state.get("ii_result")
     if res:

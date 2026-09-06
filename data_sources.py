@@ -2332,6 +2332,25 @@ def list_mail_folders_tree(mailbox: str, token: str | None = None, max_folders: 
     return out
 
 
+def list_child_folders(mailbox: str, parent_name: str, token: str | None = None) -> list:
+    """The subfolders under the folder called `parent_name` (e.g. Inbox's 'Suppliers') as
+    [{id, name, path, count}] — the per-supplier invoice folders to scan. [] if the parent isn't
+    found. Matches parent by name anywhere in the tree (case/space-insensitive)."""
+    token = token or ms_token()
+    target = _norm(parent_name)
+    parent = None
+    for f in list_mail_folders_tree(mailbox, token=token):
+        if _norm(f["name"]) == target:
+            parent = f
+            break
+    if not parent:
+        return []
+    return [{"id": c["id"], "name": c.get("displayName") or "",
+             "path": f"{parent['path']}/{c.get('displayName')}",
+             "count": c.get("totalItemCount", 0)}
+            for c in _graph_children(mailbox, parent["id"], token)]
+
+
 def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
                                  token: str | None = None) -> list:
     """Recent messages in a folder (by id) that HAVE attachments → [{id, internet_id, subject,
@@ -2424,6 +2443,29 @@ def add_pdf_to_subitem_file(subitem_id, pdf_bytes: bytes, filename: str,
         if a.get("name") == filename and abs(sz - want) <= 2:
             return True
     return False
+
+
+def find_or_create_mail_folder(mailbox: str, name: str, token: str | None = None) -> str | None:
+    """Return the id of the mailbox folder called `name` (searched anywhere in the tree), creating
+    it at the mailbox root if it doesn't exist. Used for the fixed 'Fully Processed - Claude'
+    archive folder so processed invoice emails always land in one place. None on failure."""
+    token = token or ms_token()
+    target = _norm(name)
+    try:
+        for f in list_mail_folders_tree(mailbox, token=token):
+            if _norm(f["name"]) == target:
+                return f["id"]
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        r = requests.post(f"{GRAPH}/users/{mailbox}/mailFolders",
+                          headers={"Authorization": f"Bearer {token}",
+                                   "Content-Type": "application/json"},
+                          json={"displayName": name}, timeout=20)
+        r.raise_for_status()
+        return r.json().get("id")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def move_message_to_folder(mailbox: str, message_id: str, dest_folder_id: str,
