@@ -2356,22 +2356,25 @@ def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
     """Recent messages in a folder (by id) that HAVE attachments → [{id, internet_id, subject,
     from, received, has_attachments}]. Newest first. Used by the importer to find invoice emails."""
     token = token or ms_token()
+    # NOTE: Graph rejects ($filter hasAttachments) + ($orderby) together with a 400 ("too complex"),
+    # so we sort newest-first and filter to attachment-bearing emails in code instead.
     r = requests.get(
         f"{GRAPH}/users/{mailbox}/mailFolders/{folder_id}/messages",
         headers={"Authorization": f"Bearer {token}"},
         params={"$top": str(limit), "$orderby": "receivedDateTime desc",
-                "$select": "id,internetMessageId,subject,from,receivedDateTime,hasAttachments",
-                "$filter": "hasAttachments eq true"},
+                "$select": "id,internetMessageId,subject,from,receivedDateTime,hasAttachments"},
         timeout=30,
     )
     r.raise_for_status()
     out = []
     for m in r.json().get("value", []):
+        if not m.get("hasAttachments"):
+            continue
         frm = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
         out.append({"id": m.get("id"), "internet_id": m.get("internetMessageId") or m.get("id"),
                     "subject": (m.get("subject") or "").strip(), "from": frm,
                     "received": m.get("receivedDateTime"),
-                    "has_attachments": bool(m.get("hasAttachments"))})
+                    "has_attachments": True})
     return out
 
 
