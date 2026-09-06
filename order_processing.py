@@ -415,6 +415,22 @@ def _sole_feed_supplier(sku):
     return order_routing.CANON.get(next(iter(sups))) if len(sups) == 1 else None
 
 
+# Suppliers we hold no pricelist for, but whose Shopify **cost per item** is trusted as the correct
+# cost — so the PO price is taken live from Shopify (Daniela 2026-09-06: "all vista cost prices can
+# be taken off shopify cost prices as they are correct"). Still that supplier's own cost (it's what
+# we pay them), so the strict never-cross rule holds.
+SHOPIFY_COST_SUPPLIERS = {"vista"}
+
+
+@st.cache_data(show_spinner=False)
+def _shopify_cost(sku):
+    """Cached Shopify cost-per-item for a SKU (None if unset / not found / no read_inventory)."""
+    try:
+        return data_sources.shopify_variant_cost(sku)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _line_cost(sku, supplier, name=None, variant=None):
     """The routed supplier's OWN cost for a SKU (or, failing that, its product title), or None.
     STRICT RULE: a supplier's cost is only ever that supplier's own price — never another
@@ -429,6 +445,11 @@ def _line_cost(sku, supplier, name=None, variant=None):
     c = (_pricing().get(key) or {}).get(sup)
     if isinstance(c, (int, float)):
         return c
+    # Suppliers whose Shopify cost-per-item is trusted (Vista): use it live when we hold no price.
+    if sup in SHOPIFY_COST_SUPPLIERS and sku:
+        sc = _shopify_cost(sku)
+        if isinstance(sc, (int, float)):
+            return sc
     # Same-supplier family pattern (e.g. UPB prices all trims/boards one price per type). Still the
     # SAME supplier's own price only. Optional suffix distinguishes families that share a prefix but
     # differ in price (e.g. Squaredeal HardiePlank Cedar -CE vs Smooth -SM).

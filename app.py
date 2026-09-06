@@ -7942,14 +7942,28 @@ with st.sidebar:
         if data.get("outlook_error"):
             st.caption(data["outlook_error"][:160])
         st.caption(f"Updated: {data.get('updated','—')}")
-        if st.button("Check Shopify fulfilment permission", use_container_width=True):
+        if st.button("Check Shopify permissions", use_container_width=True):
             try:
                 sc = data_sources.shopify_token_scopes()
-                can_split = any("fulfillment_orders" in s for s in sc.get("scopes", []))
-                st.caption(("🟢 Can split fulfilments" if can_split else
-                            "🔴 CANNOT split fulfilments — add a `write_..._fulfillment_orders` "
-                            "scope to the Shopify app and regenerate the token")
-                           + f" · app: {sc.get('app') or '?'}")
+                scopes = sc.get("scopes", [])
+                st.caption(f"App: {sc.get('app') or '?'}")
+                # Each row: what it unlocks + whether the scope is present.
+                checks = [
+                    ("read_inventory" in scopes,
+                     "Vista cost prices (read cost-per-item)", "read_inventory"),
+                    (any("write_" in s and "fulfillment_orders" in s for s in scopes),
+                     "Split fulfilments across suppliers",
+                     "write_merchant_managed_fulfillment_orders"),
+                    ("read_shopify_payments_disputes" in scopes,
+                     "Live chargebacks/disputes", "read_shopify_payments_disputes"),
+                ]
+                for ok, what, handle in checks:
+                    st.caption((f"🟢 {what}" if ok else
+                                f"🔴 {what} — add `{handle}`"))
+                if not all(ok for ok, _, _ in checks):
+                    st.caption("Add the missing scope(s) in Shopify → Settings → Apps → "
+                               "Develop apps → your app → Configuration → Admin API scopes, "
+                               "then Save & re-install. (No token to copy — TradeHub fetches it.)")
             except Exception as e:  # noqa: BLE001
                 st.caption(f"Couldn't read Shopify scopes: {str(e)[:120]}")
         if st.button("Refresh data", use_container_width=True):

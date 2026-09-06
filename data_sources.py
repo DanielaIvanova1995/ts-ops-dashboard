@@ -315,6 +315,45 @@ def shopify_variant_price(sku: str) -> dict | None:
     return None
 
 
+def shopify_variant_cost(sku: str) -> float | None:
+    """Live Shopify **cost per item** (the InventoryItem unitCost — what WE pay) for a SKU, or None.
+    Used as the PO cost for suppliers we hold no pricelist for but whose Shopify cost is trusted as
+    correct (e.g. Vista, Daniela 2026-09-06). Tries the bare SKU and a leading 'TSO' prefix.
+    Returns None (never raises) if not on Shopify, no cost is set, or the token lacks `read_inventory`
+    — so pricing falls through gracefully to a packing slip. Reading unitCost needs the
+    `read_inventory` scope on the Shopify app."""
+    if not sku:
+        return None
+    try:
+        store = get_secret("SHOPIFY_STORE")
+        token = shopify_products_token()
+        forms = [sku, f"TSO{sku}"]
+        qstr = " OR ".join(f"sku:{s}" for s in forms)
+        query = ("query ($q: String!) { productVariants(first: 10, query: $q) { edges { node { "
+                 "sku inventoryItem { unitCost { amount } } } } } }")
+        r = requests.post(
+            f"https://{store}/admin/api/2024-10/graphql.json",
+            json={"query": query, "variables": {"q": qstr}},
+            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("errors"):          # e.g. missing read_inventory scope → fall through
+            return None
+        edges = payload.get("data", {}).get("productVariants", {}).get("edges", [])
+        nodes = {(e["node"].get("sku") or ""): e["node"] for e in edges}
+        for want in forms:                 # prefer exact, then TSO-prefixed
+            n = nodes.get(want)
+            amt = (((n or {}).get("inventoryItem") or {}).get("unitCost") or {}).get("amount")
+            if amt is not None:
+                c = float(amt)
+                return c if c > 0 else None
+    except Exception:  # noqa: BLE001 — cost is best-effort; never break PO pricing
+        return None
+    return None
+
+
 def fetch_order_discounts(order_ids, token: str | None = None) -> dict:
     """{shopify_order_id(str): {amount, codes}} — customer discounts applied on each
     Shopify order. Batched. Raises if Shopify orders aren't readable (caller falls back)."""
