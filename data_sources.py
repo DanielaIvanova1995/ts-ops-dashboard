@@ -3692,6 +3692,101 @@ def split_fulfillment_by_supplier(order_id, key_to_supplier, token=None):
     return actions
 
 
+def _resolve_order_gid(order_ref, token=None):
+    """Shopify order GID from either a numeric order id, a full gid, or an order NAME/number
+    (e.g. '30479' / '#30479'). None if it can't be found. Reads orders (needs read_orders)."""
+    ref = str(order_ref or "").strip()
+    if not ref:
+        return None
+    if ref.startswith("gid://"):
+        return ref
+    digits = re.sub(r"\D", "", ref)
+    if digits and len(digits) >= 10:               # a real Shopify order id (orders are ~13 digits)
+        return f"gid://shopify/Order/{digits}"
+    # Otherwise it's the human order number → look it up by name (with and without '#').
+    name = ref if ref.startswith("#") else f"#{digits or ref}"
+    q = ('query($q:String!){orders(first:5,query:$q){edges{node{id name}}}}')
+    try:
+        data = _shopify_admin_gql(q, {"q": f"name:{name}"}, token)
+    except Exception:  # noqa: BLE001
+        return None
+    edges = ((data.get("orders") or {}).get("edges") or [])
+    for e in edges:                                 # exact name match first
+        n = e.get("node") or {}
+        if (n.get("name") or "").lstrip("#") == name.lstrip("#"):
+            return n.get("id")
+    return edges[0]["node"]["id"] if edges else None
+
+
+def fulfill_order_for_supplier(order_ref, supplier=None, skus=None, notify=False, token=None):
+    """Mark a Shopify order FULFILLED — used when an invoice is approved (Daniela 2026-09-06).
+    Default = fulfil the WHOLE order (every open fulfilment-order line still to ship): Daniela would
+    rather over-fulfil than miss lines when a supplier's invoice SKUs don't line up (2026-09-06).
+    If `skus` ARE passed it fulfils only the matching lines (partial) — kept for callers that want
+    it, but the invoice approval passes none. Quiet by default (no customer email). Returns
+    {ok, fulfilled, note}; never raises for a business reason — a problem comes back in `note`.
+    Needs write_merchant_managed_fulfillment_orders."""
+    def nk(s):
+        return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    def keys(s):                                     # tolerant sku forms (bare + TSO-prefixed)
+        k = nk(s)
+        out = {k}
+        if k.startswith("tso"):
+            out.add(k[3:])
+        else:
+            out.add("tso" + k)
+        return {x for x in out if x}
+
+    try:
+        token = token or shopify_products_token()
+        gid = _resolve_order_gid(order_ref, token)
+        if not gid:
+            return {"ok": False, "fulfilled": 0, "note": f"couldn't find order {order_ref} on Shopify"}
+        q = ("query($id:ID!){order(id:$id){fulfillmentOrders(first:25){nodes{id status "
+             "lineItems(first:100){nodes{id remainingQuantity lineItem{sku}}}}}}}")
+        data = _shopify_admin_gql(q, {"id": gid}, token)
+        fos = (((data.get("order") or {}).get("fulfillmentOrders") or {}).get("nodes") or [])
+        open_fos = [f for f in fos if (f.get("status") or "").upper() in ("OPEN", "IN_PROGRESS")]
+        if not open_fos:
+            return {"ok": True, "fulfilled": 0, "note": "already fulfilled / nothing open"}
+
+        want = set()
+        for s in (skus or []):
+            want |= keys(s)
+
+        entries = []
+        for fo in open_fos:
+            lines = [li for li in ((fo.get("lineItems") or {}).get("nodes") or [])
+                     if (li.get("remainingQuantity") or 0) > 0]
+            if want:
+                sel = [li for li in lines
+                       if keys(((li.get("lineItem") or {}).get("sku"))) & want]
+            else:
+                sel = lines                          # no skus given → fulfil the WHOLE order
+            if sel:
+                entries.append({"fulfillmentOrderId": fo["id"],
+                                "fulfillmentOrderLineItems": [
+                                    {"id": li["id"], "quantity": li["remainingQuantity"]}
+                                    for li in sel]})
+        if not entries:
+            return {"ok": False, "fulfilled": 0,
+                    "note": f"couldn't match {supplier}'s lines to an open fulfilment on {order_ref}"}
+
+        mut = ("mutation($f:FulfillmentV2Input!){fulfillmentCreateV2(fulfillment:$f){"
+               "fulfillment{id status} userErrors{field message}}}")
+        res = _shopify_admin_gql(mut, {"f": {"lineItemsByFulfillmentOrder": entries,
+                                             "notifyCustomer": bool(notify)}}, token)
+        payload = res.get("fulfillmentCreateV2") or {}
+        errs = payload.get("userErrors") or []
+        if errs:
+            return {"ok": False, "fulfilled": 0, "note": errs[0].get("message", "?")[:120]}
+        n = sum(len(e["fulfillmentOrderLineItems"]) for e in entries)
+        return {"ok": True, "fulfilled": n, "note": ""}
+    except Exception as e:  # noqa: BLE001 — fulfilment is best-effort; never break invoice approval
+        return {"ok": False, "fulfilled": 0, "note": str(e)[:120]}
+
+
 SUGGESTIONS_BOARD = "TradeHub Suggestions"   # dedicated board — one row per note
 
 

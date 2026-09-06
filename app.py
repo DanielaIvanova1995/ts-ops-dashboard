@@ -3454,12 +3454,18 @@ def _run_one_invoice(inv, lbsku):
     # below the auto-push floor (rec == "hold"). Holding is only a *suggestion* — the final call
     # is yours, so a matched invoice always gets the clear green Push button.
     push_primary = rec == "push" or (matched and rec != "disc")
+    # On approval (not a credit note), also fulfil the whole order on Shopify — Daniela would rather
+    # over-fulfil than miss lines when invoice SKUs don't match (2026-09-06), so no per-line SKUs.
+    _fulfil = None if is_cn else {
+        "order_ref": inv.get("order_no"), "supplier": inv.get("supplier"),
+    }
     ca.button("Push credit note to QB" if is_cn else "Push to QB",
               key=f"push_{_sid}", use_container_width=True,
               type=("primary" if push_primary else "secondary"),
-              on_click=_queue_action, args=(_sid, push_label, _no),
+              on_click=_queue_action, args=(_sid, push_label, _no, _fulfil),
               help="Approves this invoice and pushes it to QuickBooks. Always available for a "
-                   "matched invoice — the HOLD/FLAG note above is only advice, not a lock.")
+                   "matched invoice — the HOLD/FLAG note above is only advice, not a lock."
+                   + ("" if is_cn else " Also marks the order fulfilled on Shopify."))
     cb.button("Mark Matched (hold)", key=f"matched_{_sid}", use_container_width=True,
               type=("primary" if rec == "hold" else "secondary"),
               on_click=_queue_action, args=(_sid, MATCHED_LABEL, _no))
@@ -3595,11 +3601,16 @@ def _run_one_invoice(inv, lbsku):
                                    + " — set the status/note manually if needed.")
 
 
-def _queue_action(sub_id, label, inv_no):
+def _queue_action(sub_id, label, inv_no, fulfil=None):
     """Button on_click callback — stash a Push/Matched/Flag action. Callbacks ALWAYS fire on
     click (unlike an 'if st.button(): …' inside the dynamically-rendered detail panel, which
-    can miss a click and need pressing twice). Applied at the top of the next render."""
+    can miss a click and need pressing twice). Applied at the top of the next render.
+    `fulfil` (only passed by the Push-to-QB button, and never for a credit note) carries
+    {order_ref, supplier, skus} so approving the invoice also fulfils that supplier's lines on
+    Shopify (Daniela 2026-09-06)."""
     st.session_state["inv_action"] = ("status", str(sub_id), label, inv_no)
+    if fulfil and label == APPROVED_QB_LABEL:
+        st.session_state["inv_fulfil"] = fulfil
 
 
 def _queue_delete(sub_id, inv_no):
@@ -3663,6 +3674,7 @@ def _process_pending_action():
     act = st.session_state.pop("inv_action", None)
     disc = st.session_state.pop("inv_disc_note", None)
     del_clear = st.session_state.pop("inv_del_clear", None)
+    fulfil = st.session_state.pop("inv_fulfil", None)
     if not act:
         return
     kind, sub_id, label, inv_no = act
@@ -3691,6 +3703,17 @@ def _process_pending_action():
                 except Exception:  # noqa: BLE001
                     pass
             msg = f"Invoice {inv_no} marked “{label}”."
+            # Approved → also fulfil this supplier's lines on Shopify (quietly, no customer email).
+            if label == APPROVED_QB_LABEL and fulfil and fulfil.get("order_ref"):
+                fr = data_sources.fulfill_order_for_supplier(
+                    fulfil["order_ref"], fulfil.get("supplier"),
+                    skus=fulfil.get("skus"), notify=False)
+                if fr.get("ok") and fr.get("fulfilled"):
+                    msg += f" Fulfilled {fr['fulfilled']} line(s) on Shopify."
+                elif fr.get("ok"):
+                    msg += f" (Shopify: {fr.get('note') or 'nothing to fulfil'}.)"
+                else:
+                    msg += f" ⚠️ Shopify fulfil didn’t run: {fr.get('note')}"
         st.session_state.setdefault("inv_gone", set()).add(str(sub_id))   # hide instantly
         for kk in ("review", "matched", "recent", "discrepancy"):
             st.session_state.pop(f"sel_{kk}", None)                       # reset row selections
