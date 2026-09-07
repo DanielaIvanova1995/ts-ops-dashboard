@@ -85,6 +85,18 @@ create table if not exists invoice_parses (
   parsed jsonb not null,
   at     timestamptz not null default now()
 );
+
+-- Scheduled invoice-check log: skip already-handled invoices + keep a reasons history
+create table if not exists invoice_check_log (
+  sub_id     text primary key,   -- Monday subitem id
+  outcome    text not null,      -- pushed | held | left | failed
+  invoice_no text,
+  order_no   text,
+  supplier   text,
+  reason     text,
+  at         timestamptz not null default now()
+);
+create index if not exists invoice_check_log_outcome_idx on invoice_check_log (outcome, at desc);
 ```
 
 **Because "auto-expose new tables" is OFF, grant the new table to the service role too** (same as we did for the others), else writes get "permission denied":
@@ -92,6 +104,7 @@ create table if not exists invoice_parses (
 grant all on invoice_imports to service_role;
 grant all on app_config to service_role;
 grant all on invoice_parses to service_role;
+grant all on invoice_check_log to service_role;
 ```
 
 ## Code

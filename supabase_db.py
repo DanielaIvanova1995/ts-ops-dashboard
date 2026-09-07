@@ -300,6 +300,64 @@ def invoice_import_delete(internet_id: str) -> bool:
         return False
 
 
+# ---- Scheduled invoice-check log (skip already-handled, keep a reasons history) -------------
+def invoice_check_seen(sub_id: str) -> bool:
+    """True if the scheduler has already checked this invoice AND set it aside (left/failed), so it
+    isn't re-checked every cycle. A pushed/held one leaves Needs Review so it won't be re-fetched
+    anyway; this guards the ones that stay in the queue."""
+    if not configured() or not sub_id:
+        return False
+    try:
+        r = (_client().table("invoice_check_log").select("outcome")
+             .eq("sub_id", str(sub_id)).in_("outcome", ["left", "failed"]).limit(1).execute())
+        return bool(r.data)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def invoice_check_log(sub_id: str, outcome: str, **fields) -> bool:
+    """Record a scheduled-check outcome for an invoice (upsert by sub_id): outcome =
+    'pushed'|'held'|'left'|'failed', plus invoice_no/order_no/supplier/reason for the history view."""
+    if not configured() or not sub_id:
+        return False
+    try:
+        row = {"sub_id": str(sub_id), "outcome": outcome, "at": _now()}
+        for k in ("invoice_no", "order_no", "supplier", "reason"):
+            if fields.get(k) is not None:
+                row[k] = str(fields[k])[:400]
+        _client().table("invoice_check_log").upsert(row).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def invoice_check_recent(limit: int = 100, outcomes: list | None = None) -> list:
+    """Recent scheduled-check outcomes (newest first). Pass outcomes=['left','failed'] for the
+    'didn't go through' history."""
+    if not configured():
+        return []
+    try:
+        q = (_client().table("invoice_check_log")
+             .select("sub_id,outcome,invoice_no,order_no,supplier,reason,at")
+             .order("at", desc=True).limit(limit))
+        if outcomes:
+            q = q.in_("outcome", outcomes)
+        return q.execute().data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def invoice_check_clear(sub_id: str) -> bool:
+    """Forget a left/failed invoice so the scheduler re-checks it next cycle (after you've fixed it)."""
+    if not configured() or not sub_id:
+        return False
+    try:
+        _client().table("invoice_check_log").delete().eq("sub_id", str(sub_id)).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def audit(actor: str, action: str, detail: str = "", ref: str = "") -> bool:
     if not configured():
         return False

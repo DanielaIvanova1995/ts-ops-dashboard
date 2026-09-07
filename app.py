@@ -4185,19 +4185,44 @@ def _grid_push(inv):
     st.session_state.setdefault("inv_gone", set()).add(str(inv["sub_id"]))
 
 
+def _left_reason(res, action, margin):
+    """Human reason an invoice was set aside by the auto-check (for the history)."""
+    if action == "flag":
+        m = f"{margin:.0f}% " if isinstance(margin, (int, float)) else ""
+        return f"margin {m}over the ceiling — likely a missing credit note or 2nd invoice"
+    issues = [t for l in res.get("lines", []) for t, _ in l.get("issues", []) if t != "name"]
+    if "supplier" in issues:
+        return "invoice looks like a different supplier than the order"
+    if "price" in issues:
+        return "a price doesn't match the pricelist"
+    if "qty" in issues:
+        return "a quantity doesn't match the order"
+    if "notorder" in issues:
+        return "a line isn't on the order"
+    if "noprice" in issues:
+        return "no pricelist price to check against"
+    if "delivery" in issues:
+        return "a delivery/carriage charge to check"
+    if isinstance(margin, (int, float)):
+        return f"margin {margin:.0f}% below the push floor — held for review"
+    return "needs review"
+
+
 def run_scheduled_invoice_check(max_n=40):
     """HEADLESS invoice check + auto-process for the background scheduler (no Streamlit session/UI).
     Makes the SAME decisions as the manual 'Bulk-check & auto-process', but only auto-acts on the
     safe cases: fully-matched + margin in the supplier's band → PUSH (create the QB bill, or fall
     back to the old label so Make makes it); thin-margin → HOLD as Matched; everything else
     (discrepancy, high margin, unreadable, no price) is LEFT in Needs Review for a human.
-    Returns {checked, pushed, held, left, failed}."""
-    out = {"checked": 0, "pushed": 0, "held": 0, "left": 0, "failed": 0}
+    Skips invoices it has ALREADY set aside (so it doesn't re-check them every cycle and wastes no
+    reads), and logs every left/failed one with its reason for the history. Returns counts."""
+    import supabase_db
+    out = {"checked": 0, "pushed": 0, "held": 0, "left": 0, "failed": 0, "skipped": 0}
     try:
         label_ids, lim = INVOICE_STATUS["review"]
         data = data_sources.fetch_invoices_by_status(label_ids, limit=lim)
         invs = [i for i in (data.get("invoices") or [])
-                if not _is_excluded_supplier(i.get("supplier"))][:max_n]
+                if not _is_excluded_supplier(i.get("supplier"))]
     except Exception:  # noqa: BLE001
         return out
     try:
@@ -4205,12 +4230,22 @@ def run_scheduled_invoice_check(max_n=40):
     except Exception:  # noqa: BLE001
         return out
     for inv in invs:
+        if out["checked"] >= max_n:
+            break
+        sid = inv.get("sub_id")
+        # Already set aside on a previous cycle → don't re-check (saves reads; keeps progressing).
+        if supabase_db.invoice_check_seen(sid):
+            out["skipped"] += 1
+            continue
         aid = inv.get("asset_id")
         if not aid:
             continue
         parsed = _read_pdf_plain(aid)
         if not isinstance(parsed, dict) or parsed.get("error"):
             out["failed"] += 1
+            supabase_db.invoice_check_log(sid, "failed", invoice_no=inv.get("invoice_no"),
+                                          order_no=inv.get("order_no"), supplier=inv.get("supplier"),
+                                          reason="couldn't read the invoice PDF")
             continue
         out["checked"] += 1
         try:
@@ -4228,24 +4263,35 @@ def run_scheduled_invoice_check(max_n=40):
             is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
             _label, action = _push_decision(matched, is_cn, margin, inv.get("supplier"),
                                             has_discount=bool(inv.get("_discount")))
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             out["failed"] += 1
+            supabase_db.invoice_check_log(sid, "failed", invoice_no=inv.get("invoice_no"),
+                                          order_no=inv.get("order_no"), supplier=inv.get("supplier"),
+                                          reason=f"check error: {str(e)[:120]}")
             continue
+        _meta = dict(invoice_no=inv.get("invoice_no"), order_no=inv.get("order_no"),
+                     supplier=inv.get("supplier"))
         try:
             if action == "push" and is_cn:
                 data_sources.set_invoice_status(inv["sub_id"], CN_APPROVED_QB_LABEL)
                 out["pushed"] += 1
+                supabase_db.invoice_check_log(sid, "pushed", reason="credit note approved", **_meta)
             elif action == "push":
                 ok, _n = _approve_to_quickbooks(inv["sub_id"], inv.get("invoice_no"))
                 data_sources.set_invoice_status(
                     inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL if ok else APPROVED_QB_LABEL,
                     create_missing=ok)
                 out["pushed"] += 1
+                supabase_db.invoice_check_log(sid, "pushed", reason=_n, **_meta)
             elif action == "hold":
                 data_sources.set_invoice_status(inv["sub_id"], MATCHED_LABEL)
                 out["held"] += 1
+                supabase_db.invoice_check_log(sid, "held", reason="thin margin — held as Matched",
+                                              **_meta)
             else:
                 out["left"] += 1          # flag / uncertain → leave for review (never auto-flag)
+                supabase_db.invoice_check_log(sid, "left", reason=_left_reason(res, action, margin),
+                                              **_meta)
         except Exception:  # noqa: BLE001
             out["failed"] += 1
     return out
@@ -5042,6 +5088,26 @@ def render_invoice_check():
                 st.caption(f"🤖 Last automatic check {str(_cs['at'])[:16].replace('T', ' ')} UTC — "
                            f"pushed {_cs.get('pushed', 0)}, held {_cs.get('held', 0)}, "
                            f"left {_cs.get('left', 0)}, failed {_cs.get('failed', 0)}.")
+            # History of invoices the auto-check set aside, with the reason — and a re-check button
+            # (use after you've fixed one on Monday) so the scheduler tries it again next cycle.
+            _hist = _sdb.invoice_check_recent(limit=200, outcomes=["left", "failed"])
+            st.markdown(f"**Didn't go through ({len(_hist)})** — reasons below. These stay in Needs "
+                        "Review and are skipped by future runs until you fix + re-check them.")
+            if _hist:
+                st.dataframe(pd.DataFrame([{
+                    "When": str(r.get("at") or "")[:16].replace("T", " "),
+                    "Invoice": r.get("invoice_no"), "Order": r.get("order_no"),
+                    "Supplier": r.get("supplier"), "Why": r.get("reason")} for r in _hist]),
+                    use_container_width=True, hide_index=True)
+                _opts = {f"{r.get('invoice_no') or r.get('sub_id')} — {r.get('reason','')[:40]}":
+                         r.get("sub_id") for r in _hist}
+                _pick = st.selectbox("Re-check one (after you've fixed it)",
+                                     ["— choose —"] + list(_opts), key="invchk_recheck_pick")
+                if _pick != "— choose —" and st.button("↻ Re-check next run", key="invchk_recheck"):
+                    _sdb.invoice_check_clear(_opts[_pick])
+                    st.success("Cleared — the scheduler will re-check it on the next run.")
+            else:
+                st.caption("Nothing set aside yet.")
 
     flash = st.session_state.pop("inv_flash", None)
     if flash:
