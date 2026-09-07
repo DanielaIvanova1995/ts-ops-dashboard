@@ -458,7 +458,10 @@ def load_kpis() -> dict:
 # Only the Daily Ops board + Summary use the live KPI fetch. Skip it on the other
 # modules so Quotes / Pricing / Finance / Invoice Check / Activity don't wait on Monday.
 _kpi_modules = ("Daily Ops",)
-if st.session_state.get("module", "Daily Ops") in _kpi_modules:
+# Only do the (slower) live KPI fetch when Daily Ops is the page ALREADY selected — NOT on the very
+# first paint (module unset), so the app opens fast even though it no longer lands on Daily Ops.
+# When Daily Ops is the resolved page, it's loaded further down (see the reload guard before render).
+if st.session_state.get("module") in _kpi_modules:
     data = load_kpis()
 else:
     data = {"kpis": [], "updated": "—", "_lazy": True}
@@ -8170,7 +8173,12 @@ with st.sidebar:
         _want = set(user_modules)
         menu = tuple(m for m in all_modules if m in _want) or ("Daily Ops",)
     if "module" not in st.session_state or st.session_state.module not in menu:
-        st.session_state.module = "Daily Ops"
+        # Land on a page people actually use (fast, lazy) rather than Daily Ops, which does the
+        # slower live fetch on open. Admin/manager → Invoice Check; everyone else → their first page.
+        if role in ("admin", "manager") and "Invoice Check" in menu:
+            st.session_state.module = "Invoice Check"
+        else:
+            st.session_state.module = menu[0] if menu else "Daily Ops"
     for _m in menu:
         if st.button(_m, key=f"nav_{_m}", use_container_width=True,
                      type=("primary" if st.session_state.module == _m else "secondary")):
@@ -8263,6 +8271,12 @@ elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance")
     module = "Daily Ops"
 if user_modules and module not in menu:            # per-user allow-list, enforced server-side
     module = menu[0] if menu else "Daily Ops"
+
+# If Daily Ops is the page actually being shown but we skipped the eager load (fast first paint),
+# fetch the live KPIs now so the board isn't empty — for whoever really lands on Daily Ops.
+if module == "Daily Ops" and data.get("_lazy"):
+    data = load_kpis()
+    KPIS = data.get("kpis", [])
 
 # --- QuickBooks OAuth callback: Intuit redirects back to the app with ?code&state&realmId ---
 # One-shot (guarded) so it never re-processes the code and spins a redirect/rerun loop.
