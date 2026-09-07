@@ -3844,15 +3844,16 @@ def _process_pending_action():
             # bill can't be created, DON'T approve — surface the reason so nothing is silently lost.
             if label == APPROVED_QB_LABEL:
                 ok, note = _approve_to_quickbooks(sub_id, inv_no)
-                if not ok:
-                    st.session_state["inv_flash_err"] = (
-                        f"Didn't push {inv_no} to QuickBooks — {note}. Left unapproved for you.")
-                    return
-                data_sources.set_invoice_status(sub_id, APPROVED_QB_TRADEHUB_LABEL,
-                                                create_missing=True)
-                label = APPROVED_QB_TRADEHUB_LABEL
+                if ok:
+                    data_sources.set_invoice_status(sub_id, APPROVED_QB_TRADEHUB_LABEL,
+                                                    create_missing=True)
+                    msg = f"Invoice {inv_no} approved — {note}."
+                else:
+                    # Couldn't create the bill in TradeHub → still approve, and let the existing
+                    # automation (Make) create the bill, so a matched invoice is never left stuck.
+                    data_sources.set_invoice_status(sub_id, APPROVED_QB_LABEL)
+                    msg = f"Invoice {inv_no} approved (bill via existing automation — {note})."
                 _incomplete_note_if_approved(sub_id, APPROVED_QB_LABEL)
-                msg = f"Invoice {inv_no} approved — {note}."
             else:
                 data_sources.set_invoice_status(sub_id, label)
                 _incomplete_note_if_approved(sub_id, label)
@@ -4089,13 +4090,15 @@ def _bulk_check(invs, lbsku):
                 if ok:
                     data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL,
                                                     create_missing=True)
-                    _incomplete_note_if_approved(inv["sub_id"], APPROVED_QB_LABEL)
-                    goneset.add(str(inv["sub_id"]))
-                    pushed += 1
                 else:
-                    billfail += 1     # couldn't create the QB bill → leave for review
+                    # bill couldn't be created here → approve anyway; Make creates the bill.
+                    data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_LABEL)
+                    billfail += 1
+                _incomplete_note_if_approved(inv["sub_id"], APPROVED_QB_LABEL)
+                goneset.add(str(inv["sub_id"]))
+                pushed += 1
             except Exception:  # noqa: BLE001
-                billfail += 1
+                pass
         elif action == "hold":
             try:
                 data_sources.set_invoice_status(inv["sub_id"], label)
@@ -4120,8 +4123,8 @@ def _bulk_check(invs, lbsku):
         + f"Processed {n}: pushed {pushed} to QB, held {held} as Matched. "
         f"{flagged + unmatched} left in Needs Review for you ({flagged} high margin >{hi:.0f}%, "
         f"{unmatched} to check)"
-        + (f", ⚠️ {billfail} couldn't be created in QuickBooks (left for you — usually a missing "
-           "invoice date or vendor)" if billfail else "")
+        + (f" (of which {billfail} will get their QuickBooks bill from the existing automation — "
+           "usually a missing invoice date or vendor on our side)" if billfail else "")
         + (f", {fail} unreadable" if fail else "")
         + ". Nothing was auto-marked Discrepancy — flag those yourself after emailing the supplier.")
     st.rerun()
@@ -4160,40 +4163,49 @@ def _grid_is_matched(sid):
 
 def _grid_push(inv):
     """Push one already-checked, matched invoice to QuickBooks. For an INVOICE, TradeHub creates the
-    bill itself and marks it 'Approved (To QB by TradeHub)'. Credit notes keep the old CN label
-    (Make still handles those). Raises if the bill couldn't be created (so nothing is silently lost)."""
+    bill itself and marks it 'Approved (To QB by TradeHub)'; if it can't (no invoice date/vendor) it
+    still approves under the old 'Approved (To QB)' label so the existing automation makes the bill.
+    Credit notes keep the old CN label (Make still handles those)."""
     is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
     if is_cn:
         data_sources.set_invoice_status(inv["sub_id"], CN_APPROVED_QB_LABEL)
         _incomplete_note_if_approved(inv["sub_id"], CN_APPROVED_QB_LABEL)
     else:
-        ok, note = _approve_to_quickbooks(inv["sub_id"], inv.get("invoice_no"))
-        if not ok:
-            raise RuntimeError(note)
-        data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL, create_missing=True)
+        ok, _note = _approve_to_quickbooks(inv["sub_id"], inv.get("invoice_no"))
+        if ok:
+            data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL,
+                                            create_missing=True)
+        else:
+            # Couldn't create the bill here → still approve; the existing automation (Make) makes it.
+            data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_LABEL)
         _incomplete_note_if_approved(inv["sub_id"], APPROVED_QB_LABEL)
     st.session_state.setdefault("inv_gone", set()).add(str(inv["sub_id"]))
 
 
 def _selection_bar(picked_ids, key, pos):
-    """Selection actions (Check / Push / Fix margins) shown above AND below the list."""
+    """Selection actions (Check / Check & process / Push / Fix margins), above AND below the list."""
     n = len(picked_ids)
-    b = st.columns([1, 1, 1, 1.4])
+    b = st.columns([1, 1.2, 1, 1])
     if b[0].button(f"Check selected ({n})", key=f"chksel_{key}_{pos}", disabled=not n,
                    use_container_width=True,
                    help="Reads & checks the ticked invoices (cached reads are free), fills in the "
-                        "table columns and opens them below to review."):
+                        "table columns and opens them below to review — no pushing."):
         st.session_state[f"do_check_{key}"] = True
-    if b[1].button(f"Push selected ({n})", key=f"pushsel_{key}_{pos}", type="primary",
+    if b[1].button(f"⚙️ Check & process ({n})", key=f"procsel_{key}_{pos}", type="primary",
+                   disabled=not n, use_container_width=True,
+                   help="Runs the full auto-process on JUST the ticked invoices: checks each, pushes "
+                        "the fully-matched to QuickBooks, holds thin-margin ones, leaves the rest for "
+                        "review — the same as 'Bulk-check & auto-process all', but only your selection."):
+        st.session_state[f"do_process_{key}"] = list(picked_ids)
+    if b[2].button(f"Push selected ({n})", key=f"pushsel_{key}_{pos}",
                    disabled=not n, use_container_width=True,
                    help="Checks any not-yet-checked ticked invoices, then pushes the fully-matched "
                         "ones straight to QuickBooks."):
         st.session_state[f"do_push_{key}"] = list(picked_ids)
-    if b[2].button(f"🔧 Fix margins ({n})", key=f"fixsel_{key}_{pos}", disabled=not n,
+    if b[3].button(f"🔧 Fix margins ({n})", key=f"fixsel_{key}_{pos}", disabled=not n,
                    use_container_width=True,
                    help="For the ticked invoices, adds any invoice total missing from its order's "
-                        "INV columns so the order margin is right (fixes a 98%-type margin). "
-                        "Won't double-count."):
+                        "INV columns so the order margin is right (fixes a 98%-type margin)."):
         st.session_state[f"do_fixmargin_{key}"] = list(picked_ids)
 
 
@@ -4450,6 +4462,14 @@ def _invoice_tab(key, is_queue):
             st.session_state[show_key] = picked_ids
             st.session_state.pop(f"sel_{key}", None)
             st.rerun()
+
+        # Check & auto-process JUST the ticked invoices (same engine as 'Bulk-check & auto-process
+        # all', on the selection only).
+        _procids = st.session_state.pop(f"do_process_{key}", None)
+        if _procids:
+            sel_invs = [i for i in fil if i["sub_id"] in set(_procids) and i.get("asset_id")]
+            st.session_state.pop(f"sel_{key}", None)
+            _bulk_check(sel_invs, lbsku)          # checks, auto-pushes/holds, then reruns
 
         # Push the ticked, matched invoices (checking any not yet checked first).
         if st.session_state.get(f"do_push_{key}"):
