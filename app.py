@@ -8503,10 +8503,13 @@ with st.sidebar:
         _want = set(user_modules)
         menu = tuple(m for m in all_modules if m in _want) or ("Daily Ops",)
     if "module" not in st.session_state or st.session_state.module not in menu:
-        # Land on a page people actually use (fast, lazy) rather than Daily Ops, which does the
-        # slower live fetch on open. Admin/manager → Invoice Check; everyone else → their first page.
+        # Land on the page each person actually works on (fast, lazy) rather than Daily Ops, which
+        # does the slower live fetch on open. Admin/manager → Invoice Check; a processor whose access
+        # includes Order Processing (e.g. Natasha) → Order Processing; everyone else → their first.
         if role in ("admin", "manager") and "Invoice Check" in menu:
             st.session_state.module = "Invoice Check"
+        elif "Order Processing" in menu:
+            st.session_state.module = "Order Processing"
         else:
             st.session_state.module = menu[0] if menu else "Daily Ops"
     for _m in menu:
