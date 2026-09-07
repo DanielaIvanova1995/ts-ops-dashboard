@@ -3500,23 +3500,32 @@ def _run_one_invoice(inv, lbsku):
                    "whenever you're happy with it — even if the margin note suggests holding.")
 
     # Fix a wrong-looking order margin on the spot: adds any invoice total(s) that never made it
-    # into the order's INV columns (the cause of a 98%-type margin). Duplicate-safe.
+    # into the order's INV columns (the cause of a 98%-type margin). Duplicate-safe. Always shown
+    # when we can identify the order (by parent id, or by order number).
     _oid = inv.get("order_item_id")
+    _ono = (inv.get("order_no") or "").strip()
     _mlive = inv.get("order_margin_live")
-    if _oid:
+    if _oid or _ono:
         _hint = (" — looks high, the invoice total may be missing from the order"
                  if isinstance(_mlive, (int, float)) and _mlive >= 60 else "")
         if st.button("🔧 Fix order margin", key=f"fixmargin_{_sid}",
                      help="Adds any invoice totals missing from the order's INV columns so the "
                           "profit/margin is right. Won't double-count. Re-check to see the update."):
             try:
-                with st.spinner("Updating order margin…"):
-                    _n = data_sources.reconcile_order_inv_slots(_oid)
-                if _n:
-                    st.success(f"Added {_n} missing invoice total(s) to order {inv.get('order_no')}. "
-                               "Re-check the invoice to see the corrected margin.")
+                oid = _oid
+                if not oid and _ono:                       # resolve the order id from its number
+                    _o = data_sources.find_order_item_by_number(_ono)
+                    oid = _o.get("id") if _o else None
+                if not oid:
+                    st.error("Couldn't find this order on Monday to update.")
                 else:
-                    st.info("Order margin already up to date — every invoice total is already on it.")
+                    with st.spinner("Updating order margin…"):
+                        _n = data_sources.reconcile_order_inv_slots(oid)
+                    if _n:
+                        st.success(f"Added {_n} missing invoice total(s) to order {_ono}. "
+                                   "Re-check the invoice to see the corrected margin.")
+                    else:
+                        st.info("Order margin already up to date — every invoice total is on it.")
             except Exception as e:  # noqa: BLE001
                 st.error("Couldn't update the order: " + str(e)[:180])
         if _hint:
