@@ -1130,6 +1130,35 @@ def subitems_status_by_names(names, token=None):
     return out
 
 
+def subitems_status_by_number_like(numbers, token=None):
+    """Like subitems_status_by_names but matches a subitem whose name CONTAINS the number rather than
+    equals it — so a statement number '1845950' finds an invoice stored on Monday with a branch
+    prefix, e.g. LPD's '01/1845950'. Returns {invoice name: Payment Status text}. Best-effort."""
+    token = token or get_token()
+    uniq = list(dict.fromkeys(str(n).strip() for n in (numbers or []) if str(n).strip()))
+    out = {}
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    q = ('query($b:ID!,$v:String!){boards(ids:[$b]){items_page(limit:25,query_params:{rules:['
+         '{column_id:"name",compare_value:[$v],operator:contains_text}]}){items{name '
+         'column_values(ids:["status7__1"]){text}}}}}')
+    for num in uniq:
+        try:
+            r = requests.post(MONDAY_API, json={"query": q, "variables": {
+                "b": str(SUBITEMS_BOARD_ID), "v": num}}, headers=headers, timeout=30)
+            r.raise_for_status()
+            p = r.json()
+            if p.get("errors"):
+                continue
+            items = ((((p.get("data") or {}).get("boards") or [{}])[0]).get("items_page")
+                     or {}).get("items") or []
+            for it in items:
+                cv = it.get("column_values") or []
+                out[str(it.get("name") or "").strip()] = (cv[0].get("text") if cv else "") or ""
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def _fetch_subitem_details(sub_ids, token):
     """{sub_id(str): {invoice_no, current_status, total, order_no, supplier}} for the given
     subitem ids (their CURRENT state + parent order/supplier). Batched by 100."""

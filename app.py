@@ -7455,6 +7455,22 @@ def _render_statement_recon():
     mon_status = {}                              # normalised invoice no -> Monday Payment Status text
     for _nm, _stt in _found.items():
         mon_status[_norm_inv_no(_nm, sup)] = _stt
+    # Prefix-tolerant lookup: an invoice stored on Monday WITH a branch prefix (LPD '01/1845950')
+    # won't match the statement's bare number by exact name. Search by 'contains', then accept a hit
+    # only if it normalises to a number that's actually on this statement (so it can't over-match).
+    _stmt_norms = {_norm_inv_no((_l.get("invoice_no") or ""), sup)
+                   for _l in (stmt.get("lines") or []) if (_l.get("type") or "").lower() == "invoice"}
+    _stmt_norms.discard("")
+    _missing_norms = [n for n in _stmt_norms if n not in mon_status]
+    if _missing_norms:
+        try:
+            _like = data_sources.subitems_status_by_number_like(_missing_norms)
+        except Exception:  # noqa: BLE001
+            _like = {}
+        for _nm, _stt in _like.items():
+            _n = _norm_inv_no(_nm, sup)
+            if _n in _stmt_norms:
+                mon_status.setdefault(_n, _stt)
 
     bill_by_doc = {}
     for b in bills:
