@@ -21,9 +21,12 @@ ENV PORT=8501
 EXPOSE 8501
 
 # Shell form so ${PORT} expands at runtime. Bind 0.0.0.0 + headless for a server.
+# XSRF protection OFF: behind Render's reverse proxy the uploader's XSRF token check fails and
+# file uploads (e.g. reconciling a statement PDF) return "AxiosError 400". The app is behind a
+# login and served over HTTPS, so disabling it is safe here and fixes uploads (Daniela 2026-09-06).
 CMD streamlit run app.py \
     --server.port=${PORT} \
     --server.address=0.0.0.0 \
     --server.headless=true \
     --server.enableCORS=false \
-    --server.enableXsrfProtection=true
+    --server.enableXsrfProtection=false
