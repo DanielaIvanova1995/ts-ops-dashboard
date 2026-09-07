@@ -705,8 +705,9 @@ _NEVER_POST = ("fireplace", "surround", "radiator", "stove", "sleeper", "door", 
                "sand", "paving", "slab", "kerb", "lintel", "hardcore", "screed", "plaster",
                "timber", "batten")
 # TO POST only applies to these suppliers (small roofline/hardware goods, ordered in to our Derby
-# branch). Never bulky suppliers like Carron.
-_POSTABLE_SUPPLIERS = {"Eurocell", "GAP", "Travis Perkins"}
+# branch). Never bulky suppliers like Carron — and NEVER Travis Perkins (Daniela 2026-09-06:
+# nothing from TP is ever posted, they deliver everything).
+_POSTABLE_SUPPLIERS = {"Eurocell", "GAP"}
 _POST_MAX_MM = 600            # "fits in a small box" — a stated dimension must be within this
 
 
