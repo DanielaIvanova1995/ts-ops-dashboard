@@ -694,12 +694,16 @@ _ALWAYS_POST = ("tape", "coil", "touch up paint", "touch-up paint", "handle", "s
                 "escutcheon", "hinge", "screw", "fixing", "pin", "clip", "bracket", "cap",
                 "washer", "bolt", "gasket", "sealant", "silicone", "adhesive", "sample", "key",
                 "latch", "knob", "letterplate", "numeral")
-# Bulky / heavy things that must NEVER be posted — fireplaces, sheets, doors, furniture, bathrooms.
+# Bulky / heavy things that must NEVER be posted — fireplaces, sheets, doors, furniture, bathrooms,
+# and heavy building materials (bricks/blocks/aggregates/cement — small in size but far too heavy).
 _NEVER_POST = ("fireplace", "surround", "radiator", "stove", "sleeper", "door", "panel", "board",
                "sheet", "cladding", "bath", "wardrobe", "bed", "drawers", "table", "chair", "sofa",
                "cill", "gate", "ladder", "stair", "canopy", "decking", "fence", "membrane", "felt",
                "furniture", "worktop", "mirror", "cistern", "basin", "toilet", "shower", "tray",
-               "flooring", "tile", "plank", "beam", "joist", "pergola")
+               "flooring", "tile", "plank", "beam", "joist", "pergola",
+               "brick", "block", "cement", "mortar", "concrete", "aggregate", "ballast", "gravel",
+               "sand", "paving", "slab", "kerb", "lintel", "hardcore", "screed", "plaster",
+               "timber", "batten")
 # TO POST only applies to these suppliers (small roofline/hardware goods, ordered in to our Derby
 # branch). Never bulky suppliers like Carron.
 _POSTABLE_SUPPLIERS = {"Eurocell", "GAP", "Travis Perkins"}
