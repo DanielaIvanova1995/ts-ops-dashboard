@@ -3522,8 +3522,13 @@ def _run_one_invoice(inv, lbsku):
                     with st.spinner("Updating order margin…"):
                         _n = data_sources.reconcile_order_inv_slots(oid)
                     if _n:
-                        st.success(f"Added {_n} missing invoice total(s) to order {_ono}. "
-                                   "Re-check the invoice to see the corrected margin.")
+                        invoices_by_status.clear()   # refetch so Monday's updated margin shows
+                        invoice_count.clear()
+                        st.session_state.pop("inv_gone", None)
+                        st.session_state["inv_flash"] = (
+                            f"Added {_n} missing invoice total(s) to order {_ono}. Updated margin "
+                            "loading — reopen the invoice to see it.")
+                        st.rerun()
                     else:
                         st.info("Order margin already up to date — every invoice total is on it.")
             except Exception as e:  # noqa: BLE001
@@ -4379,9 +4384,14 @@ def _invoice_tab(key, is_queue):
                     except Exception:  # noqa: BLE001
                         pass
             st.session_state.pop(f"sel_{key}", None)
+            # Order margin is Monday's formula (fed by the INV totals we just wrote), and the invoice
+            # list is cached — so refetch it, else the page keeps showing the old margin.
+            invoices_by_status.clear()
+            invoice_count.clear()
+            st.session_state.pop("inv_gone", None)
             st.session_state["inv_flash"] = (
                 f"Fixed order margins on {len(done_orders)} order(s) — added {filled} missing "
-                "invoice total(s). Re-check to see the updated margins." if filled else
+                "invoice total(s). The updated margins are now loading." if filled else
                 f"Checked {len(done_orders)} order(s) — margins already up to date.")
             st.rerun()
 
