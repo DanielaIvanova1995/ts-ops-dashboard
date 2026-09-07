@@ -4049,9 +4049,9 @@ def _grid_push(inv):
 
 
 def _selection_bar(picked_ids, key, pos):
-    """Two selection actions (Check selected / Push selected) shown above AND below the list."""
+    """Selection actions (Check / Push / Fix margins) shown above AND below the list."""
     n = len(picked_ids)
-    b = st.columns([1, 1, 2.4])
+    b = st.columns([1, 1, 1, 1.4])
     if b[0].button(f"Check selected ({n})", key=f"chksel_{key}_{pos}", disabled=not n,
                    use_container_width=True,
                    help="Reads & checks the ticked invoices (cached reads are free), fills in the "
@@ -4062,6 +4062,12 @@ def _selection_bar(picked_ids, key, pos):
                    help="Checks any not-yet-checked ticked invoices, then pushes the fully-matched "
                         "ones straight to QuickBooks."):
         st.session_state[f"do_push_{key}"] = list(picked_ids)
+    if b[2].button(f"🔧 Fix margins ({n})", key=f"fixsel_{key}_{pos}", disabled=not n,
+                   use_container_width=True,
+                   help="For the ticked invoices, adds any invoice total missing from its order's "
+                        "INV columns so the order margin is right (fixes a 98%-type margin). "
+                        "Won't double-count."):
+        st.session_state[f"do_fixmargin_{key}"] = list(picked_ids)
 
 
 def _invoice_tab(key, is_queue):
@@ -4340,6 +4346,36 @@ def _invoice_tab(key, is_queue):
             if nc.button("Cancel", key=f"dopushno_{key}", use_container_width=True):
                 st.session_state.pop(f"do_push_{key}", None)
                 st.rerun()
+
+        # Fix order margins for the ticked invoices — add any invoice total missing from its
+        # order's INV columns (the cause of a 98%-type margin). Duplicate-safe; no Claude cost.
+        _fixids = st.session_state.pop(f"do_fixmargin_{key}", None)
+        if _fixids:
+            ids = set(_fixids)
+            sel_invs = [i for i in fil if i["sub_id"] in ids]
+            done_orders, filled = set(), 0
+            with st.spinner("Fixing order margins…"):
+                for i in sel_invs:
+                    oid = i.get("order_item_id")
+                    ono = (i.get("order_no") or "").strip()
+                    okey = oid or ono
+                    if not okey or okey in done_orders:
+                        continue
+                    done_orders.add(okey)
+                    try:
+                        if not oid and ono:
+                            _o = data_sources.find_order_item_by_number(ono)
+                            oid = _o.get("id") if _o else None
+                        if oid:
+                            filled += data_sources.reconcile_order_inv_slots(oid)
+                    except Exception:  # noqa: BLE001
+                        pass
+            st.session_state.pop(f"sel_{key}", None)
+            st.session_state["inv_flash"] = (
+                f"Fixed order margins on {len(done_orders)} order(s) — added {filled} missing "
+                "invoice total(s). Re-check to see the updated margins." if filled else
+                f"Checked {len(done_orders)} order(s) — margins already up to date.")
+            st.rerun()
 
     # ---- review panels: opened (via Check selected) + any flagged discrepancies ----
     show_ids = [sid for sid in st.session_state.get(show_key, [])
