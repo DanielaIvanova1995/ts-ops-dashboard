@@ -2213,9 +2213,11 @@ def _supplier_identity(name):
     return None
 
 
-def _check_invoice(parsed, meta, pidx, tol=0.01):
+def _check_invoice(parsed, meta, pidx, tol=0.05):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the
-    order's SKUs/quantities. Known supplier delivery charges are recognised."""
+    order's SKUs/quantities. Known supplier delivery charges are recognised.
+    `tol` = £0.05 price leeway (Daniela 2026-09-06) so penny/rounding differences
+    (e.g. £271.47 vs £271.46) don't flag — only an over-charge beyond 5p does."""
     supplier = _norm_code(meta.get("supplier"))
     # Supplier sanity check — the invoice's OWN printed supplier must match the Monday order's
     # supplier. Misfiled invoices happen (e.g. a PJH invoice logged under a Nuie order); unchecked
@@ -3475,6 +3477,29 @@ def _run_one_invoice(inv, lbsku):
     if matched and rec != "push":
         st.caption("↑ This invoice matches the order and pricelist, so you can **Push to QB** "
                    "whenever you're happy with it — even if the margin note suggests holding.")
+
+    # Fix a wrong-looking order margin on the spot: adds any invoice total(s) that never made it
+    # into the order's INV columns (the cause of a 98%-type margin). Duplicate-safe.
+    _oid = inv.get("order_item_id")
+    _mlive = inv.get("order_margin_live")
+    if _oid:
+        _hint = (" — looks high, the invoice total may be missing from the order"
+                 if isinstance(_mlive, (int, float)) and _mlive >= 60 else "")
+        if st.button("🔧 Fix order margin", key=f"fixmargin_{_sid}",
+                     help="Adds any invoice totals missing from the order's INV columns so the "
+                          "profit/margin is right. Won't double-count. Re-check to see the update."):
+            try:
+                with st.spinner("Updating order margin…"):
+                    _n = data_sources.reconcile_order_inv_slots(_oid)
+                if _n:
+                    st.success(f"Added {_n} missing invoice total(s) to order {inv.get('order_no')}. "
+                               "Re-check the invoice to see the corrected margin.")
+                else:
+                    st.info("Order margin already up to date — every invoice total is already on it.")
+            except Exception as e:  # noqa: BLE001
+                st.error("Couldn't update the order: " + str(e)[:180])
+        if _hint:
+            st.caption("Order margin " + f"{_mlive:.0f}%" + _hint + " — click **Fix order margin**.")
 
     # Under-delivered order → tell the team (hello@) to chase the rest. Not a supplier query,
     # and it does NOT flag the invoice — the invoice stays approvable.
