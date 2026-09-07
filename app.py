@@ -4288,7 +4288,15 @@ def _invoice_tab(key, is_queue):
     for c in ("Inv £", "Discount"):        # money → thousands-separated text
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").map(_gbp)
-    df.insert(0, "✓", False)
+    # Select-all: ticking this defaults every shown row to selected. Toggling it resets the grid's
+    # own edit state so the new default actually applies (data_editor otherwise keeps prior ticks).
+    _all = False
+    if not is_recent:
+        _all = st.checkbox(f"Select all {len(fil)} shown", key=f"selall_{key}")
+        if st.session_state.get(f"selall_prev_{key}") != _all:
+            st.session_state[f"selall_prev_{key}"] = _all
+            st.session_state.pop(f"sel_{key}", None)
+    df.insert(0, "✓", bool(_all))
     colcfg["✓"] = st.column_config.CheckboxColumn(
         "Select", width="small", help="Tick invoices, then use Check / Push selected above or below")
     edited = st.data_editor(
