@@ -4899,6 +4899,19 @@ def _render_invoice_import():
     # 3) Recent + failures from the database (persistent across runs).
     if supabase_db and supabase_db.configured():
         st.markdown("---")
+        # One-off repair: fill any missing INV-slot totals on orders (fixes wrong margins from
+        # invoices imported before the slot step existed). Safe — never double-counts.
+        with st.expander("🔧 Fix order margins (add any missing invoice totals to the order)"):
+            st.caption("If an imported invoice's total didn't land in the order's INV column, the "
+                       "order margin looks wrong (e.g. 98%). This adds any missing ones. It won't "
+                       "double-count what's already there.")
+            if st.button("Fix now", key="ii_backfill"):
+                with st.spinner("Checking imported invoices…"):
+                    bf = invoice_import.backfill_imported_margins()
+                st.success(f"Checked {bf['checked']} · fixed **{bf['filled']}** order(s)"
+                           + (f" · {bf['no_order']} couldn't find their order" if bf['no_order'] else ""))
+                if bf.get("items"):
+                    st.dataframe(pd.DataFrame(bf["items"]), use_container_width=True, hide_index=True)
         fails = supabase_db.invoice_import_recent(limit=50, status="failed")
         with st.expander(f"⚠️ Failed to import ({len(fails)}) — need a look", expanded=bool(fails)):
             if not fails:

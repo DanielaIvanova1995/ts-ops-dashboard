@@ -64,6 +64,42 @@ def _resolve_folder_ids(folder_names: list[str], mailbox: str, token) -> list[di
     return out
 
 
+def backfill_imported_margins(limit: int = 500) -> dict:
+    """One-off repair: for every invoice we've IMPORTED (from the log), make sure its total sits in
+    an INV slot on its order — fixes orders whose margin is wrong because the slot step was missing.
+    Email-independent (uses the import log, not the mailbox). Safe: skip_if_present means a total
+    already recorded is never added twice. Returns {checked, filled, no_order, items:[...]}."""
+    out = {"checked": 0, "filled": 0, "no_order": 0, "items": []}
+    if not supabase_db:
+        return out
+    for r in supabase_db.invoice_import_recent(limit=limit):
+        if r.get("status") != "imported":
+            continue
+        ono = r.get("order_no")
+        try:
+            total = float(r.get("total"))
+        except (TypeError, ValueError):
+            continue
+        if not ono:
+            continue
+        out["checked"] += 1
+        try:
+            order = ds.find_order_item_by_number(str(ono))
+        except Exception:  # noqa: BLE001
+            order = None
+        if not order:
+            out["no_order"] += 1
+            continue
+        try:
+            slot = ds.set_order_next_invoice_slot(order["id"], total, skip_if_present=True)
+        except Exception:  # noqa: BLE001
+            slot = None
+        if slot:
+            out["filled"] += 1
+            out["items"].append({"order": ono, "invoice": r.get("invoice_no"), "total": total})
+    return out
+
+
 def _norm_no(s: str) -> str:
     """Normalise an invoice number for duplicate comparison — drop non-alphanumerics, lowercase,
     and strip a leading 'i' before a digit (PJH's 'I11703035' == Monday's '11703035')."""
