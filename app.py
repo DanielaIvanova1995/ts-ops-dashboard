@@ -7631,9 +7631,12 @@ def _render_statement_recon():
                     status = ("🟢 On Monday & approved — not yet matched to a QuickBooks bill "
                               "(check the invoice no.)")
                     # Approved on Monday but no QB bill → candidate for TradeHub to create the bill.
+                    # Carry the statement's line date — Make-created invoices often have no invoice
+                    # date on Monday, so we use the statement date (and backfill it onto Monday).
                     _rawnm = mon_raw.get(_k) or inv
                     create_bill_rows.append({"name": _rawnm, "amt": round(val, 2),
-                                             "order": ln.get("order_ref") or ""})
+                                             "order": ln.get("order_ref") or "",
+                                             "date": ln.get("date") or ""})
                 else:
                     status = "🟠 On Monday, not yet approved — review/approve ASAP"
                 n_action += 1
@@ -7684,22 +7687,31 @@ def _render_statement_recon():
                 _det_map = {}
             _made = _skipped = _failed = 0
             _notes = []
+            _dated = 0
             with st.spinner("Creating bills in QuickBooks…"):
                 for r in create_bill_rows:
                     nm = r["name"]
                     det = _det_map.get(nm) or {}
-                    if not det.get("invoice_date"):
+                    # Invoice date: Monday's if set, else the statement's line date (and backfill it
+                    # onto Monday so the record is complete).
+                    inv_date = det.get("invoice_date") or r.get("date") or ""
+                    if not inv_date:
                         _skipped += 1
-                        _notes.append(f"{nm}: no invoice date — add it on Monday")
+                        _notes.append(f"{nm}: no invoice date on Monday or the statement")
                         continue
+                    if not det.get("invoice_date") and det.get("sub_id"):
+                        try:
+                            data_sources.set_subitem_text(det["sub_id"], "date_mm3d1ear", inv_date[:10])
+                            _dated += 1
+                        except Exception:  # noqa: BLE001
+                            pass
                     tot = det.get("total") if isinstance(det.get("total"), (int, float)) else r["amt"]
                     try:
                         if data_sources.qbo_bill_exists(nm):
                             _skipped += 1
                             _notes.append(f"{nm}: already in QuickBooks")
                         else:
-                            data_sources.qbo_create_bill(vid, nm, tot,
-                                                         txn_date=det.get("invoice_date"),
+                            data_sources.qbo_create_bill(vid, nm, tot, txn_date=inv_date[:10],
                                                          description=nm,
                                                          private_note=det.get("parent_name"))
                             _made += 1
@@ -7711,7 +7723,9 @@ def _render_statement_recon():
                         _failed += 1
                         _notes.append(f"{nm}: {str(e)[:70]}")
             st.success(f"Created **{_made}** bill(s) in QuickBooks · skipped {_skipped} · "
-                       f"failed {_failed}. Re-upload the statement to see them settle.")
+                       f"failed {_failed}"
+                       + (f" · added {_dated} invoice date(s) to Monday" if _dated else "")
+                       + ". Re-upload the statement to see them settle.")
             if _notes:
                 st.caption(" · ".join(_notes[:25]))
 
