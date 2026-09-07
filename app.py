@@ -1562,8 +1562,11 @@ MARGIN_PUSH_MAX = 35.0          # in SUPPLIER_RULES) — editable in the Invoice
 
 
 def _thresholds():
-    lo = float(st.session_state.get("inv_margin_min", MARGIN_PUSH_MIN))
-    hi = float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX))
+    try:                       # session isn't available on the background scheduler thread
+        lo = float(st.session_state.get("inv_margin_min", MARGIN_PUSH_MIN))
+        hi = float(st.session_state.get("inv_margin_max", MARGIN_PUSH_MAX))
+    except Exception:          # noqa: BLE001 — no ScriptRunContext → use the safe defaults
+        lo, hi = MARGIN_PUSH_MIN, MARGIN_PUSH_MAX
     if hi <= lo:               # an empty/invalid band (e.g. a stray 0/0) would flag everything —
         return MARGIN_PUSH_MIN, MARGIN_PUSH_MAX   # fall back to the safe defaults instead
     return lo, hi
@@ -4182,6 +4185,72 @@ def _grid_push(inv):
     st.session_state.setdefault("inv_gone", set()).add(str(inv["sub_id"]))
 
 
+def run_scheduled_invoice_check(max_n=40):
+    """HEADLESS invoice check + auto-process for the background scheduler (no Streamlit session/UI).
+    Makes the SAME decisions as the manual 'Bulk-check & auto-process', but only auto-acts on the
+    safe cases: fully-matched + margin in the supplier's band → PUSH (create the QB bill, or fall
+    back to the old label so Make makes it); thin-margin → HOLD as Matched; everything else
+    (discrepancy, high margin, unreadable, no price) is LEFT in Needs Review for a human.
+    Returns {checked, pushed, held, left, failed}."""
+    out = {"checked": 0, "pushed": 0, "held": 0, "left": 0, "failed": 0}
+    try:
+        label_ids, lim = INVOICE_STATUS["review"]
+        data = data_sources.fetch_invoices_by_status(label_ids, limit=lim)
+        invs = [i for i in (data.get("invoices") or [])
+                if not _is_excluded_supplier(i.get("supplier"))][:max_n]
+    except Exception:  # noqa: BLE001
+        return out
+    try:
+        pidx, lbsku = _pricelist_index(), _lookup_by_sku()
+    except Exception:  # noqa: BLE001
+        return out
+    for inv in invs:
+        aid = inv.get("asset_id")
+        if not aid:
+            continue
+        parsed = _read_pdf_plain(aid)
+        if not isinstance(parsed, dict) or parsed.get("error"):
+            out["failed"] += 1
+            continue
+        out["checked"] += 1
+        try:
+            res = _check_invoice(parsed, inv, pidx)
+            inv_costs = {_norm_code(l.get("sku")): l.get("unit_price")
+                         for l in (parsed.get("lines") or [])
+                         if isinstance(l.get("unit_price"), (int, float))}
+            om = _order_margin(inv.get("order_items"), lbsku, cost_override=inv_costs)
+            margin = inv.get("order_margin_live")
+            if margin is None and om:
+                margin = om.get("margin")
+            has_rule = _norm_code(inv.get("supplier")) in SUPPLIER_RULES
+            v = _verdict(res)
+            matched = has_rule or (res.get("n_issues") == 0 and v.get("order") is not False)
+            is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+            _label, action = _push_decision(matched, is_cn, margin, inv.get("supplier"),
+                                            has_discount=bool(inv.get("_discount")))
+        except Exception:  # noqa: BLE001
+            out["failed"] += 1
+            continue
+        try:
+            if action == "push" and is_cn:
+                data_sources.set_invoice_status(inv["sub_id"], CN_APPROVED_QB_LABEL)
+                out["pushed"] += 1
+            elif action == "push":
+                ok, _n = _approve_to_quickbooks(inv["sub_id"], inv.get("invoice_no"))
+                data_sources.set_invoice_status(
+                    inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL if ok else APPROVED_QB_LABEL,
+                    create_missing=ok)
+                out["pushed"] += 1
+            elif action == "hold":
+                data_sources.set_invoice_status(inv["sub_id"], MATCHED_LABEL)
+                out["held"] += 1
+            else:
+                out["left"] += 1          # flag / uncertain → leave for review (never auto-flag)
+        except Exception:  # noqa: BLE001
+            out["failed"] += 1
+    return out
+
+
 def _selection_bar(picked_ids, key, pos):
     """Selection actions (Check / Check & process / Push / Fix margins), above AND below the list."""
     n = len(picked_ids)
@@ -4944,6 +5013,36 @@ def render_invoice_check():
                    f"{MARGIN_PUSH_MAX:.0f} when the app reboots (and an impossible band auto-corrects "
                    "back to it). Tell me if you'd like different permanent defaults.")
 
+    # Scheduled (hands-off) invoice checking — runs the same auto-process in the background.
+    try:
+        import supabase_db as _sdb
+        _sched_ok = _sdb.configured()
+    except Exception:  # noqa: BLE001
+        _sdb, _sched_ok = None, False
+    if _sched_ok:
+        with st.expander("🤖 Automatic invoice checking (hands-off)"):
+            _cc = _sdb.config_get("invoice_check") or {}
+            st.caption("When on, TradeHub checks Needs-Review invoices on a schedule and **auto-"
+                       "pushes only the clean matches** (creates the QuickBooks bill), holds "
+                       "thin-margin ones as Matched, and leaves discrepancies / high-margin / "
+                       "unreadable ones in Needs Review for you. Runs on the always-on host.")
+            ca_, cb_ = st.columns([2, 1])
+            _auto = ca_.toggle("Run automatically", value=bool(_cc.get("auto_enabled")),
+                               key="invchk_auto")
+            _iv = cb_.number_input("Every (min)", 10, 240, int(_cc.get("interval_min") or 20),
+                                   step=5, key="invchk_interval")
+            if st.button("💾 Save automatic-check settings", key="invchk_save"):
+                _sdb.config_set("invoice_check", {"auto_enabled": bool(_auto),
+                                                  "interval_min": int(_iv), "max_total": 40})
+                st.success(("Saved — automatic checking is ON, every "
+                            f"{int(_iv)} min." if _auto else
+                            "Saved. (Automatic checking is OFF.)"))
+            _cs = _sdb.config_get("invoice_check_status") or {}
+            if _cs.get("at"):
+                st.caption(f"🤖 Last automatic check {str(_cs['at'])[:16].replace('T', ' ')} UTC — "
+                           f"pushed {_cs.get('pushed', 0)}, held {_cs.get('held', 0)}, "
+                           f"left {_cs.get('left', 0)}, failed {_cs.get('failed', 0)}.")
+
     flash = st.session_state.pop("inv_flash", None)
     if flash:
         st.success(flash)
@@ -5032,9 +5131,27 @@ def _bg_worker():
         finally:
             state["running"] = False
 
+    def _run_check(reason):
+        import datetime as _dt
+        import supabase_db
+        try:
+            cfg = supabase_db.config_get("invoice_check") or {}
+            res = run_scheduled_invoice_check(max_n=int(cfg.get("max_total") or 40))
+            supabase_db.config_set("invoice_check_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "checked": res.get("checked"), "pushed": res.get("pushed"),
+                "held": res.get("held"), "left": res.get("left"), "failed": res.get("failed"),
+                "reason": reason})
+            if res.get("pushed") or res.get("held"):
+                supabase_db.audit("scheduler", "invoice_check",
+                                  f"pushed {res.get('pushed')}, held {res.get('held')}, "
+                                  f"left {res.get('left')}", "")
+        except Exception:  # noqa: BLE001
+            pass
+
     def _loop():
         import supabase_db
-        next_auto = 0.0
+        next_import = next_check = 0.0
         while True:
             fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
             state["trigger"].clear()
@@ -5043,13 +5160,20 @@ def _bg_worker():
                 continue
             try:
                 cfg = supabase_db.config_get("invoice_import") or {}
-                if cfg.get("auto_enabled") and _time.time() >= next_auto:
-                    next_auto = _time.time() + max(300, int(cfg.get("interval_min") or 15) * 60)
+                if cfg.get("auto_enabled") and _time.time() >= next_import:
+                    next_import = _time.time() + max(300, int(cfg.get("interval_min") or 15) * 60)
                     _run_once("auto")
             except Exception:  # noqa: BLE001 — never let the loop die
-                next_auto = _time.time() + 900
+                next_import = _time.time() + 900
+            try:
+                ccfg = supabase_db.config_get("invoice_check") or {}
+                if ccfg.get("auto_enabled") and _time.time() >= next_check:
+                    next_check = _time.time() + max(300, int(ccfg.get("interval_min") or 20) * 60)
+                    _run_check("auto")
+            except Exception:  # noqa: BLE001
+                next_check = _time.time() + 900
 
-    threading.Thread(target=_loop, name="invoice-import-worker", daemon=True).start()
+    threading.Thread(target=_loop, name="invoice-worker", daemon=True).start()
     return state
 
 
