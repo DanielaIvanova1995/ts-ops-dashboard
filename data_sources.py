@@ -2665,6 +2665,42 @@ def set_order_number(item_id, column_id: str, value, token: str | None = None) -
     return True
 
 
+# The order's INV1..INVn total slots (feed Total profit / order margin). An invoice's total goes
+# into the first EMPTY one — the step the Make scenarios did via their router branches.
+INV_TOTAL_COLS = ["numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+                  "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm6agswe"]
+
+
+def set_order_next_invoice_slot(order_item_id, total, skip_if_present: bool = False,
+                                token: str | None = None) -> str | None:
+    """Write an invoice `total` into the first EMPTY INV slot on the parent order (feeds the order's
+    profit + margin) — the step Make did after creating the subitem. Returns the column id used, or
+    None if there's no total, no empty slot, or (when skip_if_present) the total is already in a slot.
+    `skip_if_present`=True is the safe self-heal for an invoice created earlier without its slot: it
+    only fills if that exact total isn't already recorded, so it never double-counts."""
+    import json as _json
+    if not isinstance(total, (int, float)):
+        return None
+    token = token or get_token()
+    ids = _json.dumps(INV_TOTAL_COLS)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){column_values(ids:%s){id text}}}" % ids,
+                       {"i": [str(order_item_id)]}, token)
+    cvs = (((data.get("items") or [{}])[0]).get("column_values") or [])
+    vals = {c["id"]: (c.get("text") or "").strip() for c in cvs}
+    if skip_if_present:
+        for v in vals.values():
+            try:
+                if v and abs(float(v.replace(",", "")) - float(total)) <= 0.01:
+                    return None                       # already counted somewhere → don't double up
+            except ValueError:
+                pass
+    for col in INV_TOTAL_COLS:
+        if not vals.get(col):                          # first empty slot
+            set_order_number(order_item_id, col, round(float(total), 2), token)
+            return col
+    return None                                        # all slots full (6+ invoices on one order)
+
+
 def delete_subitem(sub_id, token: str | None = None) -> bool:
     """Delete a subitem (an invoice / credit note) from Monday. DESTRUCTIVE and permanent —
     the caller must confirm first. Raises on API failure."""

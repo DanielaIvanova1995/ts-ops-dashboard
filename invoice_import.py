@@ -228,6 +228,16 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
         existing = set()
     if _norm_no(inv_no) and _norm_no(inv_no) in existing:
         rec.update(status="skipped", detail=f"invoice {inv_no} already on order {rec['order_no']}")
+        # Self-heal: if this invoice's total isn't in an INV slot yet (e.g. created before we added
+        # the slot step), put it in an empty one so the order's margin is right. Safe — won't
+        # double-count (skip_if_present).
+        if not dry_run:
+            try:
+                slot = ds.set_order_next_invoice_slot(order["id"], total, skip_if_present=True)
+                if slot:
+                    rec["detail"] += " (added missing total to order margin)"
+            except Exception:  # noqa: BLE001
+                pass
         summary["skipped"] += 1
         summary["items"].append(rec)
         if not dry_run and supabase_db:
@@ -252,6 +262,14 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
             rec["detail"] = "PDF attached" if attached else "subitem made (PDF unverified)"
         except Exception as e:  # noqa: BLE001
             rec["detail"] = f"subitem made but PDF attach failed: {str(e)[:100]}"
+        # Put the invoice total into the order's next empty INV slot (feeds profit + margin) —
+        # the step the Make scenarios did after creating the subitem.
+        try:
+            slot = ds.set_order_next_invoice_slot(order["id"], total)
+            if not slot and isinstance(total, (int, float)):
+                rec["detail"] = (rec.get("detail") or "") + " · ⚠️ no free INV slot for the total"
+        except Exception:  # noqa: BLE001
+            pass
         rec.update(status="imported", subitem_id=sub_id)
         _finish(key, "imported", rec, summary, dry_run)
         return "imported"
