@@ -419,7 +419,7 @@ def _sole_feed_supplier(sku):
 # cost — so the PO price is taken live from Shopify (Daniela 2026-09-06: "all vista cost prices can
 # be taken off shopify cost prices as they are correct"). Still that supplier's own cost (it's what
 # we pay them), so the strict never-cross rule holds.
-SHOPIFY_COST_SUPPLIERS = {"vista"}
+SHOPIFY_COST_SUPPLIERS = {"vista", "ctie"}
 
 
 @st.cache_data(show_spinner=False)

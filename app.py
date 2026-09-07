@@ -2031,6 +2031,28 @@ def _is_toolbank(supplier):
 # than saying 'not on the order'). Decor8 is handled separately — it has no SKUs at all.
 LENIENT_NAME_SUPPLIERS = ("eurocell", "gap", "jbkind", "squaredeal", "molan")
 
+# Suppliers whose TRUE cost is the Shopify cost-per-item (not the feed) — the invoice checker prices
+# their lines against that. CTie prices per "Box of N" and Vista's box costs live on Shopify too
+# (Daniela 2026-09-06). Order-processing keeps its own matching set for PO pricing.
+SHOPIFY_COST_SUPPLIERS = {"ctie", "vista"}
+_SHOP_COST_CACHE: dict = {}
+
+
+def _shopify_cost(sku):
+    """Shopify cost-per-item for a SKU, memoised (thread-safe plain dict — the bulk check may call
+    from worker threads where st.cache_data can't run). None if unset/not found."""
+    k = (sku or "").strip().lower()
+    if not k:
+        return None
+    if k in _SHOP_COST_CACHE:
+        return _SHOP_COST_CACHE[k]
+    try:
+        v = data_sources.shopify_variant_cost(sku)
+    except Exception:  # noqa: BLE001
+        v = None
+    _SHOP_COST_CACHE[k] = v
+    return v
+
 
 # Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
 # (BT postcodes) £13 under £250 (free over). Priced on the delivery postcode, like Carron.
@@ -2686,6 +2708,22 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
             rec["issues"].extend(
                 _price_issues(supplier, unit, oc, tol,
                               f"our SKU {order[okey]['sku']} (invoice uses their own code)"))
+
+    # Shopify-cost suppliers (CTie, Vista): their true cost is the Shopify cost-per-item, so price
+    # EVERY matched line against that (overriding the feed, which for CTie is per-unit and wrong).
+    # Basis matches because the Shopify variant IS the "Box of N" we're invoiced for.
+    if supplier in SHOPIFY_COST_SUPPLIERS:
+        for rec in lines:
+            unit = rec.get("unit")
+            if not isinstance(unit, (int, float)):
+                continue
+            okey = rec.get("_okey")
+            sku = (order[okey].get("sku") if okey else None) or rec.get("sku")
+            sc = _shopify_cost(sku)
+            if isinstance(sc, (int, float)) and sc > 0:
+                rec["cost"] = sc
+                rec["issues"] = [i for i in rec["issues"] if i[0] not in ("price", "noprice")]
+                rec["issues"].extend(_price_issues(supplier, unit, sc, tol))
 
     # Quantity check on the TOTAL invoiced per order line. A product split across invoice lines
     # that sums to the ordered qty is fine. A SHORTFALL (invoiced < ordered) is NOT a discrepancy
