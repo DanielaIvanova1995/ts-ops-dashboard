@@ -60,8 +60,9 @@ _NP_NORTH = {"CW", "SK", "S", "DN", "LN", "SY", "YO", "HG", "BD", "HU", "PR", "B
 _SQUAREDEAL = {"SA", "CF", "NP", "LD", "TA", "EX", "PL", "TQ", "TR", "DT",
                "BS", "BA", "SP", "SO", "BH", "SN", "PO"}
 # Depot ordering emails — per Daniela's map (Newmarket/Ipswich are .co.uk, Aldridge is .com).
-_UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.co.uk",
-              "UPB Ipswich": "ipswich@upbuildingproducts.co.uk",
+# UPB emails are ALWAYS @upbuildingproducts.COM — never .co.uk (Daniela 2026-09-06).
+_UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
+              "UPB Ipswich": "ipswich@upbuildingproducts.com",
               "UPB Aldridge": "martinmelaney@upbuildingproducts.com"}
 _UPB_DEPOT_PHONE = {"UPB Newmarket": "01638501927"}   # Ipswich / Aldridge TBC
 
