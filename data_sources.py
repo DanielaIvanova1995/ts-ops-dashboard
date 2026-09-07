@@ -2578,19 +2578,22 @@ def move_message_to_folder(mailbox: str, message_id: str, dest_folder_id: str,
     return True
 
 
-def set_invoice_status(sub_id, label: str, token: str | None = None) -> bool:
+def set_invoice_status(sub_id, label: str, token: str | None = None,
+                       create_missing: bool = False) -> bool:
     """Set a subitem's Payment Status (status7__1) to a label, e.g.
     'Approved (To QB)' or 'Discrepancy'. Uses change_column_value with {label} (the
     canonical method for status columns) and VERIFIES it stuck by reading the value
-    back in the same response. Returns True, or raises a clear error if it didn't apply."""
+    back in the same response. `create_missing`=True lets Monday create the label if it doesn't
+    exist yet (e.g. the new 'Approved (To QB by TradeHub)'). Returns True, or raises on failure."""
     import json as _json
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
     query = ("mutation ($board: ID!, $item: ID!, $val: JSON!) {"
              " change_column_value(board_id: $board, item_id: $item,"
-             " column_id: \"status7__1\", value: $val, create_labels_if_missing: false)"
-             " { id column_values(ids: [\"status7__1\"]) { text } } }")
+             " column_id: \"status7__1\", value: $val, create_labels_if_missing: %s)"
+             " { id column_values(ids: [\"status7__1\"]) { text } } }"
+             % ("true" if create_missing else "false"))
     r = requests.post(
         MONDAY_API,
         json={"query": query, "variables": {"board": str(SUBITEMS_BOARD_ID),
@@ -3550,6 +3553,87 @@ def qbo_create(entity: str, body: dict) -> dict:
         print(f"[QBO] create {entity} error {r.status_code} intuit_tid={tid}: {r.text[:400]}")
         raise RuntimeError(f"QuickBooks write error {r.status_code} (ref {tid}): {r.text[:220]}")
     return r.json()
+
+
+# QuickBooks Bill defaults — copied from the Make "Create a Bill on QB" scenario so a native bill is
+# built IDENTICALLY (these ids are specific to Trade Superstore's QuickBooks company).
+QBO_BILL_ACCOUNT_REF = "8"      # the purchases/cost expense account
+QBO_BILL_TAX_CODE_REF = "6"     # 20% VAT (standard)
+QBO_BILL_TERM_REF = "3"         # payment terms
+
+
+def qbo_create_bill(vendor_id, doc_number, total_inc_vat, txn_date=None, description=None,
+                    private_note=None) -> dict:
+    """Create a supplier bill in QuickBooks — the native replacement for Make's 'Create a Bill on QB'
+    scenario, built to the SAME shape: one ex-VAT AccountBasedExpenseLine (total ÷ 1.2) on account 8
+    at tax code 6 (20% VAT), DocNumber = the invoice number, TaxExcluded, terms 3. TxnDate is set to
+    the invoice date when given (Make left it as today). Returns the created bill. Raises on error."""
+    ex_vat = round(float(total_inc_vat) / 1.2, 2)
+    body = {
+        "VendorRef": {"value": str(vendor_id)},
+        "DocNumber": str(doc_number)[:21],          # QuickBooks DocNumber max length is 21
+        "GlobalTaxCalculation": "TaxExcluded",
+        "SalesTermRef": {"value": QBO_BILL_TERM_REF},
+        "TxnTaxDetail": {"TxnTaxCodeRef": {"value": QBO_BILL_TAX_CODE_REF}},
+        "Line": [{
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "Amount": ex_vat,
+            "Description": (description or str(doc_number))[:4000],
+            "AccountBasedExpenseLineDetail": {
+                "AccountRef": {"value": QBO_BILL_ACCOUNT_REF},
+                "TaxCodeRef": {"value": QBO_BILL_TAX_CODE_REF},
+            },
+        }],
+    }
+    if private_note:
+        body["PrivateNote"] = str(private_note)[:4000]
+    if txn_date:
+        body["TxnDate"] = str(txn_date)[:10]
+    return qbo_create("bill", body)
+
+
+def subitems_bill_details(names, token=None) -> dict:
+    """For invoice numbers (subitem names), return {name: {sub_id, total, invoice_date, status,
+    parent_name}} — everything needed to create a QuickBooks bill for an approved-but-missing
+    invoice. Exact-name match on the invoices subitems board."""
+    token = token or get_token()
+    uniq = list(dict.fromkeys(str(n).strip() for n in (names or []) if str(n).strip()))
+    out = {}
+    q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
+         'columns:[{column_id:"name",column_values:$vals}]){items{id name '
+         'column_values(ids:["numbers4","status7__1","date_mm3d1ear"]){id text} '
+         'parent_item{name column_values(ids:["dropdown_mkyqdeqd"]){text}}}}}')
+    for i in range(0, len(uniq), 50):
+        chunk = uniq[i:i + 50]
+        try:
+            data = _monday_gql(q, {"b": str(SUBITEMS_BOARD_ID), "vals": chunk}, token)
+        except Exception:  # noqa: BLE001
+            continue
+        for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
+            cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+            parent = it.get("parent_item") or {}
+            pcv = parent.get("column_values") or []
+            out[str(it.get("name") or "").strip()] = {
+                "sub_id": it.get("id"), "total": _num(cvs.get("numbers4")),
+                "invoice_date": cvs.get("date_mm3d1ear") or "",
+                "status": cvs.get("status7__1") or "",
+                "parent_name": parent.get("name") or "",
+                "supplier": (pcv[0].get("text") if pcv else "") or "",
+            }
+    return out
+
+
+def qbo_bill_exists(doc_number) -> bool:
+    """True if a QuickBooks Bill with this DocNumber already exists — the duplicate guard before
+    creating a bill (so re-approving, or a bill Make already made, never double-creates)."""
+    doc = str(doc_number or "").strip().replace("'", "\\'")
+    if not doc:
+        return False
+    try:
+        r = qbo_query(f"select Id from Bill where DocNumber = '{doc}' MAXRESULTS 1")
+        return bool(r.get("Bill"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def qbo_bank_accounts():

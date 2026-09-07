@@ -1512,6 +1512,50 @@ INVOICE_STATUS = {            # key → (Monday status7__1 label ids, fetch limi
 MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
 CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
+# When TradeHub creates the bill in QuickBooks itself (not via Make), the invoice is marked with
+# THIS distinct label — so Make's 'Create a Bill on QB' scenario (which watches 'Approved (To QB)')
+# never also creates the bill → no duplicates (Daniela 2026-09-06).
+APPROVED_QB_TRADEHUB_LABEL = "Approved (To QB by TradeHub)"
+
+
+def _approve_to_quickbooks(sub_id, invoice_no):
+    """Create the QuickBooks bill for an approved invoice, directly (the native replacement for
+    Make's 'Create a Bill on QB'). Returns (ok, note). On ok, the caller sets the status to
+    APPROVED_QB_TRADEHUB_LABEL; on failure it leaves the invoice UNAPPROVED so nothing is silently
+    lost. Verifies the invoice date is present, resolves the QuickBooks vendor, and never
+    double-creates (checks the DocNumber first)."""
+    name = str(invoice_no or "").strip()
+    try:
+        det = (data_sources.subitems_bill_details([name]) or {}).get(name)
+    except Exception as e:  # noqa: BLE001
+        return False, f"couldn't read the invoice on Monday ({str(e)[:80]})"
+    if not det:
+        return False, "couldn't find the invoice on Monday to read its total/date"
+    if not det.get("invoice_date"):
+        return False, "no invoice date on Monday — add the invoice date, then approve again"
+    total = det.get("total")
+    if not isinstance(total, (int, float)) or total == 0:
+        return False, "no invoice total on Monday"
+    supplier = det.get("supplier") or ""
+    try:
+        vmap = data_sources.qbo_vendor_map_load() or {}
+        vinfo = vmap.get(_norm_code(supplier))
+        vid = vinfo.get("id") if vinfo else None
+        if not vid:
+            v = data_sources.qbo_find_vendor(supplier)
+            vid = v.get("id") if v else None
+    except Exception:  # noqa: BLE001
+        vid = None
+    if not vid:
+        return False, f"couldn't match supplier “{supplier}” to a QuickBooks vendor"
+    try:
+        if data_sources.qbo_bill_exists(name):
+            return True, "already on QuickBooks"
+        data_sources.qbo_create_bill(vid, name, total, txn_date=det.get("invoice_date"),
+                                     description=name, private_note=det.get("parent_name"))
+        return True, f"bill created in QuickBooks (£{total:,.2f})"
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)[:160]
 DISCREPANCY_LABEL = "Discrepancy"
 MARGIN_PUSH_MIN = 10.0          # default lowest margin to auto-approve (Decor8 overridden to 5%
 MARGIN_PUSH_MAX = 35.0          # in SUPPLIER_RULES) — editable in the Invoice Check settings box
@@ -3795,17 +3839,32 @@ def _process_pending_action():
                         pass
             msg = f"Deleted duplicate invoice {inv_no} from Monday{extra}."
         else:
-            data_sources.set_invoice_status(sub_id, label)
-            _incomplete_note_if_approved(sub_id, label)
+            # Approving an INVOICE (not a credit note) → TradeHub creates the QuickBooks bill itself
+            # and marks it with the distinct 'by TradeHub' label (Make no longer creates it). If the
+            # bill can't be created, DON'T approve — surface the reason so nothing is silently lost.
+            if label == APPROVED_QB_LABEL:
+                ok, note = _approve_to_quickbooks(sub_id, inv_no)
+                if not ok:
+                    st.session_state["inv_flash_err"] = (
+                        f"Didn't push {inv_no} to QuickBooks — {note}. Left unapproved for you.")
+                    return
+                data_sources.set_invoice_status(sub_id, APPROVED_QB_TRADEHUB_LABEL,
+                                                create_missing=True)
+                label = APPROVED_QB_TRADEHUB_LABEL
+                _incomplete_note_if_approved(sub_id, APPROVED_QB_LABEL)
+                msg = f"Invoice {inv_no} approved — {note}."
+            else:
+                data_sources.set_invoice_status(sub_id, label)
+                _incomplete_note_if_approved(sub_id, label)
+                msg = f"Invoice {inv_no} marked “{label}”."
             # Persist the discrepancy reason so the Discrepancy log shows it without a re-check.
             if disc and disc[0] == str(sub_id) and disc[1]:
                 try:
                     data_sources.set_subitem_text(sub_id, "text_mm3gh2za", disc[1][:1500])
                 except Exception:  # noqa: BLE001
                     pass
-            msg = f"Invoice {inv_no} marked “{label}”."
             # Approved → also fulfil this supplier's lines on Shopify (quietly, no customer email).
-            if label == APPROVED_QB_LABEL and fulfil and fulfil.get("order_ref"):
+            if fulfil and fulfil.get("order_ref"):
                 fr = data_sources.fulfill_order_for_supplier(
                     fulfil["order_ref"], fulfil.get("supplier"),
                     skus=fulfil.get("skus"), notify=False)
@@ -3981,7 +4040,7 @@ def _bulk_check(invs, lbsku):
                         lambda iv: (iv["asset_id"], _read_pdf_plain(iv["asset_id"])), need):
                     pcache[_aid] = _p
     prog = st.progress(0.0, text="Checking…")
-    pushed = held = flagged = unmatched = fail = 0
+    pushed = held = flagged = unmatched = fail = billfail = 0
     # Pass 1 — read + 3-way check EVERYTHING first, so a multi-invoice order is fully reconciled
     # across its invoices before any push decision is made (a split delivery that sums to the
     # order is matched; one that sums to MORE is caught as over-invoiced).
@@ -4024,13 +4083,25 @@ def _bulk_check(invs, lbsku):
         is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
         label, action = _push_decision(matched, is_cn, inv.get("order_margin_live"),
                                        inv.get("supplier"), has_discount=bool(inv.get("_discount")))
-        if action in ("push", "hold"):
+        if action == "push":
+            try:
+                ok, _note = _approve_to_quickbooks(inv["sub_id"], inv.get("invoice_no"))
+                if ok:
+                    data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL,
+                                                    create_missing=True)
+                    _incomplete_note_if_approved(inv["sub_id"], APPROVED_QB_LABEL)
+                    goneset.add(str(inv["sub_id"]))
+                    pushed += 1
+                else:
+                    billfail += 1     # couldn't create the QB bill → leave for review
+            except Exception:  # noqa: BLE001
+                billfail += 1
+        elif action == "hold":
             try:
                 data_sources.set_invoice_status(inv["sub_id"], label)
                 _incomplete_note_if_approved(inv["sub_id"], label)
                 goneset.add(str(inv["sub_id"]))
-                pushed += action == "push"
-                held += action == "hold"
+                held += 1
             except Exception:  # noqa: BLE001
                 pass
         elif action == "flag":
@@ -4049,6 +4120,8 @@ def _bulk_check(invs, lbsku):
         + f"Processed {n}: pushed {pushed} to QB, held {held} as Matched. "
         f"{flagged + unmatched} left in Needs Review for you ({flagged} high margin >{hi:.0f}%, "
         f"{unmatched} to check)"
+        + (f", ⚠️ {billfail} couldn't be created in QuickBooks (left for you — usually a missing "
+           "invoice date or vendor)" if billfail else "")
         + (f", {fail} unreadable" if fail else "")
         + ". Nothing was auto-marked Discrepancy — flag those yourself after emailing the supplier.")
     st.rerun()
@@ -4086,11 +4159,19 @@ def _grid_is_matched(sid):
 
 
 def _grid_push(inv):
-    """Push one already-checked, matched invoice to QuickBooks (Approved / CN Approved)."""
+    """Push one already-checked, matched invoice to QuickBooks. For an INVOICE, TradeHub creates the
+    bill itself and marks it 'Approved (To QB by TradeHub)'. Credit notes keep the old CN label
+    (Make still handles those). Raises if the bill couldn't be created (so nothing is silently lost)."""
     is_cn = isinstance(inv.get("total"), (int, float)) and inv["total"] < 0
-    lbl = CN_APPROVED_QB_LABEL if is_cn else APPROVED_QB_LABEL
-    data_sources.set_invoice_status(inv["sub_id"], lbl)
-    _incomplete_note_if_approved(inv["sub_id"], lbl)
+    if is_cn:
+        data_sources.set_invoice_status(inv["sub_id"], CN_APPROVED_QB_LABEL)
+        _incomplete_note_if_approved(inv["sub_id"], CN_APPROVED_QB_LABEL)
+    else:
+        ok, note = _approve_to_quickbooks(inv["sub_id"], inv.get("invoice_no"))
+        if not ok:
+            raise RuntimeError(note)
+        data_sources.set_invoice_status(inv["sub_id"], APPROVED_QB_TRADEHUB_LABEL, create_missing=True)
+        _incomplete_note_if_approved(inv["sub_id"], APPROVED_QB_LABEL)
     st.session_state.setdefault("inv_gone", set()).add(str(inv["sub_id"]))
 
 
@@ -7453,8 +7534,11 @@ def _render_statement_recon():
     except Exception:  # noqa: BLE001
         _found = {}
     mon_status = {}                              # normalised invoice no -> Monday Payment Status text
+    mon_raw = {}                                 # normalised invoice no -> RAW Monday name (for bill create)
     for _nm, _stt in _found.items():
-        mon_status[_norm_inv_no(_nm, sup)] = _stt
+        _n = _norm_inv_no(_nm, sup)
+        mon_status[_n] = _stt
+        mon_raw[_n] = _nm
     # Prefix-tolerant lookup: an invoice stored on Monday WITH a branch prefix (LPD '01/1845950')
     # won't match the statement's bare number by exact name. Search by 'contains', then accept a hit
     # only if it normalises to a number that's actually on this statement (so it can't over-match).
@@ -7471,13 +7555,14 @@ def _render_statement_recon():
             _n = _norm_inv_no(_nm, sup)
             if _n in _stmt_norms:
                 mon_status.setdefault(_n, _stt)
+                mon_raw.setdefault(_n, _nm)
 
     bill_by_doc = {}
     for b in bills:
         if b["doc_no"]:
             bill_by_doc.setdefault(_norm_inv_no(b["doc_no"], sup), b)
 
-    rows, action_rows, pay_lines = [], [], []
+    rows, action_rows, pay_lines, create_bill_rows = [], [], [], []
     n_pay = n_paid = n_missing = n_disc = n_action = 0
     to_pay = paid_total = disc_total = missing_total = action_total = stmt_total = 0.0
     used = set()
@@ -7545,6 +7630,10 @@ def _render_statement_recon():
                 if _mon_ok:
                     status = ("🟢 On Monday & approved — not yet matched to a QuickBooks bill "
                               "(check the invoice no.)")
+                    # Approved on Monday but no QB bill → candidate for TradeHub to create the bill.
+                    _rawnm = mon_raw.get(_k) or inv
+                    create_bill_rows.append({"name": _rawnm, "amt": round(val, 2),
+                                             "order": ln.get("order_ref") or ""})
                 else:
                     status = "🟠 On Monday, not yet approved — review/approve ASAP"
                 n_action += 1
@@ -7573,6 +7662,59 @@ def _render_statement_recon():
     if n_paid:
         parts.append(f"{n_paid} paid")
     st.markdown(" · ".join(parts))
+
+    # Approved on Monday but no QuickBooks bill → create the bills directly (native replacement for
+    # Make's 'Create a Bill on QB'). Checks each has an invoice date; never double-creates.
+    if create_bill_rows:
+        st.markdown("---")
+        st.markdown(f"##### 🟢 {len(create_bill_rows)} approved on Monday, not yet in QuickBooks")
+        st.caption("These are approved on Monday but have no QuickBooks bill. TradeHub can **create "
+                   "the bills straight in QuickBooks** (as the chosen vendor, with the invoice date "
+                   "and number). It checks each has an invoice date and won't duplicate anything "
+                   "already in QuickBooks.")
+        st.dataframe(pd.DataFrame([{"Invoice": r["name"], "Order": r["order"], "£": _gbp(r["amt"])}
+                                   for r in create_bill_rows]),
+                     hide_index=True, use_container_width=True)
+        if st.button(f"➕ Create {len(create_bill_rows)} bill(s) in QuickBooks",
+                     key=f"mkbills_{_norm_code(sup)}", type="primary"):
+            _names = [r["name"] for r in create_bill_rows]
+            try:
+                _det_map = data_sources.subitems_bill_details(_names)
+            except Exception:  # noqa: BLE001
+                _det_map = {}
+            _made = _skipped = _failed = 0
+            _notes = []
+            with st.spinner("Creating bills in QuickBooks…"):
+                for r in create_bill_rows:
+                    nm = r["name"]
+                    det = _det_map.get(nm) or {}
+                    if not det.get("invoice_date"):
+                        _skipped += 1
+                        _notes.append(f"{nm}: no invoice date — add it on Monday")
+                        continue
+                    tot = det.get("total") if isinstance(det.get("total"), (int, float)) else r["amt"]
+                    try:
+                        if data_sources.qbo_bill_exists(nm):
+                            _skipped += 1
+                            _notes.append(f"{nm}: already in QuickBooks")
+                        else:
+                            data_sources.qbo_create_bill(vid, nm, tot,
+                                                         txn_date=det.get("invoice_date"),
+                                                         description=nm,
+                                                         private_note=det.get("parent_name"))
+                            _made += 1
+                        if det.get("sub_id"):
+                            data_sources.set_invoice_status(det["sub_id"],
+                                                            APPROVED_QB_TRADEHUB_LABEL,
+                                                            create_missing=True)
+                    except Exception as e:  # noqa: BLE001
+                        _failed += 1
+                        _notes.append(f"{nm}: {str(e)[:70]}")
+            st.success(f"Created **{_made}** bill(s) in QuickBooks · skipped {_skipped} · "
+                       f"failed {_failed}. Re-upload the statement to see them settle.")
+            if _notes:
+                st.caption(" · ".join(_notes[:25]))
+
     if rows:
         df = pd.DataFrame(rows)
         for _c in ("Amount", "Unpaid"):
