@@ -1619,14 +1619,32 @@ def _order_discounts(order_ids):
 @st.cache_data(ttl=86400, show_spinner=False, max_entries=48)
 def _read_invoice(asset_id, sub_id, nonce=0):
     """Read + cache one invoice's parsed PDF (keyed per asset/sub; nonce busts the
-    cache to force a fresh re-read)."""
+    cache to force a fresh re-read). Also backed by a DURABLE Supabase cache keyed by the PDF's
+    asset id + parser version, so a checked invoice survives restarts/redeploys without paying
+    Claude to re-read it. `nonce` bypasses BOTH caches for a deliberate fresh read."""
+    dkey = f"{asset_id}:v{getattr(data_sources, 'INVOICE_PARSE_VERSION', 1)}"
+    if not nonce:                                   # durable cache hit → no Claude call, no cost
+        try:
+            import supabase_db
+            hit = supabase_db.invoice_parse_get(dkey)
+            if hit:
+                return hit
+        except Exception:  # noqa: BLE001
+            pass
     try:
         url = data_sources.monday_asset_url(asset_id)
         if not url:
             return {"error": "Couldn't get a download link for the PDF."}
-        return data_sources.read_invoice_pdf(url)
+        parsed = data_sources.read_invoice_pdf(url)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
+    if isinstance(parsed, dict) and not parsed.get("error"):   # persist only good parses
+        try:
+            import supabase_db
+            supabase_db.invoice_parse_set(dkey, parsed)
+        except Exception:  # noqa: BLE001
+            pass
+    return parsed
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -3857,14 +3875,30 @@ def _amount_dup_ids(invs):
 
 def _read_pdf_plain(asset_id):
     """Read + parse an invoice PDF with NO Streamlit cache — safe to call from worker threads
-    (st.cache_data isn't). Bulk-check uses this to read many PDFs in parallel."""
+    (st.cache_data isn't). Bulk-check uses this to read many PDFs in parallel. Backed by the
+    durable Supabase parse cache so bulk re-checks don't re-pay Claude for already-read invoices."""
+    dkey = f"{asset_id}:v{getattr(data_sources, 'INVOICE_PARSE_VERSION', 1)}"
+    try:
+        import supabase_db
+        hit = supabase_db.invoice_parse_get(dkey)
+        if hit:
+            return hit
+    except Exception:  # noqa: BLE001
+        pass
     try:
         url = data_sources.monday_asset_url(asset_id)
         if not url:
             return {"error": "Couldn't get a download link for the PDF."}
-        return data_sources.read_invoice_pdf(url)
+        parsed = data_sources.read_invoice_pdf(url)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
+    if isinstance(parsed, dict) and not parsed.get("error"):
+        try:
+            import supabase_db
+            supabase_db.invoice_parse_set(dkey, parsed)
+        except Exception:  # noqa: BLE001
+            pass
+    return parsed
 
 
 def _bulk_check(invs, lbsku):

@@ -78,12 +78,20 @@ create table if not exists app_config (
   value      jsonb not null,
   updated_at timestamptz not null default now()
 );
+
+-- Durable invoice-PDF parse cache (so a checked invoice is never re-read by Claude = no re-pay)
+create table if not exists invoice_parses (
+  key    text primary key,     -- <asset_id>:v<parser version>
+  parsed jsonb not null,
+  at     timestamptz not null default now()
+);
 ```
 
 **Because "auto-expose new tables" is OFF, grant the new table to the service role too** (same as we did for the others), else writes get "permission denied":
 ```sql
 grant all on invoice_imports to service_role;
 grant all on app_config to service_role;
+grant all on invoice_parses to service_role;
 ```
 
 ## Code

@@ -2186,6 +2186,11 @@ def monday_asset_url(asset_id, token: str | None = None) -> str | None:
     return assets[0]["public_url"] if assets else None
 
 
+# Bump when the read_invoice_pdf PROMPT changes, so the durable parse cache re-reads once (then
+# never re-pays). History: v3 = qty-column (not Units), Customer Ref / Customer purchase order.
+INVOICE_PARSE_VERSION = 3
+
+
 def read_invoice_pdf(pdf_url: str) -> dict:
     """Read a supplier invoice PDF with Claude and return structured line items:
     {supplier, invoice_no, invoice_date, lines:[{sku, description, qty,

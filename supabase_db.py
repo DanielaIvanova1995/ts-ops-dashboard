@@ -185,6 +185,32 @@ def audit_recent(limit: int = 50) -> list:
         return []
 
 
+# ---- Durable invoice-parse cache (so a checked invoice is never re-read by Claude = no re-pay) --
+def invoice_parse_get(key: str) -> dict | None:
+    """A previously stored PDF parse for this key (asset id + parser version), or None. Lets a
+    checked invoice survive restarts/redeploys without paying Claude to re-read it."""
+    if not configured() or not key:
+        return None
+    try:
+        r = _client().table("invoice_parses").select("parsed").eq("key", key).limit(1).execute()
+        rows = r.data or []
+        return rows[0]["parsed"] if rows else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def invoice_parse_set(key: str, parsed: dict) -> bool:
+    """Store a successful PDF parse durably (upsert). Callers must NOT store error results."""
+    if not configured() or not key or not isinstance(parsed, dict):
+        return False
+    try:
+        _client().table("invoice_parses").upsert({"key": key, "parsed": _json_safe(parsed),
+                                                  "at": _now()}).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---- Small key/value config store (so the scheduled job reads the UI's settings) -----------
 def config_get(key: str, default=None):
     """Read a JSON config value by key (e.g. the invoice-import folder selection). default if unset."""
