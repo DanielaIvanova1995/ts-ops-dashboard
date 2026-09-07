@@ -1014,7 +1014,10 @@ def _norm_inv_no(inv, supplier=None):
       leading zeros. Harmless to their composite numbers that start with a letter (SIN…, G…).
     - Toolbank INVOICES/QuickBooks carry a leading '0' (06016444) their STATEMENT 'Transaction'
       column omits (6016444) → strip leading zeros so the two sides match.
+    - LPD invoices are stored on Monday with a branch prefix (01/1839520) that the invoice/statement
+      omit (1839520) → strip a leading 'NN/' prefix. Applied to both sides so either format matches.
     Applied to BOTH sides of every match, so it works whichever way round it was entered."""
+    inv = re.sub(r"^\s*\d{1,3}\s*/\s*", "", str(inv or ""))   # LPD '01/1839520' -> '1839520'
     s = _norm_code(inv)
     if not s:
         return s

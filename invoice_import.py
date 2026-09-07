@@ -99,9 +99,11 @@ def backfill_imported_margins(limit: int = 500) -> dict:
 
 
 def _norm_no(s: str) -> str:
-    """Normalise an invoice number for duplicate comparison — drop non-alphanumerics, lowercase,
-    and strip a leading 'i' before a digit (PJH's 'I11703035' == Monday's '11703035')."""
-    n = re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    """Normalise an invoice number for duplicate comparison — strip a leading branch prefix
+    ('01/1839520' -> '1839520', LPD), drop non-alphanumerics, lowercase, and strip a leading 'i'
+    before a digit (PJH's 'I11703035' == Monday's '11703035')."""
+    s = re.sub(r"^\s*\d{1,3}\s*/\s*", "", str(s or ""))     # LPD branch prefix
+    n = re.sub(r"[^a-z0-9]", "", s.lower())
     if n[:1] == "i" and n[1:2].isdigit():
         n = n[1:]
     return n
