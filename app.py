@@ -4908,7 +4908,8 @@ def _render_invoice_import():
             if st.button("Fix now", key="ii_backfill"):
                 with st.spinner("Checking imported invoices…"):
                     bf = invoice_import.backfill_imported_margins()
-                st.success(f"Checked {bf['checked']} · fixed **{bf['filled']}** order(s)"
+                st.success(f"Checked {bf['orders']} order(s) · added **{bf['filled']}** missing "
+                           f"total(s)"
                            + (f" · {bf['no_order']} couldn't find their order" if bf['no_order'] else ""))
                 if bf.get("items"):
                     st.dataframe(pd.DataFrame(bf["items"]), use_container_width=True, hide_index=True)

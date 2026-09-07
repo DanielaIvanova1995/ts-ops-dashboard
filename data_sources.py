@@ -2701,6 +2701,56 @@ def set_order_next_invoice_slot(order_item_id, total, skip_if_present: bool = Fa
     return None                                        # all slots full (6+ invoices on one order)
 
 
+def order_subitem_totals(order_item_id, token: str | None = None) -> list:
+    """The totals (numbers4) of every invoice subitem on an order → [float, …]. The authoritative
+    list of what's been invoiced against the order (used to reconcile the INV slots)."""
+    data = _monday_gql('query($i:[ID!]){items(ids:$i){subitems{column_values(ids:["numbers4"])'
+                       '{text}}}}', {"i": [str(order_item_id)]}, token)
+    subs = (((data.get("items") or [{}])[0]).get("subitems") or [])
+    out = []
+    for s in subs:
+        cv = s.get("column_values") or []
+        t = (cv[0].get("text") if cv else "") or ""
+        try:
+            out.append(round(float(t.replace(",", "")), 2))
+        except (ValueError, AttributeError):
+            pass
+    return out
+
+
+def reconcile_order_inv_slots(order_item_id, token: str | None = None) -> int:
+    """Make the order's INV slots match the MULTISET of its invoice subitems' totals — fills empty
+    slots with any invoice totals not yet represented, **counting duplicates correctly** (two
+    £33.20 invoices need two £33.20 slots). Never clears or overwrites an existing value, so it's
+    safe to run repeatedly. Returns how many slots it filled. This is the duplicate-safe version of
+    set_order_next_invoice_slot for repairs/self-heal."""
+    import json as _json
+    from collections import Counter
+    token = token or get_token()
+    ids = _json.dumps(INV_TOTAL_COLS)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){column_values(ids:%s){id text}}}" % ids,
+                       {"i": [str(order_item_id)]}, token)
+    cvs = (((data.get("items") or [{}])[0]).get("column_values") or [])
+    slots = []                                     # [(col_id, value|None)] in INV order
+    by_id = {c["id"]: (c.get("text") or "").strip() for c in cvs}
+    for col in INV_TOTAL_COLS:
+        t = by_id.get(col, "")
+        try:
+            slots.append((col, round(float(t.replace(",", "")), 2) if t else None))
+        except ValueError:
+            slots.append((col, None))
+    filled = Counter(v for _, v in slots if v is not None)
+    needed = Counter(order_subitem_totals(order_item_id, token))
+    missing = needed - filled                      # multiset difference (positive counts only)
+    to_add = [v for v, n in missing.items() for _ in range(n)]
+    empty_cols = [col for col, v in slots if v is None]
+    n_filled = 0
+    for col, val in zip(empty_cols, to_add):
+        set_order_number(order_item_id, col, val, token)
+        n_filled += 1
+    return n_filled
+
+
 def delete_subitem(sub_id, token: str | None = None) -> bool:
     """Delete a subitem (an invoice / credit note) from Monday. DESTRUCTIVE and permanent —
     the caller must confirm first. Raises on API failure."""

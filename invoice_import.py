@@ -65,24 +65,21 @@ def _resolve_folder_ids(folder_names: list[str], mailbox: str, token) -> list[di
 
 
 def backfill_imported_margins(limit: int = 500) -> dict:
-    """One-off repair: for every invoice we've IMPORTED (from the log), make sure its total sits in
-    an INV slot on its order — fixes orders whose margin is wrong because the slot step was missing.
-    Email-independent (uses the import log, not the mailbox). Safe: skip_if_present means a total
-    already recorded is never added twice. Returns {checked, filled, no_order, items:[...]}."""
-    out = {"checked": 0, "filled": 0, "no_order": 0, "items": []}
+    """One-off repair: for every ORDER we've imported invoices into (from the log), reconcile its
+    INV slots against its actual invoice subitems — fixes orders whose margin is wrong because the
+    slot step was missing. Email-independent (uses the import log). Duplicate-safe (matches counts,
+    never overwrites). Returns {orders, filled, no_order, items:[...]}."""
+    out = {"orders": 0, "filled": 0, "no_order": 0, "items": []}
     if not supabase_db:
         return out
+    seen = set()
     for r in supabase_db.invoice_import_recent(limit=limit):
         if r.get("status") != "imported":
             continue
         ono = r.get("order_no")
-        try:
-            total = float(r.get("total"))
-        except (TypeError, ValueError):
+        if not ono or ono in seen:
             continue
-        if not ono:
-            continue
-        out["checked"] += 1
+        seen.add(ono)
         try:
             order = ds.find_order_item_by_number(str(ono))
         except Exception:  # noqa: BLE001
@@ -90,13 +87,14 @@ def backfill_imported_margins(limit: int = 500) -> dict:
         if not order:
             out["no_order"] += 1
             continue
+        out["orders"] += 1
         try:
-            slot = ds.set_order_next_invoice_slot(order["id"], total, skip_if_present=True)
+            n = ds.reconcile_order_inv_slots(order["id"])
         except Exception:  # noqa: BLE001
-            slot = None
-        if slot:
-            out["filled"] += 1
-            out["items"].append({"order": ono, "invoice": r.get("invoice_no"), "total": total})
+            n = 0
+        if n:
+            out["filled"] += n
+            out["items"].append({"order": ono, "slots_added": n})
     return out
 
 
@@ -264,13 +262,11 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
         existing = set()
     if _norm_no(inv_no) and _norm_no(inv_no) in existing:
         rec.update(status="skipped", detail=f"invoice {inv_no} already on order {rec['order_no']}")
-        # Self-heal: if this invoice's total isn't in an INV slot yet (e.g. created before we added
-        # the slot step), put it in an empty one so the order's margin is right. Safe — won't
-        # double-count (skip_if_present).
+        # Self-heal: make the order's INV slots match its invoice subitems (duplicate-safe), so an
+        # invoice created before the slot step gets its total counted toward the margin.
         if not dry_run:
             try:
-                slot = ds.set_order_next_invoice_slot(order["id"], total, skip_if_present=True)
-                if slot:
+                if ds.reconcile_order_inv_slots(order["id"]):
                     rec["detail"] += " (added missing total to order margin)"
             except Exception:  # noqa: BLE001
                 pass
@@ -298,11 +294,11 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
             rec["detail"] = "PDF attached" if attached else "subitem made (PDF unverified)"
         except Exception as e:  # noqa: BLE001
             rec["detail"] = f"subitem made but PDF attach failed: {str(e)[:100]}"
-        # Put the invoice total into the order's next empty INV slot (feeds profit + margin) —
-        # the step the Make scenarios did after creating the subitem.
+        # Put the invoice total into the order's INV slot (feeds profit + margin) — the step the Make
+        # scenarios did after creating the subitem. Reconcile matches slots to the subitems, so a
+        # second invoice with the same amount still gets its own slot.
         try:
-            slot = ds.set_order_next_invoice_slot(order["id"], total)
-            if not slot and isinstance(total, (int, float)):
+            if not ds.reconcile_order_inv_slots(order["id"]) and isinstance(total, (int, float)):
                 rec["detail"] = (rec.get("detail") or "") + " · ⚠️ no free INV slot for the total"
         except Exception:  # noqa: BLE001
             pass
