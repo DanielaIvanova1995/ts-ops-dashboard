@@ -2520,7 +2520,10 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
             # TOTAL sheet area (not pieces) and the unit is £/m². Validate the effective £/m²
             # (line_total ÷ qty) against our rate, and flag the line as area-billed so the generic
             # unit-price and piece-quantity checks are skipped for it.
-            _rate = _persqm_rate(sku_raw, supplier) if cost is None else None
+            # Per-m² (QNET) TAKES PRECEDENCE over any flat feed value — the feed sometimes carries the
+            # £/m² RATE as if it were a per-piece cost, which would flat-compare wrongly (a QNET sheet
+            # unit price vs the rate). So check the per-m² rate regardless of `cost`.
+            _rate = _persqm_rate(sku_raw, supplier)
             if _rate is not None:
                 area_billed = True
                 cost = _rate
