@@ -2216,8 +2216,9 @@ def monday_asset_url(asset_id, token: str | None = None) -> str | None:
 
 
 # Bump when the read_invoice_pdf PROMPT changes, so the durable parse cache re-reads once (then
-# never re-pays). History: v3 = qty-column (not Units), Customer Ref / Customer purchase order.
-INVOICE_PARSE_VERSION = 3
+# never re-pays). History: v3 = qty-column (not Units), Customer Ref / Customer purchase order;
+# v4 = unit_price must be PER-UNIT (line total ÷ qty), not the whole-line amount (Molan).
+INVOICE_PARSE_VERSION = 4
 
 
 def read_invoice_pdf(pdf_url: str) -> dict:
@@ -2244,7 +2245,12 @@ def read_invoice_pdf(pdf_url: str) -> dict:
         '"carriage":<ex-VAT delivery/carriage/shipping/postage charge, or null>,'
         '"subtotal_ex_vat":<number>,"vat":<number>,"total":<number>}\n'
         "All prices are GBP. unit_price and line_total MUST be EX-VAT (the cost before VAT is "
-        "added). Use the product/SKU code exactly as printed on each line. Put any delivery, "
+        "added). CRITICAL: unit_price is the price of ONE single unit. Many invoices (e.g. Molan) "
+        "show a line TOTAL for the whole quantity in the amount/net column, NOT a per-unit price — "
+        "in that case set line_total to that amount and set unit_price = line_total ÷ qty. So for a "
+        "line 'qty 3 ... £32.87' the £32.87 is the LINE TOTAL: line_total=32.87 and unit_price=10.96. "
+        "NEVER put the whole-line total in unit_price. line_total should equal unit_price × qty. "
+        "Use the product/SKU code exactly as printed on each line. Put any delivery, "
         "carriage, shipping or postage charge (ex-VAT) in 'carriage' — INCLUDING when it appears "
         "in the totals/summary section (e.g. 'Carriage Net') rather than the line-item table. If a "
         "value is genuinely absent use null. Do not invent or merge lines. "
