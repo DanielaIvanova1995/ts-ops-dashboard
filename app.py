@@ -2393,6 +2393,16 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
         sku_raw = ln.get("sku") or ""
         desc = ln.get("description") or ""
         qty, unit = ln.get("qty"), ln.get("unit_price")
+        # Some suppliers (e.g. Molan) print the LINE TOTAL in the amount column, which the parser
+        # returns as 'unit_price'. When the parsed unit price equals the line total on a multi-qty
+        # line, the real per-unit price is line_total ÷ qty — use that for the price check so a line
+        # total (e.g. £32.87 for qty 3) isn't compared to the per-unit cost (£10.95). Safe: only
+        # divides when unit == line_total (i.e. unit clearly IS the whole-line amount).
+        _lt0 = ln.get("line_total")
+        eff_unit = unit
+        if (isinstance(_lt0, (int, float)) and isinstance(unit, (int, float))
+                and isinstance(qty, (int, float)) and qty and qty > 1 and abs(unit - _lt0) < 0.01):
+            eff_unit = round(_lt0 / qty, 4)
 
         # Bundled COMPONENT line. Nuie / Ultra Finishing list a priced PARENT product (e.g.
         # WRSB700 Wetroom Screen) followed by the parts included in it on indented lines whose
@@ -2538,27 +2548,27 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
                     else:
                         issues.append(("name", f"£{_eff:,.2f}/m² = our £{_rate:,.2f}/m² rate{_q}"))
             if not no_pl and not area_billed:         # suppliers with no pricelist: skip price check
-                if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
+                if isinstance(eff_unit, (int, float)) and isinstance(cost, (int, float)):
                     sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)   # e.g. Eurocell temporary 5%
                     allowed = cost * (1 + sur)                    # pricelist + expected surcharge
                     via = f" (vs '{title_note}' on the pricelist)" if title_note else ""
-                    if unit > allowed + tol:
+                    if eff_unit > allowed + tol:
                         if sur:
-                            issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
+                            issues.append(("price", f"£{eff_unit:,.2f} vs pricelist £{cost:,.2f} "
                                                     f"+{sur * 100:.0f}% surcharge (£{allowed:,.2f}) — "
-                                                    f"still over by £{unit - allowed:,.2f}{via}"))
+                                                    f"still over by £{eff_unit - allowed:,.2f}{via}"))
                         else:
-                            issues.append(("price", f"£{unit:,.2f} vs pricelist £{cost:,.2f} "
-                                                    f"(+£{unit - cost:,.2f}){via}"))
-                    elif sur and unit > cost + tol:               # within surcharge band — expected
-                        issues.append(("name", f"£{unit:,.2f} = pricelist £{cost:,.2f} + "
+                            issues.append(("price", f"£{eff_unit:,.2f} vs pricelist £{cost:,.2f} "
+                                                    f"(+£{eff_unit - cost:,.2f}){via}"))
+                    elif sur and eff_unit > cost + tol:           # within surcharge band — expected
+                        issues.append(("name", f"£{eff_unit:,.2f} = pricelist £{cost:,.2f} + "
                                                f"{sur * 100:.0f}% surcharge{via}"))
                     elif title_note:
                         issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
-                elif isinstance(unit, (int, float)) and cost is None:
+                elif isinstance(eff_unit, (int, float)) and cost is None:
                     issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
         rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
-               "unit": unit, "line_total": ln.get("line_total"), "cost": cost,
+               "unit": unit, "eff_unit": eff_unit, "line_total": ln.get("line_total"), "cost": cost,
                "issues": issues, "_okey": None, "_areaqty": area_billed}
         lines.append(rec)
 
@@ -2750,7 +2760,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
             if rec.get("cost") is not None:
                 continue
             okey = rec.get("_okey")
-            unit = rec.get("unit")
+            unit = rec.get("eff_unit", rec.get("unit"))   # per-unit (line total ÷ qty where needed)
             if okey is None or not isinstance(unit, (int, float)):
                 continue
             oc = (pidx.get(_canon_sku(order[okey].get("sku"))) or {}).get(supplier)
@@ -2767,7 +2777,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
     # Basis matches because the Shopify variant IS the "Box of N" we're invoiced for.
     if supplier in SHOPIFY_COST_SUPPLIERS:
         for rec in lines:
-            unit = rec.get("unit")
+            unit = rec.get("eff_unit", rec.get("unit"))   # per-unit (line total ÷ qty where needed)
             if not isinstance(unit, (int, float)):
                 continue
             okey = rec.get("_okey")
