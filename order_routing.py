@@ -24,7 +24,8 @@ CANON = {
     "chasehardware": "Chase Hardware", "chhardware": "Chase Hardware",
     "wallsandfloors": "Walls and Floors",
     "splendour": "Walls and Floors", "velux": "Velux", "dolle": "Dolle", "mbdecor": "MB Decor",
-    "mbdiy": "MB Decor", "permaroof": "Permaroof", "newplas": "newplas", "bricklink": "Bricklink",
+    "mbdiy": "MB Decor", "mbdecordiy": "MB Decor", "mbdecordly": "MB Decor",
+    "permaroof": "Permaroof", "newplas": "newplas", "bricklink": "Bricklink",
     "brickservices": "Brickservices", "plastivan": "Plastivan", "brundle": "Brundle",
     "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "C TIE",
     "nationalplastics": "National Plastics",   # distinct from NBP
@@ -33,7 +34,9 @@ CANON = {
     "jameshardie": "UPB", "hardie": "UPB", "freefoam": "UPB", "fortex": "UPB", "cladco": "UPB",
 }
 
-PORTAL = {"PJH", "Toolbank", "Velux", "MB Decor", "Nuie", "National Skirting", "Rexel"}
+# MB Decor removed 2026-09-06 — Daniela wants POs (emailed to orders@mbdecor.co.uk) not packing
+# slips, now that MB Decor prices are loaded.
+PORTAL = {"PJH", "Toolbank", "Velux", "Nuie", "National Skirting", "Rexel"}
 QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices", "AJW"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
