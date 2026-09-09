@@ -42,7 +42,7 @@ def _product_lines(lines):
 FLAT = {
     "upb": (12.50, 100), "nbp": (17.00, 250), "eurocell": (12.50, 100),
     "travisperkins": (24.99, 100), "gap": (20.83, 150), "pjh": (37.50, 1000),
-    "molan": (23.74, None), "decor8": (5.99, 50), "deanta": (8.00, None),
+    "molan": (23.74, None), "decor8": (5.99, 50),
     "chasehardware": (10.00, None), "bricklink": (16.99, 100),
 }
 
@@ -241,6 +241,62 @@ def lpd_expected(lines, ship=None):
     return base + surcharge
 
 
+# --- Deanta (door count + postcode surcharge; hardware-only cheap/FOC) -----------------------
+# 2026 Direct-to-Site carriage: 1 door £40, then +£5/door, 7+ capped at £70 (multi-product also
+# capped £70 ex-surcharge). Hardware-only £8 under £100 / FOC over £100 (and free if going with
+# doors). Postcode surcharges on top; some areas POA.
+DEANTA_DOOR_BASE, DEANTA_DOOR_STEP, DEANTA_DOOR_CAP = 40.0, 5.0, 70.0
+DEANTA_HARDWARE, DEANTA_HARDWARE_FOC_OVER = 8.0, 100.0
+
+
+def _deanta_surcharge(ship):
+    area, dist, _out = _lpd_pc_parts(ship)
+    if area is None:
+        return 0.0, False
+    if area == "HS" or (area == "IV" and dist >= 40):      # HS / IV40+ = POA
+        return 0.0, True
+    s = 0.0
+    if area == "AB":
+        s = 37.0
+    elif area == "DD":
+        s = 42.0
+    elif area == "KY":
+        s = 37.0
+    elif area == "PH":
+        s = 40.0
+    elif area == "ZE":
+        s = 150.0
+    elif area == "DG" and 6 <= dist <= 9:
+        s = 60.0
+    elif area == "IV" and 1 <= dist <= 39:
+        s = 40.0
+    elif area == "KW":
+        s = 40.0 if dist <= 14 else 110.0
+    elif area == "PA":
+        s = 37.0 if dist <= 19 else 68.0
+    elif area == "KA" and 27 <= dist <= 28:
+        s = 150.0
+    elif area == "FK" and 8 <= dist <= 21:
+        s = 20.0
+    elif area == "G" and (dist == 63 or 82 <= dist <= 84):
+        s = 20.0
+    return s, False
+
+
+def deanta_expected(goods, lines, ship=None):
+    surcharge, poa = _deanta_surcharge(ship)
+    if poa:
+        return None
+    doors, packs = _lpd_doors(lines)          # same door vs hardware split as LPD
+    if doors > 0:
+        base = min(DEANTA_DOOR_BASE + (doors - 1) * DEANTA_DOOR_STEP, DEANTA_DOOR_CAP)
+    elif packs > 0:                           # hardware only
+        base = 0.0 if (goods is not None and goods >= DEANTA_HARDWARE_FOC_OVER) else DEANTA_HARDWARE
+    else:
+        return None
+    return base + surcharge
+
+
 # --- Vista (door canopies): box-count, with carriage-paid over a category threshold ----------
 # 1 box £15, 2 £17.50, 3 £20, 4 £25, 5 £30 (5+ capped at £30). Carriage paid over the category
 # threshold (Wall Ties £225 / Metalwork £450 / Beads-Mesh £625 / Deck-Fencing £450) — we can't
@@ -270,6 +326,8 @@ def expected_delivery(supplier, goods=None, ship=None, lines=None):
         return jbkind_expected(lines, ship)
     if s.startswith("lpd"):
         return lpd_expected(lines, ship)
+    if s.startswith("deanta"):
+        return deanta_expected(goods, lines, ship)
     if s.startswith("vista"):
         return vista_expected(goods, lines)
     if s in FLAT:

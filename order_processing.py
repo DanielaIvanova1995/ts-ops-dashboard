@@ -537,6 +537,17 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     if notes_extra:
         notes += [n for n in notes_extra if n and str(n).strip()]
 
+    # EXPRESS / NEXT-DAY: if the customer paid for expedited shipping, the PO must make it clear we
+    # need the express (not standard) service. Applies to Deanta & LPD (Daniela 2026-09-09).
+    _method = ((ship or {}).get("shipping_method") or "").strip()
+    _express = any(w in _method.lower() for w in
+                   ("express", "next day", "next-day", "nextday", "expedited", "priority", "24 hour"))
+    _cs = _canon_sup(supplier)
+    if _express and (_cs.startswith("deanta") or _cs.startswith("lpd")):
+        notes.insert(0, f"*** EXPRESS / NEXT-DAY DELIVERY REQUIRED *** — the customer paid for "
+                        f"expedited shipping ({_method}). Please dispatch on your EXPRESS / NEXT-DAY "
+                        "service, NOT standard.")
+
     items = items_override if items_override is not None else _parse_monday_items(o.get("items"))
     # Ensure the customer's chosen VARIANT (colour/size) is on every PO line. Monday's order text can
     # predate this / omit it, so pull the folded product+variant title from Shopify and match by SKU.
@@ -1541,6 +1552,7 @@ def _order_detail(o):
                 "unpriced": doc.get("unpriced") or [],
                 "name": f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_"
                         "Trade_Superstore_Online.pdf"}
+            _write_po_total(iid, kind, doc)   # numbers6 = the PO's inc-VAT total, ALWAYS on generate
         except ValueError as e:      # the validation gate blocked it — show exactly what's missing
             st.session_state.pop(f"op_gen_pdf_{iid}", None)
             st.error("Can't generate yet — " + str(e))

@@ -423,7 +423,8 @@ def fetch_order_shipping_full(order_id, token: str | None = None) -> dict:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { shippingAddress { name company address1 "
-             "address2 city province zip country phone } } }")
+             "address2 city province zip country phone } "
+             "shippingLines(first: 5) { nodes { title } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": query, "variables": {"id": gid}},
@@ -434,12 +435,18 @@ def fetch_order_shipping_full(order_id, token: str | None = None) -> dict:
     payload = r.json()
     if payload.get("errors"):
         raise RuntimeError(f"Shopify error: {payload['errors']}")
-    sa = (((payload.get("data") or {}).get("order") or {}).get("shippingAddress") or {})
+    order = ((payload.get("data") or {}).get("order") or {})
+    sa = (order.get("shippingAddress") or {})
     lines = [sa.get("name"), sa.get("company"), sa.get("address1"), sa.get("address2"),
              " ".join(x for x in [sa.get("city"), sa.get("province")] if x),
              sa.get("zip"), sa.get("country")]
     sa = dict(sa)
     sa["lines"] = [str(x).strip() for x in lines if x and str(x).strip()]
+    # The shipping METHOD the customer chose (e.g. "Express", "Next Day") — so a PO can flag when
+    # express/next-day delivery must be requested from the supplier (Deanta / LPD).
+    sa["shipping_method"] = "; ".join(
+        n.get("title", "").strip() for n in ((order.get("shippingLines") or {}).get("nodes") or [])
+        if n.get("title"))
     return sa
 
 
