@@ -609,7 +609,8 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                "qty": (float(it.get("Qty")) if str(it.get("Qty") or "").replace(".", "", 1)
                        .isdigit() else 1)}
               for it in items]
-    ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country")}
+    ship_pc = {"postcode": (ship or {}).get("zip"), "country": (ship or {}).get("country"),
+               "shipping_method": (ship or {}).get("shipping_method")}   # for the express surcharge
     if delivery_override is not None:
         deliv = float(delivery_override)
     elif to_post:

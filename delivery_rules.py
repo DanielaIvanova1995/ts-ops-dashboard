@@ -247,6 +247,13 @@ def lpd_expected(lines, ship=None):
 # doors). Postcode surcharges on top; some areas POA.
 DEANTA_DOOR_BASE, DEANTA_DOOR_STEP, DEANTA_DOOR_CAP = 40.0, 5.0, 70.0
 DEANTA_HARDWARE, DEANTA_HARDWARE_FOC_OVER = 8.0, 100.0
+DEANTA_NEXT_DAY = 50.0            # NEXT DAY / express service = +£50 on top of standard (per sheet)
+
+
+def _is_express(ship):
+    m = ((ship or {}).get("shipping_method") or "").lower()
+    return any(w in m for w in ("express", "next day", "next-day", "nextday", "expedited",
+                                "priority", "24 hour"))
 
 
 def _deanta_surcharge(ship):
@@ -294,7 +301,8 @@ def deanta_expected(goods, lines, ship=None):
         base = 0.0 if (goods is not None and goods >= DEANTA_HARDWARE_FOC_OVER) else DEANTA_HARDWARE
     else:
         return None
-    return base + surcharge
+    next_day = DEANTA_NEXT_DAY if _is_express(ship) else 0.0   # express = +£50 on top
+    return base + next_day + surcharge
 
 
 # --- Vista (door canopies): box-count, with carriage-paid over a category threshold ----------
