@@ -538,15 +538,15 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         notes += [n for n in notes_extra if n and str(n).strip()]
 
     # EXPRESS / NEXT-DAY: if the customer paid for expedited shipping, the PO must make it clear we
-    # need the express (not standard) service. Applies to Deanta & LPD (Daniela 2026-09-09).
+    # need the express (not standard) service. Applies to Deanta & LPD (Daniela 2026-09-09). Shown
+    # UNDER each product line (below) — the surest place not to miss it — not as a top note.
     _method = ((ship or {}).get("shipping_method") or "").strip()
-    _express = any(w in _method.lower() for w in
-                   ("express", "next day", "next-day", "nextday", "expedited", "priority", "24 hour"))
     _cs = _canon_sup(supplier)
-    if _express and (_cs.startswith("deanta") or _cs.startswith("lpd")):
-        notes.insert(0, f"*** EXPRESS / NEXT-DAY DELIVERY REQUIRED *** — the customer paid for "
-                        f"expedited shipping ({_method}). Please dispatch on your EXPRESS / NEXT-DAY "
-                        "service, NOT standard.")
+    _express_po = (any(w in _method.lower() for w in
+                       ("express", "next day", "next-day", "nextday", "expedited", "priority",
+                        "24 hour"))
+                   and (_cs.startswith("deanta") or _cs.startswith("lpd")))
+    _exp_note = "\nEXPRESS / NEXT-DAY DELIVERY REQUIRED — not standard" if _express_po else ""
 
     items = items_override if items_override is not None else _parse_monday_items(o.get("items"))
     # Ensure the customer's chosen VARIANT (colour/size) is on every PO line. Monday's order text can
@@ -586,13 +586,13 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         else:
             lt = round(cost * q, 2)
             goods += lt
-            po_lines.append([(it.get("SKU") or "-"), _po_desc(it), qty, _money(cost),
+            po_lines.append([(it.get("SKU") or "-"), _po_desc(it) + _exp_note, qty, _money(cost),
                              _money(lt)])
 
     make_slip = is_portal or in_house or bool(unpriced_items)
 
     if make_slip:
-        lines = [[(it.get("SKU") or "-"), _po_desc(it), (it.get("Qty") or "1")]
+        lines = [[(it.get("SKU") or "-"), _po_desc(it) + _exp_note, (it.get("Qty") or "1")]
                  for it in items]
         if is_portal:
             head = ["Portal order - place on the supplier portal."]

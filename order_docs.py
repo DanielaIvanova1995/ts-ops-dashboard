@@ -285,9 +285,14 @@ def _grid_table(pdf, cols, lines, line_h=4.4, pad=1.8):
             for j, ln_txt in enumerate(parts):                   # (cell() never re-wraps → no distortion)
                 if ln_txt.startswith("Variant:"):
                     variant_bold = True
-                pdf.set_font("Helvetica", "B" if variant_bold else "", 8.5)
+                _is_exp = "EXPRESS" in ln_txt                    # express-delivery flag → bold + red
+                pdf.set_font("Helvetica", "B" if (variant_bold or _is_exp) else "", 8.5)
+                if _is_exp:
+                    pdf.set_text_color(200, 0, 0)
                 pdf.set_xy(x + pad, y0 + 1.1 + j * line_h)
                 pdf.cell(w - 2 * pad, line_h, ln_txt, align=a)
+                if _is_exp:
+                    pdf.set_text_color(0, 0, 0)
             x += w
         pdf.set_font("Helvetica", "", 8.5)                       # reset for the next row
         pdf.set_xy(x0, y0 + row_h)
