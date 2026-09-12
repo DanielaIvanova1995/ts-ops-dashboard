@@ -1593,6 +1593,15 @@ def _order_detail(o):
             try:
                 res = data_sources.op_upload_po(iid, up.getvalue(), up.name)
                 if res.get("ok"):
+                    # numbers6: a manually-uploaded PDF has no parsed total, so write the order's
+                    # own expected PO total (same feed-priced figure the generator would produce).
+                    try:
+                        _k, _d = _build_doc(o, delivery_override=delivery_override,
+                                            notes_extra=notes_extra, items_override=items_override,
+                                            address_override=address_override)
+                        _write_po_total(iid, _k, _d)
+                    except Exception:  # noqa: BLE001
+                        pass
                     st.success(f"Attached & verified ({res['size']:,} bytes).")
                     st.session_state["_op_orders"] = None
                 else:

@@ -5163,6 +5163,116 @@ def render_invoice_check():
     _invoice_tab(active, is_queue=is_queue)
 
 
+def render_email_triage():
+    """Native Outlook triage UI — a verbatim copy of the Make 'Outlook Triage NEW' scenario:
+    classifies new inbox emails with Claude and moves each into the SAME Outlook folder Make used.
+    Preview (dry-run) first, then live."""
+    import email_triage
+    try:
+        import supabase_db as _sdb
+    except Exception:  # noqa: BLE001
+        _sdb = None
+    _ok = bool(_sdb and _sdb.configured())
+
+    st.markdown(
+        """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
+        <span class="sec">Email Triage</span></span></div>""",
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Reads new emails in **{email_triage.MAILBOX} › Inbox**, classifies each with Claude, "
+               "and moves it to the same Outlook folder the Make automation used (supplier / customer "
+               "categories, plus Megan's & Malyeka's supplier-reply folders). A few Claude tokens per "
+               "email, no Make operations. Already-triaged emails are skipped.")
+    if not _ok:
+        st.warning("Supabase isn't connected — de-dup + history are off, so run **Preview** only "
+                   "until it's set (a live run would still work, but there'd be no history).")
+
+    # --- Preview / run ---
+    c1, c2 = st.columns(2)
+    if c1.button("👁 Preview (classify, move nothing)", key="tri_preview", use_container_width=True):
+        with st.spinner("Classifying recent inbox emails…"):
+            try:
+                st.session_state["tri_result"] = email_triage.run_triage(dry_run=True, max_total=40)
+            except Exception as e:  # noqa: BLE001
+                st.session_state["tri_result"] = {"ok": False, "error": str(e)[:200]}
+    if c2.button("▶ Triage now (move for real)", key="tri_run", type="primary",
+                 use_container_width=True, disabled=not _ok):
+        with st.spinner("Triaging + filing emails…"):
+            try:
+                st.session_state["tri_result"] = email_triage.run_triage(dry_run=False, max_total=40)
+            except Exception as e:  # noqa: BLE001
+                st.session_state["tri_result"] = {"ok": False, "error": str(e)[:200]}
+
+    res = st.session_state.get("tri_result")
+    if res:
+        if not res.get("ok"):
+            st.error("Couldn't run: " + str(res.get("error")))
+        else:
+            verb = "Would move" if res.get("dry_run") else "Moved"
+            st.success(f"{verb} {res.get('moved', 0)} · left in inbox (no folder) "
+                       f"{res.get('no_folder', 0)} · skipped {res.get('skipped', 0)} · "
+                       f"failed {res.get('failed', 0)}"
+                       + ("  ·  (capped — run again for more)" if res.get("capped") else ""))
+            items = res.get("items") or []
+            if items:
+                st.dataframe(pd.DataFrame([{
+                    "From": r.get("sender"), "Subject": (r.get("subject") or "")[:60],
+                    "Category": r.get("category"), "Owner": r.get("owner"),
+                    "→ Folder": r.get("folder"), "Status": r.get("status"),
+                    "Note": r.get("detail")} for r in items]),
+                    use_container_width=True, hide_index=True)
+
+    # --- Automatic settings ---
+    st.divider()
+    _cc = (_sdb.config_get("email_triage") if _ok else None) or {}
+    with st.expander("🤖 Automatic triage (hands-off)", expanded=False):
+        st.caption("When on, TradeHub classifies + files new inbox emails on a schedule with no "
+                   "clicks. Runs on the always-on host. Prove it with Preview first.")
+        ca, cb = st.columns([2, 1])
+        auto_on = ca.toggle("Run automatically", value=bool(_cc.get("auto_enabled")),
+                            key="tri_auto")
+        every = cb.number_input("Every (min)", 5, 120, int(_cc.get("interval_min") or 10),
+                                step=5, key="tri_interval")
+        if st.button("💾 Save automatic settings", key="tri_savecfg", disabled=not _ok):
+            _cc.update(auto_enabled=bool(auto_on), interval_min=int(every), max_total=40)
+            _sdb.config_set("email_triage", _cc)
+            st.success(("Saved — automatic triage is ON, every "
+                        f"{int(every)} min." if auto_on else "Saved. (Automatic triage is OFF.)"))
+        if _ok:
+            _stat = _sdb.config_get("email_triage_status") or {}
+            if _stat.get("at"):
+                _bad = "" if _stat.get("ok", True) else f" — ⚠️ {str(_stat.get('error'))[:120]}"
+                st.caption(f"🤖 Last run {str(_stat['at'])[:16].replace('T', ' ')} UTC — moved "
+                           f"{_stat.get('moved', 0)}, failed {_stat.get('failed', 0)}.{_bad}")
+
+    # --- History (problems first) ---
+    if _ok:
+        probs = [r for r in (_sdb.email_triage_recent(limit=200) or [])
+                 if r.get("status") == "failed"]
+        with st.expander(f"⚠️ Didn't get filed ({len(probs)})", expanded=bool(probs)):
+            if probs:
+                st.dataframe(pd.DataFrame([{
+                    "When": str(r.get("at") or "")[:16].replace("T", " "),
+                    "From": r.get("sender"), "Subject": (r.get("subject") or "")[:50],
+                    "Category": r.get("category"), "Why": r.get("detail")} for r in probs]),
+                    use_container_width=True, hide_index=True)
+                st.caption("These are retried automatically on the next run (a failed row isn't "
+                           "counted as done).")
+            else:
+                st.caption("Nothing outstanding — everything classified got filed.")
+        recent = [r for r in (_sdb.email_triage_recent(limit=100) or [])
+                  if r.get("status") == "moved"]
+        with st.expander(f"Recently filed ({len(recent)})"):
+            if recent:
+                st.dataframe(pd.DataFrame([{
+                    "When": str(r.get("at") or "")[:16].replace("T", " "),
+                    "From": r.get("sender"), "Subject": (r.get("subject") or "")[:50],
+                    "Category": r.get("category"), "→ Folder": r.get("folder")} for r in recent]),
+                    use_container_width=True, hide_index=True)
+            else:
+                st.caption("No filed emails logged yet.")
+
+
 @st.cache_resource(show_spinner=False)
 def _bg_worker():
     """The always-on background worker (ONE per server process via st.cache_resource). It runs the
@@ -5210,6 +5320,30 @@ def _bg_worker():
         finally:
             state["running"] = False
 
+    def _run_triage(reason):
+        import datetime as _dt
+        import email_triage
+        import supabase_db
+        try:
+            cfg = supabase_db.config_get("email_triage") or {}
+            res = email_triage.run_triage(dry_run=False, since_days=cfg.get("since_days"),
+                                          max_total=int(cfg.get("max_total") or 40))
+            supabase_db.config_set("email_triage_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "moved": res.get("moved"), "failed": res.get("failed"),
+                "skipped": res.get("skipped"), "capped": res.get("capped"),
+                "ok": res.get("ok"), "error": res.get("error"), "reason": reason})
+            if res.get("moved") or res.get("failed"):
+                supabase_db.audit("scheduler" if reason == "auto" else "manual", "email_triage",
+                                  f"moved {res.get('moved')}, failed {res.get('failed')}", "")
+        except Exception as e:  # noqa: BLE001
+            try:
+                supabase_db.config_set("email_triage_status", {
+                    "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ok": False, "error": str(e)[:200], "reason": reason})
+            except Exception:  # noqa: BLE001
+                pass
+
     def _run_check(reason):
         import datetime as _dt
         import supabase_db
@@ -5230,7 +5364,7 @@ def _bg_worker():
 
     def _loop():
         import supabase_db
-        next_import = next_check = 0.0
+        next_import = next_check = next_triage = 0.0
         while True:
             fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
             state["trigger"].clear()
@@ -5251,6 +5385,13 @@ def _bg_worker():
                     _run_check("auto")
             except Exception:  # noqa: BLE001
                 next_check = _time.time() + 900
+            try:
+                tcfg = supabase_db.config_get("email_triage") or {}
+                if tcfg.get("auto_enabled") and _time.time() >= next_triage:
+                    next_triage = _time.time() + max(300, int(tcfg.get("interval_min") or 10) * 60)
+                    _run_triage("auto")
+            except Exception:  # noqa: BLE001
+                next_triage = _time.time() + 900
 
     threading.Thread(target=_loop, name="invoice-worker", daemon=True).start()
     return state
@@ -8693,7 +8834,7 @@ with st.sidebar:
     # (e.g. Natasha = Daily Ops + Order Processing only). It can only ever NARROW/pick from the
     # full module set — never grants Invoice Check/Finance unless listed explicitly.
     all_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing", "Invoice Check",
-                   "Order Processing", "Finance")
+                   "Order Processing", "Finance", "Email Triage")
     staff_modules = ("Daily Ops", "Daily Activity", "Quotes", "Pricing")
     if role == "office":
         menu = ("Daily Ops",)
@@ -8803,7 +8944,7 @@ with st.sidebar:
 #   office → Daily Ops only · only admin/manager may open Invoice Check.
 if role == "office":
     module = "Daily Ops"
-elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance"):
+elif role not in ("admin", "manager") and module in ("Invoice Check", "Finance", "Email Triage"):
     module = "Daily Ops"
 if user_modules and module not in menu:            # per-user allow-list, enforced server-side
     module = menu[0] if menu else "Daily Ops"
@@ -8862,6 +9003,10 @@ if module == "Invoice Check":
 if module == "Order Processing":
     import order_processing
     order_processing.render()
+    st.stop()
+
+if module == "Email Triage":
+    render_email_triage()
     st.stop()
 
 if module == "Finance":

@@ -97,6 +97,20 @@ create table if not exists invoice_check_log (
   at         timestamptz not null default now()
 );
 create index if not exists invoice_check_log_outcome_idx on invoice_check_log (outcome, at desc);
+
+-- Native email triage: de-dup + outcome log (one row per triaged inbox email)
+create table if not exists email_triage (
+  internet_id text primary key,   -- Outlook internetMessageId
+  status      text not null,      -- moved | skipped | no_folder | failed
+  subject     text,
+  sender      text,
+  category    text,               -- the classified category
+  owner       text,               -- supplier-reply owner (megan/malyeka/natasha/…), else none
+  folder      text,               -- the destination folder name
+  detail      text,
+  at          timestamptz not null default now()
+);
+create index if not exists email_triage_status_idx on email_triage (status, at desc);
 ```
 
 **Because "auto-expose new tables" is OFF, grant the new table to the service role too** (same as we did for the others), else writes get "permission denied":
@@ -105,6 +119,7 @@ grant all on invoice_imports to service_role;
 grant all on app_config to service_role;
 grant all on invoice_parses to service_role;
 grant all on invoice_check_log to service_role;
+grant all on email_triage to service_role;
 ```
 
 ## Code

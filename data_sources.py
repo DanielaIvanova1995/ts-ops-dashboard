@@ -2591,6 +2591,184 @@ def move_message_to_folder(mailbox: str, message_id: str, dest_folder_id: str,
     return True
 
 
+# ---------------------------------------------------------------------------
+# Native email TRIAGE (replaces the Make "Outlook Triage NEW" scenario). Watch
+# one inbox folder, ask Claude to classify each email into a fixed set of
+# categories (+ which team member owns a supplier reply), and move it to the
+# matching Outlook folder. See email_triage.py for the orchestration; these are
+# the building blocks. Cost is a few Claude tokens per email (no Make operations).
+# ---------------------------------------------------------------------------
+TRIAGE_MAILBOX = "hello@tradesuperstoreonline.co.uk"     # the shared inbox that gets triaged
+TRIAGE_INBOX_FOLDER = "Inbox"                            # folder watched for new mail
+TRIAGE_MODEL = "claude-haiku-4-5-20251001"              # cheap + fast — classification is text-only
+
+
+def list_folder_messages_full(mailbox: str, folder_id: str, limit: int = 60,
+                              token: str | None = None, since_days: int | None = None) -> list:
+    """Recent messages in a folder (by id) as [{id, internet_id, subject, from, received, body}],
+    newest first, WITH the plain-text body (for triage classification). Unlike
+    list_folder_invoice_messages this returns ALL messages, not only ones with attachments. The
+    `Prefer: outlook.body-content-type="text"` header makes Graph return the body as plain text
+    (far cheaper on tokens than HTML). `since_days` limits to the last N days."""
+    from datetime import datetime as _dtm, timedelta as _td, timezone as _tz
+    token = token or ms_token()
+    cutoff = (_dtm.now(_tz.utc) - _td(days=since_days)) if since_days else None
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/mailFolders/{folder_id}/messages",
+        headers={"Authorization": f"Bearer {token}",
+                 "Prefer": 'outlook.body-content-type="text"'},
+        params={"$top": str(limit), "$orderby": "receivedDateTime desc",
+                "$select": "id,internetMessageId,subject,from,receivedDateTime,body"},
+        timeout=45,
+    )
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("value", []):
+        rec = m.get("receivedDateTime") or ""
+        if cutoff and rec:
+            try:
+                if _dtm.fromisoformat(rec.replace("Z", "+00:00")) < cutoff:
+                    break            # ordered newest-first → everything after is older too
+            except ValueError:
+                pass
+        frm = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
+        body = ((m.get("body") or {}).get("content") or "")
+        out.append({"id": m.get("id"), "internet_id": m.get("internetMessageId") or m.get("id"),
+                    "subject": (m.get("subject") or "").strip(), "from": frm,
+                    "received": rec, "body": body})
+    return out
+
+
+# The exact triage contract the Make "Outlook Triage NEW" scenario used, so the native classifier is
+# a like-for-like replacement (same categories, same thread-ownership logic).
+_TRIAGE_SYSTEM = (
+    "You are an email triage assistant for a small order management team. Your only job is to "
+    "classify incoming emails and return a JSON object with three fields: category, "
+    "is_reply_to_our_thread, and thread_owner. Do not reply to the email. Do not summarise it. Only "
+    "classify.\n\n"
+    "CATEGORIES:\n"
+    "- supplier_with_eta: Email from a supplier containing a clear delivery date or ETA for an order\n"
+    "- supplier_no_eta: Email from a supplier with no clear delivery date — acknowledgements, "
+    "queries, delays without dates, delivery notes, despatch confirmations without a delivery date, "
+    "credit notes, invoices, supplier replies asking for more info, supplier-to-supplier rep "
+    "enquiries\n"
+    "- customer_after_sales: Customer reporting a problem with a delivered order — damaged goods, "
+    "missing items, wrong item, quality issue, confusion about a replacement or collection, partially "
+    "delivered orders OR a customer thanking/confirming a delivery has been received\n"
+    "- customer_new_order_or_quote: Customer enquiring about an UNPLACED order — quotes, product "
+    "availability, product specs, discount codes, sample requests, pre-purchase queries, confirming "
+    "intent to proceed with a new order, OR declining to place an order\n"
+    "- customer_pre_delivery_question: Customer has ALREADY placed an order that has not yet been "
+    "delivered, and is asking a question about it — amendments, changes, additions, queries about an "
+    "in-flight order that is not specifically chasing the delivery date. Any partially delivered "
+    "orders where customers are chasing outstanding/missing items should not land here, they should "
+    "be put into customer_after_sales\n"
+    "- customer_delivery_chase: Customer asking where their order is or when it will arrive, OR "
+    "threatening to cancel IF they don't get an ETA\n"
+    "- customer_returns: Customer wants to return an item due to change of mind, wrong size, no "
+    "longer needed (not a fault) — including return forms and confirmation they have sent items back\n"
+    "- customer_refund_chase: Customer asking about the status of a refund they are owed or expecting "
+    "— they have already returned or been promised a refund and are chasing it\n"
+    "- customer_cancellation: Customer asking to cancel an order because the item is discontinued, "
+    "out of stock long-term, or unavailable — NOT cancellations driven by impatience over ETAs\n"
+    "- automated_system: Automated, system-generated emails that carry NO actionable order "
+    "information — marketing newsletters (including marketing from suppliers), Zendesk system "
+    "notifications, DMARC reports, message recall reports, monday.com [New update] notifications, "
+    "SEO/directory pitches, out-of-office auto-replies, generic \"thank you for your email\" "
+    "auto-acknowledgements, automated daily stock/price update files not tied to a specific order, "
+    "and pure delivery-tracking pings that name no specific order. If the email references a specific "
+    "order, despatch, delivery, invoice, or credit note, it is NOT automated_system — classify it as "
+    "a supplier email instead.\n"
+    "- unsure: Anything you cannot confidently classify, or that doesn't fit a category above\n\n"
+    "IMPORTANT RULES:\n"
+    "1. Internal monday.com notifications (subjects starting with \"[New update]\") are ALWAYS "
+    "automated_system.\n"
+    "2. Supplier order updates, delivery/despatch notes, despatch confirmations, order "
+    "acknowledgements, invoices, and credit notes are supplier emails even when sent from a no-reply "
+    "or automated address. If they contain a clear delivery date/ETA → supplier_with_eta. If they do "
+    "not → supplier_no_eta. Never classify these as automated_system just because the sender is "
+    "automated.\n"
+    "3. Refund status chases (\"where is my refund\") are customer_refund_chase, NOT customer_returns.\n"
+    "4. CANCELLATION LOGIC:\n"
+    "   - Cancel because item is discontinued / out of stock / unavailable → customer_cancellation\n"
+    "   - Threaten to cancel if no ETA → customer_delivery_chase (the real intent is chasing)\n"
+    "   - Cancel for unclear reason → unsure\n"
+    "5. THREAD CONTINUITY (applies to customer replies): When a customer is replying within an "
+    "existing thread our team has already responded to (the quoted history below their message "
+    "contains a reply from us), classify the email by what the thread was ORIGINALLY about — not by "
+    "what the latest message now asks for. A customer changing their desired outcome does NOT move "
+    "the case to a new category. Examples: an after-sales thread where the customer now says \"I'd "
+    "rather have a refund\" stays customer_after_sales; a delivery-chase thread where they now say "
+    "\"forget it, refund me\" stays customer_delivery_chase; a returns thread where they now ask "
+    "where their refund is stays customer_returns. Only classify a refund, return, or cancellation "
+    "as its own standalone category when it is a NEW request that is not a continuation of an "
+    "existing thread. If there is no quoted history and the message stands alone, classify it on its "
+    "own content as normal.\n"
+    "6. AUTO-ARCHIVE IS FOR AUTOMATED EMAILS AND ANY MARKETING EMAILS. Only use automated_system if "
+    "the email body is auto-generated by a system with no human writing it. A customer's reply to an "
+    "automated email we sent them (e.g. \"Your order is in the warehouse\") is human content and must "
+    "be classified by what they actually say. If the email has a personal sender (a named individual "
+    "at a normal address) and contains human-written content, it is NOT automated_system.\n\n"
+    "THREAD OWNERSHIP (for supplier emails):\n"
+    "- \"is_reply_to_our_thread\": true only if the email is from a supplier/external sender AND the "
+    "quoted history beneath their message contains a previous email sent by our team (Trade "
+    "Superstore Online / hello@tradesuperstoreonline.co.uk). Otherwise false.\n"
+    "- \"thread_owner\": when is_reply_to_our_thread is true, look at the most recent message from "
+    "our team in the quoted history (the one the sender is replying to) and read its sign-off. Return "
+    "one of: \"megan\", \"malyeka\", \"natasha\". Map variants: Meg -> megan. (Melissa no longer "
+    "works here — if an old thread is signed by Melissa/Mel, return \"unknown\", not her name.) "
+    "If you cannot confidently identify a single name — no sign-off, a generic \"Trade "
+    "Superstore Online Team\" sign-off, or several conflicting names — return \"unknown\". When "
+    "is_reply_to_our_thread is false, return \"none\".\n"
+    "- Always include both fields in every response, including customer and automated emails (use "
+    "false and \"none\").\n\n"
+    "OUTPUT: Return ONLY a single JSON object and nothing else — no preamble, no reasoning, no "
+    "markdown fences. Exactly these three fields:\n"
+    "{\"category\": \"<category>\", \"is_reply_to_our_thread\": <true|false>, \"thread_owner\": "
+    "\"<megan|malyeka|natasha|unknown|none>\"}"
+)
+
+TRIAGE_CATEGORIES = (
+    "supplier_with_eta", "supplier_no_eta", "customer_after_sales", "customer_new_order_or_quote",
+    "customer_pre_delivery_question", "customer_delivery_chase", "customer_returns",
+    "customer_refund_chase", "customer_cancellation", "automated_system", "unsure",
+)
+
+
+def classify_email(subject: str, from_addr: str, body: str) -> dict:
+    """Classify one email with Claude → {category, is_reply_to_our_thread, thread_owner}. Same
+    contract as the Make triage scenario. Raises if ANTHROPIC_API_KEY is missing or no JSON comes
+    back. Body is truncated so a huge quoted history can't blow up the token cost."""
+    import json as _json
+    import re
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    body = (body or "")[:12000]           # plenty for the latest message + recent quoted history
+    user = f"Subject: {subject}\n\nFrom: {from_addr}\n\nBody: {body}"
+    payload = {
+        "model": TRIAGE_MODEL, "max_tokens": 200, "system": _TRIAGE_SYSTEM,
+        "messages": [{"role": "user", "content": user}],
+    }
+    r = requests.post(ANTHROPIC_API,
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
+                      json=payload, timeout=60)
+    r.raise_for_status()
+    blocks = r.json().get("content", [])
+    txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise RuntimeError("Triage classifier returned no JSON")
+    out = _json.loads(m.group(0))
+    cat = (out.get("category") or "").strip()
+    if cat not in TRIAGE_CATEGORIES:
+        cat = "unsure"
+    return {"category": cat,
+            "is_reply_to_our_thread": bool(out.get("is_reply_to_our_thread")),
+            "thread_owner": (out.get("thread_owner") or "none").strip().lower()}
+
+
 def set_invoice_status(sub_id, label: str, token: str | None = None,
                        create_missing: bool = False) -> bool:
     """Set a subitem's Payment Status (status7__1) to a label, e.g.

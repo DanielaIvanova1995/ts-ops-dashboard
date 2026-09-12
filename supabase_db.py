@@ -300,6 +300,65 @@ def invoice_import_delete(internet_id: str) -> bool:
         return False
 
 
+# ---- Email triage (de-dup + history for the native Outlook-triage job) ----------------------
+def email_triage_seen(internet_id: str) -> bool:
+    """True if this email (by internetMessageId) has already been triaged and MOVED (moved/skipped),
+    so it's never re-classified — the de-dup + cost guard. A 'failed' or 'no_folder' row does NOT
+    count as seen, so those auto-retry next run once fixed. False when Supabase isn't configured (the
+    move itself is the backstop: a moved email leaves the watched folder)."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        r = (_client().table("email_triage").select("status")
+             .eq("internet_id", internet_id).in_("status", ["moved", "skipped"])
+             .limit(1).execute())
+        return bool(r.data)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def email_triage_log(internet_id: str, status: str, **fields) -> bool:
+    """Record a triage outcome (upsert by internet_id): status = 'moved' | 'skipped' | 'no_folder' |
+    'failed'. Extra fields (subject, sender, category, owner, folder, detail) feed the history view."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        row = {"internet_id": internet_id, "status": status, "at": _now()}
+        for k in ("subject", "sender", "category", "owner", "folder", "detail"):
+            if fields.get(k) is not None:
+                row[k] = str(fields[k])[:500]
+        _client().table("email_triage").upsert(row).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def email_triage_recent(limit: int = 100, status: str | None = None) -> list:
+    """Recent triage outcomes (newest first). Pass status='no_folder'/'failed' for the problem list."""
+    if not configured():
+        return []
+    try:
+        q = (_client().table("email_triage")
+             .select("internet_id,status,subject,sender,category,owner,folder,detail,at")
+             .order("at", desc=True).limit(limit))
+        if status:
+            q = q.eq("status", status)
+        return q.execute().data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def email_triage_delete(internet_id: str) -> bool:
+    """Forget one triaged email so the next run re-tries it (used after fixing a folder mapping)."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        _client().table("email_triage").delete().eq("internet_id", internet_id).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---- Scheduled invoice-check log (skip already-handled, keep a reasons history) -------------
 def invoice_check_seen(sub_id: str) -> bool:
     """True if the scheduler has already checked this invoice AND set it aside (left/failed), so it
