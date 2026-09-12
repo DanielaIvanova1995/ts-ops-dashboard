@@ -2600,7 +2600,8 @@ def move_message_to_folder(mailbox: str, message_id: str, dest_folder_id: str,
 # ---------------------------------------------------------------------------
 TRIAGE_MAILBOX = "hello@tradesuperstoreonline.co.uk"     # the shared inbox that gets triaged
 TRIAGE_INBOX_FOLDER = "Inbox"                            # folder watched for new mail
-TRIAGE_MODEL = "claude-haiku-4-5-20251001"              # cheap + fast — classification is text-only
+TRIAGE_MODEL = "claude-haiku-4-5"                        # cheap + fast — classification is text-only
+                                                        # (NO date suffix — the API 400s on those)
 
 
 def list_folder_messages_full(mailbox: str, folder_id: str, limit: int = 60,
@@ -2754,7 +2755,8 @@ def classify_email(subject: str, from_addr: str, body: str) -> dict:
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                                "content-type": "application/json"},
                       json=payload, timeout=60)
-    r.raise_for_status()
+    if r.status_code >= 400:                    # surface the real Anthropic error (model id, etc.)
+        raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:200]}")
     blocks = r.json().get("content", [])
     txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     m = re.search(r"\{.*\}", txt, re.S)
