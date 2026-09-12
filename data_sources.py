@@ -2282,7 +2282,8 @@ def read_invoice_pdf(pdf_url: str) -> dict:
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                                "content-type": "application/json"},
                       json=body, timeout=150)
-    r.raise_for_status()
+    if r.status_code >= 400:                    # surface the real Anthropic error (size, pages, etc.)
+        raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:250]}")
     blocks = r.json().get("content", [])
     txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     m = re.search(r"\{.*\}", txt, re.S)
@@ -2359,7 +2360,8 @@ def parse_invoice_header(pdf_b64: str) -> dict:
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                                "content-type": "application/json"},
                       json=body, timeout=150)
-    r.raise_for_status()
+    if r.status_code >= 400:                    # surface the real Anthropic error (size, pages, etc.)
+        raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:250]}")
     blocks = r.json().get("content", [])
     txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     m = re.search(r"\{.*\}", txt, re.S)
