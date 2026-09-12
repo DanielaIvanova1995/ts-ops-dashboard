@@ -24,9 +24,15 @@ EXPOSE 8501
 # XSRF protection OFF: behind Render's reverse proxy the uploader's XSRF token check fails and
 # file uploads (e.g. reconciling a statement PDF) return "AxiosError 400". The app is behind a
 # login and served over HTTPS, so disabling it is safe here and fixes uploads (Daniela 2026-09-06).
+#
+# WebSocket compression OFF: behind Render's reverse proxy the compressed WebSocket frames get
+# mangled, so the browser receives a message it can't decode -> "Bad message format" -> the screen
+# reconnects/restarts, over and over. Disabling compression sends plain frames the proxy passes
+# through cleanly and stops the constant restarts (Daniela 2026-09-12).
 CMD streamlit run app.py \
     --server.port=${PORT} \
     --server.address=0.0.0.0 \
     --server.headless=true \
     --server.enableCORS=false \
-    --server.enableXsrfProtection=false
+    --server.enableXsrfProtection=false \
+    --server.enableWebsocketCompression=false
