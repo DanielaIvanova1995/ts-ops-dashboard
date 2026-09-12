@@ -5060,6 +5060,8 @@ def render_invoice_check():
                f"to QuickBooks; **under {lo:.0f}%** → held as Matched; **over {hi:.0f}%** → flagged "
                "(likely a missing invoice/credit). Uses your Anthropic key — pennies per invoice.")
 
+    render_llm_costs()
+
     with st.expander("Auto-push margin thresholds"):
         sa, sb = st.columns(2)
         sa.number_input("Push to QB when order margin is at least (%)", min_value=0.0,
@@ -5163,6 +5165,57 @@ def render_invoice_check():
     _invoice_tab(active, is_queue=is_queue)
 
 
+def render_llm_costs():
+    """Compact panel showing TradeHub's OWN Claude spend (from each call's logged token usage),
+    so daily cost is visible at a glance. Tracks from when this was deployed onward; it does NOT
+    include Make's separate spend. No extra API keys — priced from response usage."""
+    try:
+        import supabase_db as _sdb
+        if not _sdb.configured():
+            return
+    except Exception:  # noqa: BLE001
+        return
+    import collections
+    import datetime as _d
+    rows = _sdb.llm_usage_recent(days=30) or []
+    _today = _d.datetime.now(_d.timezone.utc).date()
+    today = _today.isoformat()
+    d7 = (_today - _d.timedelta(days=6)).isoformat()
+    tot_today = sum((r.get("cost_usd") or 0) for r in rows if r.get("day") == today)
+    tot_7 = sum((r.get("cost_usd") or 0) for r in rows if (r.get("day") or "") >= d7)
+    tot_30 = sum((r.get("cost_usd") or 0) for r in rows)
+    GBP = 0.79    # rough USD→GBP for an at-a-glance figure (Anthropic bills in USD)
+    title = (f"💷 Claude running costs — ${tot_today:.2f} today · ${tot_7:.2f} last 7 days"
+             if rows else "💷 Claude running costs")
+    with st.expander(title):
+        if not rows:
+            st.caption("No Claude usage logged yet — figures appear here as TradeHub reads invoices "
+                       "and triages email. Tracking started when this was deployed.")
+            return
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Today", f"${tot_today:.2f}", f"≈ £{tot_today * GBP:.2f}", delta_color="off")
+        c2.metric("Last 7 days", f"${tot_7:.2f}", f"≈ £{tot_7 * GBP:.2f}", delta_color="off")
+        c3.metric("Last 30 days", f"${tot_30:.2f}", f"≈ £{tot_30 * GBP:.2f}", delta_color="off")
+        byday = collections.defaultdict(float)
+        for r in rows:
+            byday[r.get("day")] += (r.get("cost_usd") or 0)
+        if byday:
+            dfd = pd.DataFrame([{"Day": k, "$": round(v, 2)} for k, v in sorted(byday.items())])
+            st.bar_chart(dfd.set_index("Day")["$"], height=180)
+        byfeat = collections.defaultdict(lambda: [0.0, 0, 0])
+        for r in rows:
+            f = byfeat[r.get("feature") or "?"]
+            f[0] += (r.get("cost_usd") or 0)
+            f[1] += (r.get("input_tokens") or 0)
+            f[2] += (r.get("output_tokens") or 0)
+        dff = pd.DataFrame([{"Area": k, "$ (30 days)": round(v[0], 2),
+                             "≈ £": round(v[0] * GBP, 2), "tokens in": v[1], "tokens out": v[2]}
+                            for k, v in sorted(byfeat.items(), key=lambda x: -x[1][0])])
+        st.dataframe(dff, use_container_width=True, hide_index=True)
+        st.caption("Tracks TradeHub's own Claude calls (triage, invoice reading) from when this was "
+                   "deployed — it does NOT include Make's separate spend. £ is approximate.")
+
+
 def render_email_triage():
     """Native Outlook triage UI — a verbatim copy of the Make 'Outlook Triage NEW' scenario:
     classifies new inbox emails with Claude and moves each into the SAME Outlook folder Make used.
@@ -5186,6 +5239,8 @@ def render_email_triage():
     if not _ok:
         st.warning("Supabase isn't connected — de-dup + history are off, so run **Preview** only "
                    "until it's set (a live run would still work, but there'd be no history).")
+
+    render_llm_costs()
 
     # --- Preview / run ---
     c1, c2 = st.columns(2)

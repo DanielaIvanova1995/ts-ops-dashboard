@@ -1009,6 +1009,41 @@ ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 SENTIMENT_MODEL = "claude-haiku-4-5"     # no date suffix — the API 400s on suffixed ids
 COMPETITOR_MODEL = "claude-sonnet-4-6"  # stronger model for live web-search research
 
+# USD per 1M tokens (input, output) for the models TradeHub calls — used to price each call for the
+# running-cost display. Cache writes bill ~1.25x input, cache reads ~0.10x input.
+LLM_PRICES = {
+    "claude-haiku-4-5":  (1.0, 5.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-opus-4-7":   (5.0, 25.0),
+    "claude-opus-4-8":   (5.0, 25.0),
+    "claude-opus-5":     (5.0, 25.0),
+    "claude-sonnet-5":   (2.0, 10.0),
+}
+
+
+def _llm_cost_usd(model: str, usage: dict) -> float:
+    """USD cost of one Claude call from its `usage` block (input/output + any cache tokens)."""
+    pin, pout = LLM_PRICES.get(model, (3.0, 15.0))      # default to Sonnet rates if unknown
+    it = usage.get("input_tokens") or 0
+    ot = usage.get("output_tokens") or 0
+    cw = usage.get("cache_creation_input_tokens") or 0
+    cr = usage.get("cache_read_input_tokens") or 0
+    return (it * pin + cw * pin * 1.25 + cr * pin * 0.10 + ot * pout) / 1_000_000
+
+
+def _track_usage(model: str, feature: str, resp_json: dict) -> None:
+    """Log one Claude call's tokens + cost to Supabase (best-effort) so TradeHub can show its own
+    daily Claude spend. Never raises — a logging hiccup must not break the actual call."""
+    try:
+        import supabase_db                               # lazy: avoids a circular import
+        u = (resp_json or {}).get("usage") or {}
+        supabase_db.llm_usage_log(model, feature,
+                                  int(u.get("input_tokens") or 0),
+                                  int(u.get("output_tokens") or 0),
+                                  _llm_cost_usd(model, u))
+    except Exception:  # noqa: BLE001
+        pass
+
 
 def research_competitors(title: str, code: str | None, vendor: str | None,
                          your_price) -> dict:
@@ -2284,7 +2319,9 @@ def read_invoice_pdf(pdf_url: str) -> dict:
                       json=body, timeout=150)
     if r.status_code >= 400:                    # surface the real Anthropic error (size, pages, etc.)
         raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:250]}")
-    blocks = r.json().get("content", [])
+    resp = r.json()
+    _track_usage(INVOICE_MODEL, "invoice_read", resp)
+    blocks = resp.get("content", [])
     txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     m = re.search(r"\{.*\}", txt, re.S)
     if not m:
@@ -2349,7 +2386,7 @@ def parse_invoice_header(pdf_b64: str) -> dict:
     if not key:
         raise RuntimeError("No ANTHROPIC_API_KEY configured")
     body = {
-        "model": INVOICE_IMPORT_MODEL, "max_tokens": 1500,
+        "model": INVOICE_IMPORT_MODEL, "max_tokens": 1500,  # tracked as feature "invoice_import"
         "system": _INVOICE_HEADER_SYSTEM,
         "messages": [{"role": "user", "content": [
             {"type": "document",
@@ -2362,7 +2399,9 @@ def parse_invoice_header(pdf_b64: str) -> dict:
                       json=body, timeout=150)
     if r.status_code >= 400:                    # surface the real Anthropic error (size, pages, etc.)
         raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:250]}")
-    blocks = r.json().get("content", [])
+    resp = r.json()
+    _track_usage(INVOICE_IMPORT_MODEL, "invoice_import", resp)
+    blocks = resp.get("content", [])
     txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     m = re.search(r"\{.*\}", txt, re.S)
     if not m:
@@ -2759,7 +2798,9 @@ def classify_email(subject: str, from_addr: str, body: str) -> dict:
                       json=payload, timeout=60)
     if r.status_code >= 400:                    # surface the real Anthropic error (model id, etc.)
         raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:200]}")
-    blocks = r.json().get("content", [])
+    resp = r.json()
+    _track_usage(TRIAGE_MODEL, "triage", resp)
+    blocks = resp.get("content", [])
     txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
     m = re.search(r"\{.*\}", txt, re.S)
     if not m:

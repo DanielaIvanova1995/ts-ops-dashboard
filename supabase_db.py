@@ -359,6 +359,43 @@ def email_triage_delete(internet_id: str) -> bool:
         return False
 
 
+# ---- Claude API usage/cost log (so TradeHub can show its own daily Claude spend) ------------
+def llm_usage_log(model: str, feature: str, input_tokens: int, output_tokens: int,
+                  cost_usd: float) -> bool:
+    """Append one Claude call's token usage + computed cost. `feature` groups spend by area
+    (triage / invoice_import / invoice_read / …). Best-effort; one row per call, aggregated on read."""
+    if not configured():
+        return False
+    try:
+        import datetime as _d
+        now = _dt.datetime.now(_dt.timezone.utc)
+        _client().table("llm_usage").insert({
+            "at": now.isoformat(), "day": now.date().isoformat(),
+            "model": str(model)[:60], "feature": str(feature)[:40],
+            "input_tokens": int(input_tokens or 0), "output_tokens": int(output_tokens or 0),
+            "cost_usd": float(cost_usd or 0.0)}).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def llm_usage_recent(days: int = 14) -> list:
+    """Rows from the last N days (for the cost display). [{at, day, model, feature, input_tokens,
+    output_tokens, cost_usd}]. Aggregated into per-day / per-feature totals by the caller."""
+    if not configured():
+        return []
+    try:
+        import datetime as _d
+        cutoff = (_dt.datetime.now(_dt.timezone.utc).date()
+                  - _d.timedelta(days=days)).isoformat()
+        r = (_client().table("llm_usage")
+             .select("at,day,model,feature,input_tokens,output_tokens,cost_usd")
+             .gte("day", cutoff).order("at", desc=True).limit(20000).execute())
+        return r.data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ---- Scheduled invoice-check log (skip already-handled, keep a reasons history) -------------
 def invoice_check_seen(sub_id: str) -> bool:
     """True if the scheduler has already checked this invoice AND set it aside (left/failed), so it
