@@ -1006,7 +1006,7 @@ def fetch_folder_messages(mailbox: str, folder_name: str, limit: int = 12,
 
 
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
-SENTIMENT_MODEL = "claude-haiku-4-5-20251001"
+SENTIMENT_MODEL = "claude-haiku-4-5"     # no date suffix — the API 400s on suffixed ids
 COMPETITOR_MODEL = "claude-sonnet-4-6"  # stronger model for live web-search research
 
 

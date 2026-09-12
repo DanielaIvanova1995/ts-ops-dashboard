@@ -17,6 +17,7 @@ never double-creates. Reuses the same Claude parser + Monday/Outlook plumbing th
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 
 import data_sources as ds
@@ -25,6 +26,32 @@ try:
     import supabase_db
 except Exception:  # noqa: BLE001 — importer still runs without Supabase (Monday dedup is the backstop)
     supabase_db = None
+
+# Bump if _INVOICE_HEADER_SYSTEM changes, so the durable parse cache re-reads once then re-caches.
+HEADER_PARSE_VERSION = 1
+
+
+def _parse_header_cached(pdf_bytes: bytes) -> dict:
+    """Read an invoice PDF header with Claude, but reuse a durable parse (Supabase, keyed by the
+    PDF's content hash) so a re-run — a failed-to-match invoice retried, or the same PDF re-sent —
+    never re-pays Claude to read the identical file. Only SUCCESSFUL parses are cached, so a genuine
+    API error (e.g. no credit) still retries next run. Falls back to a live read with no Supabase."""
+    key = None
+    if supabase_db:
+        key = f"imp:{hashlib.sha1(pdf_bytes).hexdigest()}:v{HEADER_PARSE_VERSION}"
+        try:
+            hit = supabase_db.invoice_parse_get(key)
+            if hit:
+                return hit
+        except Exception:  # noqa: BLE001
+            pass
+    parsed = ds.parse_invoice_header(base64.b64encode(pdf_bytes).decode())
+    if key and isinstance(parsed, dict):
+        try:
+            supabase_db.invoice_parse_set(key, parsed)
+        except Exception:  # noqa: BLE001
+            pass
+    return parsed
 
 # Where invoices live: every subfolder under Inbox's "Suppliers" folder (Daniela 2026-09-06). When
 # no explicit folder list is given, the importer scans ALL of these automatically.
@@ -215,7 +242,7 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
     rec = {"folder": folder_name, "subject": msg.get("subject"), "from": msg.get("from"),
            "file": a.get("name")}
     try:
-        parsed = ds.parse_invoice_header(base64.b64encode(a["bytes"]).decode())
+        parsed = _parse_header_cached(a["bytes"])   # durable cache → failed retries don't re-pay
     except Exception as e:  # noqa: BLE001
         rec.update(status="failed", detail=f"couldn't read the PDF: {str(e)[:120]}")
         _finish(key, "failed", rec, summary, dry_run)
