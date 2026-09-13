@@ -61,12 +61,67 @@ def _geocode(postcode):
     return None
 
 
+@lru_cache(maxsize=64)
+def _geocode_outcode(outcode):
+    """(lat, lon) for a bare UK outcode (e.g. 'NP11', 'ME14') via postcodes.io's /outcodes endpoint.
+    `_geocode` mangles a bare outcode (its full-postcode fallback chops the last 3 chars), so branch
+    outcodes must use this. None on failure."""
+    oc = (outcode or "").strip().replace(" ", "")
+    if not oc:
+        return None
+    try:
+        with urllib.request.urlopen(
+                f"https://api.postcodes.io/outcodes/{urllib.parse.quote(oc)}", timeout=8) as resp:
+            d = json.loads(resp.read())
+        if d.get("status") == 200 and d.get("result"):
+            return (d["result"]["latitude"], d["result"]["longitude"])
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _haversine(a, b, c, d):
     R = 3958.8
     p1, p2 = math.radians(a), math.radians(c)
     dp, dl = math.radians(c - a), math.radians(d - b)
     x = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(x), math.sqrt(1 - x))
+
+
+# National Plastics (specbd) — the 3 branches we can send Hardie orders to. Each carries a
+# representative outcode we geocode once to rank by distance (Daniela, 2026-09-13).
+_NP_BRANCHES = [
+    {"branch_name": "National Plastics — Rotherham", "email": "Afearn@specbd.co.uk",
+     "phone": "01827 948660", "contact": "Anthony", "outcode": "S60"},
+    {"branch_name": "National Plastics — Abercarn",
+     "email": "AbercarnManager@nationalplastics.co.uk", "phone": "01495 248469",
+     "contact": "Phil", "outcode": "NP11"},
+    {"branch_name": "National Plastics — Maidstone", "email": "Aellerbeck@shepherdsuk.co.uk",
+     "phone": "01622 695909", "contact": "Allen", "outcode": "ME14"},
+]
+
+
+def national_plastics_branch(postcode):
+    """Nearest National Plastics branch (Rotherham / Abercarn / Maidstone) for a customer postcode
+    → {branch_name, email, phone, contact, miles}. None if the postcode won't geocode (caller then
+    falls back to a coarse region map). Geocodes the branch outcodes via postcodes.io like the
+    Eurocell/TP finder."""
+    coords = _geocode(postcode)
+    if not coords:
+        return None
+    lat, lon = coords
+    best, best_d = None, None
+    for b in _NP_BRANCHES:
+        bc = _geocode_outcode(b["outcode"])
+        if not bc:
+            continue
+        d = _haversine(lat, lon, bc[0], bc[1])
+        if best_d is None or d < best_d:
+            best, best_d = b, d
+    if not best:
+        return None
+    return {"branch_name": best["branch_name"], "email": best["email"], "phone": best["phone"],
+            "contact": best["contact"], "miles": round(best_d, 1)}
 
 
 def nearest_branch(postcode, supplier):

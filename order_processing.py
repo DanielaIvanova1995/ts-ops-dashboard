@@ -959,6 +959,11 @@ def _fix_po_email(iid, supplier, o=None):
     # the quote, not Molan's orders@ PO address).
     if em and o and (o.get("branch_email") or "").lower().startswith("quotes@"):
         em = None
+    # National Plastics is BRANCH-routed for Hardie (nearest of Rotherham/Abercarn/Maidstone) — keep
+    # the branch manager's email/phone the router set. Only fall back to the Will Chammings default
+    # when no specific branch was chosen (e.g. a Zest-panel order).
+    if key == "nationalplastics" and o is not None and (o.get("branch") or "").strip():
+        em = ph = None
     try:
         if em:
             data_sources.op_set_branch(iid, email=em)

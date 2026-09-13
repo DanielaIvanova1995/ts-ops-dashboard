@@ -88,35 +88,63 @@ def upb_depot_for(pc):
     return fb, _UPB_DEPOT[fb], _UPB_DEPOT_PHONE.get(fb)
 
 
-def hardie_route(pc, smooth=False):
-    """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (definitive Aug 2026 map).
-    Each supplier prices from its OWN list. Returns {supplier, branch, branch_email, branch_phone,
-    reason, conf, quote}."""
+# National Plastics (specbd) branch contacts — used for the offline region fallback when the live
+# geocoder (branch_finder) can't be reached. Live path picks the nearest of these by distance.
+_NP_CONTACTS = {
+    "National Plastics — Rotherham": ("Afearn@specbd.co.uk", "01827 948660"),
+    "National Plastics — Abercarn": ("AbercarnManager@nationalplastics.co.uk", "01495 248469"),
+    "National Plastics — Maidstone": ("Aellerbeck@shepherdsuk.co.uk", "01622 695909"),
+}
+
+
+def _np_branch(pc):
+    """Nearest National Plastics branch for a postcode → {branch_name, email, phone, miles}. Uses the
+    live geocoder (branch_finder) for true distance; falls back to a coarse region map offline
+    (north/Scotland → Rotherham, Wales/south-west → Abercarn, else → Maidstone)."""
+    try:
+        import branch_finder
+        nb = branch_finder.national_plastics_branch(pc)
+        if nb and nb.get("branch_name"):
+            return nb
+    except Exception:  # noqa: BLE001
+        pass
     area = postcode_area(pc)
-    # Smooth-finish Hardie: Squaredeal always hold Smooth boards → route there whatever the area.
+    if area in _SCOTLAND or area in _NP_NORTH:
+        name = "National Plastics — Rotherham"
+    elif area in _SQUAREDEAL:
+        name = "National Plastics — Abercarn"
+    else:
+        name = "National Plastics — Maidstone"
+    email, phone = _NP_CONTACTS[name]
+    return {"branch_name": name, "email": email, "phone": phone, "miles": None}
+
+
+def hardie_route(pc, smooth=False):
+    """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (Daniela, 2026-09-13):
+    ONLY UPB (in their own depot areas) and National Plastics (everywhere else, nearest of their 3
+    branches). Squaredeal is a BACKUP only (kept for Smooth, which only they stock). Each supplier
+    prices from its OWN list. Returns {supplier, branch, branch_email, branch_phone, reason, conf,
+    quote}."""
+    area = postcode_area(pc)
+    # Smooth-finish Hardie: only Squaredeal stock Smooth boards → Squaredeal (our backup) whatever
+    # the area. Everything else stays on UPB / National Plastics.
     if smooth:
-        return {"supplier": "Squaredeal", "reason": "Smooth finish — Squaredeal always supply Smooth",
-                "quote": True, "conf": "high"}
-    if not area:
-        return {"supplier": "National Plastics", "reason": "Hardie — no postcode; National Plastics "
-                "do Hardie nationwide", "conf": "low"}
-    if area in _SCOTLAND:
-        return {"supplier": "Bricklink", "reason": f"Scotland ({area}) → Bricklink (quote; free "
-                "collection, Glasgow)", "quote": True, "conf": "high"}
+        return {"supplier": "Squaredeal", "quote": True, "conf": "high",
+                "reason": "Smooth finish — only Squaredeal stock Smooth (backup use)"}
+    # UPB in their OWN depot areas (Newmarket / Ipswich / Aldridge).
     for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
                         ("UPB Aldridge", _UPB_ALDRIDGE)):
         if area in keys:
             return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
                     "branch_phone": _UPB_DEPOT_PHONE.get(depot),
-                    "reason": f"{depot} ({area})", "conf": "high"}
-    if area in _NP_NORTH:
-        return {"supplier": "National Plastics",
-                "reason": f"{area} (north of the Aldridge line) → National Plastics", "conf": "high"}
-    if area in _SQUAREDEAL:
-        return {"supplier": "Squaredeal", "reason": f"Squaredeal ({area}) — south/Wales, quote first",
-                "quote": True, "conf": "high"}
-    return {"supplier": "National Plastics", "reason": f"{area} not on the Hardie map → National "
-            "Plastics (nationwide)", "conf": "med"}
+                    "reason": f"UPB own area — {depot} ({area})", "conf": "high"}
+    # EVERYTHING outside a UPB area → National Plastics, nearest of the 3 branches by postcode.
+    nb = _np_branch(pc)
+    miles = f" ({nb['miles']} mi)" if nb.get("miles") is not None else ""
+    return {"supplier": "National Plastics", "branch": nb["branch_name"],
+            "branch_email": nb["email"], "branch_phone": nb["phone"],
+            "reason": f"{area or 'no postcode'} outside UPB area → {nb['branch_name']}{miles}",
+            "conf": "high" if area else "low"}
 
 
 def _norm(s):
