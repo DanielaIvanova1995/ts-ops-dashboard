@@ -5232,10 +5232,11 @@ def render_email_triage():
         <span class="sec">Email Triage</span></span></div>""",
         unsafe_allow_html=True,
     )
-    st.caption(f"Reads new emails in **{email_triage.MAILBOX} › Inbox**, classifies each with Claude, "
-               "and moves it to the same Outlook folder the Make automation used (supplier / customer "
-               "categories, plus Megan's & Malyeka's supplier-reply folders). A few Claude tokens per "
-               "email, no Make operations. Already-triaged emails are skipped.")
+    st.caption(f"Reads new emails in **{email_triage.MAILBOX} › Inbox** (last "
+               f"**{email_triage.DEFAULT_SINCE_DAYS} days** only — never old mail), classifies each "
+               "with Claude, and moves it to the same Outlook folder the Make automation used "
+               "(supplier / customer categories, plus Megan's & Malyeka's supplier-reply folders). "
+               "A few Claude tokens per email, no Make operations. Already-triaged emails are skipped.")
     if not _ok:
         st.warning("Supabase isn't connected — de-dup + history are off, so run **Preview** only "
                    "until it's set (a live run would still work, but there'd be no history).")

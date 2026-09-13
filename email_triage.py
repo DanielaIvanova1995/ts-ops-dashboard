@@ -24,6 +24,10 @@ try:
 except Exception:  # noqa: BLE001 — triage still runs without Supabase (the move itself is the backstop)
     supabase_db = None
 
+# Only ever look at RECENT mail — never reach back into old emails sitting in the Inbox. A run that
+# hasn't happened for a while still won't touch anything older than this many days.
+DEFAULT_SINCE_DAYS = 7
+
 # The shared inbox that gets triaged, and the exact Inbox folder Make watched (its id).
 MAILBOX = "hello@tradesuperstoreonline.co.uk"
 INBOX_ID = ("AAMkAGUzYjQwOWIyLWE2NDktNDhhMS04OGRmLWY2NDM3YTRkNzc0MgAuAAAAAADNPrxz3I1jRrPdjo9v"
@@ -66,10 +70,14 @@ def run_triage(dry_run: bool = False, since_days: int | None = None, max_total: 
     """Classify + file new emails in the watched Inbox, exactly as the Make scenario did.
 
     dry_run: classify + report, but MOVE nothing and mark nothing handled.
-    since_days: only look at emails received within the last N days.
+    since_days: only look at emails received within the last N days. Defaults to DEFAULT_SINCE_DAYS
+        so triage NEVER reaches back into old mail; pass an explicit number to override (0 = today
+        only). None means "not specified" → the default is used.
     max_total: stop after this many emails handled (keeps each run bounded).
     Returns {ok, dry_run, scanned, moved, skipped, failed, capped, items:[{...}], error}.
     """
+    if since_days is None:
+        since_days = DEFAULT_SINCE_DAYS
     mailbox = mailbox or MAILBOX
     summary = {"ok": True, "dry_run": dry_run, "scanned": 0, "moved": 0, "skipped": 0,
                "failed": 0, "capped": False, "items": [], "error": None}
