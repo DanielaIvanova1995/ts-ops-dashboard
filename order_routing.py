@@ -119,6 +119,23 @@ def _np_branch(pc):
     return {"branch_name": name, "email": email, "phone": phone, "miles": None}
 
 
+def freefoam_route(pc):
+    """Freefoam → ALWAYS UPB for now (Daniela 2026-09-13): the matching UPB depot for the postcode,
+    and if it's OUTSIDE all UPB areas, default to UPB Aldridge. (The rest-of-country plan comes
+    later.) Each supplier prices from its OWN list."""
+    area = postcode_area(pc)
+    for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
+                        ("UPB Aldridge", _UPB_ALDRIDGE)):
+        if area in keys:
+            return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
+                    "branch_phone": _UPB_DEPOT_PHONE.get(depot),
+                    "reason": f"Freefoam — UPB own area {depot} ({area})", "conf": "high"}
+    depot = "UPB Aldridge"
+    return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
+            "branch_phone": _UPB_DEPOT_PHONE.get(depot),
+            "reason": f"Freefoam — outside UPB areas → {depot} (default)", "conf": "med"}
+
+
 def hardie_route(pc, smooth=False):
     """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (Daniela, 2026-09-13):
     ONLY UPB (in their own depot areas) and National Plastics (everywhere else, nearest of their 3
@@ -175,8 +192,13 @@ def route_line(line, area_pc=None, sku_supplier=None):
     if "clearance" in tl or sku.lower().startswith("clear"):
         return out("CLEARANCE", None, "Clearance stock we hold — in-house", "high")
 
-    # Hardie / Freefoam / Fortex / Cladco — route by the delivery postcode (Aug 2026 map).
-    if any(k in blob for k in ("hardie", "freefoam", "fortex", "cladco")):
+    # Freefoam → always UPB for now (matching depot, else Aldridge) — Daniela 2026-09-13.
+    if "freefoam" in blob:
+        fr = freefoam_route(area_pc)
+        return out("UPB", "UPB", fr["reason"], fr["conf"], branch=fr.get("branch"),
+                   branch_email=fr.get("branch_email"), branch_phone=fr.get("branch_phone"))
+    # Hardie / Fortex / Cladco — UPB in their own areas, else National Plastics (nearest branch).
+    if any(k in blob for k in ("hardie", "fortex", "cladco")):
         hr = hardie_route(area_pc, smooth="smooth" in tl)
         return out(hr["supplier"], hr["supplier"], hr["reason"], hr["conf"],
                    quote=hr.get("quote", False), needs_branch=hr.get("needs_branch", False),
