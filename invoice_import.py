@@ -283,6 +283,22 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
         if order:
             rec["order_no"] = c
             break
+    # Credit notes reference the ORIGINAL invoice number, not our PO — if the PO didn't match an
+    # order, find the order that invoice number is logged under and credit it there.
+    if not order and doc_type == "credit_note":
+        for cand in (po, parsed.get("invoice_number")):
+            if not cand:
+                continue
+            try:
+                o2 = ds.find_order_by_subitem_invoice_no(str(cand))
+            except Exception:  # noqa: BLE001
+                o2 = None
+            if o2:
+                order = o2
+                rec["order_no"] = o2.get("order_no") or rec.get("order_no")
+                rec["detail"] = (f"credit note linked via invoice {cand} → order "
+                                 f"{o2.get('order_no') or o2.get('name')}")
+                break
     if not order:
         rec.update(status="failed", detail=f"no order on Monday for PO {po!r}")
         _finish(key, "failed", rec, summary, dry_run)

@@ -2538,6 +2538,42 @@ def find_order_item_by_number(order_no: str, token: str | None = None) -> dict |
     return {"id": items[0]["id"], "name": items[0].get("name")} if items else None
 
 
+def find_order_by_subitem_invoice_no(invoice_no, token: str | None = None) -> dict | None:
+    """Find the ORDER a given invoice number is logged under: search the Subitems board for a
+    subitem whose name contains that number and return its parent order {id, name, order_no}, or
+    None. Used to attach a CREDIT NOTE to the same order as the invoice it credits — credit notes
+    reference the ORIGINAL invoice number, not our PO. Exact invoice-number match wins over a loose
+    contains-match."""
+    import re as _re
+    num = str(invoice_no or "").strip()
+    if not num:
+        return None
+
+    def _n(s):
+        return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    q = ('query($b:ID!,$v:String!){boards(ids:[$b]){items_page(limit:15,query_params:{rules:['
+         '{column_id:"name",compare_value:[$v],operator:contains_text}]}){items{id name '
+         'parent_item{id name column_values(ids:["text_mkv6z0nt"]){id text}}}}}}')
+    try:
+        data = _monday_gql(q, {"b": str(SUBITEMS_BOARD_ID), "v": num}, token)
+    except Exception:  # noqa: BLE001
+        return None
+    items = ((((data.get("boards") or [{}])[0]).get("items_page") or {}).get("items") or [])
+    best = None
+    for it in items:
+        par = it.get("parent_item") or {}
+        if not par.get("id"):
+            continue
+        ono = next((cv.get("text") for cv in (par.get("column_values") or [])
+                    if cv.get("id") == "text_mkv6z0nt"), "") or ""
+        cand = {"id": par["id"], "name": par.get("name") or "", "order_no": ono}
+        if _n(it.get("name")) == _n(num):        # exact invoice-number match wins
+            return cand
+        best = best or cand                       # else keep the first contains-match
+    return best
+
+
 def order_subitem_invoice_numbers(order_item_id, token: str | None = None) -> list:
     """The invoice numbers (subitem names) already logged under an order → [name, …]. Used to skip
     an invoice whose number is ALREADY on the order (a re-sent email, or one Make already created),
