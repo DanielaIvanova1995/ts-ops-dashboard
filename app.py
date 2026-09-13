@@ -4312,7 +4312,7 @@ def _left_reason(res, action, margin):
     return "needs review"
 
 
-def run_scheduled_invoice_check(max_n=40, only_sub_ids=None):
+def run_scheduled_invoice_check(max_n=40, only_sub_ids=None, progress=None):
     """HEADLESS invoice check + auto-process for the background scheduler (no Streamlit session/UI).
     Makes the SAME decisions as the manual 'Bulk-check & auto-process', but only auto-acts on the
     safe cases: fully-matched + margin in the supplier's band → PUSH (create the QB bill, or fall
@@ -4339,7 +4339,13 @@ def run_scheduled_invoice_check(max_n=40, only_sub_ids=None):
         pidx, lbsku = _pricelist_index(), _lookup_by_sku()
     except Exception:  # noqa: BLE001
         return out
+    if progress is not None:
+        progress["total"] = len(invs)
     for inv in invs:
+        if progress is not None:                # live counts (lags by the one in flight)
+            progress.update(done=out["checked"] + out["failed"] + out["skipped"],
+                            pushed=out["pushed"], held=out["held"], left=out["left"],
+                            failed=out["failed"])
         if out["checked"] >= max_n:
             break
         sid = inv.get("sub_id")
@@ -4405,6 +4411,10 @@ def run_scheduled_invoice_check(max_n=40, only_sub_ids=None):
                                               **_meta)
         except Exception:  # noqa: BLE001
             out["failed"] += 1
+    if progress is not None:                     # final tally
+        progress.update(done=out["checked"] + out["failed"] + out["skipped"],
+                        pushed=out["pushed"], held=out["held"], left=out["left"],
+                        failed=out["failed"])
     return out
 
 
@@ -4599,7 +4609,7 @@ def _invoice_tab(key, is_queue):
                     _bg["trigger"].set()
                     st.session_state["inv_flash"] = (
                         f"Checking & processing {n} invoice(s) in the background — the page won't "
-                        "freeze. Give it a moment, then hit 🔄 Refresh to see them move.")
+                        "freeze. Watch the live progress bar above; it refreshes when done.")
                     st.rerun()
                 else:
                     _bulk_check(checkable, lbsku)      # local: synchronous fallback
@@ -4733,8 +4743,7 @@ def _invoice_tab(key, is_queue):
                 _bg["trigger"].set()
                 st.session_state["inv_flash"] = (
                     f"Checking & processing {len(sel_ids)} invoice(s) in the background — the page "
-                    "won't freeze. Give it a moment, then hit 🔄 Refresh: matched ones move to "
-                    "QuickBooks/Matched, the rest stay here with their result.")
+                    "won't freeze. Watch the live progress bar above; it refreshes the list when done.")
                 st.rerun()
             else:
                 sel_invs = [i for i in fil if i["sub_id"] in set(_procids) and i.get("asset_id")]
@@ -5181,6 +5190,22 @@ def render_discrepancy_log():
             st.caption("None queried yet.")
 
 
+@st.fragment(run_every=2)
+def _bg_progress_live():
+    """Live progress for a background 'Check & process' job — auto-refreshes every 2s (reads the
+    in-process worker state), then triggers a full rerun when the job finishes so the list updates
+    and the auto-refresh stops."""
+    prog = _bg_worker().get("progress") or {}
+    total, done = prog.get("total") or 0, prog.get("done") or 0
+    if total:
+        st.progress(min(done / total, 1.0) if total else 0.0,
+                    text=(f"⏳ Checking & processing — **{done} of {total}** done · pushed "
+                          f"{prog.get('pushed', 0)}, held {prog.get('held', 0)}, left "
+                          f"{prog.get('left', 0)}, failed {prog.get('failed', 0)}"))
+    if not prog.get("active"):
+        st.rerun(scope="app")     # finished → refresh the list and stop the 2s auto-refresh
+
+
 def render_invoice_check():
     _process_pending_action()   # apply any queued Push/Matched/Flag before rendering
     st.markdown(
@@ -5202,6 +5227,15 @@ def render_invoice_check():
                "(likely a missing invoice/credit). Uses your Anthropic key — pennies per invoice.")
 
     render_llm_costs()
+
+    # Live background 'Check & process' progress (auto-refreshing) — or the last run's summary.
+    _prog = _bg_worker().get("progress") or {}
+    if _prog.get("active"):
+        _bg_progress_live()
+    elif _prog.get("total"):
+        st.success(f"✅ Last background check: **{_prog.get('done', 0)}/{_prog.get('total', 0)}** — "
+                   f"pushed {_prog.get('pushed', 0)}, held {_prog.get('held', 0)}, left "
+                   f"{_prog.get('left', 0)}, failed {_prog.get('failed', 0)}. Hit 🔄 to refresh.")
 
     with st.expander("Auto-push margin thresholds"):
         sa, sb = st.columns(2)
@@ -5550,8 +5584,11 @@ def _bg_worker():
             state.setdefault("manual_backlog", []).extend(sub_ids)   # fold into the next run
             return
         state["running"] = True
+        state["progress"] = {"total": len(sub_ids), "done": 0, "pushed": 0, "held": 0,
+                             "left": 0, "failed": 0, "active": True}
         try:
-            res = run_scheduled_invoice_check(max_n=len(sub_ids) or 40, only_sub_ids=sub_ids)
+            res = run_scheduled_invoice_check(max_n=len(sub_ids) or 40, only_sub_ids=sub_ids,
+                                              progress=state["progress"])
             supabase_db.config_set("invoice_check_status", {
                 "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                 "checked": res.get("checked"), "pushed": res.get("pushed"),
@@ -5560,6 +5597,8 @@ def _bg_worker():
         except Exception:  # noqa: BLE001
             pass
         finally:
+            if isinstance(state.get("progress"), dict):
+                state["progress"]["active"] = False
             state["running"] = False
 
     def _run_check(reason):
