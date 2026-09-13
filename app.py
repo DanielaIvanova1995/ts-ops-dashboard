@@ -4312,16 +4312,19 @@ def _left_reason(res, action, margin):
     return "needs review"
 
 
-def run_scheduled_invoice_check(max_n=40):
+def run_scheduled_invoice_check(max_n=40, only_sub_ids=None):
     """HEADLESS invoice check + auto-process for the background scheduler (no Streamlit session/UI).
     Makes the SAME decisions as the manual 'Bulk-check & auto-process', but only auto-acts on the
     safe cases: fully-matched + margin in the supplier's band → PUSH (create the QB bill, or fall
     back to the old label so Make makes it); thin-margin → HOLD as Matched; everything else
     (discrepancy, high margin, unreadable, no price) is LEFT in Needs Review for a human.
     Skips invoices it has ALREADY set aside (so it doesn't re-check them every cycle and wastes no
-    reads), and logs every left/failed one with its reason for the history. Returns counts."""
+    reads), and logs every left/failed one with its reason for the history. Returns counts.
+    `only_sub_ids`: run on JUST these subitem ids (a manual 'Check & process selected' fired into
+    the background worker) — forces a re-check even if previously set aside."""
     import supabase_db
     out = {"checked": 0, "pushed": 0, "held": 0, "left": 0, "failed": 0, "skipped": 0}
+    want = {str(s) for s in only_sub_ids} if only_sub_ids else None
     try:
         label_ids, lim = INVOICE_STATUS["review"]
         data = data_sources.fetch_invoices_by_status(label_ids, limit=lim)
@@ -4329,6 +4332,9 @@ def run_scheduled_invoice_check(max_n=40):
                 if not _is_excluded_supplier(i.get("supplier"))]
     except Exception:  # noqa: BLE001
         return out
+    if want is not None:                       # manual selection → just those, process them all
+        invs = [i for i in invs if str(i.get("sub_id")) in want]
+        max_n = max(max_n, len(invs))
     try:
         pidx, lbsku = _pricelist_index(), _lookup_by_sku()
     except Exception:  # noqa: BLE001
@@ -4338,7 +4344,8 @@ def run_scheduled_invoice_check(max_n=40):
             break
         sid = inv.get("sub_id")
         # Already set aside on a previous cycle → don't re-check (saves reads; keeps progressing).
-        if supabase_db.invoice_check_seen(sid):
+        # A manual selection (want) forces the re-check, so skip this guard then.
+        if want is None and supabase_db.invoice_check_seen(sid):
             out["skipped"] += 1
             continue
         aid = inv.get("asset_id")
@@ -4586,7 +4593,16 @@ def _invoice_tab(key, is_queue):
             if yc.button(f"Yes — check & process {n}", key=f"bulkyes_{key}", type="primary",
                          use_container_width=True):
                 st.session_state.pop(pend, None)
-                _bulk_check(checkable, lbsku)
+                _bg = _bg_worker()
+                if _bg.get("enabled"):
+                    _bg["manual_check"] = [i["sub_id"] for i in checkable]
+                    _bg["trigger"].set()
+                    st.session_state["inv_flash"] = (
+                        f"Checking & processing {n} invoice(s) in the background — the page won't "
+                        "freeze. Give it a moment, then hit 🔄 Refresh to see them move.")
+                    st.rerun()
+                else:
+                    _bulk_check(checkable, lbsku)      # local: synchronous fallback
             if nc.button("Cancel", key=f"bulkno_{key}", use_container_width=True):
                 st.session_state.pop(pend, None)
                 st.rerun()
@@ -4706,9 +4722,23 @@ def _invoice_tab(key, is_queue):
         # all', on the selection only).
         _procids = st.session_state.pop(f"do_process_{key}", None)
         if _procids:
-            sel_invs = [i for i in fil if i["sub_id"] in set(_procids) and i.get("asset_id")]
+            sel_ids = [i["sub_id"] for i in fil
+                       if i["sub_id"] in set(_procids) and i.get("asset_id")]
             st.session_state.pop(f"sel_{key}", None)
-            _bulk_check(sel_invs, lbsku)          # checks, auto-pushes/holds, then reruns
+            _bg = _bg_worker()
+            if _bg.get("enabled"):
+                # Run OFF the page thread (like the importer) so a big selection can't drop the
+                # websocket and kick you out. Results appear as invoices leave Needs Review — refresh.
+                _bg["manual_check"] = list(sel_ids)
+                _bg["trigger"].set()
+                st.session_state["inv_flash"] = (
+                    f"Checking & processing {len(sel_ids)} invoice(s) in the background — the page "
+                    "won't freeze. Give it a moment, then hit 🔄 Refresh: matched ones move to "
+                    "QuickBooks/Matched, the rest stay here with their result.")
+                st.rerun()
+            else:
+                sel_invs = [i for i in fil if i["sub_id"] in set(_procids) and i.get("asset_id")]
+                _bulk_check(sel_invs, lbsku)       # local (no bg worker): synchronous fallback
 
         # Push the ticked, matched invoices (checking any not yet checked first).
         if st.session_state.get(f"do_push_{key}"):
@@ -5511,6 +5541,27 @@ def _bg_worker():
             except Exception:  # noqa: BLE001
                 pass
 
+    def _run_manual_check(sub_ids):
+        """Check & process JUST these subitems, off the page thread — so a big selection (e.g. many
+        Eurocell invoices) can't drop the websocket and 'kick you out'. Same engine as the scheduler."""
+        import datetime as _dt
+        import supabase_db
+        if state.get("running"):
+            state.setdefault("manual_backlog", []).extend(sub_ids)   # fold into the next run
+            return
+        state["running"] = True
+        try:
+            res = run_scheduled_invoice_check(max_n=len(sub_ids) or 40, only_sub_ids=sub_ids)
+            supabase_db.config_set("invoice_check_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "checked": res.get("checked"), "pushed": res.get("pushed"),
+                "held": res.get("held"), "left": res.get("left"), "failed": res.get("failed"),
+                "reason": "manual-selected"})
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            state["running"] = False
+
     def _run_check(reason):
         import datetime as _dt
         import supabase_db
@@ -5536,7 +5587,14 @@ def _bg_worker():
             fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
             state["trigger"].clear()
             if fired:
-                _run_once("manual")
+                mc = state.pop("manual_check", None)     # a 'Check & process selected' job?
+                if mc:
+                    _run_manual_check(list(mc))
+                    _bl = state.pop("manual_backlog", None)
+                    if _bl:
+                        _run_manual_check(list(_bl))
+                else:
+                    _run_once("manual")
                 continue
             try:
                 cfg = supabase_db.config_get("invoice_import") or {}
