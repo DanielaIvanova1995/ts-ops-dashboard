@@ -290,10 +290,18 @@ def _deanta_surcharge(ship):
     return s, False
 
 
+def is_deanta_doc(l):
+    """Deanta Q-Mark fire-door documentation lines (e.g. SKU 'QMARKDS', description 'Q-Mark Fire
+    Door Documents') are £0 paperwork, not a product — exclude from door counting and the checks."""
+    blob = _norm((l.get("sku") or "") + " " + (l.get("description") or ""))
+    return "qmark" in blob or "firedoordocument" in blob
+
+
 def deanta_expected(goods, lines, ship=None):
     surcharge, poa = _deanta_surcharge(ship)
     if poa:
         return None
+    lines = [l for l in (lines or []) if not is_deanta_doc(l)]   # drop £0 Q-Mark doc lines
     doors, packs = _lpd_doors(lines)          # same door vs hardware split as LPD
     if doors > 0:
         base = min(DEANTA_DOOR_BASE + (doors - 1) * DEANTA_DOOR_STEP, DEANTA_DOOR_CAP)

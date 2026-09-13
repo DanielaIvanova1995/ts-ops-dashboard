@@ -1894,6 +1894,10 @@ def _is_lpd(supplier):
     return (supplier or "").startswith("lpd")
 
 
+def _is_deanta(supplier):
+    return (supplier or "").startswith("deanta")
+
+
 def _lpd_pc_parts(ship):
     pc = ((ship or {}).get("postcode") or "").upper().strip()
     m = re.match(r"([A-Z]{1,2})(\d{1,2})", pc)
@@ -2255,6 +2259,10 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         return _southern_expected(ship)
     if _is_nuie(supplier):
         return _nuie_expected(lines, ship)
+    if (supplier or "").startswith("deanta"):
+        # Door-count carriage sheet (1 door £40, +£5/door, cap £70; hardware-only £8/FOC; postcode
+        # surcharges; +£50 next-day) — NOT the old flat £8. Doc lines excluded inside deanta_expected.
+        return delivery_rules.deanta_expected(goods_value, lines, ship)
     if (supplier or "").startswith("vista"):
         return delivery_rules.vista_expected(goods_value, lines)
     rule = DELIVERY_CHARGES.get(supplier)
@@ -2553,6 +2561,16 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
                 sissues.append(("name", "surcharge — expected, not on the Shopify order"))
             lines.append({"sku": sku_raw or "Surcharge", "desc": desc, "qty": qty,
                           "unit": unit, "cost": None, "issues": sissues})
+            continue
+
+        # Deanta Q-Mark fire-door documentation lines (QMARKDS / 'Q-Mark Fire Door Documents') are
+        # £0 paperwork that never appears on the Shopify order — accept them, don't flag 'not on the
+        # order', and they're already excluded from the door-count carriage calc.
+        if _is_deanta(supplier) and delivery_rules.is_deanta_doc({"sku": sku_raw, "description": desc}):
+            lines.append({"sku": sku_raw or "Q-Mark docs", "desc": desc, "qty": qty, "unit": unit,
+                          "cost": None,
+                          "issues": [("name", "Q-Mark fire-door documents — £0 paperwork, "
+                                              "not on the Shopify order")]})
             continue
 
         sk = _canon_sku(sku_raw)

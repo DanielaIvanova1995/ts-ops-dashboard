@@ -68,6 +68,11 @@ def _order_no_candidates(po_number: str | None) -> list[str]:
     raw = (po_number or "").strip()
     if not raw:
         return []
+    # Some suppliers prefix our order number with 'ref' (e.g. 'ref30720', 'Ref: 30720') — strip it
+    # so it matches the bare order number on Monday.
+    stripped = re.sub(r"^\s*ref[:\s#.\-]*", "", raw, flags=re.I).strip()
+    if stripped:
+        raw = stripped
     compact = re.sub(r"\s", "", raw)
     base = compact[:5]
     out = []
