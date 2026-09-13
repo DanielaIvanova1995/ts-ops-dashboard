@@ -62,4 +62,4 @@ cookie:
   # key here once the repo is public.
   name: ts_ops_dashboard
   key: local-dev-placeholder-not-the-real-key
-  expiry_days: 30
+  expiry_days: 90
