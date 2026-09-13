@@ -1495,7 +1495,7 @@ def _pricelist_index():
                 idx.setdefault(sk, {})[sup] = o.get("c")
     ov = _price_overrides()
     for sup, skus in ov.items():
-        if sup in ("_patterns", "_titles", "_persqm") or not isinstance(skus, dict):
+        if sup in ("_patterns", "_titles", "_persqm", "_persection") or not isinstance(skus, dict):
             continue
         sn = _norm_code(sup)
         for sk, cost in skus.items():
@@ -2821,14 +2821,22 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
             unit = rec.get("eff_unit", rec.get("unit"))   # per-unit (line total ÷ qty where needed)
             if okey is None or not isinstance(unit, (int, float)):
                 continue
-            oc = (pidx.get(_canon_sku(order[okey].get("sku"))) or {}).get(supplier)
+            osku = order[okey].get("sku")
+            oc = (pidx.get(_canon_sku(osku)) or {}).get(supplier)
+            note = f"our SKU {osku} (invoice uses their own code)"
+            # Per-section (Carron): the finish + section count live on OUR order line's variant
+            # title, and the cost is keyed to our LD/JJC leg code — so the invoice line (which prints
+            # Carron's own code and a sparse description) only prices via the ORDER line. Try that
+            # before giving up, using the order line's SKU + name (and the invoice desc as a bonus).
+            if not isinstance(oc, (int, float)):
+                ps = _persection_cost(osku, supplier, order[okey].get("name"), rec.get("desc"))
+                if isinstance(ps, (int, float)):
+                    oc, note = ps, f"our SKU {osku} per-section rate"
             if not isinstance(oc, (int, float)):
                 continue
             rec["cost"] = oc
             rec["issues"] = [i for i in rec["issues"] if i[0] != "noprice"]   # order SKU priced it
-            rec["issues"].extend(
-                _price_issues(supplier, unit, oc, tol,
-                              f"our SKU {order[okey]['sku']} (invoice uses their own code)"))
+            rec["issues"].extend(_price_issues(supplier, unit, oc, tol, note))
 
     # Shopify-cost suppliers (CTie, Vista): their true cost is the Shopify cost-per-item, so price
     # EVERY matched line against that (overriding the feed, which for CTie is per-unit and wrong).
