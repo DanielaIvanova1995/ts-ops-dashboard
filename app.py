@@ -4376,6 +4376,14 @@ def run_scheduled_invoice_check(max_n=40, only_sub_ids=None, progress=None):
                 margin = om.get("margin")
             has_rule = _norm_code(inv.get("supplier")) in SUPPLIER_RULES
             v = _verdict(res)
+            # Persist the verdict so the on-screen grid shows the result after a background run
+            # (the manual check does this via _check_and_store; the headless one didn't).
+            v["margin"] = round(margin) if isinstance(margin, (int, float)) else None
+            v["missing"] = res.get("missing") or []
+            try:
+                supabase_db.invoice_verdict_set(sid, v)
+            except Exception:  # noqa: BLE001
+                pass
             matched = has_rule or (res.get("n_issues") == 0 and v.get("order") is not False)
             is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
             _label, action = _push_decision(matched, is_cn, margin, inv.get("supplier"),
@@ -4605,6 +4613,8 @@ def _invoice_tab(key, is_queue):
                 st.session_state.pop(pend, None)
                 _bg = _bg_worker()
                 if _bg.get("enabled"):
+                    _bg["progress"] = {"total": len(checkable), "done": 0, "pushed": 0, "held": 0,
+                                       "left": 0, "failed": 0, "active": True}
                     _bg["manual_check"] = [i["sub_id"] for i in checkable]
                     _bg["trigger"].set()
                     st.session_state["inv_flash"] = (
@@ -4739,6 +4749,8 @@ def _invoice_tab(key, is_queue):
             if _bg.get("enabled"):
                 # Run OFF the page thread (like the importer) so a big selection can't drop the
                 # websocket and kick you out. Results appear as invoices leave Needs Review — refresh.
+                _bg["progress"] = {"total": len(sel_ids), "done": 0, "pushed": 0, "held": 0,
+                                   "left": 0, "failed": 0, "active": True}   # show the bar at once
                 _bg["manual_check"] = list(sel_ids)
                 _bg["trigger"].set()
                 st.session_state["inv_flash"] = (
