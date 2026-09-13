@@ -5494,5 +5494,584 @@
     "JHVENT5300186": 11.86,
     "JHVENT5300187": 12.58,
     "HAR5300448": 41.0
+  },
+  "Carron": {
+    "BWP041": 3.79,
+    "BWP042": 3.79,
+    "BWP043": 3.79,
+    "BWP045": 3.79,
+    "ELE001": 99.17,
+    "ELE002": 102.08,
+    "ELE003": 107.92,
+    "ELE004": 99.17,
+    "ELE005": 102.08,
+    "ELE006": 107.92,
+    "ELE007": 99.17,
+    "ELE010": 99.17,
+    "ELE011": 102.08,
+    "ELE013": 8.75,
+    "GCM248": 116.67,
+    "HAN005": 40.83,
+    "HAN008": 36.75,
+    "HAN010": 36.75,
+    "HAN011": 20.42,
+    "HAN012": 20.42,
+    "HAN013": 20.42,
+    "HAN019": 8.75,
+    "HAN023": 40.83,
+    "HAN025": 43.75,
+    "HAN026": 43.75,
+    "HAN027": 43.75,
+    "HAN028": 43.75,
+    "HAN029": 43.75,
+    "HAN030": 43.75,
+    "HAN032": 43.75,
+    "HAN033": 43.75,
+    "HAN034": 43.75,
+    "HAN035": 43.75,
+    "HAN036": 43.75,
+    "HAN037": 43.75,
+    "HAN038": 8.75,
+    "HAN039": 8.75,
+    "HAN040": 40.83,
+    "HAN041": 40.83,
+    "HAN042": 40.83,
+    "HAN043": 40.83,
+    "HAN044": 36.75,
+    "HAN045": 36.75,
+    "HAN046": 36.75,
+    "HAN047": 36.75,
+    "HAN049": 67.08,
+    "HAN050": 67.08,
+    "HAN051": 67.08,
+    "HAN052": 67.08,
+    "HAN053": 67.08,
+    "HAN054": 67.08,
+    "HAN101": 8.75,
+    "HAN102": 8.75,
+    "HAN103": 7.29,
+    "HAN107": 8.75,
+    "HAN120": 17.47,
+    "HAN121": 17.47,
+    "HAN122": 17.47,
+    "HAN123": 17.47,
+    "HAN124": 17.47,
+    "HAN125": 17.47,
+    "HAN126": 20.39,
+    "HAN127": 20.39,
+    "HAN128": 20.39,
+    "HAN129": 20.39,
+    "HAN130": 20.39,
+    "HAN131": 20.39,
+    "HAN150": 3.79,
+    "HAN151": 3.79,
+    "HAN152": 3.79,
+    "HAN153": 3.79,
+    "HAN154": 3.79,
+    "HAN155": 3.79,
+    "HAN205": 9.33,
+    "HEF249": 128.33,
+    "LD055": 6.13,
+    "LD056": 6.13,
+    "LD221/LD222-ANTIQUED": 37.13,
+    "LD221/LD222-PAINTED": 31.88,
+    "LD221/LD222-PRIMER": 27.13,
+    "LD221/LD222-SATIN-POLISHED": 44.63,
+    "LD221/LD222-VINTAGE-COPPER": 42.13,
+    "RTO001": 52.21,
+    "RTO002": 26.25,
+    "RTO003": 52.21,
+    "RTO004": 52.21,
+    "RTO005": 52.21,
+    "RTO035": 16.04,
+    "RX152": 522.08,
+    "RX153": 615.42,
+    "TBK136": 14.58,
+    "TCR001": 60.08,
+    "TCR004": 88.67,
+    "TCR005": 62.13,
+    "TCR006": 72.04,
+    "TCR007": 82.54,
+    "TCR009": 62.13,
+    "TCR010": 72.04,
+    "TCR011": 81.96,
+    "TCR012": 88.67,
+    "TOW001": 343.0,
+    "TOW002": 343.0,
+    "TOW003": 343.0,
+    "TOW013": 495.25,
+    "TOW015": 495.25,
+    "TOW019": 716.92,
+    "TOW020": 716.92,
+    "TOW021": 716.92,
+    "TOW025": 396.08,
+    "TOW026": 396.08,
+    "TOW027": 396.08,
+    "TOW031": 476.0,
+    "TOW032": 476.0,
+    "TOW033": 476.0,
+    "TOW107": 327.83,
+    "TOW108": 327.83,
+    "TOW109": 327.83,
+    "TOW110": 327.83,
+    "TOW115": 189.58,
+    "TOW156": 189.58,
+    "TOW221": 145.54,
+    "TOW223": 210.29,
+    "TOW226": 160.71,
+    "TOW228": 229.54,
+    "TOW230": 198.92,
+    "TOW231": 244.71,
+    "TOW232": 305.96,
+    "TOW233": 343.88,
+    "TOW236": 294.29,
+    "TOW257": 327.83,
+    "TOW258": 327.83,
+    "TOW259": 327.83,
+    "TOW260": 327.83,
+    "TOW261": 189.58,
+    "TOW262": 189.58,
+    "TOW275": 343.0,
+    "TOW276": 495.25,
+    "TOW277": 396.08,
+    "TOW278": 476.0
+  },
+  "_persection": {
+    "Carron": {
+      "JJC010": {
+        "PRIMER": 51.33,
+        "PAINTED": 56.08,
+        "SATIN-POLISHED": 72.33,
+        "ANTIQUED": 61.33,
+        "VINTAGE-COPPER": 66.33
+      },
+      "JJC014": {
+        "PRIMER": 35.88,
+        "PAINTED": 40.63,
+        "SATIN-POLISHED": 53.38,
+        "ANTIQUED": 45.88,
+        "VINTAGE-COPPER": 50.88
+      },
+      "JJC064": {
+        "PRIMER": 72.63,
+        "PAINTED": 77.38,
+        "SATIN-POLISHED": 100.63,
+        "ANTIQUED": 82.63,
+        "VINTAGE-COPPER": 87.63
+      },
+      "LD005": {
+        "PRIMER": 44.63,
+        "PAINTED": 49.38,
+        "SATIN-POLISHED": 65.63,
+        "ANTIQUED": 54.63,
+        "VINTAGE-COPPER": 59.63
+      },
+      "LD009": {
+        "PRIMER": 25.08,
+        "PAINTED": 29.83,
+        "SATIN-POLISHED": 46.08,
+        "ANTIQUED": 35.08,
+        "VINTAGE-COPPER": 40.08
+      },
+      "LD011": {
+        "PRIMER": 17.79,
+        "PAINTED": 22.54,
+        "SATIN-POLISHED": 38.79,
+        "ANTIQUED": 27.79,
+        "VINTAGE-COPPER": 32.79
+      },
+      "LD013": {
+        "PRIMER": 18.08,
+        "PAINTED": 22.83,
+        "SATIN-POLISHED": 39.08,
+        "ANTIQUED": 28.08,
+        "VINTAGE-COPPER": 33.08
+      },
+      "LD015": {
+        "PRIMER": 15.75,
+        "PAINTED": 20.5,
+        "SATIN-POLISHED": 36.75,
+        "ANTIQUED": 25.75,
+        "VINTAGE-COPPER": 30.75
+      },
+      "LD030": {
+        "PRIMER": 55.71,
+        "PAINTED": 60.46,
+        "SATIN-POLISHED": 83.71,
+        "ANTIQUED": 65.71,
+        "VINTAGE-COPPER": 70.71
+      },
+      "LD060": {
+        "PRIMER": 14.0,
+        "PAINTED": 18.75,
+        "SATIN-POLISHED": 31.5,
+        "ANTIQUED": 24.0,
+        "VINTAGE-COPPER": 29.0
+      },
+      "LD063": {
+        "PRIMER": 46.38,
+        "PAINTED": 51.13,
+        "SATIN-POLISHED": 67.38,
+        "ANTIQUED": 56.38,
+        "VINTAGE-COPPER": 61.38
+      },
+      "LD078": {
+        "PRIMER": 48.42,
+        "PAINTED": 53.17,
+        "SATIN-POLISHED": 76.42,
+        "ANTIQUED": 58.42,
+        "VINTAGE-COPPER": 63.42
+      },
+      "LD080": {
+        "PRIMER": 57.17,
+        "PAINTED": 61.92,
+        "SATIN-POLISHED": 85.17,
+        "ANTIQUED": 67.17,
+        "VINTAGE-COPPER": 72.17
+      },
+      "LD082": {
+        "PRIMER": 78.17,
+        "PAINTED": 82.92,
+        "SATIN-POLISHED": 106.17,
+        "ANTIQUED": 88.17,
+        "VINTAGE-COPPER": 93.17
+      },
+      "LD180": {
+        "PRIMER": 73.5,
+        "PAINTED": 78.25,
+        "SATIN-POLISHED": 101.5,
+        "ANTIQUED": 83.5,
+        "VINTAGE-COPPER": 88.5
+      },
+      "LD183": {
+        "PRIMER": 16.04,
+        "PAINTED": 20.79,
+        "SATIN-POLISHED": 33.54,
+        "ANTIQUED": 26.04,
+        "VINTAGE-COPPER": 31.04
+      },
+      "LD208": {
+        "PRIMER": 39.96,
+        "PAINTED": 44.71,
+        "SATIN-POLISHED": 60.96,
+        "ANTIQUED": 49.96,
+        "VINTAGE-COPPER": 54.96
+      },
+      "LD213": {
+        "PRIMER": 21.29,
+        "PAINTED": 26.04,
+        "SATIN-POLISHED": 42.29,
+        "ANTIQUED": 31.29,
+        "VINTAGE-COPPER": 36.29
+      },
+      "LD217": {
+        "PRIMER": 50.17,
+        "PAINTED": 54.92,
+        "SATIN-POLISHED": 71.17,
+        "ANTIQUED": 60.17,
+        "VINTAGE-COPPER": 65.17
+      },
+      "LD221": {
+        "PRIMER": 27.13,
+        "PAINTED": 31.88,
+        "SATIN-POLISHED": 44.63,
+        "ANTIQUED": 37.13,
+        "VINTAGE-COPPER": 42.13
+      },
+      "LD232": {
+        "PRIMER": 29.46,
+        "PAINTED": 34.21,
+        "SATIN-POLISHED": 46.96,
+        "ANTIQUED": 39.46,
+        "VINTAGE-COPPER": 44.46
+      },
+      "LD236": {
+        "PRIMER": 57.46,
+        "PAINTED": 62.21,
+        "SATIN-POLISHED": 85.46,
+        "ANTIQUED": 67.46,
+        "VINTAGE-COPPER": 72.46
+      },
+      "LD265": {
+        "PRIMER": 17.5,
+        "PAINTED": 22.25,
+        "SATIN-POLISHED": 38.5,
+        "ANTIQUED": 27.5,
+        "VINTAGE-COPPER": 32.5
+      },
+      "LD267": {
+        "PRIMER": 14.0,
+        "PAINTED": 18.75,
+        "SATIN-POLISHED": 31.5,
+        "ANTIQUED": 24.0,
+        "VINTAGE-COPPER": 29.0
+      },
+      "LD269": {
+        "PRIMER": 39.96,
+        "PAINTED": 44.71,
+        "SATIN-POLISHED": 60.96,
+        "ANTIQUED": 49.96,
+        "VINTAGE-COPPER": 54.96
+      },
+      "TBK021": {
+        "PRIMER": 33.25,
+        "PAINTED": 38.0,
+        "SATIN-POLISHED": 54.25,
+        "ANTIQUED": 43.25,
+        "VINTAGE-COPPER": 48.25
+      },
+      "TBK023": {
+        "PRIMER": 29.17,
+        "PAINTED": 33.92,
+        "SATIN-POLISHED": 46.67,
+        "ANTIQUED": 39.17,
+        "VINTAGE-COPPER": 44.17
+      },
+      "TBK040": {
+        "PRIMER": 41.71,
+        "PAINTED": 46.46,
+        "SATIN-POLISHED": 62.71,
+        "ANTIQUED": 51.71,
+        "VINTAGE-COPPER": 56.71
+      },
+      "TBK042": {
+        "PRIMER": 60.38,
+        "PAINTED": 65.13,
+        "SATIN-POLISHED": 88.38,
+        "ANTIQUED": 70.38,
+        "VINTAGE-COPPER": 75.38
+      },
+      "TBK044": {
+        "PRIMER": 36.46,
+        "PAINTED": 41.21,
+        "SATIN-POLISHED": 57.46,
+        "ANTIQUED": 46.46,
+        "VINTAGE-COPPER": 51.46
+      },
+      "TBK046": {
+        "PRIMER": 53.96,
+        "PAINTED": 58.71,
+        "SATIN-POLISHED": 81.96,
+        "ANTIQUED": 63.96,
+        "VINTAGE-COPPER": 68.96
+      },
+      "TBK048": {
+        "PRIMER": 29.17,
+        "PAINTED": 33.92,
+        "SATIN-POLISHED": 50.17,
+        "ANTIQUED": 39.17,
+        "VINTAGE-COPPER": 44.17
+      },
+      "TBK050": {
+        "PRIMER": 24.5,
+        "PAINTED": 29.25,
+        "SATIN-POLISHED": 42.0,
+        "ANTIQUED": 34.5,
+        "VINTAGE-COPPER": 39.5
+      },
+      "TBK065": {
+        "PRIMER": 36.75,
+        "PAINTED": 41.5,
+        "SATIN-POLISHED": 57.75,
+        "ANTIQUED": 46.75,
+        "VINTAGE-COPPER": 51.75
+      },
+      "TBK067": {
+        "PRIMER": 23.33,
+        "PAINTED": 28.08,
+        "SATIN-POLISHED": 44.33,
+        "ANTIQUED": 33.33,
+        "VINTAGE-COPPER": 38.33
+      },
+      "TBK070": {
+        "PRIMER": 31.21,
+        "PAINTED": 35.96,
+        "SATIN-POLISHED": 52.21,
+        "ANTIQUED": 41.21,
+        "VINTAGE-COPPER": 46.21
+      },
+      "TBK072": {
+        "PRIMER": 21.0,
+        "PAINTED": 25.75,
+        "SATIN-POLISHED": 38.5,
+        "ANTIQUED": 31.0,
+        "VINTAGE-COPPER": 36.0
+      },
+      "TBK074": {
+        "PRIMER": 29.75,
+        "PAINTED": 34.5,
+        "SATIN-POLISHED": 50.75,
+        "ANTIQUED": 39.75,
+        "VINTAGE-COPPER": 44.75
+      },
+      "TBK076": {
+        "PRIMER": 31.21,
+        "PAINTED": 35.96,
+        "SATIN-POLISHED": 52.21,
+        "ANTIQUED": 41.21,
+        "VINTAGE-COPPER": 46.21
+      },
+      "TBK078": {
+        "PRIMER": 50.46,
+        "PAINTED": 55.21,
+        "SATIN-POLISHED": 71.46,
+        "ANTIQUED": 60.46,
+        "VINTAGE-COPPER": 65.46
+      },
+      "TBK084": {
+        "PRIMER": 36.75,
+        "PAINTED": 41.5,
+        "SATIN-POLISHED": 57.75,
+        "ANTIQUED": 46.75,
+        "VINTAGE-COPPER": 51.75
+      },
+      "TBK086": {
+        "PRIMER": 27.71,
+        "PAINTED": 32.46,
+        "SATIN-POLISHED": 45.21,
+        "ANTIQUED": 37.71,
+        "VINTAGE-COPPER": 42.71
+      },
+      "TBK088": {
+        "PRIMER": 57.17,
+        "PAINTED": 61.92,
+        "SATIN-POLISHED": 85.17,
+        "ANTIQUED": 67.17,
+        "VINTAGE-COPPER": 72.17
+      },
+      "TBK102": {
+        "PRIMER": 21.29,
+        "PAINTED": 26.04,
+        "SATIN-POLISHED": 38.79,
+        "ANTIQUED": 31.29,
+        "VINTAGE-COPPER": 36.29
+      },
+      "TBK104": {
+        "PRIMER": 28.0,
+        "PAINTED": 32.75,
+        "SATIN-POLISHED": 45.5,
+        "ANTIQUED": 38.0,
+        "VINTAGE-COPPER": 43.0
+      },
+      "TBK106": {
+        "PRIMER": 32.67,
+        "PAINTED": 37.42,
+        "SATIN-POLISHED": 53.67,
+        "ANTIQUED": 42.67,
+        "VINTAGE-COPPER": 47.67
+      },
+      "TBK108": {
+        "PRIMER": 28.88,
+        "PAINTED": 33.63,
+        "SATIN-POLISHED": 46.38,
+        "ANTIQUED": 38.88,
+        "VINTAGE-COPPER": 43.88
+      },
+      "TBK110": {
+        "PRIMER": 39.08,
+        "PAINTED": 43.83,
+        "SATIN-POLISHED": 60.08,
+        "ANTIQUED": 49.08,
+        "VINTAGE-COPPER": 54.08
+      },
+      "TBK112": {
+        "PRIMER": 39.96,
+        "PAINTED": 44.71,
+        "SATIN-POLISHED": 60.96,
+        "ANTIQUED": 49.96,
+        "VINTAGE-COPPER": 54.96
+      },
+      "TBK114": {
+        "PRIMER": 56.88,
+        "PAINTED": 61.63,
+        "SATIN-POLISHED": 74.38,
+        "ANTIQUED": 66.88,
+        "VINTAGE-COPPER": 71.88
+      },
+      "TBK116": {
+        "PRIMER": 39.96,
+        "PAINTED": 44.71,
+        "SATIN-POLISHED": 67.96,
+        "ANTIQUED": 49.96,
+        "VINTAGE-COPPER": 54.96
+      },
+      "TBK118": {
+        "PRIMER": 26.25,
+        "PAINTED": 31.0,
+        "SATIN-POLISHED": 43.75,
+        "ANTIQUED": 36.25,
+        "VINTAGE-COPPER": 41.25
+      },
+      "TBK120": {
+        "PRIMER": 35.58,
+        "PAINTED": 40.33,
+        "SATIN-POLISHED": 56.58,
+        "ANTIQUED": 45.58,
+        "VINTAGE-COPPER": 50.58
+      },
+      "TBK122": {
+        "PRIMER": 25.96,
+        "PAINTED": 30.71,
+        "SATIN-POLISHED": 43.46,
+        "ANTIQUED": 35.96,
+        "VINTAGE-COPPER": 40.96
+      },
+      "TBK124": {
+        "PRIMER": 34.42,
+        "PAINTED": 39.17,
+        "SATIN-POLISHED": 62.42,
+        "ANTIQUED": 44.42,
+        "VINTAGE-COPPER": 49.42
+      },
+      "TBK126": {
+        "PRIMER": 17.5,
+        "PAINTED": 22.25,
+        "SATIN-POLISHED": 35.0,
+        "ANTIQUED": 27.5,
+        "VINTAGE-COPPER": 32.5
+      },
+      "TBK128": {
+        "PRIMER": 33.25,
+        "PAINTED": 38.0,
+        "SATIN-POLISHED": 54.25,
+        "ANTIQUED": 43.25,
+        "VINTAGE-COPPER": 48.25
+      },
+      "TBK130": {
+        "PRIMER": 72.63,
+        "PAINTED": 77.38,
+        "SATIN-POLISHED": 100.63,
+        "ANTIQUED": 82.63,
+        "VINTAGE-COPPER": 87.63
+      },
+      "TBK132": {
+        "PRIMER": 35.88,
+        "PAINTED": 40.63,
+        "SATIN-POLISHED": 53.38,
+        "ANTIQUED": 45.88,
+        "VINTAGE-COPPER": 50.88
+      },
+      "TBK134": {
+        "PRIMER": 51.33,
+        "PAINTED": 56.08,
+        "SATIN-POLISHED": 72.33,
+        "ANTIQUED": 61.33,
+        "VINTAGE-COPPER": 66.33
+      },
+      "TBK137": {
+        "PRIMER": 26.25,
+        "PAINTED": 31.0,
+        "SATIN-POLISHED": 47.25,
+        "ANTIQUED": 36.25,
+        "VINTAGE-COPPER": 41.25
+      },
+      "TCR022": {
+        "PRIMER": 17.5,
+        "PAINTED": 22.25,
+        "SATIN-POLISHED": 38.5,
+        "ANTIQUED": 27.5,
+        "VINTAGE-COPPER": 32.5
+      }
+    }
   }
 }

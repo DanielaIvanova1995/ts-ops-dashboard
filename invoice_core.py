@@ -8,6 +8,8 @@ them in. Kept deliberately in step with app.py — if you change a rule in one, 
 the other (a later refactor will make app.py import from here so there's a single copy).
 """
 import re
+import os
+import json
 
 # ---- Monday Payment Status labels -----------------------------------------------------
 MATCHED_LABEL = "Matched (TradeHub)"
@@ -263,8 +265,22 @@ def supplier_code_cost(sku_raw, desc, supplier, cidx):
 
 
 # ---- index builders (from the pricing_lookup.json the app/runner load) ----------------
+def _price_overrides():
+    """Durable per-supplier SKU cost overrides from price_overrides.json (kept in the repo so a
+    feed rebuild can't wipe them). {} if the file is missing or unreadable."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "price_overrides.json")
+        with open(path, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def pricelist_index(lookup):
-    """{norm_sku: {norm_supplier: cost}} from the lookup offers."""
+    """{norm_sku: {norm_supplier: cost}} from the lookup offers PLUS the durable overrides in
+    price_overrides.json. The overrides must be applied here too: the scheduled runner
+    (run_invoice_check.py) builds its index from this function alone, so without them it would
+    check invoices against a pricelist the Streamlit app doesn't agree with."""
     idx = {}
     for it in (lookup["items"] if lookup else []):
         sk = norm_code(it.get("sku"))
@@ -274,6 +290,24 @@ def pricelist_index(lookup):
             sup = norm_code(o.get("s"))
             if sup and o.get("c") is not None:
                 idx.setdefault(sk, {})[sup] = o.get("c")
+    ov = _price_overrides()
+    for sup, skus in ov.items():
+        if sup.startswith("_") or not isinstance(skus, dict):
+            continue
+        sn = norm_code(sup)
+        for sk, cost in skus.items():
+            if isinstance(cost, (int, float)):
+                idx.setdefault(norm_code(sk), {})[sn] = cost
+    # Same-supplier family patterns (e.g. UPB price one product TYPE, not per colour). Fills ONLY
+    # that supplier's own cost — never borrows another supplier's price.
+    pats = [(norm_code(sup), norm_code(r.get("prefix")), norm_code(r.get("suffix") or ""),
+             r.get("cost"))
+            for sup, rules in (ov.get("_patterns") or {}).items()
+            for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
+    for sk, offers in idx.items():
+        for sn, pref, suf, cost in pats:
+            if pref and sk.startswith(pref) and (not suf or sk.endswith(suf)):
+                offers.setdefault(sn, cost)
     return idx
 
 

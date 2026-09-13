@@ -394,6 +394,61 @@ def _persqm_cost(sku, supplier, *texts):
     return round(area * rates[base], 2)
 
 
+
+def _persection_rates():
+    """{supplier_norm: {leg_code_norm: {finish: £ per section}}} — suppliers who price a made-to-
+    order product PER SECTION rather than per item (Carron cast iron radiators: one Shopify SKU
+    covers 4-18 sections x 6 finishes). From price_overrides.json '_persection'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_persection") or {}).items():
+        out[_canon_sup(sup)] = {re.sub(r"[^a-z0-9]", "", (k or "").lower()): fin
+                                for k, fin in (rules or {}).items() if isinstance(fin, dict)}
+    return out
+
+
+_SECTIONS_RE = re.compile(r"(\d{1,3})\s*sections?\b", re.I)
+
+# Carron's finish names on the Shopify variant -> the finish column on their pricelist. Order
+# matters: the first needle found wins, so 'Paint/ Metallic' isn't read as '.../ Powder Coated'.
+# 'Hand Gilded' maps to None ON PURPOSE — Carron's "+£50 SRP" gilding note doesn't say whether
+# that's per section or per radiator, so a gilded line stays UNPRICED rather than guessing
+# (house rule: never invent a supplier's price).
+_CARRON_FINISH = [("gilded", None), ("burnish", "SATIN-POLISHED"), ("satin", "SATIN-POLISHED"),
+                  ("antiqu", "ANTIQUED"), ("highlight", "ANTIQUED"), ("baremetal", "ANTIQUED"),
+                  ("powdercoat", "ANTIQUED"), ("copper", "VINTAGE-COPPER"),
+                  ("metallic", "PAINTED"), ("paint", "PAINTED"), ("primer", "PRIMER")]
+
+
+def _persection_cost(sku, supplier, *texts):
+    """Per-section cost = section count x the range's £/section rate for the chosen finish (Carron
+    bespoke cast iron radiators). BOTH the count and the finish come from the variant/name, because
+    every finish/size variant of a range shares ONE Shopify SKU (e.g. 'LD221/LD222' on all 90).
+    None if this supplier/SKU isn't per-section priced, or the finish/count can't be read — so
+    pricing falls through to the normal SKU lookup."""
+    rates = _persection_rates().get(_canon_sup(supplier))
+    if not rates:
+        return None
+    key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
+    leg = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+    if not leg:
+        return None
+    blob = " ".join(str(t or "") for t in texts)
+    m = _SECTIONS_RE.search(blob)
+    if not m:
+        return None
+    n = int(m.group(1))
+    flat = re.sub(r"[^a-z0-9]", "", blob.lower())
+    fin = next((f for needle, f in _CARRON_FINISH if needle in flat), None)
+    if not fin or not 1 <= n <= 40:
+        return None
+    rate = rates[leg].get(fin)
+    return round(n * rate, 2) if isinstance(rate, (int, float)) else None
+
+
 def _sole_feed_supplier(sku):
     """If the pricing feed prices this SKU from exactly ONE supplier, return that supplier's label
     (routing fallback for a house-brand line whose Shopify vendor reveals no supplier). Matches the
@@ -440,6 +495,10 @@ def _line_cost(sku, supplier, name=None, variant=None):
     pq = _persqm_cost(sku, supplier, variant, name)
     if pq is not None:
         return pq
+    # Per-section made-to-order (Carron cast iron radiators): sections x the finish's £/section.
+    ps = _persection_cost(sku, supplier, variant, name)
+    if ps is not None:
+        return ps
     key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
     sup = _canon_sup(supplier)
     c = (_pricing().get(key) or {}).get(sup)
