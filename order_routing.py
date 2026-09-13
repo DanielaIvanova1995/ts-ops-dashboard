@@ -67,7 +67,9 @@ _SQUAREDEAL = {"SA", "CF", "NP", "LD", "TA", "EX", "PL", "TQ", "TR", "DT",
 _UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
               "UPB Ipswich": "ipswich@upbuildingproducts.com",
               "UPB Aldridge": "martinmelaney@upbuildingproducts.com"}
-_UPB_DEPOT_PHONE = {"UPB Newmarket": "01638501927"}   # Ipswich / Aldridge TBC
+_UPB_DEPOT_PHONE = {"UPB Newmarket": "01638501927",
+                    "UPB Ipswich": "01473747122",
+                    "UPB Aldridge": "07485928894"}   # all confirmed (Daniela 2026-09-13)
 
 
 def postcode_area(pc):
