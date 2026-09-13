@@ -1113,6 +1113,58 @@ def _persqm_rate(sku, supplier):
     return rates[base] if base else None
 
 
+
+def _persection_rates():
+    """{supplier_norm: {leg_code_norm: {finish: £ per section}}} — suppliers who price a made-to-
+    order product PER SECTION rather than per item (Carron cast iron radiators: one Shopify SKU
+    covers 4-18 sections x 6 finishes). From price_overrides.json '_persection'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    return {_norm_code(sup): {_norm_code(k): fin for k, fin in (rules or {}).items()
+                              if isinstance(fin, dict)}
+            for sup, rules in (ov.get("_persection") or {}).items()}
+
+
+_SECTIONS_RE = re.compile(r"(\d{1,3})\s*sections?\b", re.I)
+
+# Carron's finish names (as they appear on the Shopify variant / the invoice description) -> the
+# finish column on their pricelist. Order matters: the first needle found wins, so 'Paint/
+# Metallic' isn't read as '.../ Powder Coated'. 'Hand Gilded' maps to None ON PURPOSE — Carron's
+# "+£50 SRP" gilding note doesn't say whether that is per section or per radiator, so a gilded
+# line stays UNPRICED rather than guessing (house rule: never invent a supplier's price).
+_CARRON_FINISH = [("gilded", None), ("burnish", "SATIN-POLISHED"), ("satin", "SATIN-POLISHED"),
+                  ("antiqu", "ANTIQUED"), ("highlight", "ANTIQUED"), ("baremetal", "ANTIQUED"),
+                  ("powdercoat", "ANTIQUED"), ("copper", "VINTAGE-COPPER"),
+                  ("metallic", "PAINTED"), ("paint", "PAINTED"), ("primer", "PRIMER")]
+
+
+def _persection_cost(sku, supplier, *texts):
+    """Per-section cost = section count x the range's £/section rate for the chosen finish (Carron
+    bespoke cast iron radiators). BOTH the count and the finish are read from the description /
+    variant, because every finish and size of a range shares ONE Shopify SKU (e.g. 'LD221/LD222'
+    on all 90 variants). None if this supplier/SKU isn't per-section priced, or the finish or
+    count can't be read — pricing then falls through to the normal SKU lookup."""
+    rates = _persection_rates().get(_norm_code(supplier))
+    if not rates:
+        return None
+    key = _norm_code(sku)
+    leg = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+    if not leg:
+        return None
+    blob = " ".join(str(t or "") for t in texts)
+    m = _SECTIONS_RE.search(blob)
+    if not m:
+        return None
+    n = int(m.group(1))
+    fin = next((f for needle, f in _CARRON_FINISH if needle in _norm_code(blob)), None)
+    if not fin or not 1 <= n <= 40:
+        return None
+    rate = rates[leg].get(fin)
+    return round(n * rate, 2) if isinstance(rate, (int, float)) else None
+
+
 def _parse_order_items(text):
     """Order line text → {key: {sku, qty, name}}. Keyed by normalised SKU when the line has
     one, else a synthetic key so a product that's on the order but has NO SKU set is still a
@@ -2533,6 +2585,12 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
             # Per-m² (QNET) TAKES PRECEDENCE over any flat feed value — the feed sometimes carries the
             # £/m² RATE as if it were a per-piece cost, which would flat-compare wrongly (a QNET sheet
             # unit price vs the rate). So check the per-m² rate regardless of `cost`.
+            # Carron bespoke cast iron radiators are billed PER SECTION — the description
+            # carries the finish and the section count, and one SKU covers every combination.
+            if cost is None and not no_pl:
+                c2 = _persection_cost(sku_raw, supplier, desc)
+                if c2 is not None:
+                    cost, title_note = c2, "per-section rate"
             _rate = _persqm_rate(sku_raw, supplier)
             if _rate is not None:
                 area_billed = True
@@ -2889,6 +2947,13 @@ def _check_and_store(inv, parsed, lbsku, pidx):
     v["margin"] = round(om["margin"]) if om else None
     v["missing"] = res.get("missing") or []          # for the incomplete-invoice note on Monday
     st.session_state.setdefault("inv_verdict", {})[inv["sub_id"]] = v
+    # Persist the verdict durably so an idle reconnect (new Streamlit session) doesn't wipe your
+    # checked results — they reload on the next render until the invoice is pushed/re-checked.
+    try:
+        import supabase_db as _sdbv
+        _sdbv.invoice_verdict_set(inv["sub_id"], v)
+    except Exception:  # noqa: BLE001
+        pass
     # Record what THIS invoice covers of the order — covered lines AND invoiced quantity per line —
     # keyed by order, so the order's invoices build a combined picture with no re-parsing.
     if inv.get("order_no"):
@@ -4440,6 +4505,26 @@ def _invoice_tab(key, is_queue):
             st.rerun()
         cdb.caption("Removes the extra copy of any invoice logged twice on its order (keeping "
                     "one) and clears its amount from the order total.")
+
+    # Rehydrate checked verdicts from durable storage so an idle reconnect (which starts a fresh
+    # Streamlit session and empties session_state) doesn't wipe results — the invoices you've
+    # already checked keep showing their verdict until they're pushed or re-checked.
+    try:
+        import supabase_db as _sdbv
+        if _sdbv.configured():
+            _sess = st.session_state.setdefault("inv_verdict", {})
+            _want = [i["sub_id"] for i in fil
+                     if i.get("sub_id") is not None and i["sub_id"] not in _sess]
+            if _want:
+                _stored = _sdbv.invoice_verdicts_get(_want)
+                for i in fil:
+                    if i.get("sub_id") in _sess:
+                        continue
+                    sv = _stored.get(str(i.get("sub_id")))
+                    if isinstance(sv, dict):
+                        _sess[i["sub_id"]] = sv
+    except Exception:  # noqa: BLE001
+        pass
 
     verdicts = st.session_state.get("inv_verdict", {})
 

@@ -359,6 +359,50 @@ def email_triage_delete(internet_id: str) -> bool:
         return False
 
 
+# ---- Durable invoice-check verdicts (so a reconnect/idle timeout doesn't wipe checked results) --
+def invoice_verdict_set(sub_id, verdict: dict) -> bool:
+    """Store one invoice's checked verdict (order/price/incomplete/margin/missing) durably, keyed by
+    subitem id, so it survives a Streamlit reconnect and the processor never has to re-check. Upsert."""
+    if not configured() or sub_id is None or not isinstance(verdict, dict):
+        return False
+    try:
+        _client().table("invoice_verdicts").upsert({
+            "sub_id": str(sub_id), "verdict": _json_safe(verdict), "at": _now()}).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def invoice_verdicts_get(sub_ids: list) -> dict:
+    """Stored verdicts for a set of subitem ids → {sub_id(str): verdict}. Used to rehydrate the
+    invoice checker after a reconnect so already-checked invoices show their result again."""
+    if not configured() or not sub_ids:
+        return {}
+    try:
+        out = {}
+        ids = [str(s) for s in sub_ids]
+        for i in range(0, len(ids), 200):                # chunk to keep the `in` filter sane
+            chunk = ids[i:i + 200]
+            r = (_client().table("invoice_verdicts").select("sub_id,verdict")
+                 .in_("sub_id", chunk).execute())
+            for row in (r.data or []):
+                out[row["sub_id"]] = row.get("verdict")
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def invoice_verdict_delete(sub_id) -> bool:
+    """Forget one invoice's stored verdict (e.g. after it's deleted)."""
+    if not configured() or sub_id is None:
+        return False
+    try:
+        _client().table("invoice_verdicts").delete().eq("sub_id", str(sub_id)).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---- Claude API usage/cost log (so TradeHub can show its own daily Claude spend) ------------
 def llm_usage_log(model: str, feature: str, input_tokens: int, output_tokens: int,
                   cost_usd: float) -> bool:
