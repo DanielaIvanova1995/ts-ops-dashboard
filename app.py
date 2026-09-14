@@ -4771,9 +4771,17 @@ def _invoice_tab(key, is_queue):
         # all', on the selection only).
         _procids = st.session_state.pop(f"do_process_{key}", None)
         if _procids:
-            sel_ids = [i["sub_id"] for i in fil
-                       if i["sub_id"] in set(_procids) and i.get("asset_id")]
+            procset = set(_procids)
+            sel_ids = [i["sub_id"] for i in fil if i["sub_id"] in procset and i.get("asset_id")]
+            n_no_pdf = sum(1 for i in fil if i["sub_id"] in procset and not i.get("asset_id"))
             st.session_state.pop(f"sel_{key}", None)
+            if not sel_ids:
+                # Everything ticked is missing its PDF — nothing to read. Say so plainly instead of
+                # spinning a '0 of 0' bar (and never fire an empty job).
+                st.session_state["inv_flash_err"] = (
+                    f"None of the {n_no_pdf} selected invoice(s) have a PDF attached, so they can't "
+                    "be checked. Attach the invoice PDF on Monday first, then Check & process.")
+                st.rerun()
             _bg = _bg_worker()
             if _bg.get("enabled"):
                 # Run OFF the page thread (like the importer) so a big selection can't drop the
@@ -4784,12 +4792,15 @@ def _invoice_tab(key, is_queue):
                                    "at": _tnow.time()}          # show the bar at once
                 _bg["manual_check"] = list(sel_ids)
                 _bg["trigger"].set()
-                st.session_state["inv_flash"] = (
-                    f"Checking & processing {len(sel_ids)} invoice(s) in the background — the page "
-                    "won't freeze. Watch the live progress bar above; it refreshes the list when done.")
+                _msg = (f"Checking & processing {len(sel_ids)} invoice(s) in the background — the "
+                        "page won't freeze. Watch the live progress bar above; it refreshes the list "
+                        "when done.")
+                if n_no_pdf:
+                    _msg += f" ({n_no_pdf} skipped — no PDF attached.)"
+                st.session_state["inv_flash"] = _msg
                 st.rerun()
             else:
-                sel_invs = [i for i in fil if i["sub_id"] in set(_procids) and i.get("asset_id")]
+                sel_invs = [i for i in fil if i["sub_id"] in procset and i.get("asset_id")]
                 _bulk_check(sel_invs, lbsku)       # local (no bg worker): synchronous fallback
 
         # Push the ticked, matched invoices (checking any not yet checked first).
