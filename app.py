@@ -4617,6 +4617,23 @@ def _invoice_tab(key, is_queue):
     # Per-row and ticked-selection actions live in the grid below — this is the "do it all" button.
     if key == "review":
         checkable = [i for i in fil if i.get("asset_id")]
+        # Invoices with NO PDF attached — can't be checked (nothing to read). List them so they're
+        # visible, with a CSV, so the missing files can be attached on Monday.
+        no_pdf = [i for i in fil if not i.get("asset_id")]
+        if no_pdf:
+            with st.expander(f"⚠️ {len(no_pdf)} invoice(s) here have NO PDF attached — can't be "
+                             "checked until a file is attached"):
+                st.caption("Check & process skips these (there's nothing to read). Attach the "
+                           "invoice PDF to the subitem on Monday and they become checkable.")
+                _npdf_df = pd.DataFrame([{
+                    "Invoice": i.get("invoice_no") or "—", "Order": i.get("order_no") or "—",
+                    "Supplier": i.get("supplier") or "—", "£": i.get("total"),
+                    "Added": _fmt_actioned(i.get("actioned_at")) if i.get("actioned_at") else ""}
+                    for i in no_pdf])
+                st.dataframe(_npdf_df, use_container_width=True, hide_index=True)
+                st.download_button("⬇ Download list (CSV)", _npdf_df.to_csv(index=False),
+                                   file_name="invoices_missing_pdf.csv", mime="text/csv",
+                                   key=f"nopdf_csv_{key}")
         pend = f"bulk_pending_{key}"
         lo0, hi0 = _thresholds()
         if st.button(f"Bulk-check & auto-process all {len(checkable)}", key=f"bulk_{key}",
