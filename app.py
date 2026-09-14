@@ -2138,6 +2138,31 @@ def _is_toolbank(supplier):
 # than saying 'not on the order'). Decor8 is handled separately — it has no SKUs at all.
 LENIENT_NAME_SUPPLIERS = ("eurocell", "gap", "jbkind", "squaredeal", "molan")
 
+# Supplier re-codes: a supplier prints its OWN product code on the invoice for a product we sell
+# under a different SKU, so the invoice line reads as 'not on the order'. Map their invoice code →
+# OUR SKU so the line matches the order line and prices correctly. Daniela teaches these 1:1.
+_SUPPLIER_RECODE = {
+    # UPB code 5300294 "Hardiepanel Screws (Timber)" = our VL7 "James Hardie VL Coloured Fixing
+    # Screws (Box of 250)" (Daniela 2026-09-14).
+    "upb": {"5300294": "VL7"},
+}
+
+
+def _recode_sku(supplier, sku_raw, desc=""):
+    """If this supplier prints its own code for a product we sell under a different SKU, return OUR
+    SKU (so the line matches + prices); otherwise return sku_raw unchanged. Matches the code in the
+    SKU field or anywhere in the description."""
+    m = _SUPPLIER_RECODE.get(_norm_code(supplier))
+    if not m:
+        return sku_raw
+    ksku = _norm_code(sku_raw)
+    kdesc = _norm_code(desc)
+    for code, our in m.items():
+        c = _norm_code(code)
+        if c and (c == ksku or c in kdesc):
+            return our
+    return sku_raw
+
 # Suppliers whose TRUE cost is the Shopify cost-per-item (not the feed) — the invoice checker prices
 # their lines against that. CTie prices per "Box of N" and Vista's box costs live on Shopify too
 # (Daniela 2026-09-06). Order-processing keeps its own matching set for PO pricing.
@@ -2453,6 +2478,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
     for ln in parsed_lines:
         sku_raw = ln.get("sku") or ""
         desc = ln.get("description") or ""
+        sku_raw = _recode_sku(supplier, sku_raw, desc)   # supplier's own code → our SKU (e.g. UPB 5300294→VL7)
         qty, unit = ln.get("qty"), ln.get("unit_price")
         # Some suppliers (e.g. Molan) print the LINE TOTAL in the amount column, which the parser
         # returns as 'unit_price'. When the parsed unit price equals the line total on a multi-qty
