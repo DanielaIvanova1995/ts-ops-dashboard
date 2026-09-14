@@ -29,6 +29,7 @@ CANON = {
     "brickservices": "Brickservices", "plastivan": "Plastivan", "brundle": "Brundle",
     "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "C TIE",
     "nationalplastics": "National Plastics",   # distinct from NBP
+    "markovitz": "Markovitz",                    # builders' merchant — PO to Amy Charlesworth
     "ajw": "AJW", "ajwdistribution": "AJW",     # AJW Distribution — Cedral quotes
     # brand locks
     "jameshardie": "UPB", "hardie": "UPB", "freefoam": "UPB", "fortex": "UPB", "cladco": "UPB",
