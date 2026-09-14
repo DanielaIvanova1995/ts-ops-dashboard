@@ -867,9 +867,15 @@ def _write_po_total(iid, kind, doc):
     total = (doc or {}).get("total")
     if isinstance(total, (int, float)):
         try:
-            data_sources.set_order_number(iid, OP["cost_supplier"], round(total, 2))
-        except Exception:  # noqa: BLE001
-            pass
+            # Reference the column directly — `OP` is a LOCAL in other functions, not a global, so
+            # `OP[...]` here threw NameError and the total was never written (silent for months).
+            data_sources.set_order_number(iid, data_sources.OP_COLS["cost_supplier"],
+                                          round(total, 2))
+        except Exception as e:  # noqa: BLE001 — surface it so a real Monday error isn't hidden
+            try:
+                st.toast(f"⚠️ Couldn't write PO total to Monday (numbers6): {str(e)[:150]}")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _to_float(x):
