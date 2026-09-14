@@ -1810,6 +1810,7 @@ DELIVERY_CHARGES = {
     # Chase Hardware: £5 under 2kg, £10 above — but we don't hold weights yet, so accept either
     # (flat £10 ceiling = anything up to £10 passes; only >£10 flags). Tighten once we have weights.
     "chasehardware": {"name": "Chase Hardware", "flat": 10.0},
+    "markovitz": {"name": "Markovitz", "flat": 35.0, "free_over": 350.0},   # £35 <£350 net, free over
     # JB Kind delivery is by NUMBER OF DOORS, not goods value — handled separately below.
 }
 
