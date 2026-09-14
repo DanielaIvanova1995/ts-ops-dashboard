@@ -5206,16 +5206,24 @@ def render_discrepancy_log():
 def _bg_progress_live():
     """Live progress for a background 'Check & process' job — auto-refreshes every 2s (reads the
     in-process worker state), then triggers a full rerun when the job finishes so the list updates
-    and the auto-refresh stops."""
-    prog = _bg_worker().get("progress") or {}
-    total, done = prog.get("total") or 0, prog.get("done") or 0
-    if total:
-        st.progress(min(done / total, 1.0) if total else 0.0,
-                    text=(f"⏳ Checking & processing — **{done} of {total}** done · pushed "
-                          f"{prog.get('pushed', 0)}, held {prog.get('held', 0)}, left "
-                          f"{prog.get('left', 0)}, failed {prog.get('failed', 0)}"))
-    if not prog.get("active"):
-        st.rerun(scope="app")     # finished → refresh the list and stop the 2s auto-refresh
+    and the auto-refresh stops. Fully guarded: a transient read/render blip must never crash the
+    page (it just shows the bar again on the next 2s tick)."""
+    try:
+        prog = _bg_worker().get("progress") or {}
+        total, done = prog.get("total") or 0, prog.get("done") or 0
+        pct = min(done / total, 1.0) if total else 0.0
+        st.progress(pct, text=(f"⏳ Checking & processing — **{done} of {total}** done · pushed "
+                               f"{prog.get('pushed', 0)}, held {prog.get('held', 0)}, left "
+                               f"{prog.get('left', 0)}, failed {prog.get('failed', 0)}  ·  updates "
+                               "on its own — no need to refresh"))
+        finished = not prog.get("active")
+    except Exception:  # noqa: BLE001 — never let the live bar take the page down
+        return
+    if finished:
+        try:
+            st.rerun(scope="app")   # finished → refresh the list and stop the 2s auto-refresh
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def render_invoice_check():
