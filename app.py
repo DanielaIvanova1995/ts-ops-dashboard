@@ -4482,7 +4482,52 @@ def _selection_bar(picked_ids, key, pos):
         st.session_state[f"do_fixmargin_{key}"] = list(picked_ids)
 
 
+def _run_proc_batch(proc, batch=4):
+    """On-page 'Check & process' that PROGRESSES: it does a few invoices per page-refresh (reusing
+    the exact scheduler engine), ticks the bar up, then reruns to do the next few — so the bar climbs
+    smoothly and each request is short enough that it can never drop the connection / kick you out."""
+    import time as _t
+    total, done = proc.get("total", 0), proc.get("done", 0)
+    st.progress(min(done / total, 1.0) if total else 1.0,
+                text=(f"⏳ Checking & processing — **{done} of {total}** done · pushed "
+                      f"{proc.get('pushed', 0)}, held {proc.get('held', 0)}, left "
+                      f"{proc.get('left', 0)}, failed {proc.get('failed', 0)}"))
+    st.caption("Working through them a few at a time so the page stays responsive — leave it to run.")
+    ids = proc.get("ids") or []
+    if ids:
+        chunk = ids[:batch]
+        try:
+            res = run_scheduled_invoice_check(max_n=len(chunk), only_sub_ids=chunk)
+        except Exception:  # noqa: BLE001
+            res = {"pushed": 0, "held": 0, "left": 0, "failed": len(chunk), "skipped": 0}
+        proc["pushed"] += res.get("pushed", 0)
+        proc["held"] += res.get("held", 0)
+        proc["left"] += res.get("left", 0) + res.get("skipped", 0)
+        proc["failed"] += res.get("failed", 0)
+        proc["done"] = min(total, done + len(chunk))
+        proc["ids"] = ids[batch:]
+        st.session_state["proc"] = proc
+        _t.sleep(0.1)               # let the climbed bar paint before the next batch
+        st.rerun()
+    else:
+        st.session_state.pop("proc", None)
+        invoices_by_status.clear()
+        invoice_count.clear()
+        st.session_state.pop("inv_gone", None)     # unhide — the refetch shows the new statuses
+        st.session_state["inv_flash"] = (
+            f"✅ Done — pushed {proc.get('pushed', 0)} to QuickBooks, held {proc.get('held', 0)} as "
+            f"Matched, left {proc.get('left', 0)} for review"
+            + (f", {proc.get('failed', 0)} couldn't be read" if proc.get("failed") else "") + ".")
+        st.rerun()
+
+
 def _invoice_tab(key, is_queue):
+    # A 'Check & process' run in progress → show ONLY the climbing bar and do the next batch (fast
+    # reruns, short requests). Clears itself and refreshes the list when done.
+    _proc = st.session_state.get("proc")
+    if _proc and _proc.get("key") == key:
+        _run_proc_batch(_proc)
+        return
     data = invoices_by_status(key)
     if data.get("error"):
         msg = data["error"]
@@ -4657,19 +4702,11 @@ def _invoice_tab(key, is_queue):
             if yc.button(f"Yes — check & process {n}", key=f"bulkyes_{key}", type="primary",
                          use_container_width=True):
                 st.session_state.pop(pend, None)
-                _bg = _bg_worker()
-                if _bg.get("enabled"):
-                    import time as _tnow
-                    _bg["progress"] = {"total": len(checkable), "done": 0, "pushed": 0, "held": 0,
-                                       "left": 0, "failed": 0, "active": True, "at": _tnow.time()}
-                    _bg["manual_check"] = [i["sub_id"] for i in checkable]
-                    _bg["trigger"].set()
-                    st.session_state["inv_flash"] = (
-                        f"Checking & processing {n} invoice(s) in the background — the page won't "
-                        "freeze. Watch the live progress bar above; it refreshes when done.")
-                    st.rerun()
-                else:
-                    _bulk_check(checkable, lbsku)      # local: synchronous fallback
+                # On-page batched run: the bar climbs a few at a time (short requests, no drop-out).
+                st.session_state["proc"] = {"key": key, "ids": [i["sub_id"] for i in checkable],
+                                            "total": len(checkable), "done": 0, "pushed": 0,
+                                            "held": 0, "left": 0, "failed": 0}
+                st.rerun()
             if nc.button("Cancel", key=f"bulkno_{key}", use_container_width=True):
                 st.session_state.pop(pend, None)
                 st.rerun()
@@ -4794,32 +4831,17 @@ def _invoice_tab(key, is_queue):
             n_no_pdf = sum(1 for i in fil if i["sub_id"] in procset and not i.get("asset_id"))
             st.session_state.pop(f"sel_{key}", None)
             if not sel_ids:
-                # Everything ticked is missing its PDF — nothing to read. Say so plainly instead of
-                # spinning a '0 of 0' bar (and never fire an empty job).
+                # Everything ticked is missing its PDF — nothing to read. Say so plainly.
                 st.session_state["inv_flash_err"] = (
                     f"None of the {n_no_pdf} selected invoice(s) have a PDF attached, so they can't "
                     "be checked. Attach the invoice PDF on Monday first, then Check & process.")
-                st.rerun()
-            _bg = _bg_worker()
-            if _bg.get("enabled"):
-                # Run OFF the page thread (like the importer) so a big selection can't drop the
-                # websocket and kick you out. Results appear as invoices leave Needs Review — refresh.
-                import time as _tnow
-                _bg["progress"] = {"total": len(sel_ids), "done": 0, "pushed": 0, "held": 0,
-                                   "left": 0, "failed": 0, "active": True,
-                                   "at": _tnow.time()}          # show the bar at once
-                _bg["manual_check"] = list(sel_ids)
-                _bg["trigger"].set()
-                _msg = (f"Checking & processing {len(sel_ids)} invoice(s) in the background — the "
-                        "page won't freeze. Watch the live progress bar above; it refreshes the list "
-                        "when done.")
-                if n_no_pdf:
-                    _msg += f" ({n_no_pdf} skipped — no PDF attached.)"
-                st.session_state["inv_flash"] = _msg
-                st.rerun()
             else:
-                sel_invs = [i for i in fil if i["sub_id"] in procset and i.get("asset_id")]
-                _bulk_check(sel_invs, lbsku)       # local (no bg worker): synchronous fallback
+                # On-page batched run: the bar climbs a few at a time, short requests, no drop-out.
+                st.session_state["proc"] = {"key": key, "ids": list(sel_ids), "total": len(sel_ids),
+                                            "done": 0, "pushed": 0, "held": 0, "left": 0, "failed": 0}
+                if n_no_pdf:
+                    st.session_state["inv_flash"] = f"({n_no_pdf} skipped — no PDF attached.)"
+            st.rerun()
 
         # Push the ticked, matched invoices (checking any not yet checked first).
         if st.session_state.get(f"do_push_{key}"):
