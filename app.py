@@ -4339,13 +4339,14 @@ def run_scheduled_invoice_check(max_n=40, only_sub_ids=None, progress=None):
         pidx, lbsku = _pricelist_index(), _lookup_by_sku()
     except Exception:  # noqa: BLE001
         return out
+    import time as _tnow
     if progress is not None:
         progress["total"] = len(invs)
     for inv in invs:
         if progress is not None:                # live counts (lags by the one in flight)
             progress.update(done=out["checked"] + out["failed"] + out["skipped"],
                             pushed=out["pushed"], held=out["held"], left=out["left"],
-                            failed=out["failed"])
+                            failed=out["failed"], at=_tnow.time())
         if out["checked"] >= max_n:
             break
         sid = inv.get("sub_id")
@@ -4422,7 +4423,7 @@ def run_scheduled_invoice_check(max_n=40, only_sub_ids=None, progress=None):
     if progress is not None:                     # final tally
         progress.update(done=out["checked"] + out["failed"] + out["skipped"],
                         pushed=out["pushed"], held=out["held"], left=out["left"],
-                        failed=out["failed"])
+                        failed=out["failed"], at=_tnow.time())
     return out
 
 
@@ -4613,8 +4614,9 @@ def _invoice_tab(key, is_queue):
                 st.session_state.pop(pend, None)
                 _bg = _bg_worker()
                 if _bg.get("enabled"):
+                    import time as _tnow
                     _bg["progress"] = {"total": len(checkable), "done": 0, "pushed": 0, "held": 0,
-                                       "left": 0, "failed": 0, "active": True}
+                                       "left": 0, "failed": 0, "active": True, "at": _tnow.time()}
                     _bg["manual_check"] = [i["sub_id"] for i in checkable]
                     _bg["trigger"].set()
                     st.session_state["inv_flash"] = (
@@ -4749,8 +4751,10 @@ def _invoice_tab(key, is_queue):
             if _bg.get("enabled"):
                 # Run OFF the page thread (like the importer) so a big selection can't drop the
                 # websocket and kick you out. Results appear as invoices leave Needs Review — refresh.
+                import time as _tnow
                 _bg["progress"] = {"total": len(sel_ids), "done": 0, "pushed": 0, "held": 0,
-                                   "left": 0, "failed": 0, "active": True}   # show the bar at once
+                                   "left": 0, "failed": 0, "active": True,
+                                   "at": _tnow.time()}          # show the bar at once
                 _bg["manual_check"] = list(sel_ids)
                 _bg["trigger"].set()
                 st.session_state["inv_flash"] = (
@@ -5202,12 +5206,20 @@ def render_discrepancy_log():
             st.caption("None queried yet.")
 
 
+def _bg_prog_active(prog):
+    """True only if a background job is running AND its progress was updated recently — so a job
+    that got stuck (e.g. the app restarted mid-run) can't keep the live bar's timer alive forever,
+    which was firing during reconnects and throwing 'SessionInfo before initialized'."""
+    import time as _t
+    return bool((prog or {}).get("active")) and (_t.time() - ((prog or {}).get("at") or 0) < 180)
+
+
 @st.fragment(run_every=2)
 def _bg_progress_live():
     """Live progress for a background 'Check & process' job — auto-refreshes every 2s (reads the
-    in-process worker state), then triggers a full rerun when the job finishes so the list updates
-    and the auto-refresh stops. Fully guarded: a transient read/render blip must never crash the
-    page (it just shows the bar again on the next 2s tick)."""
+    in-process worker state), then triggers a full rerun when the job finishes (or goes stale) so
+    the list updates and the auto-refresh stops. Fully guarded: a transient blip must never crash
+    the page."""
     try:
         prog = _bg_worker().get("progress") or {}
         total, done = prog.get("total") or 0, prog.get("done") or 0
@@ -5216,12 +5228,12 @@ def _bg_progress_live():
                                f"{prog.get('pushed', 0)}, held {prog.get('held', 0)}, left "
                                f"{prog.get('left', 0)}, failed {prog.get('failed', 0)}  ·  updates "
                                "on its own — no need to refresh"))
-        finished = not prog.get("active")
+        finished = not _bg_prog_active(prog)
     except Exception:  # noqa: BLE001 — never let the live bar take the page down
         return
     if finished:
         try:
-            st.rerun(scope="app")   # finished → refresh the list and stop the 2s auto-refresh
+            st.rerun(scope="app")   # finished/stale → refresh the list and stop the auto-refresh
         except Exception:  # noqa: BLE001
             pass
 
@@ -5250,7 +5262,7 @@ def render_invoice_check():
 
     # Live background 'Check & process' progress (auto-refreshing) — or the last run's summary.
     _prog = _bg_worker().get("progress") or {}
-    if _prog.get("active"):
+    if _bg_prog_active(_prog):
         _bg_progress_live()
     elif _prog.get("total"):
         st.success(f"✅ Last background check: **{_prog.get('done', 0)}/{_prog.get('total', 0)}** — "
@@ -5603,9 +5615,10 @@ def _bg_worker():
         if state.get("running"):
             state.setdefault("manual_backlog", []).extend(sub_ids)   # fold into the next run
             return
+        import time as _tnow
         state["running"] = True
         state["progress"] = {"total": len(sub_ids), "done": 0, "pushed": 0, "held": 0,
-                             "left": 0, "failed": 0, "active": True}
+                             "left": 0, "failed": 0, "active": True, "at": _tnow.time()}
         try:
             res = run_scheduled_invoice_check(max_n=len(sub_ids) or 40, only_sub_ids=sub_ids,
                                               progress=state["progress"])
