@@ -1495,7 +1495,8 @@ def _pricelist_index():
                 idx.setdefault(sk, {})[sup] = o.get("c")
     ov = _price_overrides()
     for sup, skus in ov.items():
-        if sup in ("_patterns", "_titles", "_persqm", "_persection") or not isinstance(skus, dict):
+        if sup in ("_patterns", "_titles", "_persqm", "_persection", "_delivery") \
+                or not isinstance(skus, dict):
             continue
         sn = _norm_code(sup)
         for sk, cost in skus.items():
@@ -2290,6 +2291,9 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         # Door-count carriage sheet (1 door £40, +£5/door, cap £70; hardware-only £8/FOC; postcode
         # surcharges; +£50 next-day) — NOT the old flat £8. Doc lines excluded inside deanta_expected.
         return delivery_rules.deanta_expected(goods_value, lines, ship)
+    if (supplier or "").startswith("dolle"):
+        # Per-product delivery (Dolle pricelist column G, courier bands) summed across the lines.
+        return delivery_rules.dolle_expected(lines)
     if (supplier or "").startswith("vista"):
         return delivery_rules.vista_expected(goods_value, lines)
     rule = DELIVERY_CHARGES.get(supplier)

@@ -330,6 +330,37 @@ def vista_expected(goods, lines):
     return VISTA_BOX[5] if boxes >= 5 else VISTA_BOX.get(boxes, 15.0)
 
 
+# --- Dolle (per-product delivery: column G of their pricelist, by courier band) -------------
+@lru_cache(maxsize=1)
+def _delivery_map():
+    """{supplier_norm: {sku_norm: delivery£}} from price_overrides.json '_delivery' — per-SKU
+    carriage (e.g. Dolle's courier bands £5 Evri / £19 APC / £28 DX / £40 Palletways)."""
+    try:
+        with open(BASE / "price_overrides.json", encoding="utf-8") as f:
+            ov = json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+    return {_norm(sup): {_norm(k): v for k, v in (m or {}).items() if isinstance(v, (int, float))}
+            for sup, m in (ov.get("_delivery") or {}).items()}
+
+
+def dolle_expected(lines):
+    """Dolle carriage = the sum of each ordered product's own delivery charge (× qty) — their items
+    ship on different couriers so the per-product charges add up. None if no line can be priced."""
+    rates = _delivery_map().get("dolle") or {}
+    if not rates:
+        return None
+    total, seen = 0.0, False
+    for l in _product_lines(lines):
+        r = rates.get(_norm(l.get("sku")))
+        if r is None:
+            continue
+        q = l.get("qty") if isinstance(l.get("qty"), (int, float)) and l.get("qty") else 1
+        total += r * q
+        seen = True
+    return round(total, 2) if seen else None
+
+
 # --- dispatch -------------------------------------------------------------------------------
 def expected_delivery(supplier, goods=None, ship=None, lines=None):
     s = _norm(supplier)
@@ -345,6 +376,8 @@ def expected_delivery(supplier, goods=None, ship=None, lines=None):
         return lpd_expected(lines, ship)
     if s.startswith("deanta"):
         return deanta_expected(goods, lines, ship)
+    if s.startswith("dolle"):
+        return dolle_expected(lines)
     if s.startswith("vista"):
         return vista_expected(goods, lines)
     if s in FLAT:
