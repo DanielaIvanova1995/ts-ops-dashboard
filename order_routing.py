@@ -139,6 +139,19 @@ def freefoam_route(pc):
             "reason": f"Freefoam — outside UPB areas → {depot} (default)", "conf": "med"}
 
 
+def _zest_branch(pc):
+    """Nearest National Plastics branch (full network) for a Zest order → {branch_name, email,
+    phone, miles} or None. Live geocoder (branch_finder); no offline fallback (branch list is large,
+    so geocoding is required — a blank postcode just returns None and the order goes to review)."""
+    if not (pc or "").strip():
+        return None
+    try:
+        import branch_finder
+        return branch_finder.zest_branch(pc)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def hardie_route(pc, smooth=False):
     """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (Daniela, 2026-09-13):
     ONLY UPB (in their own depot areas) and National Plastics (everywhere else, nearest of their 3
@@ -207,11 +220,19 @@ def route_line(line, area_pc=None, sku_supplier=None):
                    quote=hr.get("quote", False), needs_branch=hr.get("needs_branch", False),
                    branch=hr.get("branch"), branch_email=hr.get("branch_email"),
                    branch_phone=hr.get("branch_phone"))
-    # Zest wall/shower panels (tagged "Zest…", currently vendor UPB) are now sourced from National
-    # Plastics (Daniela, 2026-08-24) — check the tag so it OVERRIDES the UPB vendor below.
+    # Zest wall/shower panels (tagged "Zest…") are sourced from National Plastics — to the customer's
+    # NEAREST branch of the full NP network (Daniela 2026-09-16; check the tag so it OVERRIDES any
+    # vendor below).
     if "zest" in tags or "zest" in blob:
+        nb = _zest_branch(area_pc)
+        if nb and nb.get("branch_name"):
+            miles = f" ({nb['miles']} mi)" if nb.get("miles") is not None else ""
+            return out("National Plastics", "National Plastics",
+                       f"Zest → National Plastics — nearest branch {nb['branch_name']}{miles}",
+                       "high", branch=nb["branch_name"], branch_email=nb["email"],
+                       branch_phone=nb["phone"])
         return out("National Plastics", "National Plastics",
-                   "Zest panel → National Plastics", "high")
+                   "Zest → National Plastics (branch by postcode)", "med")
     # Cedral (fibre-cement cladding) → quote from AJW Distribution until we get their pricelist
     # (Daniela, 2026-08-24). Tag/name check overrides whatever vendor it sits under.
     if "cedral" in tags or "cedral" in blob:

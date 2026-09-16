@@ -1,0 +1,626 @@
+[
+  {
+    "name": "ACC Accrington",
+    "pc": "BB5 6AH",
+    "phone": "01254 387388",
+    "email": "accrington@accringtonplastics.com",
+    "lat": 53.75922,
+    "lon": -2.361321
+  },
+  {
+    "name": "CK Building Supplies Ltd",
+    "pc": "WA2 8QT",
+    "phone": "01925 245883",
+    "email": "warrington@ckbuildingsupplies.co.uk",
+    "lat": 53.416984,
+    "lon": -2.599778
+  },
+  {
+    "name": "Magden Bradford",
+    "pc": "BD10 8EW",
+    "phone": "01274 622459",
+    "email": "bradford@magden.co.uk",
+    "lat": 53.82586,
+    "lon": -1.731421
+  },
+  {
+    "name": "Magden Bury",
+    "pc": "M26 1AD",
+    "phone": "0161 725 9117",
+    "email": "Bury@magden.co.uk",
+    "lat": 53.55749,
+    "lon": -2.329888
+  },
+  {
+    "name": "Magden Cleckheaton",
+    "pc": "BD19 5LY",
+    "phone": "01274 861222",
+    "email": "cleckheaton@magden.co.uk",
+    "lat": 53.718059,
+    "lon": -1.701467
+  },
+  {
+    "name": "Magden Rotherham",
+    "pc": "S60 1EW",
+    "phone": "01709 556713",
+    "email": "rotherham@magden.co.uk",
+    "lat": 53.430189,
+    "lon": -1.36283
+  },
+  {
+    "name": "Magden Stockport",
+    "pc": "SK6 2QN",
+    "phone": "0161 494 2543",
+    "email": "Stockport@magden.co.uk",
+    "lat": 53.429863,
+    "lon": -2.121461
+  },
+  {
+    "name": "Magden Whitefield (Manchester)",
+    "pc": "M45 8FH",
+    "phone": "0161 796 2030",
+    "email": "manchester@magden.co.uk",
+    "lat": 53.553052,
+    "lon": -2.287561
+  },
+  {
+    "name": "National Plastics Chester",
+    "pc": "CH1 4LT",
+    "phone": "01244 445350",
+    "email": "chester@nationalplastics.co.uk",
+    "lat": 53.192611,
+    "lon": -2.916451
+  },
+  {
+    "name": "National Plastics Corby",
+    "pc": "NN17 5ZA",
+    "phone": "01536 262640",
+    "email": "corby@nationalplastics.co.uk",
+    "lat": 52.504073,
+    "lon": -0.665297
+  },
+  {
+    "name": "National Plastics Ilkeston",
+    "pc": "DE7 8EF",
+    "phone": "0115 773 8822",
+    "email": "ilkeston@nationalplastics.co.uk",
+    "lat": 52.97687,
+    "lon": -1.319933
+  },
+  {
+    "name": "National Plastics Sheffield",
+    "pc": "S2 4BB",
+    "phone": "01142 700788",
+    "email": "sheffield@nationalplastics.co.uk",
+    "lat": 53.372721,
+    "lon": -1.46496
+  },
+  {
+    "name": "National Plastics Stafford",
+    "pc": "ST16 3ST",
+    "phone": "01785 240298",
+    "email": "stafford@nationalplastics.co.uk",
+    "lat": 52.8287,
+    "lon": -2.109546
+  },
+  {
+    "name": "National Plastics Tamworth",
+    "pc": "B77 5DU",
+    "phone": "01827 261616",
+    "email": "Tamworth@nationalplastics.co.uk",
+    "lat": 52.608537,
+    "lon": -1.677538
+  },
+  {
+    "name": "National Plastics Telford",
+    "pc": "TF3 3BA",
+    "phone": "01952 252001",
+    "email": "telford@nationalplastics.co.uk",
+    "lat": 52.675592,
+    "lon": -2.421096
+  },
+  {
+    "name": "PBS Gorleston",
+    "pc": "NR31 6PX",
+    "phone": "01493 658659",
+    "email": "Gorleston@pbsanglia.co.uk",
+    "lat": 52.58101,
+    "lon": 1.730271
+  },
+  {
+    "name": "PBS Kings Lynn",
+    "pc": "PE34 3LW",
+    "phone": "01553 772013",
+    "email": "kingslynn@pbsanglia.co.uk",
+    "lat": 52.744466,
+    "lon": 0.387057
+  },
+  {
+    "name": "PBS Norwich",
+    "pc": "NR6 6BJ",
+    "phone": "01603 484589",
+    "email": "Norwich@pbsanglia.co.uk",
+    "lat": 52.659143,
+    "lon": 1.288358
+  },
+  {
+    "name": "PBS Thetford",
+    "pc": "IP24 3QS",
+    "phone": "01842 765425",
+    "email": "Thetford@pbsanglia.co.uk",
+    "lat": 52.404116,
+    "lon": 0.72686
+  },
+  {
+    "name": "Quay Plastics Colchester",
+    "pc": "CO2 8HE",
+    "phone": "01206 864832",
+    "email": "colchester@quayplastics.co.uk",
+    "lat": 51.874407,
+    "lon": 0.927553
+  },
+  {
+    "name": "Quay Plastics Harlow",
+    "pc": "CM20 2SE",
+    "phone": "01279 435726",
+    "email": "harlow@quayplastics.co.uk",
+    "lat": 51.78777,
+    "lon": 0.11197
+  },
+  {
+    "name": "Quay Plastics Liverpool",
+    "pc": "L9 5AY",
+    "phone": "0151 523 9879",
+    "email": "liverpool@quayplastics.co.uk",
+    "lat": 53.480225,
+    "lon": -2.948435
+  },
+  {
+    "name": "Quay Plastics Preston",
+    "pc": "PR1 5DP",
+    "phone": "01772 704791",
+    "email": "preston@quayplastics.co.uk",
+    "lat": 53.764834,
+    "lon": -2.685443
+  },
+  {
+    "name": "Quay Plastics Tameside",
+    "pc": "SK14 2BG",
+    "phone": "0161 368 7236",
+    "email": "tameside@quayplastics.co.uk",
+    "lat": 53.453397,
+    "lon": -2.088535
+  },
+  {
+    "name": "Venture Aldridge",
+    "pc": "WS9 8UY",
+    "phone": "01922 458882",
+    "email": "aldridge@venturebp.co.uk",
+    "lat": 52.616496,
+    "lon": -1.931995
+  },
+  {
+    "name": "Venture Wolverhampton",
+    "pc": "WV10 9LU",
+    "phone": "01902 715048",
+    "email": "wolverhampton@venturebp.co.uk",
+    "lat": 52.605014,
+    "lon": -2.125654
+  },
+  {
+    "name": "Alpha General Plastics Falkirk",
+    "pc": "FK2 7UY",
+    "phone": "01324 612294",
+    "email": "Falkirk@specbd.co.uk",
+    "lat": 56.014142,
+    "lon": -3.774102
+  },
+  {
+    "name": "Magden Birtley",
+    "pc": "DH2 1AG",
+    "phone": "0191 492 0042",
+    "email": "birtley@magdenltd.com",
+    "lat": 54.874992,
+    "lon": -1.586136
+  },
+  {
+    "name": "National Plastics Newcastle",
+    "pc": "NE12 9SZ",
+    "phone": "01912 664100",
+    "email": "newcastle@nationalplastics.co.uk",
+    "lat": 55.020516,
+    "lon": -1.543289
+  },
+  {
+    "name": "National Plastics Scunthorpe",
+    "pc": "DN15 8XF",
+    "phone": "01724 514444",
+    "email": "scunthorpe@nationalplastics.co.uk",
+    "lat": 53.604029,
+    "lon": -0.650205
+  },
+  {
+    "name": "National Plastics Sunderland",
+    "pc": "SR5 2BN",
+    "phone": "01915 493311",
+    "email": "sunderland@nationalplastics.co.uk",
+    "lat": 54.916475,
+    "lon": -1.404783
+  },
+  {
+    "name": "Nu*Stock Darlington",
+    "pc": "DL1 2NW",
+    "phone": "01325 351399",
+    "email": "darlington@nu-stock.co.uk",
+    "lat": 54.535138,
+    "lon": -1.54153
+  },
+  {
+    "name": "Nu*Stock Grimsby",
+    "pc": "DN31 2SG",
+    "phone": "01472 353388",
+    "email": "grimsby@nu-stock.co.uk",
+    "lat": 53.575077,
+    "lon": -0.100692
+  },
+  {
+    "name": "Nu*Stock Hillington",
+    "pc": "G52 4LT",
+    "phone": "01418 401118",
+    "email": "hillington@nustock.co.uk",
+    "lat": 55.862817,
+    "lon": -4.369743
+  },
+  {
+    "name": "Nu*Stock Hull",
+    "pc": "HU6 7PY",
+    "phone": "01482 824466",
+    "email": "hull@nu-stock.co.uk",
+    "lat": 53.767909,
+    "lon": -0.335255
+  },
+  {
+    "name": "Nu*Stock Perth",
+    "pc": "PH1 3TT",
+    "phone": "01738 500160",
+    "email": "perth@nustock.co.uk",
+    "lat": 56.419589,
+    "lon": -3.472477
+  },
+  {
+    "name": "Nu*Stock Stockton on Tees",
+    "pc": "TS18 2PW",
+    "phone": "01642 606011",
+    "email": "stockton@nustock.co.uk",
+    "lat": 54.573036,
+    "lon": -1.279163
+  },
+  {
+    "name": "Quay Plastics Doncaster",
+    "pc": "DN2 4LP",
+    "phone": "01302 322929",
+    "email": "doncaster@quayplastics.co.uk",
+    "lat": 53.534506,
+    "lon": -1.123273
+  },
+  {
+    "name": "Quay Plastics Leeds",
+    "pc": "LS13 4LQ",
+    "phone": "0113 236 3969",
+    "email": "leeds@quayplastics.co.uk",
+    "lat": 53.805919,
+    "lon": -1.648944
+  },
+  {
+    "name": "Quay Plastics Middlesbrough",
+    "pc": "TS6 6DX",
+    "phone": "01642 465544",
+    "email": "middlesbrough@quayplastics.co.uk",
+    "lat": 54.571351,
+    "lon": -1.184992
+  },
+  {
+    "name": "Quay Plastics Newcastle",
+    "pc": "NE29 7XJ",
+    "phone": "0191 270 2141",
+    "email": "newcastle@quayplastics.co.uk",
+    "lat": 55.004262,
+    "lon": -1.48744
+  },
+  {
+    "name": "Saltire Trade Plastics Aberdeen",
+    "pc": "AB21 0GU",
+    "phone": "01224 729070",
+    "email": "aberdeen@saltiretrade.co.uk",
+    "lat": 57.202984,
+    "lon": -2.214144
+  },
+  {
+    "name": "SBS Barrow in Furness",
+    "pc": "LA14 2UF",
+    "phone": "01229 433609",
+    "email": "barrow@sbscumbria.co.uk",
+    "lat": 54.12157,
+    "lon": -3.242596
+  },
+  {
+    "name": "SBS Carlisle",
+    "pc": "CA1 3UD",
+    "phone": "01228 513377",
+    "email": "carlisle@sbsbp.co.uk",
+    "lat": 54.882283,
+    "lon": -2.905724
+  },
+  {
+    "name": "SBS Dumfries",
+    "pc": "DG1 1NA",
+    "phone": "01387 240040",
+    "email": "dumfries@sbsbp.co.uk",
+    "lat": 55.074589,
+    "lon": -3.603724
+  },
+  {
+    "name": "SBS Galashiels",
+    "pc": "TD1 1PR",
+    "phone": "01896 755877",
+    "email": "galashiels@sbscumbria.co.uk",
+    "lat": 55.620909,
+    "lon": -2.817818
+  },
+  {
+    "name": "SBS Kendal",
+    "pc": "LA9 7EN",
+    "phone": "01539 734477",
+    "email": "kendal@sbsbp.co.uk",
+    "lat": 54.319702,
+    "lon": -2.738119
+  },
+  {
+    "name": "SBS Stranraer",
+    "pc": "DG9 7UD",
+    "phone": "01776 704276",
+    "email": "stranraer@sbsbp.co.uk",
+    "lat": 54.897722,
+    "lon": -5.013713
+  },
+  {
+    "name": "SBS Workington",
+    "pc": "CA14 2TQ",
+    "phone": "01900 608300",
+    "email": "workington@sbsbp.co.uk",
+    "lat": 54.639552,
+    "lon": -3.560194
+  },
+  {
+    "name": "Scotplas Airdrie",
+    "pc": "ML6 8QH",
+    "phone": "01236 606600",
+    "email": "airdrie@scotplastradecentres.co.uk",
+    "lat": 55.849105,
+    "lon": -3.950562
+  },
+  {
+    "name": "Scotplas Bellshill",
+    "pc": "ML4 3HD",
+    "phone": "01698 842244",
+    "email": "bellshill@scotplastradecentres.co.uk",
+    "lat": 55.824027,
+    "lon": -4.049722
+  },
+  {
+    "name": "Scotplas Glasgow",
+    "pc": "G32 0HT",
+    "phone": "0141 764 0668",
+    "email": "Glasgow@scotplastradecentres.co.uk",
+    "lat": 55.852521,
+    "lon": -4.157642
+  },
+  {
+    "name": "National Plastics Abercarn",
+    "pc": "NP11 5EY",
+    "phone": "01495 248 030",
+    "email": "abercarn@nationalplastics.co.uk",
+    "lat": 51.647761,
+    "lon": -3.13822
+  },
+  {
+    "name": "National Plastics Cardiff",
+    "pc": "CF23 9AQ",
+    "phone": "02920 485055",
+    "email": "cardiff@nationalplastics.co.uk",
+    "lat": 51.49977,
+    "lon": -3.14601
+  },
+  {
+    "name": "National Plastics Cheltenham",
+    "pc": "GL51 9PB",
+    "phone": "01242 269674",
+    "email": "cheltenham@nationalplastics.co.uk",
+    "lat": 51.916386,
+    "lon": -2.096268
+  },
+  {
+    "name": "National Plastics Chichester",
+    "pc": "PO19 8NS",
+    "phone": "01243 537969",
+    "email": "chichester@nationalplastics.co.uk",
+    "lat": 50.831398,
+    "lon": -0.755619
+  },
+  {
+    "name": "National Plastics Crawley",
+    "pc": "RH10 9RX",
+    "phone": "01293 222863",
+    "email": "crawley@nationalplastics.co.uk",
+    "lat": 51.140705,
+    "lon": -0.162328
+  },
+  {
+    "name": "National Plastics Merthyr Tydfil",
+    "pc": "CF48 2SR",
+    "phone": "01685 377725",
+    "email": "merthyr@nationalplastics.co.uk",
+    "lat": 51.768673,
+    "lon": -3.362979
+  },
+  {
+    "name": "National Plastics Newport",
+    "pc": "NP20 5NS",
+    "phone": "01633 266004",
+    "email": "newport@nationalplastics.co.uk",
+    "lat": 51.599923,
+    "lon": -2.995005
+  },
+  {
+    "name": "National Plastics Plymouth",
+    "pc": "PL7 1RF",
+    "phone": "01752 875583",
+    "email": "plymouth@nationalplastics.co.uk",
+    "lat": 50.388584,
+    "lon": -4.070002
+  },
+  {
+    "name": "National Plastics Pontypridd",
+    "pc": "CF37 1NY",
+    "phone": "01443 486511",
+    "email": "pontypridd@nationalplastics.co.uk",
+    "lat": 51.595797,
+    "lon": -3.349539
+  },
+  {
+    "name": "National Plastics Poole",
+    "pc": "BH12 3LL",
+    "phone": "01202 735478",
+    "email": "poole@nationalplastics.co.uk",
+    "lat": 50.739433,
+    "lon": -1.950552
+  },
+  {
+    "name": "National Plastics Portsmouth",
+    "pc": "PO6 1US",
+    "phone": "02392 386060",
+    "email": "portsmouth@nationalplastics.co.uk",
+    "lat": 50.839403,
+    "lon": -1.042781
+  },
+  {
+    "name": "National Plastics Pyle",
+    "pc": "CF33 6BJ",
+    "phone": "01656 740444",
+    "email": "pyle@nationalplastics.co.uk",
+    "lat": 51.526392,
+    "lon": -3.687497
+  },
+  {
+    "name": "National Plastics Swansea",
+    "pc": "SA7 9AG",
+    "phone": "01792 790800",
+    "email": "swansea@nationalplastics.co.uk",
+    "lat": 51.662096,
+    "lon": -3.905563
+  },
+  {
+    "name": "National Plastics Taunton",
+    "pc": "TA1 2AL",
+    "phone": "01823 336762",
+    "email": "taunton@nationalplastics.co.uk",
+    "lat": 51.023197,
+    "lon": -3.08645
+  },
+  {
+    "name": "National Plastics Weston",
+    "pc": "BS24 9ES",
+    "phone": "01934 415231",
+    "email": "weston@nationalplastics.co.uk",
+    "lat": 51.326993,
+    "lon": -2.952314
+  },
+  {
+    "name": "National Plastics Worcester",
+    "pc": "WR2 4EU",
+    "phone": "01905 421122",
+    "email": "worcester@nationalplastics.co.uk",
+    "lat": 52.18624,
+    "lon": -2.242465
+  },
+  {
+    "name": "National Plastics Worthing",
+    "pc": "BN14 8HQ",
+    "phone": "01903 219817",
+    "email": "worthing@nationalplastics.co.uk",
+    "lat": 50.826624,
+    "lon": -0.355928
+  },
+  {
+    "name": "Quay Plastics Reading",
+    "pc": "RG2 0BF",
+    "phone": "0118 975 8056",
+    "email": "reading@quayplastics.co.uk",
+    "lat": 51.418422,
+    "lon": -0.971942
+  },
+  {
+    "name": "Quay Plastics Smethwick",
+    "pc": "B66 1NJ",
+    "phone": "0121 555 6664",
+    "email": "qpsmethwick@quayplastics.co.uk",
+    "lat": 52.502389,
+    "lon": -1.994249
+  },
+  {
+    "name": "Shepherds Eastbourne",
+    "pc": "BN22 9AF",
+    "phone": "01323 520999",
+    "email": "eastbourne@shepherdsuk.co.uk",
+    "lat": 50.792833,
+    "lon": 0.282843
+  },
+  {
+    "name": "Shepherds Fareham",
+    "pc": "PO14 1TP",
+    "phone": "01329 284220",
+    "email": "fareham@shepherdsuk.co.uk",
+    "lat": 50.834513,
+    "lon": -1.185201
+  },
+  {
+    "name": "Shepherds Goring",
+    "pc": "BN12 4QY",
+    "phone": "01903 700640",
+    "email": "goring@shepherdsuk.co.uk",
+    "lat": 50.817301,
+    "lon": -0.422624
+  },
+  {
+    "name": "Shepherds Maidstone",
+    "pc": "ME14 2DZ",
+    "phone": "01622 695909",
+    "email": "maidstone@shepherdsuk.co.uk",
+    "lat": 51.29011,
+    "lon": 0.538118
+  },
+  {
+    "name": "Shepherds Peacehaven",
+    "pc": "BN10 8HF",
+    "phone": "01273 580750",
+    "email": "peacehaven@shepherdsuk.co.uk",
+    "lat": 50.793395,
+    "lon": 0.006211
+  },
+  {
+    "name": "Shepherds Portslade",
+    "pc": "BN41 1LA",
+    "phone": "01273 424267",
+    "email": "portslade@shepherdsuk.co.uk",
+    "lat": 50.832688,
+    "lon": -0.214086
+  },
+  {
+    "name": "Venture Brierley Hill",
+    "pc": "DY5 1QA",
+    "phone": "01384 265404",
+    "email": "brierley@venturebp.co.uk",
+    "lat": 52.492301,
+    "lon": -2.12299
+  }
+]

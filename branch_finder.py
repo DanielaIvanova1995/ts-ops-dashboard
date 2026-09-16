@@ -101,6 +101,37 @@ _NP_BRANCHES = [
 ]
 
 
+_NP_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "national_plastics_branches.json")
+
+
+@lru_cache(maxsize=1)
+def _np_zest_branches():
+    """The full National Plastics branch network (name, email, phone, postcode, lat, lon) — used to
+    route Zest cladding orders to the customer's nearest branch. Pre-geocoded from Branches.xlsx."""
+    try:
+        with open(_NP_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def zest_branch(postcode):
+    """Nearest National Plastics branch (of the full network) for a Zest order → {branch_name, email,
+    phone, postcode, miles}. None if the postcode won't geocode or no branch data."""
+    coords = _geocode(postcode)
+    if not coords:
+        return None
+    lat, lon = coords
+    bs = _np_zest_branches()
+    if not bs:
+        return None
+    best = min(bs, key=lambda b: _haversine(lat, lon, b["lat"], b["lon"]))
+    return {"branch_name": best.get("name") or "", "email": best.get("email") or "",
+            "phone": best.get("phone") or "", "postcode": best.get("pc") or "",
+            "miles": round(_haversine(lat, lon, best["lat"], best["lon"]), 1)}
+
+
 def national_plastics_branch(postcode):
     """Nearest National Plastics branch (Rotherham / Abercarn / Maidstone) for a customer postcode
     → {branch_name, email, phone, contact, miles}. None if the postcode won't geocode (caller then
