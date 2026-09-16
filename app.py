@@ -1825,7 +1825,8 @@ JBKIND_IRONMONGERY = 15.0
 _JBKIND_IRONMONGERY_WORDS = (
     "hinge", "handle", "latch", "knob", "pull", "bolt", "escutcheon", "spindle", "screw",
     "fixing", "lock", "catch", "stay", "hook", "numeral", "letterplate", "letter plate",
-    "doorstop", "door stop", "tubular", "mortice", "cylinder", "keep", "strike", "ironmongery")
+    "doorstop", "door stop", "tubular", "mortice", "cylinder", "keep", "strike", "ironmongery",
+    "kit", "sparta")   # hardware KITS (Deanta Sparta bathroom/latch kits) are not doors
 # POA (price-on-application) postcode areas + district ranges — delivery not in standard pricing.
 _JBKIND_EXCLUDED_AREAS = {"BT", "GY", "HS", "IM", "IV", "JE", "KW", "ZE"}
 _JBKIND_EXCLUDED_RANGES = {"KA": (27, 28), "PA": (20, 80), "PH": (39, 44),

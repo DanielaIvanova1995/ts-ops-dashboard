@@ -117,7 +117,8 @@ JBKIND_IRONMONGERY = 15.0
 _JBKIND_IRONMONGERY_WORDS = (
     "hinge", "handle", "latch", "knob", "pull", "bolt", "escutcheon", "spindle", "screw",
     "fixing", "lock", "catch", "stay", "hook", "numeral", "letterplate", "letter plate",
-    "doorstop", "door stop", "tubular", "mortice", "cylinder", "keep", "strike", "ironmongery")
+    "doorstop", "door stop", "tubular", "mortice", "cylinder", "keep", "strike", "ironmongery",
+    "kit", "sparta")   # hardware KITS (Deanta Sparta bathroom/latch kits) are not doors
 _JBKIND_EXCLUDED_AREAS = {"BT", "GY", "HS", "IM", "IV", "JE", "KW", "ZE"}
 _JBKIND_EXCLUDED_RANGES = {"KA": (27, 28), "PA": (20, 80), "PH": (39, 44),
                            "PO": (30, 41), "TR": (21, 25)}
@@ -345,20 +346,15 @@ def _delivery_map():
 
 
 def dolle_expected(lines):
-    """Dolle carriage = the sum of each ordered product's own delivery charge (× qty) — their items
-    ship on different couriers so the per-product charges add up. None if no line can be priced."""
+    """Dolle carriage = the HIGHEST per-product delivery band among the ordered products (Daniela:
+    on a mixed-courier order they charge the single highest shipping value, not the sum). None if no
+    line can be priced."""
     rates = _delivery_map().get("dolle") or {}
     if not rates:
         return None
-    total, seen = 0.0, False
-    for l in _product_lines(lines):
-        r = rates.get(_norm(l.get("sku")))
-        if r is None:
-            continue
-        q = l.get("qty") if isinstance(l.get("qty"), (int, float)) and l.get("qty") else 1
-        total += r * q
-        seen = True
-    return round(total, 2) if seen else None
+    vals = [rates[_norm(l.get("sku"))] for l in _product_lines(lines)
+            if _norm(l.get("sku")) in rates]
+    return round(max(vals), 2) if vals else None
 
 
 # --- dispatch -------------------------------------------------------------------------------
