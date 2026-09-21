@@ -6654,6 +6654,7 @@ def _mark_quote_progress(email, category):
 # tiered by order size, always after the ~1.8% Shopify card fee, with an 8% rock-bottom.
 # Daniela's policy 2026-09-21 — floors are the MOST we give, never the opening offer.
 SHOPIFY_FEE = 0.018
+ABANDONED_CART_PCT = 0.04   # every customer already gets 4% off via the abandoned-cart email
 # (order value ceiling ex-VAT, share of the margin we may give away, label)
 _DISCOUNT_BANDS = [
     (1500,          0.15, "Under £1.5k"),
@@ -6706,12 +6707,18 @@ def _discount_floor(order_value, margin):
     floor_price = cost / (1 - floor_margin_gross) if floor_margin_gross < 1 else order_value
     max_disc = max(0.0, order_value - floor_price)
     no_room = margin <= floor_margin_gross or max_disc <= 0
+    eff_floor = order_value if no_room else floor_price
+    # Every customer already gets 4% off via the abandoned-cart email, so 4% off is the OPENING,
+    # not full price. Flag when even that 4% dips below the floor (a thin quote → Daniela's call).
+    four_pc_price = round(order_value * (1 - ABANDONED_CART_PCT), 2)
     return {"give": give, "band": band,
             "floor_margin": floor_margin_gross - SHOPIFY_FEE,   # real, after the card fee
             "margin_now": margin - SHOPIFY_FEE,
-            "floor_price": order_value if no_room else floor_price,
+            "floor_price": eff_floor,
             "max_disc": 0.0 if no_room else max_disc,
-            "no_room": no_room}
+            "no_room": no_room,
+            "four_pc_price": four_pc_price,
+            "four_breaches": four_pc_price < eff_floor}
 
 
 def _render_discount_desk(matched):
@@ -6742,6 +6749,14 @@ def _render_discount_desk(matched):
                        f"margin, down to **£{d['floor_price']:,.0f}** (keeps "
                        f"{pct(max(0, d['floor_margin']))} after the 1.8% card fee). That's the *most* "
                        "— quote the least that wins it. Below the floor, check with Daniela.")
+        # 4% abandoned-cart baseline — everyone already gets this, so it's the opening, not full price.
+        if d.get("four_breaches"):
+            st.caption(f"⚠️ The automatic **4% abandoned-cart discount** (£{d['four_pc_price']:,.0f}) "
+                       "already dips below your floor here — only match it with Daniela's OK.")
+        else:
+            st.caption(f"ℹ️ Everyone already gets **4% off** via the abandoned-cart email, so "
+                       f"**£{d['four_pc_price']:,.0f}** (4% off) is your *opening* — never quote full "
+                       "price. Only move toward the floor from there if you need to.")
         if n_priced < n_total:
             st.caption(f"⚠️ Margin based on {n_priced} of {n_total} lines (couldn't cost the rest) — "
                        "treat the floor as a guide.")
