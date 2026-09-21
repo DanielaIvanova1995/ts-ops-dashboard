@@ -7146,6 +7146,23 @@ HARDIE_PRODUCTS = {
 }
 HARDIE_TEXTURES = ["Cedar", "Smooth"]
 BATTEN_CENTRES = {"600 mm (standard)": 600, "450 mm": 450, "300 mm": 300}
+# The 21 James Hardie colours — one colour is picked for the WHOLE job (boards + trims all match).
+HARDIE_COLOURS = [
+    "Anthracite Grey", "Arctic White", "Boothbay Blue", "Chestnut Brown", "Cobble Stone",
+    "Evening Blue", "Grey Slate", "Heathered Moss", "Iron Grey", "Khaki Brown", "Light Mist",
+    "Midnight Black", "Monterey Taupe", "Mountain Sage", "Pearl Grey", "Rich Espresso",
+    "Sail Cloth", "Soft Green", "Timber Bark", "Traditional Red", "Woodland Cream",
+]
+# Trim / accessory rows for the quick form: (key, label, product title used for pricing, wants colour)
+HARDIE_TRIMS = [
+    ("ext", "External corner (3m)", "Hardie Plank External Corner", True),
+    ("int", "Internal corner (3m)", "Hardie Plank Internal Corner", True),
+    ("starter", "Starter / vent profile (3m)", "Hardie Plank Starter Ventilation Profile", False),
+    ("top", "Top vent strip (3m)", "Hardie Plank Top Ventilation Strip", False),
+    ("edge", "Edge / seal coat", "Hardie Seal Edge Coating", False),
+    ("epdm", "EPDM tape (20m)", "James Hardie EPDM Tape 20m", False),
+    ("screws", "Fixing screws (250 box)", "James Hardie Panel Screws", False),
+]
 
 
 def _fixings_per_board(batten_mm, board_len_mm=3600):
@@ -7769,6 +7786,53 @@ def _render_sample_feed_panel():
                            f"{_stat.get('failed', 0)}.")
 
 
+def _render_hardie_quickform(eid):
+    """A guided James Hardie intake for a new starter: one colour for the whole job, boards by
+    panel-count OR m², then trim quantities. On submit it writes a clean requirement line into the
+    quote's details box (authoritative), so the normal pipeline prices and drafts it."""
+    import math
+    with st.container(border=True):
+        st.markdown("##### 🧱 James Hardie quick form")
+        st.caption("Everything matches **one colour**. Enter the boards (by number of panels **or** "
+                   "m²), add any trims, then it fills the quote below.")
+        r1c1, r1c2 = st.columns(2)
+        colour = r1c1.selectbox("Colour (whole job)", HARDIE_COLOURS, key=f"hq_col_{eid}")
+        board_type = r1c2.selectbox("Board", ["HardiePlank (150mm cover)", "Hardie VL Plank"],
+                                    key=f"hq_bt_{eid}")
+        r2c1, r2c2 = st.columns(2)
+        by = r2c1.radio("Boards by", ["Number of panels", "Area (m²)"], key=f"hq_by_{eid}",
+                        horizontal=True)
+        if by.startswith("Number"):
+            boards = int(r2c2.number_input("Number of panels", min_value=0, step=1, value=0,
+                                           key=f"hq_n_{eid}"))
+        else:
+            cov = 0.54 if board_type.startswith("HardiePlank") else 0.72
+            sqm = r2c2.number_input("Area (m²)", min_value=0.0, step=1.0, value=0.0,
+                                    key=f"hq_sqm_{eid}")
+            boards = math.ceil(sqm / cov * 1.10) if sqm else 0   # +10% waste
+            r2c2.caption(f"≈ **{boards}** boards  ({cov} m²/board + 10% waste)")
+        st.markdown("**Trims & accessories** — quantity (0 = none)")
+        qty = {}
+        tcols = st.columns(3)
+        for i, (k, label, _title, _col) in enumerate(HARDIE_TRIMS):
+            qty[k] = int(tcols[i % 3].number_input(label, min_value=0, step=1, value=0,
+                                                   key=f"hq_{k}_{eid}"))
+        if st.button("➕ Put this in the quote", key=f"hq_add_{eid}", type="primary"):
+            lines = []
+            if boards > 0:
+                btype = "Hardie VL Plank" if board_type.startswith("Hardie VL") else "Hardie Plank cladding"
+                lines.append(f"{boards} x {btype} {colour}")
+            for k, _label, title, wants_col in HARDIE_TRIMS:
+                if qty[k] > 0:
+                    lines.append(f"{qty[k]} x {title}" + (f" {colour}" if wants_col else ""))
+            if not lines:
+                st.warning("Enter the boards or at least one trim quantity first.")
+            else:
+                _quote_manual()[eid] = "; ".join(lines)
+                _quote_cache().pop(eid, None)
+                st.rerun()
+
+
 def _render_sample_leads():
     """Sample follow-up calls marked 'Spoke – Quote Required' → quote them with the same pipeline
     as an email lead, then log to the Quotes Log (as a Phone call) and mark the call Quoted."""
@@ -7816,6 +7880,7 @@ def _render_sample_leads():
         "conversationId": None, "hasAttachments": False, "categories": [],
         "_is_sample": True, "_sample_item_id": lead["item_id"],
     }
+    _render_hardie_quickform(synth["id"])
     _render_quote_block(synth)
 
 
