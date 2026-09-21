@@ -2867,6 +2867,95 @@ def classify_email(subject: str, from_addr: str, body: str) -> dict:
             "thread_owner": (out.get("thread_owner") or "none").strip().lower()}
 
 
+# ---------------------------------------------------------------------------
+# Quote-queue triage — sorts the "New Orders & Quotes" folder BY THE ACTION each
+# enquiry needs, so the quote builder only ever sees the ones ready to price.
+# Based on Daniela's tso-outlook-triage-prompt spec (2026-09-21).
+# ---------------------------------------------------------------------------
+QUOTE_TRIAGE_CATEGORIES = (
+    "quote_to_price", "order_to_place", "q_delivery", "q_stock", "q_product",
+    "website_discount", "auto_archive", "supplier_quote", "unsure",
+)
+
+_QUOTE_TRIAGE_SYSTEM = (
+    "You triage the New Orders & Quotes queue for Trade Superstore Online (TSO), a UK Shopify "
+    "building-products retailer. For each customer enquiry decide WHAT ACTION it needs and return "
+    "ONLY a JSON object {\"category\": \"<one of the categories>\"}. Do not reply, price, or "
+    "summarise. Classify by the BODY, not the subject line — subjects lie (\"Delivery\" is often a "
+    "quote; \"Order\" is sometimes a promo-code failure). Ask: what does someone at TSO actually have "
+    "to DO with this? Take the FIRST matching category working down this list.\n\n"
+    "CATEGORIES:\n"
+    "- auto_archive: Scam / low-quality mass RFQs — CHECK THIS FIRST. File here only when TWO OR MORE "
+    "of these hold: a generic \"URGENT REQUEST FOR QUOTATION\" subject with a reference number; an "
+    "overseas company with a UK-irrelevant or missing delivery address; a small quantity of a "
+    "commodity item framed as urgent/high-value; repeated \"gentle reminder\" chasers within 24h; "
+    "vague \"we want a long-term relationship, send your best price\" with no specific product; TSO "
+    "not in the To line (blind-copied mass blast); a sender domain imitating a known brand (e.g. "
+    "global-ikea.com not ikea.com). Do NOT archive a legitimate UK trade buyer just because they "
+    "wrote \"request for quotation\" — when genuinely unsure, use quote_to_price, never auto_archive.\n"
+    "- supplier_quote: An inbound quote/price FROM ONE OF OUR SUPPLIERS (a trade supplier we BUY from "
+    "— e.g. GAP, Markovitz, Squaredeal, Molan, UPB, National Plastics, Deanta, LPD — giving US a "
+    "price for goods we asked them to source). They are the SELLER quoting the BUYER; this is NOT a "
+    "customer quote and must NEVER go in the quote-to-price queue.\n"
+    "- quote_to_price: A CUSTOMER has named product(s) and wants a price. The quote-builder queue. "
+    "Named items with quantities, or a spec plus a delivery postcode; bespoke/made-to-order items "
+    "(bifolds, sliding doors, roof lanterns, steel doors, cut-to-size sheets); bulk / trade-discount "
+    "requests; website quote-form submissions whose body asks for a price; delivery-COST questions "
+    "where the item and quantity are specified and no price has been given yet (the answer is a "
+    "quote).\n"
+    "- order_to_place: The customer has DECIDED and wants to buy — \"please process an order\", \"send "
+    "me payment details\", \"yes please go ahead\", confirming a previously quoted price to proceed, "
+    "or adding items to an existing order.\n"
+    "- q_delivery: Just a delivery answer needed, no pricing — \"do you deliver to ROI / Isle of Wight "
+    "/ BT postcodes?\", \"why was postage added when it says free delivery?\", \"when will it arrive "
+    "/ can you deliver Wednesday?\", shipping-cost complaints on an item already priced on the site.\n"
+    "- q_stock: Stock / lead-time — \"do you physically have this in stock?\", \"what's the lead time "
+    "from order to site?\", \"is this discontinued?\".\n"
+    "- q_product: Questions answered from product knowledge, plus the general catch-all — dimensions, "
+    "compatibility, finishes, what part do I need, is it new or refurb, what size opening, does it "
+    "come assembled, sample requests, AND trade/credit-account enquiries (TSO does not offer credit "
+    "accounts — these need a standard decline, not pricing).\n"
+    "- website_discount: A SITE FAULT someone must fix, not a customer-service answer — discount codes "
+    "that won't apply, checkout errors, postcode-validation failures, wrong shipping calculated at "
+    "checkout. File here even when the customer frames it as an order enquiry; the underlying issue "
+    "is the site.\n"
+    "- unsure: Anything you cannot confidently place. Leaving something unsorted is better than "
+    "filing it wrong.\n\n"
+    "OUTPUT: return ONLY {\"category\": \"<category>\"} — no preamble, no other text."
+)
+
+
+def classify_quote_email(subject: str, from_addr: str, body: str) -> dict:
+    """Classify one quote-queue email → {category}. Raises if ANTHROPIC_API_KEY is missing or no
+    JSON comes back."""
+    import json as _json
+    import re
+    key = get_secret("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    body = (body or "")[:12000]
+    user = f"Subject: {subject}\n\nFrom: {from_addr}\n\nBody: {body}"
+    payload = {"model": TRIAGE_MODEL, "max_tokens": 120, "system": _QUOTE_TRIAGE_SYSTEM,
+               "messages": [{"role": "user", "content": user}]}
+    r = requests.post(ANTHROPIC_API,
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
+                      json=payload, timeout=60)
+    if r.status_code >= 400:
+        raise RuntimeError(f"Anthropic {r.status_code}: {r.text[:200]}")
+    resp = r.json()
+    _track_usage(TRIAGE_MODEL, "quote_triage", resp)
+    blocks = resp.get("content", [])
+    txt = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise RuntimeError("Quote triage classifier returned no JSON")
+    cat = (_json.loads(m.group(0)).get("category") or "").strip()
+    if cat not in QUOTE_TRIAGE_CATEGORIES:
+        cat = "unsure"
+    return {"category": cat}
+
+
 def set_invoice_status(sub_id, label: str, token: str | None = None,
                        create_missing: bool = False) -> bool:
     """Set a subitem's Payment Status (status7__1) to a label, e.g.

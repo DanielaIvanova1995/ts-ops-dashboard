@@ -5690,6 +5690,31 @@ def _bg_worker():
             except Exception:  # noqa: BLE001
                 pass
 
+    def _run_quote_triage(reason):
+        import datetime as _dt
+        import quote_triage
+        import supabase_db
+        try:
+            cfg = supabase_db.config_get("quote_triage") or {}
+            res = quote_triage.run_triage(dry_run=False, since_days=cfg.get("since_days"),
+                                          max_total=int(cfg.get("max_total") or 40))
+            supabase_db.config_set("quote_triage_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "moved": res.get("moved"), "left": res.get("left"), "failed": res.get("failed"),
+                "skipped": res.get("skipped"), "capped": res.get("capped"),
+                "ok": res.get("ok"), "error": res.get("error"), "reason": reason})
+            if res.get("moved") or res.get("failed"):
+                supabase_db.audit("scheduler" if reason == "auto" else "manual", "quote_triage",
+                                  f"moved {res.get('moved')}, left {res.get('left')}, "
+                                  f"failed {res.get('failed')}", "")
+        except Exception as e:  # noqa: BLE001
+            try:
+                supabase_db.config_set("quote_triage_status", {
+                    "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ok": False, "error": str(e)[:200], "reason": reason})
+            except Exception:  # noqa: BLE001
+                pass
+
     def _run_manual_check(sub_ids):
         """Check & process JUST these subitems, off the page thread — so a big selection (e.g. many
         Eurocell invoices) can't drop the websocket and 'kick you out'. Same engine as the scheduler."""
@@ -5737,7 +5762,7 @@ def _bg_worker():
 
     def _loop():
         import supabase_db
-        next_import = next_check = next_triage = 0.0
+        next_import = next_check = next_triage = next_qtriage = 0.0
         while True:
             fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
             state["trigger"].clear()
@@ -5772,6 +5797,13 @@ def _bg_worker():
                     _run_triage("auto")
             except Exception:  # noqa: BLE001
                 next_triage = _time.time() + 900
+            try:
+                qcfg = supabase_db.config_get("quote_triage") or {}
+                if qcfg.get("auto_enabled") and _time.time() >= next_qtriage:
+                    next_qtriage = _time.time() + max(300, int(qcfg.get("interval_min") or 10) * 60)
+                    _run_quote_triage("auto")
+            except Exception:  # noqa: BLE001
+                next_qtriage = _time.time() + 900
 
     threading.Thread(target=_loop, name="invoice-worker", daemon=True).start()
     return state
@@ -6015,7 +6047,10 @@ def render_summary_dashboard():
 
 
 QUOTE_MAILBOX = "hello@tradesuperstoreonline.co.uk"
-QUOTE_FOLDER = "New Orders & Quotes"
+# The quote builder reads the TRIAGED "ready to price" sub-folder — the quote-triage sorts the loose
+# "New Orders & Quotes" queue into these action sub-folders, so the builder only surfaces genuine
+# quotes-to-price (not delivery/stock/spec questions or supplier quotes). Was "New Orders & Quotes".
+QUOTE_FOLDER = "1 - Quote To Price"
 QUOTE_CAT_QUOTED = "Quoted"          # Outlook category stamped when a quote is drafted
 QUOTE_CAT_INFO = "Awaiting info"     # Outlook category stamped when we ask for details
 # Standard reply wording when a customer asks about a trade/bulk discount. We never quote a
@@ -7379,15 +7414,92 @@ def _render_multiwall_poly():
                        "Molan product names and I'll map them.")
 
 
+def _render_quote_triage_panel():
+    """Sort the loose 'New Orders & Quotes' queue into the action sub-folders (1 - Quote To Price,
+    etc.) so the builder only surfaces genuine quotes. Preview → Run → optional auto. Off by default."""
+    import quote_triage
+    try:
+        import supabase_db as _sdb
+    except Exception:  # noqa: BLE001
+        _sdb = None
+    _ok = bool(_sdb and _sdb.configured())
+    with st.expander("🗂️ Auto-sort the quote queue (triage) — set up for a new starter"):
+        st.caption(f"Reads **{quote_triage.MAILBOX} › {quote_triage.SOURCE_FOLDER}** and files each "
+                   "enquiry by what it needs — **1 - Quote To Price**, 2 - Order To Place, 3 - Q "
+                   "Delivery, 4 - Q Stock, 5 - Q Product, 6 - Website/Discount, scam RFQs to "
+                   "Natasha - Auto-archive, and supplier quotes out to Natasha - Supplier No eta. "
+                   "Anything it's unsure about is **left in the queue**, never mis-filed. The Quotes "
+                   "list below reads the **1 - Quote To Price** folder, so this keeps it clean.")
+        if not _ok:
+            st.warning("Supabase isn't connected — de-dup + history are off, so run **Preview** only.")
+        c1, c2 = st.columns(2)
+        if c1.button("👁 Preview (sort nothing)", key="qtri_prev", use_container_width=True):
+            with st.spinner("Classifying the quote queue…"):
+                try:
+                    st.session_state["qtri_res"] = quote_triage.run_triage(dry_run=True, max_total=40)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["qtri_res"] = {"ok": False, "error": str(e)[:200]}
+        if c2.button("▶ Sort now (move for real)", key="qtri_run", type="primary",
+                     use_container_width=True, disabled=not _ok):
+            with st.spinner("Sorting the quote queue…"):
+                try:
+                    st.session_state["qtri_res"] = quote_triage.run_triage(dry_run=False, max_total=40)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["qtri_res"] = {"ok": False, "error": str(e)[:200]}
+        res = st.session_state.get("qtri_res")
+        if res:
+            if not res.get("ok"):
+                st.error("Couldn't run: " + str(res.get("error")))
+            else:
+                verb = "Would file" if res.get("dry_run") else "Filed"
+                st.success(f"{verb} {res.get('moved', 0)} · left in queue {res.get('left', 0)} · "
+                           f"folder-missing {res.get('no_folder', 0)} · failed {res.get('failed', 0)}"
+                           + ("  ·  (capped — run again)" if res.get("capped") else ""))
+                items = res.get("items") or []
+                if items:
+                    st.dataframe(pd.DataFrame([{
+                        "From": r.get("sender"), "Subject": (r.get("subject") or "")[:55],
+                        "→": r.get("category"), "Folder": r.get("folder"),
+                        "Status": r.get("status")} for r in items]),
+                        use_container_width=True, hide_index=True)
+        # Automatic + history
+        _cc = (_sdb.config_get("quote_triage") if _ok else None) or {}
+        ca, cb = st.columns([2, 1])
+        auto_on = ca.toggle("Run automatically", value=bool(_cc.get("auto_enabled")), key="qtri_auto")
+        every = cb.number_input("Every (min)", 5, 120, int(_cc.get("interval_min") or 10), step=5,
+                                key="qtri_int")
+        if st.button("💾 Save automatic settings", key="qtri_savecfg", disabled=not _ok):
+            _cc.update(auto_enabled=bool(auto_on), interval_min=int(every), max_total=40)
+            _sdb.config_set("quote_triage", _cc)
+            st.success("Saved — automatic quote sorting is "
+                       + ("ON." if auto_on else "OFF."))
+        if _ok:
+            _stat = _sdb.config_get("quote_triage_status") or {}
+            if _stat.get("at"):
+                st.caption(f"🤖 Last run {str(_stat['at'])[:16].replace('T', ' ')} UTC — filed "
+                           f"{_stat.get('moved', 0)}, left {_stat.get('left', 0)}, failed "
+                           f"{_stat.get('failed', 0)}.")
+            _probs = [r for r in (_sdb.quote_triage_recent(limit=200) or [])
+                      if r.get("status") in ("no_folder", "failed")]
+            if _probs:
+                with st.expander(f"⚠️ Didn't get filed ({len(_probs)})"):
+                    st.dataframe(pd.DataFrame([{
+                        "From": r.get("sender"), "Subject": (r.get("subject") or "")[:50],
+                        "→": r.get("category"), "Why": r.get("detail")} for r in _probs]),
+                        use_container_width=True, hide_index=True)
+
+
 def render_quotes():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
         <span class="sec">Quotes</span></span></div>""",
         unsafe_allow_html=True,
     )
-    st.caption("Reads the New Orders & Quotes emails, prices them from Shopify, and prepares a "
-               "**Shopify draft order** + an **Outlook draft reply** (with the draft-order number in "
-               "the subject) for you to review and send. Uses your Anthropic key.")
+    st.caption("Reads the **1 - Quote To Price** folder (the triaged, ready-to-price queue), prices "
+               "each from Shopify, and prepares a **Shopify draft order** + an **Outlook draft reply** "
+               "for you to review and send. Uses your Anthropic key.")
+
+    _render_quote_triage_panel()
 
     with st.expander("🔧 Shopify connection check (run if quotes won't price or draft)"):
         if st.button("Run Shopify check", key="shopdiag"):

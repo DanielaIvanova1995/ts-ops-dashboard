@@ -359,6 +359,62 @@ def email_triage_delete(internet_id: str) -> bool:
         return False
 
 
+# ---- Quote-queue triage (de-dup + history for the New Orders & Quotes sorter) ----------------
+def quote_triage_seen(internet_id: str) -> bool:
+    """True if this quote email has already been sorted (moved/left), so it's never re-classified.
+    'no_folder'/'failed' do NOT count → they auto-retry once fixed."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        r = (_client().table("quote_triage").select("status")
+             .eq("internet_id", internet_id).in_("status", ["moved", "left"])
+             .limit(1).execute())
+        return bool(r.data)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def quote_triage_log(internet_id: str, status: str, **fields) -> bool:
+    """Record a quote-triage outcome (upsert): status = 'moved' | 'left' | 'no_folder' | 'failed'."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        row = {"internet_id": internet_id, "status": status, "at": _now()}
+        for k in ("subject", "sender", "category", "folder", "detail"):
+            if fields.get(k) is not None:
+                row[k] = str(fields[k])[:500]
+        _client().table("quote_triage").upsert(row).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def quote_triage_recent(limit: int = 100, status: str | None = None) -> list:
+    """Recent quote-triage outcomes (newest first)."""
+    if not configured():
+        return []
+    try:
+        q = (_client().table("quote_triage")
+             .select("internet_id,status,subject,sender,category,folder,detail,at")
+             .order("at", desc=True).limit(limit))
+        if status:
+            q = q.eq("status", status)
+        return q.execute().data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def quote_triage_delete(internet_id: str) -> bool:
+    """Forget one triaged quote email so the next run re-tries it."""
+    if not configured() or not internet_id:
+        return False
+    try:
+        _client().table("quote_triage").delete().eq("internet_id", internet_id).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---- Durable invoice-check verdicts (so a reconnect/idle timeout doesn't wipe checked results) --
 def invoice_verdict_set(sub_id, verdict: dict) -> bool:
     """Store one invoice's checked verdict (order/price/incomplete/margin/missing) durably, keyed by
