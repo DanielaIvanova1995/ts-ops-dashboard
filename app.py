@@ -7699,27 +7699,30 @@ def _render_sample_leads():
         st.success("No sample calls are waiting to be quoted right now. When Megan sets a call to "
                    "**Spoke – Quote Required**, it appears here.")
         return
-    st.caption(f"**{len(leads)}** lead(s) ready to quote.")
+    st.caption(f"**{len(leads)}** lead(s) ready to quote — pick one.")
     _today = now_uk().strftime("%Y-%m-%d")
-    for lead in leads:
-        head = " · ".join([x for x in (lead["customer"], lead.get("order"),
-                                       lead.get("postcode")) if x])
-        with st.expander(head):
-            if lead.get("samples"):
-                st.caption("🧪 Sampled: " + lead["samples"].replace("\n", "  ·  "))
-            if lead.get("notes"):
-                st.caption("📝 Call notes: " + lead["notes"])
-            synth = {
-                "id": f"sample-{lead['item_id']}",
-                "subject": f"Sample follow-up — {lead['customer']}",
-                "from": lead.get("email") or "",
-                "from_name": lead["customer"],
-                "received": _today,
-                "body": _sample_seed_body(lead),
-                "conversationId": None, "hasAttachments": False, "categories": [],
-                "_is_sample": True, "_sample_item_id": lead["item_id"],
-            }
-            _render_quote_block(synth)
+    # A picker (not per-lead expanders) — _render_quote_block opens its own expanders, and
+    # Streamlit forbids nesting expanders, so we render ONE selected lead at a time.
+    opts = [" · ".join([x for x in (f"{i + 1}.", l["customer"], l.get("order"),
+                                    l.get("postcode")) if x]) for i, l in enumerate(leads)]
+    pick = st.selectbox("Sample lead to quote", opts, key="sample_pick",
+                        label_visibility="collapsed")
+    lead = leads[opts.index(pick)] if pick in opts else leads[0]
+    if lead.get("samples"):
+        st.caption("🧪 Sampled: " + lead["samples"].replace("\n", "  ·  "))
+    if lead.get("notes"):
+        st.caption("📝 Call notes: " + lead["notes"])
+    synth = {
+        "id": f"sample-{lead['item_id']}",
+        "subject": f"Sample follow-up — {lead['customer']}",
+        "from": lead.get("email") or "",
+        "from_name": lead["customer"],
+        "received": _today,
+        "body": _sample_seed_body(lead),
+        "conversationId": None, "hasAttachments": False, "categories": [],
+        "_is_sample": True, "_sample_item_id": lead["item_id"],
+    }
+    _render_quote_block(synth)
 
 
 def render_quotes():
