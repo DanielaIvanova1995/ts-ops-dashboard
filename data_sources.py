@@ -1875,6 +1875,10 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         "Write PLAIN TEXT only. Do NOT use any markdown formatting whatsoever: no ** or __ for "
         "bold, no * or _ for italics, no # headings, no backticks. If you want to emphasise a "
         "heading or label, just write it in plain words (e.g. 'What this quote is based on:'). "
+        "NEVER offer, mention, hint at, or invite the customer to ask about clearance, surplus, "
+        "roll-end, ex-display, seconds, off-cut or discontinued/discounted stock — we do not "
+        "promote those and that stock is not reliably available. If you mention price flexibility "
+        "at all, keep it general (we'll do our best on price) and never tie it to clearance stock. "
         "Return ONLY the email body text - no subject line, no notes, no preamble.\n\n"
         "CONVERSATION SO FAR (most recent last):\n" + (context or "(no prior messages)")[:5000]
         + "\n\n" + facts
