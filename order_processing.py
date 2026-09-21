@@ -1401,9 +1401,21 @@ def _order_detail(o):
                 for rt, lns in res["groups"].items():
                     st.markdown(f"- **{rt}** — " + ", ".join(
                         (l.get("sku") or l.get("title") or "")[:26] for l in lns))
-                st.caption("Processing this order splits it automatically. To split it by hand "
-                           "(choose which line goes to which supplier), use **✂️ Split this order "
-                           "across suppliers** below.")
+                # One-click execute of the suggested split (same engine as bulk auto-process) — so a
+                # flagged split can't be missed by generating a single PO for the whole order.
+                _grpnames = " + ".join(res["groups"].keys())
+                if st.button(f"✂️ Split automatically into {len(res['groups'])} parts ({_grpnames})",
+                             key=f"op_autosplit_{iid}", type="primary", use_container_width=True):
+                    with st.spinner("Splitting the order + generating each part's PO…"):
+                        try:
+                            msg = _process_split(o, res)
+                            st.success("Done — " + msg)
+                            st.session_state["_op_orders"] = None      # refresh the list
+                        except Exception as e:  # noqa: BLE001
+                            st.error("Split failed: " + str(e)[:200])
+                st.caption("Or split it by hand (choose which line goes to which supplier) with "
+                           "**✂️ Split this order across suppliers** below. The bulk **Process** "
+                           "action also splits automatically.")
             elif res.get("overall_supplier"):
                 _br = res.get("branch")
                 st.markdown(f"→ **{res['overall_supplier']}**"
