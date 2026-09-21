@@ -2956,6 +2956,62 @@ def classify_quote_email(subject: str, from_addr: str, body: str) -> dict:
     return {"category": cat}
 
 
+QUOTES_LOG_BOARD_ID = 1786543404          # "Quotes Log" board — one row per quote built in TradeHub
+
+
+def create_quote_log_item(name, company=None, email=None, phone=None, postcode=None,
+                          value_ex_vat=None, draft_no=None, stage="Quoted",
+                          quote_type="Standard", enquiry_date=None, token=None) -> str | None:
+    """Add a row to the Quotes Log board (1786543404) when a quote is built — customer, £ value ex
+    VAT, Shopify draft order #, quote stage, and a Day-2 follow-up date. Lands in 'Active Quotes'.
+    Returns the new item id, or raises on a Monday error. Labels: Quote Stage 'Quoted'/'Info
+    Requested', Lead 'Email', Quote Type 'Standard'/'Needs Info'."""
+    import datetime as _dt
+    import json as _json
+    import re as _re
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    cols: dict = {"color_mm5eypbn": {"label": stage}, "color0": {"label": "Email"}}
+    if company:
+        cols["text0"] = str(company)[:255]
+    if email:
+        cols["email"] = {"email": email, "text": email}
+    if phone:
+        digits = _re.sub(r"[^0-9+]", "", str(phone))
+        if digits:
+            cols["phone_1"] = {"phone": digits, "countryShortName": "GB"}
+    if postcode:
+        cols["text_mm5emjzm"] = str(postcode)[:20]
+    if isinstance(value_ex_vat, (int, float)):
+        cols["numeric_mm5ea7vr"] = round(float(value_ex_vat), 2)
+    if draft_no:
+        cols["text_mm5efxax"] = str(draft_no)[:60]
+    if quote_type:
+        cols["dropdown_mm5ey2hp"] = {"labels": [quote_type]}
+    if enquiry_date:
+        cols["date"] = {"date": str(enquiry_date)[:10]}
+    today = _dt.date.today()
+    if stage == "Quoted":
+        cols["status"] = {"label": "Quoted"}
+        cols["date_mm5ew3wx"] = {"date": today.isoformat()}                       # Quote Sent
+        cols["date_mm5eqfds"] = {"date": (today + _dt.timedelta(days=2)).isoformat()}  # FU1 (Day 2)
+        if isinstance(value_ex_vat, (int, float)) and value_ex_vat >= 500:
+            cols["boolean_mm5e1hxv"] = {"checked": "true"}                        # £500+ → call
+    query = ("mutation($b:ID!,$g:String!,$n:String!,$c:JSON!){"
+             "create_item(board_id:$b,group_id:$g,item_name:$n,column_values:$c,"
+             "create_labels_if_missing:true){id}}")
+    r = requests.post(MONDAY_API, json={"query": query, "variables": {
+        "b": str(QUOTES_LOG_BOARD_ID), "g": "topics", "n": str(name or "Customer")[:255],
+        "c": _json.dumps(cols)}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if p.get("errors"):
+        raise RuntimeError(f"Monday rejected the quote-log item: {str(p['errors'])[:200]}")
+    return (((p.get("data") or {}).get("create_item") or {}).get("id"))
+
+
 def set_invoice_status(sub_id, label: str, token: str | None = None,
                        create_missing: bool = False) -> bool:
     """Set a subitem's Payment Status (status7__1) to a label, e.g.

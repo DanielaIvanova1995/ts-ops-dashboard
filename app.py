@@ -6705,9 +6705,22 @@ def _render_quote_block(email):
                 link = data_sources.create_reply_draft(
                     QUOTE_MAILBOX, email["id"], st.session_state[f"qclar_{email['id']}"],
                     subject=subj, as_html=True, to_email=q.get("customer_email"))
+                _already_i = QUOTE_CAT_INFO.lower() in [str(c).lower()
+                                                        for c in (email.get("categories") or [])]
                 _mark_quote_progress(email, QUOTE_CAT_INFO)
+                if not _already_i:
+                    try:
+                        data_sources.create_quote_log_item(
+                            name=q.get("customer_name") or email.get("from_name")
+                            or q.get("customer_email") or "Customer",
+                            company=q.get("company"), email=q.get("customer_email"),
+                            phone=q.get("customer_phone"), postcode=q.get("postcode"),
+                            stage="Info Requested", quote_type="Needs Info",
+                            enquiry_date=email.get("received"))
+                    except Exception:  # noqa: BLE001
+                        pass
                 st.success("Draft reply created in Outlook — review and send from there. "
-                           "Marked **Info requested**.")
+                           "Marked **Info requested**. Added to the Quotes Log.")
                 if link:
                     st.markdown(f"[Open the draft in Outlook]({link})")
             except Exception as e:  # noqa: BLE001
@@ -6769,6 +6782,10 @@ def _render_quote_block(email):
         cust_email = q.get("customer_email")
         cust_name = q.get("customer_name")
         cust_phone = q.get("customer_phone")
+        # Already logged to the Quotes Log on a previous build? (the email carries the 'Quoted'
+        # category once we've logged it — durable cross-session de-dup so we never double-log.)
+        _already_q = QUOTE_CAT_QUOTED.lower() in [str(c).lower()
+                                                  for c in (email.get("categories") or [])]
         note = f"Quote for {cust_name or 'customer'} — from: {email['subject']}"
         # 1) Try the Shopify draft order (needs write_draft_orders) — but don't block on it.
         do, draft_err = None, None
@@ -6816,6 +6833,19 @@ def _render_quote_block(email):
             _mark_quote_progress(email, QUOTE_CAT_QUOTED)
         except Exception as e:  # noqa: BLE001
             st.error("Couldn't create the Outlook draft: " + str(e)[:200])
+
+        # 3b) Log the quote to the Quotes Log board (one row per quote, with a Day-2 follow-up).
+        if not _already_q:
+            try:
+                _qtype = "Bulk/Trade" if bool(q.get("bulk")) else "Standard"
+                data_sources.create_quote_log_item(
+                    name=cust_name or email.get("from_name") or cust_email or "Customer",
+                    company=q.get("company"), email=cust_email, phone=cust_phone,
+                    postcode=q.get("postcode"), value_ex_vat=total_amt, draft_no=ref,
+                    stage="Quoted", quote_type=_qtype, enquiry_date=email.get("received"))
+                st.caption("🗒️ Added to the **Quotes Log** (Monday) — follow-up due in 2 days.")
+            except Exception as e:  # noqa: BLE001
+                st.caption("⚠️ Couldn't add to the Quotes Log: " + str(e)[:140])
 
         # 4) Report.
         if do:
