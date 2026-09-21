@@ -6925,14 +6925,22 @@ def _render_quote_block(email):
                     "correct, and let us know if anything needs adding or amending.\n\n"
                     "Kind regards,\nTrade Superstore Online")
 
-        # 3) Create the Outlook draft reply and mark progress.
+        # 3) Create the Outlook draft — a threaded REPLY for an email lead, or a brand-new
+        #    draft to the customer for a sample follow-up call (no message to reply to).
         link = None
+        _is_sample = bool(email.get("_is_sample"))
         try:
-            subj = (f"Your quote {ref} – RE: {email['subject']}" if ref
-                    else f"Your quote – RE: {email['subject']}")
-            link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,
-                                                   subject=subj, as_html=True, to_email=cust_email)
-            _mark_quote_progress(email, QUOTE_CAT_QUOTED)
+            if _is_sample:
+                subj = (f"Your quote {ref} from Trade Superstore Online" if ref
+                        else "Your quote from Trade Superstore Online")
+                link = data_sources.create_new_draft(QUOTE_MAILBOX, cust_email, subj, body,
+                                                      as_html=True)
+            else:
+                subj = (f"Your quote {ref} – RE: {email['subject']}" if ref
+                        else f"Your quote – RE: {email['subject']}")
+                link = data_sources.create_reply_draft(QUOTE_MAILBOX, email["id"], body,
+                                                       subject=subj, as_html=True, to_email=cust_email)
+                _mark_quote_progress(email, QUOTE_CAT_QUOTED)
         except Exception as e:  # noqa: BLE001
             st.error("Couldn't create the Outlook draft: " + str(e)[:200])
 
@@ -6940,12 +6948,20 @@ def _render_quote_block(email):
         if not _already_q:
             try:
                 _qtype = "Bulk/Trade" if bool(q.get("bulk")) else "Standard"
-                data_sources.create_quote_log_item(
+                _ql_id = data_sources.create_quote_log_item(
                     name=cust_name or email.get("from_name") or cust_email or "Customer",
                     company=q.get("company"), email=cust_email, phone=cust_phone,
                     postcode=q.get("postcode"), value_ex_vat=total_amt, draft_no=ref,
-                    stage="Quoted", quote_type=_qtype, enquiry_date=email.get("received"))
+                    stage="Quoted", quote_type=_qtype, enquiry_date=email.get("received"),
+                    lead=("Phone call" if _is_sample else "Email"))
                 st.caption("🗒️ Added to the **Quotes Log** (Monday) — follow-up due in 2 days.")
+                # Sample lead: link the call card to its Quotes Log row + move it out of the queue.
+                if _is_sample and email.get("_sample_item_id"):
+                    try:
+                        data_sources.mark_sample_quoted(email["_sample_item_id"], _ql_id)
+                        st.caption("📞 Marked the sample call **Quoted** and linked it to the Quotes Log.")
+                    except Exception as e:  # noqa: BLE001
+                        st.caption("⚠️ Couldn't update the sample card: " + str(e)[:140])
             except Exception as e:  # noqa: BLE001
                 st.caption("⚠️ Couldn't add to the Quotes Log: " + str(e)[:140])
 
@@ -7621,6 +7637,76 @@ def _render_quote_triage_panel():
                         use_container_width=True, hide_index=True)
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _sample_leads_cached():
+    """Sample-call cards ready to quote (Spoke – Quote Required, not yet in the Quotes Log)."""
+    return data_sources.fetch_sample_leads()
+
+
+def _sample_seed_body(lead):
+    """A form-field-style seed so the quoter picks up the customer's name/email/phone/postcode.
+    The actual products + quantities come from Megan via the 'Add or correct details' box."""
+    parts = [f"Name : {lead['customer']}"]
+    if lead.get("email"):
+        parts.append(f"Email : {lead['email']}")
+    if lead.get("phone"):
+        parts.append(f"Phone : {lead['phone']}")
+    if lead.get("postcode"):
+        parts.append(f"Postcode : {lead['postcode']}")
+    parts.append("")
+    parts.append("This customer ordered samples from us and we followed up by phone; they'd like a "
+                 "quote for the full job.")
+    if lead.get("samples"):
+        parts.append("Samples they took: " + lead["samples"].replace("\n", "; "))
+    return "\n".join(parts)
+
+
+def _render_sample_leads():
+    """Sample follow-up calls marked 'Spoke – Quote Required' → quote them with the same pipeline
+    as an email lead, then log to the Quotes Log (as a Phone call) and mark the call Quoted."""
+    st.markdown("#### Sample follow-up leads")
+    st.caption("Cards from the **Sample Follow-Up Calls** board marked **Spoke – Quote Required**. "
+               "Open one, use **✏️ Add or correct details** to enter what the customer wants "
+               "(products + quantities or area), then build the quote. It creates the Shopify draft "
+               "+ an Outlook draft to the customer, logs to the **Quotes Log** as a phone lead, and "
+               "marks the call **Quoted**.")
+    _, cref = st.columns([4, 1])
+    if cref.button("↻ Refresh", use_container_width=True, key="sample_refresh"):
+        _sample_leads_cached.clear()
+        st.rerun()
+    try:
+        leads = _sample_leads_cached()
+    except Exception as e:  # noqa: BLE001
+        st.warning("Couldn't read the Sample Follow-Up board: " + str(e)[:180]
+                   + (" — is Monday connected?" if "MONDAY" in str(e).upper() else ""))
+        return
+    if not leads:
+        st.success("No sample calls are waiting to be quoted right now. When Megan sets a call to "
+                   "**Spoke – Quote Required**, it appears here.")
+        return
+    st.caption(f"**{len(leads)}** lead(s) ready to quote.")
+    _today = now_uk().strftime("%Y-%m-%d")
+    for lead in leads:
+        head = " · ".join([x for x in (lead["customer"], lead.get("order"),
+                                       lead.get("postcode")) if x])
+        with st.expander(head):
+            if lead.get("samples"):
+                st.caption("🧪 Sampled: " + lead["samples"].replace("\n", "  ·  "))
+            if lead.get("notes"):
+                st.caption("📝 Call notes: " + lead["notes"])
+            synth = {
+                "id": f"sample-{lead['item_id']}",
+                "subject": f"Sample follow-up — {lead['customer']}",
+                "from": lead.get("email") or "",
+                "from_name": lead["customer"],
+                "received": _today,
+                "body": _sample_seed_body(lead),
+                "conversationId": None, "hasAttachments": False, "categories": [],
+                "_is_sample": True, "_sample_item_id": lead["item_id"],
+            }
+            _render_quote_block(synth)
+
+
 def render_quotes():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
@@ -7662,14 +7748,17 @@ def render_quotes():
             except Exception as e:  # noqa: BLE001
                 st.error("Product read failed: " + str(e)[:300])
 
-    mode = st.radio("View", ["📧 Email requests", "🧱 Hardie cladding calculator",
-                             "🪟 Polycarbonate calculator"],
+    mode = st.radio("View", ["📧 Email requests", "📞 Sample leads",
+                             "🧱 Hardie cladding calculator", "🪟 Polycarbonate calculator"],
                     horizontal=True, label_visibility="collapsed")
     if mode.startswith("🧱"):
         render_cladding_calc()
         return
     if mode.startswith("🪟"):
         render_poly_calc()
+        return
+    if mode.startswith("📞"):
+        _render_sample_leads()
         return
 
     data = _quote_emails()

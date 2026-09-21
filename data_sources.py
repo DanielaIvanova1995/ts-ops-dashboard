@@ -2275,6 +2275,98 @@ def create_reply_draft(mailbox: str, message_id: str, body: str, subject: str | 
     return draft.get("webLink")
 
 
+def create_new_draft(mailbox: str, to_email: str, subject: str, body: str,
+                     as_html: bool = True, token: str | None = None) -> str | None:
+    """Create a brand-new draft email to `to_email` (lands in Drafts) — used when there is no
+    incoming message to reply to (e.g. a sample follow-up call). Returns the draft's webLink.
+    Mail.ReadWrite."""
+    token = token or ms_token()
+    content = _plain_to_html(body) if as_html else body
+    payload = {
+        "subject": subject or "Your quote from Trade Superstore Online",
+        "body": {"contentType": "HTML" if as_html else "Text", "content": content},
+        "toRecipients": [{"emailAddress": {"address": to_email}}] if to_email else [],
+    }
+    r = requests.post(f"{GRAPH}/users/{mailbox}/messages",
+                      headers={"Authorization": f"Bearer {token}",
+                               "Content-Type": "application/json"},
+                      json=payload, timeout=25)
+    r.raise_for_status()
+    return r.json().get("webLink")
+
+
+# --- Sample Follow-Up Calls board (18432108740) — Megan's warm-lead calling queue -------------
+SAMPLE_BOARD_ID = 18432108740
+SAMPLE_SUBITEMS_BOARD_ID = 18432109165
+SAMPLE_COLS = {
+    "order": "text_mm7d5ceb", "order_date": "date_mm7d46yp", "samples": "long_text_mm7dgyf0",
+    "email": "email_mm7d93rh", "phone": "phone_mm7d7ah5", "postcode": "text_mm7dr52f",
+    "outcome": "color_mm7da0kb", "attempts": "numeric_mm7dffvg", "last_attempt": "date_mm7d4fws",
+    "notes": "long_text_mm7dk7x7", "owner": "multiple_person_mm7d7qnq",
+    "no_quote_reason": "dropdown_mm7d3tgf", "quotes_log_link": "board_relation_mm7dge5p",
+}
+SAMPLE_GROUP_QUOTE_REQUIRED = "group_mm7dsdd"   # holding pen once quoted / linked to Quotes Log
+SAMPLE_OUTCOME_QUOTE = "Spoke - Quote Required"
+
+
+def fetch_sample_leads(token: str | None = None) -> list[dict]:
+    """Sample-call cards ready to quote: Call Outcome = 'Spoke - Quote Required' AND not yet
+    linked to a Quotes Log item. Returns [{item_id, customer, email, phone, postcode, order,
+    samples, notes}]. Read-only."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    ids = list(SAMPLE_COLS.values())
+    q = ("query($b:[ID!],$ids:[String!]){boards(ids:$b){items_page(limit:200){cursor "
+         "items{id name column_values(ids:$ids){id text}}}}}")
+    out: list[dict] = []
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": [str(SAMPLE_BOARD_ID)], "ids": ids}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if p.get("errors"):
+        raise RuntimeError(f"Monday API error: {str(p['errors'])[:200]}")
+    boards = (p.get("data") or {}).get("boards") or []
+    items = (boards[0].get("items_page", {}).get("items") if boards else []) or []
+    inv = {v: k for k, v in SAMPLE_COLS.items()}
+    for it in items:
+        cv = {inv.get(c["id"], c["id"]): (c.get("text") or "") for c in it.get("column_values", [])}
+        if (cv.get("outcome") or "").strip() != SAMPLE_OUTCOME_QUOTE:
+            continue
+        if (cv.get("quotes_log_link") or "").strip():   # already pushed to Quotes Log
+            continue
+        out.append({"item_id": it["id"], "customer": it.get("name") or "Customer",
+                    "email": cv.get("email") or "", "phone": cv.get("phone") or "",
+                    "postcode": cv.get("postcode") or "", "order": cv.get("order") or "",
+                    "samples": cv.get("samples") or "", "notes": cv.get("notes") or ""})
+    return out
+
+
+def mark_sample_quoted(item_id, quotes_log_item_id=None, token: str | None = None) -> bool:
+    """After a sample lead is quoted: link the card to its Quotes Log item and move it to the
+    'Quote Required' group so it drops out of Megan's to-quote queue. Returns True or raises."""
+    import json as _json
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    parts = ['mv: move_item_to_group(item_id:$item, group_id:"%s"){id}' % SAMPLE_GROUP_QUOTE_REQUIRED]
+    variables = {"item": str(item_id)}
+    if quotes_log_item_id:
+        parts.append('rel: change_column_value(board_id:$b, item_id:$item, column_id:"%s", '
+                     'value:$rel){id}' % SAMPLE_COLS["quotes_log_link"])
+        variables["b"] = str(SAMPLE_BOARD_ID)
+        variables["rel"] = _json.dumps({"item_ids": [str(quotes_log_item_id)]})
+    hdr = "mutation($item:ID!" + (",$b:ID!,$rel:JSON!" if quotes_log_item_id else "") + "){"
+    r = requests.post(MONDAY_API, json={"query": hdr + " ".join(parts) + "}", "variables": variables},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if p.get("errors"):
+        raise RuntimeError(f"Monday rejected the sample-quoted update: {str(p['errors'])[:200]}")
+    return True
+
+
 def monday_asset_url(asset_id, token: str | None = None) -> str | None:
     """Temporary signed download URL for a Monday file asset."""
     token = token or get_token()
@@ -2996,18 +3088,19 @@ QUOTES_LOG_BOARD_ID = 1786543404          # "Quotes Log" board — one row per q
 
 def create_quote_log_item(name, company=None, email=None, phone=None, postcode=None,
                           value_ex_vat=None, draft_no=None, stage="Quoted",
-                          quote_type="Standard", enquiry_date=None, token=None) -> str | None:
+                          quote_type="Standard", enquiry_date=None, lead="Email",
+                          token=None) -> str | None:
     """Add a row to the Quotes Log board (1786543404) when a quote is built — customer, £ value ex
     VAT, Shopify draft order #, quote stage, and a Day-2 follow-up date. Lands in 'Active Quotes'.
     Returns the new item id, or raises on a Monday error. Labels: Quote Stage 'Quoted'/'Info
-    Requested', Lead 'Email', Quote Type 'Standard'/'Needs Info'."""
+    Requested', Lead 'Email'/'Phone call', Quote Type 'Standard'/'Needs Info'."""
     import datetime as _dt
     import json as _json
     import re as _re
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
-    cols: dict = {"color_mm5eypbn": {"label": stage}, "color0": {"label": "Email"}}
+    cols: dict = {"color_mm5eypbn": {"label": stage}, "color0": {"label": lead or "Email"}}
     if company:
         cols["text0"] = str(company)[:255]
     if email:
