@@ -2367,6 +2367,168 @@ def mark_sample_quoted(item_id, quotes_log_item_id=None, token: str | None = Non
     return True
 
 
+SAMPLE_OWNER_ID = 25324062   # Megan Steer — default owner of new sample-call cards
+
+
+def fetch_sample_orders(since_days: int = 2) -> list[dict]:
+    """Recent Shopify orders that look like SAMPLE orders (free-text 'sample'), collapsed to one
+    entry per order with the sampled products. Returns [{order, date, customer, email, phone,
+    postcode, samples_text, total, high}]. Read-only."""
+    import datetime as _dt
+    store = get_secret("SHOPIFY_STORE")
+    tok = shopify_products_token()
+    since = (_dt.date.today() - _dt.timedelta(days=int(since_days))).isoformat()
+    q = ("query($q:String!){orders(first:100, query:$q, sortKey:CREATED_AT, reverse:true){edges{node{"
+         "name createdAt totalPriceSet{shopMoney{amount}} email customer{firstName lastName email phone} "
+         "shippingAddress{name zip phone} lineItems(first:30){edges{node{title variantTitle quantity}}}}}}}")
+    r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                      json={"query": q, "variables": {"q": f"created_at:>={since} sample"}},
+                      headers={"X-Shopify-Access-Token": tok, "Content-Type": "application/json"},
+                      timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {str(payload['errors'])[:200]}")
+    out: list[dict] = []
+    for e in payload.get("data", {}).get("orders", {}).get("edges", []):
+        n = e["node"]
+        lines = [li["node"] for li in n.get("lineItems", {}).get("edges", [])]
+        samp = [l for l in lines if "sample" in (l.get("title") or "").lower()]
+        if not samp:
+            continue
+        cust = n.get("customer") or {}
+        ship = n.get("shippingAddress") or {}
+        prod: dict = {}
+        for l in samp:
+            t = (l.get("title") or "").strip()
+            v = (l.get("variantTitle") or "").strip()
+            prod.setdefault(t, [])
+            if v and v not in prod[t]:
+                prod[t].append(v)
+        samples_text = "\n".join(t + ((" — " + ", ".join(vs)) if vs else "") for t, vs in prod.items())
+        amt = float((n.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
+        name = (ship.get("name")
+                or ((cust.get("firstName") or "") + " " + (cust.get("lastName") or "")).strip()
+                or n.get("email") or "Customer")
+        out.append({"order": n["name"], "date": (n.get("createdAt") or "")[:10], "customer": name,
+                    "email": n.get("email") or cust.get("email") or "",
+                    "phone": ship.get("phone") or cust.get("phone") or "",
+                    "postcode": ship.get("zip") or "", "samples_text": samples_text,
+                    "total": amt, "high": amt > 5})
+    return out
+
+
+def sample_board_index(token: str | None = None):
+    """(seen_order_numbers set, do_not_contact_emails set) across the WHOLE Sample Follow-Up board,
+    for de-dup (never re-add an order) + permanent Do-Not-Contact suppression."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    ids = [SAMPLE_COLS["order"], SAMPLE_COLS["email"], SAMPLE_COLS["outcome"]]
+    seen: set = set()
+    dnc: set = set()
+    cursor = None
+    for _ in range(25):
+        q = ("query($b:[ID!],$ids:[String!],$c:String){boards(ids:$b){items_page(limit:200,cursor:$c)"
+             "{cursor items{column_values(ids:$ids){id text}}}}}")
+        r = requests.post(MONDAY_API, json={"query": q, "variables": {
+            "b": [str(SAMPLE_BOARD_ID)], "ids": ids, "c": cursor}},
+            headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+        r.raise_for_status()
+        p = r.json()
+        if p.get("errors"):
+            raise RuntimeError(f"Monday API error: {str(p['errors'])[:200]}")
+        boards = (p.get("data") or {}).get("boards") or [{}]
+        page = boards[0].get("items_page", {}) if boards else {}
+        for it in page.get("items", []):
+            cv = {c["id"]: (c.get("text") or "") for c in it.get("column_values", [])}
+            o = (cv.get(SAMPLE_COLS["order"]) or "").strip()
+            if o:
+                seen.add(o)
+            if (cv.get(SAMPLE_COLS["outcome"]) or "").strip() == "Do Not Contact":
+                em = (cv.get(SAMPLE_COLS["email"]) or "").strip().lower()
+                if em:
+                    dnc.add(em)
+        cursor = page.get("cursor")
+        if not cursor:
+            break
+    return seen, dnc
+
+
+def _create_sample_call_item(order, token) -> str | None:
+    import json as _json
+    import re as _re
+    cols: dict = {
+        SAMPLE_COLS["order"]: order["order"],
+        SAMPLE_COLS["samples"]: {"text": order.get("samples_text") or ""},
+        SAMPLE_COLS["outcome"]: {"label": "Not Called"},
+        SAMPLE_COLS["attempts"]: "0",
+        SAMPLE_COLS["owner"]: {"personsAndTeams": [{"id": SAMPLE_OWNER_ID, "kind": "person"}]},
+    }
+    if order.get("date"):
+        cols[SAMPLE_COLS["order_date"]] = {"date": str(order["date"])[:10]}
+    if order.get("email"):
+        cols[SAMPLE_COLS["email"]] = {"email": order["email"], "text": order["email"]}
+    ph = _re.sub(r"[^0-9+]", "", str(order.get("phone") or ""))
+    if ph:
+        cols[SAMPLE_COLS["phone"]] = {"phone": ph, "countryShortName": "GB"}
+    if order.get("postcode"):
+        cols[SAMPLE_COLS["postcode"]] = str(order["postcode"])[:20]
+    if order.get("high"):
+        cols[SAMPLE_COLS["notes"]] = {
+            "text": "Larger sample order (£%.2f) — check the order before quoting." % order["total"]}
+    q = ("mutation($b:ID!,$g:String!,$n:String!,$c:JSON!){create_item(board_id:$b,group_id:$g,"
+         "item_name:$n,column_values:$c,create_labels_if_missing:true){id}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": str(SAMPLE_BOARD_ID), "g": "topics",
+        "n": str(order.get("customer") or "Customer")[:255], "c": _json.dumps(cols)}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if p.get("errors"):
+        raise RuntimeError(str(p["errors"])[:200])
+    return (((p.get("data") or {}).get("create_item") or {}).get("id"))
+
+
+def run_sample_feed(since_days: int = 2, dry_run: bool = False, token: str | None = None) -> dict:
+    """Daily feed: pull the last `since_days` of Shopify sample orders and add any NEW ones to the
+    Sample Follow-Up board's 'To Call' group. De-dups on Order # and never re-adds a Do-Not-Contact
+    customer. Returns a summary dict."""
+    token = token or get_token()
+    if not token:
+        return {"ok": False, "error": "No MONDAY_API_TOKEN configured"}
+    try:
+        orders = fetch_sample_orders(since_days=since_days)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "Shopify: " + str(e)[:200]}
+    try:
+        seen, dnc = sample_board_index(token)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "Monday: " + str(e)[:200]}
+    created: list = []
+    would: list = []
+    skipped_dupe = skipped_dnc = failed = 0
+    for o in orders:
+        if o["order"] in seen:
+            skipped_dupe += 1
+            continue
+        if (o.get("email") or "").strip().lower() in dnc:
+            skipped_dnc += 1
+            continue
+        if dry_run:
+            would.append(o["order"])
+            continue
+        try:
+            _create_sample_call_item(o, token)
+            created.append(o["order"])
+        except Exception:  # noqa: BLE001
+            failed += 1
+    return {"ok": True, "dry_run": dry_run, "found": len(orders),
+            "created": len(created), "would_add": len(would),
+            "skipped_dupe": skipped_dupe, "skipped_dnc": skipped_dnc, "failed": failed,
+            "orders": (would if dry_run else created)}
+
+
 def monday_asset_url(asset_id, token: str | None = None) -> str | None:
     """Temporary signed download URL for a Monday file asset."""
     token = token or get_token()
