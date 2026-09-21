@@ -6567,8 +6567,8 @@ def _scotland_delivery_note(pc):
 def _delivery_note(parsed):
     """Standard stock/delivery-by-postcode note, with the internal-doors caveat when the
     enquiry involves doors and a Scotland surcharge note for Scottish postcodes."""
-    note = ("Please note that stock availability and delivery charges can vary depending on the "
-            "delivery postcode — if you let us know your postcode we'll confirm both.")
+    note = ("Please note that delivery charges can vary depending on the delivery postcode — if "
+            "you let us know your postcode we'll confirm the delivery cost.")
     text = " ".join(str(parsed.get(k) or "") for k in ("product_range", "summary")).lower()
     text += " " + " ".join(str(it.get("description") or "")
                            for it in (parsed.get("items") or [])).lower()

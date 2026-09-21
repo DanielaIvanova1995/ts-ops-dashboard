@@ -1809,9 +1809,8 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
     greet = f"the customer by first name ('{name}')" if name else "the customer with 'Hello'"
     # Standard note for every quote/clarify email: stock + delivery vary by postcode.
     delivery_note = (data.get("delivery_note") or
-                     "Please note that stock availability and delivery charges can vary "
-                     "depending on the delivery postcode — let us know your postcode and we'll "
-                     "confirm both.")
+                     "Please note that delivery charges can vary depending on the delivery "
+                     "postcode — let us know your postcode and we'll confirm the delivery cost.")
     if kind == "quote":
         facts = ("QUOTED ITEMS (use these EXACT prices and figures, never change a number):\n"
                  + "\n".join(f"- {l['qty']} x {l['title']} @ GBP {l['unit']:.2f} "
@@ -1879,6 +1878,13 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         "roll-end, ex-display, seconds, off-cut or discontinued/discounted stock — we do not "
         "promote those and that stock is not reliably available. If you mention price flexibility "
         "at all, keep it general (we'll do our best on price) and never tie it to clearance stock. "
+        "NEVER tell the customer we're unsure whether we stock an item, that we'll 'check/verify "
+        "availability', or that stock 'depends on' anything — we confirm availability ourselves "
+        "before sending, so write as if the items are available. STOCK AVAILABILITY DOES NOT "
+        "depend on the postcode; only the DELIVERY CHARGE varies by postcode — never say stock "
+        "varies by area. NEVER offer or mention installation/fitting services EXCEPT for external "
+        "windows and doors bought from us — for anything else we are supply-only, so do not raise "
+        "installation at all. "
         "Return ONLY the email body text - no subject line, no notes, no preamble.\n\n"
         "CONVERSATION SO FAR (most recent last):\n" + (context or "(no prior messages)")[:5000]
         + "\n\n" + facts
