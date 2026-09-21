@@ -7833,6 +7833,73 @@ def _render_hardie_quickform(eid):
                 st.rerun()
 
 
+def _render_molan_quickform(eid):
+    """Guided Molan polycarbonate-roof intake: sheet type/tint/width, sheets by count OR roof width,
+    glazing bars + tape. Writes a clean requirement line into the quote's details box (polycarbonate
+    brand-locks to Molan automatically), so the normal pipeline prices and drafts it."""
+    import math
+    with st.container(border=True):
+        st.markdown("##### 🪟 Molan polycarbonate quick form")
+        st.caption("Polycarbonate is always **Molan**. Pick the sheet, enter sheets (by number **or** "
+                   "roof width), add glazing bars + tape, then it fills the quote below.")
+        r1 = st.columns(3)
+        sheet_type = r1[0].selectbox("Sheet", list(POLY_SHEETS.keys()), key=f"mq_st_{eid}")
+        colour = r1[1].selectbox("Tint", POLY_COLOURS, key=f"mq_col_{eid}")
+        width_label = r1[2].selectbox("Sheet width", list(POLY_WIDTHS.keys()), key=f"mq_w_{eid}")
+        sheet_w_mm = POLY_WIDTHS[width_label]
+        r2 = st.columns(3)
+        by = r2[0].radio("Sheets by", ["Number of sheets", "Roof width (m)"], key=f"mq_by_{eid}",
+                         horizontal=True)
+        if by.startswith("Number"):
+            sheets = int(r2[1].number_input("Number of sheets", min_value=0, step=1, value=0,
+                                            key=f"mq_n_{eid}"))
+        else:
+            roofw = r2[1].number_input("Roof width (m)", min_value=0.0, step=0.5, value=0.0,
+                                       key=f"mq_rw_{eid}")
+            sheets = math.ceil(roofw / (sheet_w_mm / 1000.0)) if roofw else 0
+            r2[1].caption(f"≈ **{sheets}** sheets")
+        rake = r2[2].number_input("Length down the slope (m)", min_value=0.0, step=0.5, value=0.0,
+                                  key=f"mq_rake_{eid}")
+        b1, b2, b3 = st.columns(3)
+        inc_bars = b1.checkbox("Include glazing bars", value=True, key=f"mq_bars_{eid}")
+        system = b2.selectbox("Bar system", list(POLY_SYSTEMS.keys()), key=f"mq_sys_{eid}",
+                              disabled=not inc_bars)
+        bar_colour = b3.selectbox("Bar colour", ["White", "Brown"], key=f"mq_bc_{eid}",
+                                  disabled=not inc_bars)
+        inc_acc = st.checkbox("Include sealing (anti-dust) + vented tape", value=True,
+                              key=f"mq_acc_{eid}")
+        if st.button("➕ Put this in the quote", key=f"mq_add_{eid}", type="primary"):
+            thick = sheet_type.split("mm")[0] + "mm"
+            kind = POLY_SHEETS[sheet_type]
+            lines = []
+            if sheets > 0:
+                rlabel = f" x {rake:g}m" if rake else ""
+                lines.append(f"{sheets} x {thick} {colour} {kind} Polycarbonate Sheet "
+                             f"{sheet_w_mm}mm wide{rlabel}")
+            if inc_bars and sheets > 0:
+                barlen = (next((b for b in POLY_BAR_LENGTHS if b >= rake), 6) if rake else 3)
+                sysd = POLY_SYSTEMS[system]
+                inter = max(0, sheets - 1)
+                roof_w_m = sheets * (sheet_w_mm / 1000.0)
+                wp = math.ceil(roof_w_m / 4) if roof_w_m else 1
+                if inter > 0:
+                    lines.append(f"{inter} x {sysd['inter']} {bar_colour} {barlen}m")
+                lines.append(f"2 x {sysd['end']} {bar_colour} {barlen}m")
+                lines.append(f"{wp} x {sysd['wallplate']} {bar_colour} 4m")
+                if sysd.get("eaves"):
+                    lines.append(f"{wp} x {sysd['eaves']} {bar_colour} 4m")
+            if inc_acc and sheets > 0:
+                rolls = max(1, math.ceil(sheets * (sheet_w_mm / 1000.0) / 33))
+                lines.append(f"{rolls} x Anti Dust Tape")
+                lines.append(f"{rolls} x Aluminium Foil Blanking Tape")
+            if not lines:
+                st.warning("Enter the number of sheets (or a roof width) first.")
+            else:
+                _quote_manual()[eid] = "; ".join(lines)
+                _quote_cache().pop(eid, None)
+                st.rerun()
+
+
 def _render_sample_leads():
     """Sample follow-up calls marked 'Spoke – Quote Required' → quote them with the same pipeline
     as an email lead, then log to the Quotes Log (as a Phone call) and mark the call Quoted."""
@@ -7880,7 +7947,19 @@ def _render_sample_leads():
         "conversationId": None, "hasAttachments": False, "categories": [],
         "_is_sample": True, "_sample_item_id": lead["item_id"],
     }
-    _render_hardie_quickform(synth["id"])
+    # Guided quick form — default to the range they sampled (Hardie / Molan), or none.
+    _sred = (lead.get("samples") or "").lower()
+    _qf_opts = ["— none (type it) —", "🧱 James Hardie", "🪟 Molan polycarbonate"]
+    _default = ("🪟 Molan polycarbonate"
+                if any(w in _sred for w in ("polycarbonate", "ez glaze", "ezglaze", "multiwall",
+                                            "twinwall", "poly sheet"))
+                else "🧱 James Hardie" if "hardie" in _sred else "— none (type it) —")
+    qf = st.radio("Quick form", _qf_opts, index=_qf_opts.index(_default), horizontal=True,
+                  key=f"qf_{synth['id']}")
+    if qf.startswith("🧱"):
+        _render_hardie_quickform(synth["id"])
+    elif qf.startswith("🪟"):
+        _render_molan_quickform(synth["id"])
     _render_quote_block(synth)
 
 
