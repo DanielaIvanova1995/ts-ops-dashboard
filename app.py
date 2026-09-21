@@ -6649,6 +6649,104 @@ def _mark_quote_progress(email, category):
         st.caption("⚠️ Couldn't tag the email in Outlook (" + str(e)[:120] + ").")
 
 
+# --- Discount Desk: how low can we go on a quote and still make it worth it? -------------
+# Proportional to the quote's OWN margin (a fat quote has more to give than a thin one),
+# tiered by order size, always after the ~1.8% Shopify card fee, with an 8% rock-bottom.
+# Daniela's policy 2026-09-21 — floors are the MOST we give, never the opening offer.
+SHOPIFY_FEE = 0.018
+# (order value ceiling ex-VAT, share of the margin we may give away, label)
+_DISCOUNT_BANDS = [
+    (1500,          0.15, "Under £1.5k"),
+    (5000,          0.25, "£1.5k–£5k"),
+    (15000,         0.40, "£5k–£15k"),
+    (float("inf"),  0.60, "Over £15k"),
+]
+_DISCOUNT_FLOOR_MIN = 0.08   # never quote below this margin, however big the order
+
+
+def _quote_cost_margin(matched):
+    """Best-effort cost + margin for a built quote. Each matched line is priced against
+    its OWN supplier via the Shopify vendor (Hardie→UPB, Molan→Molan, …); Shopify's
+    cost-per-item is the fallback. Returns (sell, cost, margin, n_priced, n_total) where
+    margin is the GROSS (pre-fee) share; None margin if nothing could be costed."""
+    import order_processing as _op
+    sell = cost = 0.0
+    n_priced = 0
+    n_total = len(matched)
+    for l in matched:
+        m = l["match"]
+        qty = l["qty"]
+        price = m.get("price")
+        if price is None:
+            continue
+        c = None
+        try:
+            c = _op._line_cost(m.get("sku"), m.get("vendor"), name=m.get("title"))
+        except Exception:  # noqa: BLE001
+            c = None
+        if c is None:
+            c = _shopify_cost(m.get("sku"))
+        if c is None:
+            continue
+        sell += price * qty
+        cost += c * qty
+        n_priced += 1
+    if n_priced == 0 or sell <= 0:
+        return sell, cost, None, n_priced, n_total
+    return sell, cost, (sell - cost) / sell, n_priced, n_total
+
+
+def _discount_floor(order_value, margin):
+    """Given the order value (ex-VAT) and its gross margin, return the discount floor:
+    {give, band, floor_margin(after fee), floor_price, max_disc, room}. floor_margin is the
+    real margin we'd keep after the Shopify fee; floor_price is the lowest we may quote."""
+    give, band = next((g, lbl) for cap, g, lbl in _DISCOUNT_BANDS if order_value < cap)
+    cost = order_value * (1 - margin)
+    floor_margin_gross = max(_DISCOUNT_FLOOR_MIN, margin * (1 - give))
+    floor_price = cost / (1 - floor_margin_gross) if floor_margin_gross < 1 else order_value
+    max_disc = max(0.0, order_value - floor_price)
+    no_room = margin <= floor_margin_gross or max_disc <= 0
+    return {"give": give, "band": band,
+            "floor_margin": floor_margin_gross - SHOPIFY_FEE,   # real, after the card fee
+            "margin_now": margin - SHOPIFY_FEE,
+            "floor_price": order_value if no_room else floor_price,
+            "max_disc": 0.0 if no_room else max_disc,
+            "no_room": no_room}
+
+
+def _render_discount_desk(matched):
+    """Inline panel under a quote: the live margin + how far Megan can discount to win it,
+    without asking Daniela. Reads the quote's real cost, so it needs no typing."""
+    sell, cost, margin, n_priced, n_total = _quote_cost_margin(matched)
+    if margin is None:
+        st.caption("💬 Discount Desk: couldn't read our cost on these lines, so no floor to show "
+                   "— check the margin before discounting.")
+        return
+    d = _discount_floor(sell, margin)
+    pct = lambda x: f"{x * 100:.0f}%"
+    with st.container(border=True):
+        st.markdown("#### 💬 Discount Desk — how low can you go?")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Margin now (after fee)", pct(max(0, d["margin_now"])))
+        if d["no_room"]:
+            c2.metric("Lowest you can quote", f"£{sell:,.0f}", help="Already at/below the floor")
+            c3.metric("Most off", "£0")
+            st.caption(f"This quote already sits at the floor ({d['band']} band) — **hold the price**; "
+                       "any discount is Daniela's call.")
+        else:
+            c2.metric("Lowest you can quote", f"£{d['floor_price']:,.0f}",
+                      help=f"Holds {pct(max(0, d['floor_margin']))} margin after fees")
+            c3.metric("Most you can take off", f"£{d['max_disc']:,.0f}",
+                      delta=f"-{d['max_disc'] / sell * 100:.1f}%", delta_color="off")
+            st.caption(f"**{d['band']}** order → you can give away up to **{pct(d['give'])}** of the "
+                       f"margin, down to **£{d['floor_price']:,.0f}** (keeps "
+                       f"{pct(max(0, d['floor_margin']))} after the 1.8% card fee). That's the *most* "
+                       "— quote the least that wins it. Below the floor, check with Daniela.")
+        if n_priced < n_total:
+            st.caption(f"⚠️ Margin based on {n_priced} of {n_total} lines (couldn't cost the rest) — "
+                       "treat the floor as a guide.")
+
+
 def _render_quote_block(email):
     """Build + render one email's quote: the priced table + create buttons, or a
     clarify draft if we can't quote yet. Safe to call inside a loop/expander."""
@@ -6760,6 +6858,10 @@ def _render_quote_block(email):
                 '<th style="padding:6px 10px;text-align:right">Line</th></tr>'
                 + rows + "</table>", unsafe_allow_html=True)
     st.markdown(f"**Subtotal (matched lines): £{total:,.2f}**")
+
+    # Discount Desk — live margin + how far we can discount to win it (no typing needed).
+    if matched:
+        _render_discount_desk(matched)
 
     # Customer-facing caveats: the AI's assumptions + any items we couldn't price.
     all_caveats = list(caveats)
