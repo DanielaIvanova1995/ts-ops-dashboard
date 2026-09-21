@@ -1872,6 +1872,9 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         "Structure it as a proper email: a greeting line, a short opening sentence, the body "
         "(use '- ' for any bulleted list), a courteous closing line, then the sign-off exactly:\n"
         "Kind regards,\nTrade Superstore Online\n"
+        "Write PLAIN TEXT only. Do NOT use any markdown formatting whatsoever: no ** or __ for "
+        "bold, no * or _ for italics, no # headings, no backticks. If you want to emphasise a "
+        "heading or label, just write it in plain words (e.g. 'What this quote is based on:'). "
         "Return ONLY the email body text - no subject line, no notes, no preamble.\n\n"
         "CONVERSATION SO FAR (most recent last):\n" + (context or "(no prior messages)")[:5000]
         + "\n\n" + facts
@@ -1885,7 +1888,29 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
         timeout=60,
     )
     r.raise_for_status()
-    return r.json()["content"][0]["text"].strip()
+    return strip_markdown(r.json()["content"][0]["text"].strip())
+
+
+def strip_markdown(text: str) -> str:
+    """Remove markdown formatting markers so a body composed by the AI reads as clean
+    plain text in an Outlook draft (which shows literal ** / __ / # otherwise). Keeps
+    '- ' bullets and the words themselves; only strips the emphasis/heading syntax."""
+    import re
+    if not text:
+        return text
+    t = text
+    # Bold/italic: **x** __x__ *x* _x_  -> x  (run bold first, then single)
+    t = re.sub(r"\*\*(.+?)\*\*", r"\1", t, flags=re.S)
+    t = re.sub(r"__(.+?)__", r"\1", t, flags=re.S)
+    t = re.sub(r"(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)", r"\1", t, flags=re.S)
+    t = re.sub(r"(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)", r"\1", t, flags=re.S)
+    # Any stray leftover bold markers
+    t = t.replace("**", "").replace("__", "")
+    # Headings: leading #'s on a line
+    t = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", t)
+    # Inline code backticks
+    t = t.replace("`", "")
+    return t
 
 
 def extract_quote_items(email_text: str, attachments: list | None = None) -> dict:
