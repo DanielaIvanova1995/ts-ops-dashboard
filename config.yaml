@@ -28,6 +28,13 @@ credentials:
       email: megan@tradesuperstoreonline.co.uk
       role: staff
       password: $2b$12$8LzNd.m9hkxgYXAqJaHer.d6.W0LJJUoXpbURrv03ATJAYjcb3Cyu
+    meganclark:
+      name: Megan Clark
+      email: meganclark@tradesuperstoreonline.co.uk
+      role: staff
+      # New starter doing quotes — restricted to the Quotes module only (see app.py menu gating).
+      modules: [Quotes]
+      password: $2b$12$U65qzddHrdEF7nNVbEeYDe.n0YKQaMNbpvUkC7p.BGOEXP4ebG7vi
     melissa:
       name: Melissa Covaci
       email: mel@tradesuperstoreonline.co.uk
