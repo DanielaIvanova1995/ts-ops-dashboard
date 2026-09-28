@@ -424,10 +424,11 @@ def _is_fixed_sheet_size(supplier, *texts):
 
 
 def _persqm_cost(sku, supplier, *texts):
-    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan multiwall polycarbonate).
-    Size-aware: a STANDARD fixed size uses the lower fixed rate; a bespoke cut size uses the higher
-    cut rate. Size is read from the SKU/variant/name (any of `texts`). None if this supplier/SKU
-    isn't per-m² priced or no size can be found — so pricing falls through to the normal lookup."""
+    """Per-m² sheet cost for the PO = ordered area × the base SKU's £/m² rate (Molan multiwall
+    polycarbonate). The PO ALWAYS uses the LOWER (fixed-size) rate whenever one exists — never the
+    higher cut-to-size rate — whatever the ordered size (Daniela 2026-09-28: PO creator must only
+    ever use the lower prices). Falls back to the cut rate only if a code has no fixed rate at all.
+    Size is read from the SKU/variant/name. None if not per-m² priced or no size is found."""
     sup = _canon_sup(supplier)
     cut = _persqm_rates().get(sup) or {}
     fixed = _persqm_fixed_rates().get(sup) or {}
@@ -442,15 +443,18 @@ def _persqm_cost(sku, supplier, *texts):
     area = _sheet_area_m2(sku, *texts)
     if not area:
         return None
-    if _is_fixed_sheet_size(supplier, sku, *texts):
-        b = _base(fixed)
-        if b:
-            return round(area * fixed[b], 2)
-    b = _base(cut)
-    if b:
-        return round(area * cut[b], 2)
-    b = _base(fixed)
-    return round(area * fixed[b], 2) if b else None
+    # Prefer the fixed (lower) rate always; fall back to cut only if no fixed rate for this code.
+    bf = _base(fixed)
+    bc = _base(cut)
+    if bf and bc:
+        rate = min(fixed[bf], cut[bc])
+    elif bf:
+        rate = fixed[bf]
+    elif bc:
+        rate = cut[bc]
+    else:
+        return None
+    return round(area * rate, 2)
 
 
 
