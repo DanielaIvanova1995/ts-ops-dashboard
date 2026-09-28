@@ -1861,9 +1861,20 @@ def compose_customer_email(context: str, kind: str, data: dict) -> str:
             facts += ("\n\nTRADE-DISCOUNT NOTE (the customer asked about a discount — open with "
                       "this, reworded naturally, and do NOT quote a specific discount %): " + disc)
         facts += "\n\nINCLUDE THIS NOTE (reword naturally): " + delivery_note
+        att = ("\n\nATTACHMENTS: the customer sent one or more drawings/plans/photos or a spec. "
+               "Open by acknowledging specifically that we've reviewed what they sent"
+               + (f" for their {data.get('product_range')} enquiry" if data.get("product_range") else "")
+               + ", and be HONEST: explain that to prepare an accurate quote/take-off we need the "
+               "exact measurements the questions below ask for (the drawings don't give us enough to "
+               "measure from reliably). Do NOT pretend we can price it without them, and do NOT ask "
+               "for anything the drawings already make clear." if data.get("had_attachments") else "")
+        facts += att
         task = ("Write a warm, professional email asking the customer for the missing details so "
                 "we can prepare their quote. Acknowledge their enquiry / our previous messages "
                 "using the conversation for context. "
+                + ("If an ATTACHMENTS note is provided, open exactly as it instructs — thank them for "
+                   "the drawings/details, confirm we've looked at them, and honestly explain we need "
+                   "the measurements below to quote accurately. " if data.get("had_attachments") else "")
                 + ("If a trade-discount note is provided, lead with it warmly (we may be able to "
                    "offer a discount depending on product, quantity and order size) WITHOUT "
                    "committing to a figure. " if disc else "")
@@ -1990,6 +2001,17 @@ def extract_quote_items(email_text: str, attachments: list | None = None) -> dic
         "rather than an area — set cladding.is_cladding=false and put each product in items with the "
         "stated quantity. A stated number of lengths/boards/panels/units is ALWAYS the item qty "
         "(e.g. '39 lengths' → qty 39); never treat it as an area.\n"
+        "CLADDING WITH DRAWINGS/PLANS BUT NO USABLE AREA: if this is a cladding enquiry (Hardie, "
+        "Kerrafront, Cedral or any board cladding) and they've sent drawings/elevations/plans or "
+        "described the job, but you CANNOT read off a reliable area to clad (no scale, or dimensions "
+        "you can't turn into m² with confidence), set is_cladding=false and DO NOT invent an area. "
+        "Instead write RELEVANT questions that (a) acknowledge specifically what they sent and which "
+        "cladding product it is, and (b) honestly explain we need accurate measurements to prepare a "
+        "proper take-off, then ask for exactly what's missing — the width and height of each elevation "
+        "to be clad (or the total area in m²), the size/number of windows and doors to deduct and trim, "
+        "and the number of external and internal corners. Ask ONLY for genuinely-missing measurements; "
+        "never ask about anything the drawings already show, and never send a generic question that "
+        "ignores their drawings. Keep it to a short, friendly bulleted set of measurement asks.\n"
         "ALWAYS populate items with EVERY product you can identify, even if the request is "
         "incomplete — we prefer to quote for what we can and flag the rest. If a quantity is "
         "missing, assume a sensible quantity and add a caveat saying it was assumed. Only leave "

@@ -6659,7 +6659,9 @@ def _build_quote(email):
                 parsed.get("thread", ""), "clarify",
                 {"customer_name": parsed.get("customer_name"), "questions": qs,
                  "suggestions": parsed["suggestions"], "delivery_note": parsed["delivery_note"],
-                 "discount_note": discount_note})
+                 "discount_note": discount_note,
+                 "had_attachments": parsed.get("_had_attachments"),
+                 "product_range": parsed.get("product_range")})
         except Exception:  # noqa: BLE001 — no AI key etc.; render falls back to a template
             parsed["clarify_email"] = None
     return parsed
