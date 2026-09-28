@@ -1952,8 +1952,8 @@ def extract_quote_items(email_text: str, attachments: list | None = None) -> dic
         '"code":"any product code/SKU they gave, else null"}],'
         '"questions":["short, polite, customer-facing question for each missing detail"],'
         '"caveats":["short customer-facing note on any assumption or missing detail to check"],'
-        '"cladding":{"is_cladding":true|false,"system":"hardie|kerrafront|null",'
-        '"product":"Hardie Plank|Hardie VL Plank|Kerrafront|null",'
+        '"cladding":{"is_cladding":true|false,"system":"hardie|kerrafront|cedral|null",'
+        '"product":"Hardie Plank|Hardie VL Plank|Kerrafront|Cedral Lap|Cedral Click|null",'
         '"gross_area_m2":<number or null>,"openings_m2":<number or null>,"colour":"... or null",'
         '"wall_height_m":<number or null>,"total_width_m":<number or null>,'
         '"external_corners":<int or null>,"internal_corners":<int or null>,'
@@ -1968,11 +1968,15 @@ def extract_quote_items(email_text: str, attachments: list | None = None) -> dic
         '"urgency":"normal|urgent"}\n'
         "trade_discount is true if they ask about a trade/business/bulk discount, trade "
         "account or trade pricing.\n"
-        "CLADDING TAKE-OFF (area-based, James Hardie OR Vox Kerrafront): set cladding.is_cladding=true "
-        "when this is a James Hardie Plank / Hardie VL Plank OR a Vox Kerrafront cladding enquiry AND "
+        "CLADDING TAKE-OFF (area-based, James Hardie OR Vox Kerrafront OR Cedral): set cladding.is_cladding=true "
+        "when this is a James Hardie Plank / Hardie VL Plank OR a Vox Kerrafront OR a Cedral fibre-cement "
+        "cladding enquiry AND "
         "the size is given as an AREA (m², or width×height dimensions to multiply). Set "
-        "system='hardie' or 'kerrafront' accordingly (Kerrafront product codes look like FS-302, "
-        "FS-222, FS-211, FS-251). For Kerrafront set single_board=true ONLY if they name a single-board "
+        "system='hardie', 'kerrafront' or 'cedral' accordingly (Kerrafront product codes look like FS-302, "
+        "FS-222, FS-211, FS-251; Cedral is the fibre-cement weatherboard sold as 'Cedral Lap' — the "
+        "overlapping weatherboard look — or 'Cedral Click' — the flush tongue-and-groove board — often with "
+        "a C-number colour code like C10, C05, C50). For Cedral default product to 'Cedral Lap' unless they "
+        "clearly say Click/flush. For Kerrafront set single_board=true ONLY if they name a single-board "
         "profile (default false = the double FS-302 board). Then fill product, gross_area_m2 = the area "
         "to clad INCLUDING windows/doors, openings_m2 = total window/door area to deduct, colour, and "
         "whether they asked for trims / EPDM tape / screws / paint / battens, and leave items EMPTY "

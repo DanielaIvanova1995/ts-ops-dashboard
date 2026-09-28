@@ -6344,6 +6344,89 @@ def _email_cladding_takeoff(clad):
     return raw, cav
 
 
+def _email_cedral_takeoff(clad):
+    """Cedral fibre-cement cladding take-off. Boards (Cedral Lap ~0.53 m²/board, or Cedral Click
+    ~0.60) + external/internal corner profiles + starter/base vent profile + window/door surround
+    + optional battens/fixings. Sizes every accessory from the counts and dimensions given, or from
+    sensible assumptions each flagged as a caveat. Returns (raw_lines, caveats)."""
+    import math
+    prod_l = (clad.get("product") or "").lower()
+    is_click = "click" in prod_l
+    product = "Cedral Click" if is_click else "Cedral Lap"
+    cov = 0.60 if is_click else 0.53         # Click (flush T&G) vs Lap (weatherboard) coverage
+    gross = clad.get("gross_area_m2") or 0
+    openings = clad.get("openings_m2") or 0
+    net = max(0.0, gross - openings)
+    if net <= 0:
+        return None, None
+    colour = (clad.get("colour") or "").strip()
+    cav = []
+
+    boards = math.ceil(net / cov * 1.10)     # +10% waste
+    raw = [{"description": f"{product} cladding board" + (f" — {colour}" if colour else ""),
+            "qty": boards, "search": f"{product} {colour}".strip()}]
+    cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) ÷ "
+               f"{cov} m²/board + 10% waste = {boards} {product} boards.")
+    if not colour:
+        cav.append("Colour/finish not confirmed — please confirm which Cedral colour you'd like.")
+
+    height = clad.get("wall_height_m") or 0
+    width = clad.get("total_width_m") or 0
+    if not height and width:
+        height = net / width if width else 0
+    if not height:
+        height = 2.4
+        cav.append(f"Assumed a cladding height of {height:.1f} m (not stated) to size the trims — "
+                   "confirm the run height and we'll refine.")
+    if not width:
+        width = net / height if height else 0
+        cav.append(f"Assumed ~{width:.1f} m total run width (area ÷ height) to size the "
+                   "starter/corner trims — confirm the elevation widths and we'll refine.")
+
+    def L3(lm):                              # Cedral trims come in 3 m lengths, round up
+        return max(1, math.ceil(lm / 3.0))
+
+    if clad.get("wants_trims"):
+        ext = clad.get("external_corners")
+        if ext is None:
+            ext = 4
+            cav.append("Assumed 4 external corners (not confirmed) — tell us the exact number and "
+                       "we'll adjust.")
+        if ext:
+            raw.append({"description": f"Cedral external corner profile ({ext} × {height:.1f} m)",
+                        "qty": L3(ext * height),
+                        "search": f"Cedral external corner profile {colour}".strip()})
+        intc = clad.get("internal_corners") or 0
+        if intc:
+            raw.append({"description": f"Cedral internal corner profile ({intc} × {height:.1f} m)",
+                        "qty": L3(intc * height),
+                        "search": f"Cedral internal corner profile {colour}".strip()})
+        raw.append({"description": "Cedral starter / base ventilation profile", "qty": L3(width),
+                    "search": "Cedral starter profile"})
+        nwin = clad.get("num_windows")
+        if nwin is None and openings > 0:
+            nwin = max(1, round(openings / 1.5))
+            cav.append(f"Assumed {nwin} window/opening(s) to trim (from {openings:.1f} m² of "
+                       "openings) — confirm the number/size and we'll refine.")
+        if nwin:
+            raw.append({"description": f"Cedral window/door surround profile ({nwin} opening(s))",
+                        "qty": L3(nwin * 5.0),
+                        "search": f"Cedral window door surround profile {colour}".strip()})
+        cav.append("Trim pack sized from the corners, run width and openings above (3 m lengths, "
+                   "rounded up). Send exact elevation widths / corner counts to tighten it.")
+
+    batten_lm = net / 0.6
+    if clad.get("wants_battens"):
+        raw.append({"description": "Treated timber battens (25×50, per 3 m length)",
+                    "qty": max(1, math.ceil(batten_lm / 3.0)),
+                    "search": "treated timber batten 25 x 50"})
+    if clad.get("wants_screws"):
+        raw.append({"description": "Cedral facade fixings (screws / rivets)",
+                    "qty": max(1, math.ceil(boards * 8 / 250)),
+                    "search": f"Cedral fixing screws {colour}".strip()})
+    return raw, cav
+
+
 # Brand / filler tokens that must NOT, on their own, justify a fallback match — so a
 # 'James Hardie top vent strip' can't match a 'James Hardie plank board' just on the brand.
 # Passed as the invoice scorer's `common` set (same role as order-wide colour words there).
@@ -6496,9 +6579,13 @@ def _build_quote(email):
         raw_clad, clad_cav = (None, None)
         if clad.get("is_cladding") and (clad.get("gross_area_m2") or 0) > 0:
             sys_ = (clad.get("system") or "").lower()
-            is_kerra = sys_ == "kerrafront" or "kerrafront" in (clad.get("product") or "").lower()
-            raw_clad, clad_cav = (_email_kerrafront_takeoff(clad) if is_kerra
-                                  else _email_cladding_takeoff(clad))
+            prod_ = (clad.get("product") or "").lower()
+            if sys_ == "kerrafront" or "kerrafront" in prod_:
+                raw_clad, clad_cav = _email_kerrafront_takeoff(clad)
+            elif sys_ == "cedral" or "cedral" in prod_:
+                raw_clad, clad_cav = _email_cedral_takeoff(clad)
+            else:
+                raw_clad, clad_cav = _email_cladding_takeoff(clad)
         if raw_clad:
             # Cladding: quote by converting area to boards (+ requested accessories).
             lines = []
