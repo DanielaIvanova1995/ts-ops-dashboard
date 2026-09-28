@@ -8774,6 +8774,42 @@ def _bulk_reconcile_one(s, limits):
     return f"{sup}: {n_pay} ready to pay (£{to_pay:,.0f}){tail}"
 
 
+def _recon_sig(snap):
+    """Stable signature for a saved reconciliation, so 'remove from view' hides the same statement
+    whether it came from the Monday blob or the Supabase history."""
+    return "|".join([str(snap.get("vid") or ""), str(snap.get("statement_date") or ""),
+                     str(snap.get("supplier") or "")])
+
+
+def _recon_hidden_set():
+    """Durably-hidden reconciliation signatures (Supabase app_config). Empty if no DB."""
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            return set(supabase_db.config_get("recon_hidden", []) or [])
+    except Exception:  # noqa: BLE001
+        pass
+    return set()
+
+
+def _recon_hide(snap, key):
+    """Remove a saved reconciliation from the view: delete it from the Monday blob and record its
+    signature as hidden so the Supabase-sourced copy doesn't reappear. History/audit is kept."""
+    try:
+        data_sources.recon_delete(key, vid=snap.get("vid"))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            hidden = set(supabase_db.config_get("recon_hidden", []) or [])
+            hidden.add(_recon_sig(snap))
+            supabase_db.config_set("recon_hidden", sorted(hidden))
+            supabase_db.audit("", "recon_hide", str(snap.get("supplier") or key), key)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _render_statement_recon():
     """Upload a supplier statement → match every invoice line against QuickBooks bills."""
     if not data_sources.qbo_is_connected():
@@ -8793,11 +8829,25 @@ def _render_statement_recon():
     except Exception:  # noqa: BLE001
         pass
     jump = st.session_state.pop("_open_saved_pay", None)   # arrived here from Payables "Pay"
+    # Hide any the user has cleared from view (kept in durable history, just off this list).
+    _hidden = _recon_hidden_set()
+    if _hidden:
+        saved = {k: v for k, v in (saved or {}).items() if _recon_sig(v) not in _hidden}
     if saved:
-        st.markdown("##### 📌 Saved reconciliations")
+        h1, h2 = st.columns([3, 2])
+        h1.markdown("##### 📌 Saved reconciliations")
+        # Bulk clear: drop every fully-paid-off statement (nothing left to pay) from the view.
+        _paid = {k: v for k, v in saved.items() if not (v.get("to_pay") or 0)}
+        if _paid and h2.button(f"🧹 Clear {len(_paid)} paid-off statement(s) from view",
+                               key="recon_clear_paid", use_container_width=True):
+            for _pk, _pv in _paid.items():
+                _recon_hide(_pv, _pk)
+            st.success(f"Cleared {len(_paid)} paid-off statement(s) from your view.")
+            st.rerun()
         st.caption("Every statement you reconcile is kept here so you can come back and pay it off "
                    "later — no need to re-upload. Amounts are re-checked against QuickBooks when you "
-                   "open one to pay.")
+                   "open one to pay. Use **Remove from view** on any you no longer need (the record "
+                   "stays in your history/audit log, it just leaves this list).")
         for _k, snap in sorted(saved.items(), key=lambda kv: kv[1].get("saved_at", ""),
                                reverse=True):
             paytog = f"paytog_{_k}"
@@ -8838,7 +8888,29 @@ def _render_statement_recon():
                 elif snap.get("to_pay"):
                     st.caption("Reconcile this statement once more to enable paying it off from here "
                                "(it was saved before that feature existed).")
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                if st.button("🗑 Remove from view", key=f"recon_rm_{_k}",
+                             help="Takes this statement off your saved list. It stays in your "
+                                  "history/audit log — this only clears your view."):
+                    _recon_hide(snap, _k)
+                    st.success(f"Removed {snap.get('supplier', 'statement')} from your view.")
+                    st.rerun()
         st.markdown("---")
+
+    # Restore anything cleared from view (only DB-backed statements can be brought back).
+    if _hidden:
+        with st.expander(f"🙈 Hidden from view ({len(_hidden)}) — restore"):
+            st.caption("These were cleared from your saved list. Restoring brings back any that are "
+                       "still in the database.")
+            if st.button("↩️ Restore all to view", key="recon_restore_all"):
+                try:
+                    import supabase_db
+                    if supabase_db.configured():
+                        supabase_db.config_set("recon_hidden", [])
+                except Exception:  # noqa: BLE001
+                    pass
+                st.success("Restored hidden statements to your view.")
+                st.rerun()
 
     # ---- Audit log (who did what, when) — from the database ----
     try:

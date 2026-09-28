@@ -4384,6 +4384,27 @@ def recon_save(supplier_key: str, snapshot: dict, token=None):
         pass
 
 
+def recon_delete(supplier_key: str, vid: str | None = None, token=None) -> bool:
+    """Remove a saved reconciliation from the Monday snapshot blob so it drops off the saved list.
+    Removes the given key AND any entry sharing the same QuickBooks vendor id (vid), so a statement
+    that appears under a slightly different key is cleared too. Supabase history is left intact (it
+    is the durable audit trail); the UI hides those separately. Returns True if anything changed."""
+    import base64 as _b64
+    import json as _json
+    token = token or get_token()
+    m = recon_load_all(token)
+    if not m:
+        return False
+    vid = str(vid or "")
+    keep = {k: v for k, v in m.items()
+            if k != supplier_key and not (vid and str(v.get("vid") or "") == vid)}
+    if len(keep) == len(m):
+        return False
+    item_id = _config_item_named(QBO_RECON_ITEM, token)
+    monday_post_update(item_id, _b64.b64encode(_json.dumps(keep).encode()).decode(), token)
+    return True
+
+
 def _config_file_column(token=None):
     """(board_id, file_column_id) for a 'Statement' file column on the TradeHub Config board;
     created if it doesn't exist."""
