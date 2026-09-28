@@ -7432,6 +7432,46 @@ POLY_SYSTEMS = {
 }
 POLY_BAR_LENGTHS = [2, 3, 4, 6]
 
+# Cut-to-size Molan polycarbonate: sold PER m² at the sheet's £/m² COST (price_overrides
+# _persqm.Molan) + 19% markup. Only applies when the requested size is NOT a fixed website
+# size (those are sold at the fixed website price instead). Labels → base QNET SKU whose
+# per-m² rate we look up.
+POLY_CUT_MARKUP = 1.19
+POLY_CUT_SHEETS = {
+    "4mm Clear Twinwall": "QNET04122C",
+    "6mm Clear Twinwall": "QNET06CLR",
+    "10mm Clear": "QNET10CLR", "10mm Bronze": "QNET10BRZ", "10mm Opal": "QNET10OPL",
+    "16mm Clear": "QNET16CLR", "16mm Bronze": "QNET16BRZ", "16mm Opal": "QNET16OPL",
+    "16mm Heatguard (Grey) Triplewall": "QS16HEATNET",
+    "25mm Clear": "QNET25CLR", "25mm Bronze": "QNET25BRZ", "25mm Opal": "QNET25OPL",
+    "25mm Two Tone (Bronze on Opal)": "QSBO25PNET", "25mm Heatguard Opal": "QSHO25PNET",
+    "32mm Clear": "QNET32CLR", "32mm Bronze": "QNET32BRZ", "32mm Opal": "QNET32OPL",
+    "32mm Heatguard/Opal": "QNET32HOGSM",
+    "35mm Clear": "QNET35CLR", "35mm Bronze": "QNET35BRZ", "35mm Opal": "QNET35OPL",
+    "35mm Heatguard/Opal": "QNET35HOGSM", "35mm Two Tone (Bronze on Opal)": "QNET35BOGSM",
+}
+# The standard website sheet sizes (mm) Molan sells at fixed prices — a request matching
+# BOTH a fixed width and a fixed height is a stock size, so the fixed website price applies.
+POLY_FIXED_W = {1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 7000}
+POLY_FIXED_H = {600, 700, 900, 980, 1050, 1200, 1400, 2100}
+
+
+def _poly_cut_price(base_sku, w_mm, h_mm):
+    """Cut-to-size Molan polycarbonate SELL price for one sheet at w×h mm:
+    area (m²) × the base SKU's £/m² cost × 1.19. Returns
+    {rate, area, cost, unit, is_fixed_size} or None if no rate / bad size."""
+    rates = _persqm_rates().get(_norm_code("Molan")) or {}
+    rate = rates.get(_norm_code(base_sku))
+    if not rate or not w_mm or not h_mm:
+        return None
+    area = (w_mm / 1000.0) * (h_mm / 1000.0)
+    if area <= 0:
+        return None
+    cost = area * rate
+    return {"rate": rate, "area": area, "cost": round(cost, 2),
+            "unit": round(cost * POLY_CUT_MARKUP, 2),
+            "is_fixed_size": (int(w_mm) in POLY_FIXED_W and int(h_mm) in POLY_FIXED_H)}
+
 
 def _poly_takeoff(inp):
     """Roof dimensions + sheet/system choice -> Molan take-off lines. Each line carries
@@ -7606,13 +7646,51 @@ def _render_ezglaze_calc():
 
 
 def render_poly_calc():
-    st.markdown("### 🪟 Polycarbonate roof calculator — Molan")
-    rtype = st.radio("Roof type", ["Multiwall + glazing bars", "EZ Glaze corrugated"],
+    st.markdown("### 🪟 Polycarbonate calculator — Molan")
+    rtype = st.radio("Type", ["Multiwall + glazing bars", "EZ Glaze corrugated",
+                              "Cut-to-size sheets"],
                      horizontal=True, key="poly_rtype")
     if rtype.startswith("EZ"):
         _render_ezglaze_calc()
         return
+    if rtype.startswith("Cut"):
+        _render_poly_cutsize()
+        return
     _render_multiwall_poly()
+
+
+def _render_poly_cutsize():
+    st.caption("Prices Molan polycarbonate sheets **cut to a custom size**. We sell fixed sizes at the "
+               "website price; anything cut out of those is priced per m² at our cost + 19%. Enter the "
+               "finished panel size and quantity.")
+    with st.form("poly_cut"):
+        c1, c2 = st.columns([2, 1])
+        sheet = c1.selectbox("Sheet (thickness / colour)", list(POLY_CUT_SHEETS))
+        qty = c2.number_input("Number of panels", min_value=1, value=1, step=1)
+        d1, d2 = st.columns(2)
+        w = d1.number_input("Panel width mm", min_value=0, value=0, step=5)
+        h = d2.number_input("Panel height / length mm", min_value=0, value=0, step=5)
+        go = st.form_submit_button("Price cut-to-size", type="primary")
+    if not go:
+        return
+    if not w or not h:
+        st.info("Enter the panel width and height to price.")
+        return
+    p = _poly_cut_price(POLY_CUT_SHEETS[sheet], w, h)
+    if not p:
+        st.error("No per-m² rate for that sheet — tell me and I'll add it.")
+        return
+    line = round(p["unit"] * qty, 2)
+    if p["is_fixed_size"]:
+        st.warning(f"{w:.0f}×{h:.0f}mm is a **standard website size** — sell it at the fixed website "
+                   "price instead of this cut-to-size rate (which would under/over-price it).")
+    st.markdown(
+        f"**{sheet}** — {w:.0f}×{h:.0f}mm ({p['area']:.3f} m² each)\n\n"
+        f"- Cost/m²: £{p['rate']:.2f}  ·  cost per panel: £{p['cost']:.2f}\n"
+        f"- **Sell per panel (cost + 19%, ex-VAT): £{p['unit']:.2f}**\n"
+        f"- {qty} panel(s) = **£{line:,.2f} ex-VAT**")
+    st.caption("Cut-to-size is made to order (no returns). Delivery is confirmed separately by "
+               "postcode. Prices exclude VAT.")
 
 
 def _render_multiwall_poly():
