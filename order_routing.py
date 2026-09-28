@@ -290,6 +290,39 @@ def _stage_for(supplier, route, quote, portal):
     return "Needs Review"
 
 
+# Auto-advance an order straight to "SEND PO" (so Monday's automation emails the supplier) WITHOUT
+# a human review — but only for clear, single-supplier, high-confidence Shopify-vendor matches.
+# Daniela's exclusions (2026-09-28), which stay in "Needs Review" for Natasha to check: UPB,
+# National Plastics, and the Hardie / Freefoam / Fortex / Zest products that route to them (branch/
+# area nuance); mixed (split) orders; and anything needing a quote, a portal or a branch decision.
+# Flip AUTO_SEND_PO to False to turn the whole thing off (everything reverts to Needs Review).
+AUTO_SEND_PO = True
+PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics"}
+PO_AUTOSEND_EXCLUDE_WORDS = ("hardie", "freefoam", "fortex", "zest")
+
+
+def _po_autosend_ok(result):
+    """True only when this order is safe to auto-send: single supplier, real PO route (not quote/
+    portal/in-house/PICK), high confidence, branch resolved, and not one of the excluded
+    suppliers/products above."""
+    if not AUTO_SEND_PO or not result or result.get("split"):
+        return False
+    if result.get("route") in IN_HOUSE or result.get("route") == "PICK":
+        return False
+    if result.get("stage") in ("Needs Quote", "Go To Portal"):
+        return False
+    if result.get("conf") != "high" or result.get("needs_branch"):
+        return False
+    if _norm(result.get("overall_supplier") or "") in PO_AUTOSEND_EXCLUDE_SUPPLIERS:
+        return False
+    for l in result.get("lines") or []:
+        blob = _norm((l.get("title") or "") + " " + (l.get("vendor") or "")) \
+            + " " + _norm(" ".join(l.get("tags") or []))
+        if any(w in blob for w in PO_AUTOSEND_EXCLUDE_WORDS):
+            return False
+    return True
+
+
 def route_order(lines, postcode=None, sku_supplier=None):
     """Route a whole order → {split, groups, overall_supplier, branch, branch_email, stage,
     needs_branch, conf, lines}. `groups` maps each distinct route → its lines (for a split).
@@ -344,6 +377,10 @@ def route_order(lines, postcode=None, sku_supplier=None):
                                            f"{nb['branch_name']} ({nb['miles']} mi)")
             except Exception:  # noqa: BLE001
                 pass
+        # Clear, high-confidence single-supplier match (bar the excluded ones) → skip the human
+        # review and go straight to SEND PO, so Monday's automation emails the supplier.
+        if _po_autosend_ok(result):
+            result["stage"] = "SEND PO"
         return result
     return {"split": split, "groups": groups, "overall_supplier": None, "branch": None,
             "branch_email": None, "route": None, "stage": "Needs Review",

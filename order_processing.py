@@ -1287,8 +1287,12 @@ def _process_one(o):
         else:                                    # SAMPLES / CLEARANCE
             data_sources.op_set_branch(iid, branch=route)
         _mark_del_method(iid, sup or route)      # samples → "To Post" on the Del Method column
-        data_sources.op_set_status(iid, res.get("stage") or "Needs Review")
-        o["stage"] = res.get("stage") or "Needs Review"
+        # Auto-send orders HOLD in Needs Review until the PO PDF is verified-attached below, so
+        # Monday's "SEND PO" email automation can never fire before the PDF is on the item.
+        intended_stage = res.get("stage") or "Needs Review"
+        init_stage = "Needs Review" if intended_stage == "SEND PO" else intended_stage
+        data_sources.op_set_status(iid, init_stage)
+        o["stage"] = init_stage
     except Exception as e:  # noqa: BLE001
         return {"Order": tag, "Supplier": sup or route,
                 "Result": "Monday write failed: " + str(e)[:50]}
@@ -1301,10 +1305,19 @@ def _process_one(o):
         r = data_sources.op_upload_po(iid, pdf, name)
         _write_po_total(iid, kind, doc)          # numbers6 = the PO's inc-VAT total
         docmsg = f"{kind.upper()} attached ✓" if r.get("ok") else f"{kind} attach UNVERIFIED"
+        # PO is now on the item → safe to advance an auto-send order to SEND PO (Monday emails).
+        # If the upload wasn't verified, it stays in Needs Review — never email without the PDF.
+        if intended_stage == "SEND PO":
+            if r.get("ok"):
+                data_sources.op_set_status(iid, "SEND PO")
+                o["stage"] = "SEND PO"
+                docmsg += " · → SEND PO (auto)"
+            else:
+                docmsg += " · held in Needs Review (PO not verified — not auto-sent)"
     except ValueError:                           # validation gate blocked it
-        docmsg = "doc BLOCKED — missing a field"
+        docmsg = "doc BLOCKED — missing a field"   # stays in Needs Review — not auto-sent
     except Exception as e:  # noqa: BLE001
-        docmsg = "doc error: " + str(e)[:45]
+        docmsg = "doc error: " + str(e)[:45]        # stays in Needs Review — not auto-sent
     return {"Order": tag, "Supplier": sup or route, "Result": f"routed → {docmsg}"}
 
 
