@@ -380,21 +380,77 @@ def _sheet_area_m2(*texts):
     return best or None
 
 
+def _persqm_fixed_rates():
+    """{supplier_norm: {base_sku_norm: £/m² for STANDARD fixed sizes}} — Molan bills a LOWER per-m²
+    rate on standard/fixed sheet sizes than on bespoke cut sizes (which use _persqm). From
+    price_overrides.json '_persqm_fixed'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_persqm_fixed") or {}).items():
+        out[_canon_sup(sup)] = {re.sub(r"[^a-z0-9]", "", (k or "").lower()): v
+                                for k, v in (rules or {}).items() if isinstance(v, (int, float))}
+    return out
+
+
+def _persqm_grid():
+    """{supplier_norm: (set_widths, set_heights)} — the standard sheet sizes (mm) that bill at the
+    fixed rate. From price_overrides.json '_persqm_grid'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, g in (ov.get("_persqm_grid") or {}).items():
+        out[_canon_sup(sup)] = (set(g.get("w") or []), set(g.get("h") or []))
+    return out
+
+
+def _is_fixed_sheet_size(supplier, *texts):
+    """True if the largest W×H (mm) in `texts` is one of the supplier's STANDARD fixed sizes
+    (so it bills at the fixed per-m² rate, not the higher cut-to-size rate)."""
+    grid = _persqm_grid().get(_canon_sup(supplier))
+    if not grid:
+        return False
+    ws, hs = grid
+    for t in texts:
+        for m in _DIM_RE.finditer(str(t or "")):
+            w, h = int(m.group(1)), int(m.group(2))
+            if (w in ws and h in hs) or (h in ws and w in hs):
+                return True
+    return False
+
+
 def _persqm_cost(sku, supplier, *texts):
-    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan QNET). The size is read
-    from the SKU/variant/name (any of `texts`). Returns None if this supplier/SKU isn't per-m²
-    priced or no size can be found — so pricing falls through to the normal SKU lookup."""
-    rates = _persqm_rates().get(_canon_sup(supplier))
-    if not rates:
+    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan multiwall polycarbonate).
+    Size-aware: a STANDARD fixed size uses the lower fixed rate; a bespoke cut size uses the higher
+    cut rate. Size is read from the SKU/variant/name (any of `texts`). None if this supplier/SKU
+    isn't per-m² priced or no size can be found — so pricing falls through to the normal lookup."""
+    sup = _canon_sup(supplier)
+    cut = _persqm_rates().get(sup) or {}
+    fixed = _persqm_fixed_rates().get(sup) or {}
+    if not cut and not fixed:
         return None
     key = re.sub(r"[^a-z0-9]", "", (sku or "").lower())
-    base = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
-    if not base:
-        return None
+
+    def _base(rates):
+        return next((b for b in sorted(rates, key=len, reverse=True)
+                     if b and key.startswith(b)), None)
+
     area = _sheet_area_m2(sku, *texts)
     if not area:
         return None
-    return round(area * rates[base], 2)
+    if _is_fixed_sheet_size(supplier, sku, *texts):
+        b = _base(fixed)
+        if b:
+            return round(area * fixed[b], 2)
+    b = _base(cut)
+    if b:
+        return round(area * cut[b], 2)
+    b = _base(fixed)
+    return round(area * fixed[b], 2) if b else None
 
 
 

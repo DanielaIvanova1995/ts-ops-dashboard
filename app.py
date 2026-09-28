@@ -1085,32 +1085,93 @@ def _sheet_area_m2(*texts):
     return best or None
 
 
-def _persqm_cost(sku, supplier, *texts):
-    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan QNET). Size read from the
-    SKU/variant/name. None if this supplier/SKU isn't per-m² priced or no size is found."""
-    rates = _persqm_rates().get(_norm_code(supplier))
-    if not rates:
-        return None
+def _persqm_fixed_rates():
+    """{supplier_norm: {base_sku_norm: £/m² for STANDARD fixed sizes}} — Molan's LOWER per-m² rate
+    for standard sheet sizes (cut sizes use the higher _persqm rate). From '_persqm_fixed'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, rules in (ov.get("_persqm_fixed") or {}).items():
+        out[_norm_code(sup)] = {_norm_code(k): v for k, v in (rules or {}).items()
+                                if isinstance(v, (int, float))}
+    return out
+
+
+def _persqm_grid():
+    """{supplier_norm: (set_widths, set_heights)} — standard sheet sizes (mm) that bill at the fixed
+    rate. From price_overrides.json '_persqm_grid'."""
+    try:
+        ov = json.load(open("price_overrides.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for sup, g in (ov.get("_persqm_grid") or {}).items():
+        out[_norm_code(sup)] = (set(g.get("w") or []), set(g.get("h") or []))
+    return out
+
+
+def _is_fixed_sheet_size(supplier, *texts):
+    """True if the largest W×H (mm) in texts is one of the supplier's STANDARD fixed sizes."""
+    grid = _persqm_grid().get(_norm_code(supplier))
+    if not grid:
+        return False
+    ws, hs = grid
+    for t in texts:
+        for m in _SHEET_DIM_RE.finditer(str(t or "")):
+            w, h = int(m.group(1)), int(m.group(2))
+            if (w in ws and h in hs) or (h in ws and w in hs):
+                return True
+    return False
+
+
+def _persqm_base(rates, sku):
     key = _norm_code(sku)
-    base = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
-    if not base:
+    return next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+
+
+def _persqm_cost(sku, supplier, *texts):
+    """Per-m² sheet cost = ordered area × the base SKU's £/m² rate (Molan multiwall polycarbonate).
+    Size-aware: a STANDARD fixed size uses the lower fixed rate, a bespoke cut size the higher cut
+    rate. None if this supplier/SKU isn't per-m² priced or no size is found."""
+    sup = _norm_code(supplier)
+    cut = _persqm_rates().get(sup) or {}
+    fixed = _persqm_fixed_rates().get(sup) or {}
+    if not cut and not fixed:
         return None
     area = _sheet_area_m2(sku, *texts)
     if not area:
         return None
-    return round(area * rates[base], 2)
+    if _is_fixed_sheet_size(supplier, sku, *texts):
+        b = _persqm_base(fixed, sku)
+        if b:
+            return round(area * fixed[b], 2)
+    b = _persqm_base(cut, sku)
+    if b:
+        return round(area * cut[b], 2)
+    b = _persqm_base(fixed, sku)
+    return round(area * fixed[b], 2) if b else None
 
 
-def _persqm_rate(sku, supplier):
-    """The £/m² RATE for a per-m²-billed line (Molan QNET), or None — NOT multiplied by area.
+def _persqm_rate(sku, supplier, *texts):
+    """The £/m² RATE for a per-m²-billed line (Molan multiwall), or None — NOT multiplied by area.
     Used on the invoice side, where Molan already bills qty = total sheet area, so the effective
-    £/m² (line_total ÷ qty) is compared directly to this rate."""
-    rates = _persqm_rates().get(_norm_code(supplier))
-    if not rates:
-        return None
-    key = _norm_code(sku)
-    base = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
-    return rates[base] if base else None
+    £/m² (line_total ÷ qty) is compared directly to this rate. Size-aware: a STANDARD fixed size
+    (read from sku/texts) expects the lower fixed rate; otherwise the higher cut rate (a safe ceiling
+    when the size isn't visible — Molan never bills a fixed sheet ABOVE the cut rate)."""
+    sup = _norm_code(supplier)
+    cut = _persqm_rates().get(sup) or {}
+    fixed = _persqm_fixed_rates().get(sup) or {}
+    if _is_fixed_sheet_size(supplier, sku, *texts):
+        b = _persqm_base(fixed, sku)
+        if b:
+            return fixed[b]
+    b = _persqm_base(cut, sku)
+    if b:
+        return cut[b]
+    b = _persqm_base(fixed, sku)
+    return fixed[b] if b else None
 
 
 
@@ -2642,7 +2703,7 @@ def _check_invoice(parsed, meta, pidx, tol=0.05):
                 c2 = _persection_cost(sku_raw, supplier, desc)
                 if c2 is not None:
                     cost, title_note = c2, "per-section rate"
-            _rate = _persqm_rate(sku_raw, supplier)
+            _rate = _persqm_rate(sku_raw, supplier, desc)
             if _rate is not None:
                 area_billed = True
                 cost = _rate
