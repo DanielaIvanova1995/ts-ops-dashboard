@@ -1267,6 +1267,7 @@ def _process_one(o):
         return {"Order": tag, "Supplier": order_routing.summary(res),
                 "Result": _process_split(o, res)}
     sup, route = res.get("overall_supplier"), res.get("route")
+    prev_sup = o.get("supplier")
     if route == "PICK":
         return {"Order": tag, "Supplier": "", "Result": "couldn't identify supplier — pick manually"}
     try:
@@ -1318,6 +1319,14 @@ def _process_one(o):
         docmsg = "doc BLOCKED — missing a field"   # stays in Needs Review — not auto-sent
     except Exception as e:  # noqa: BLE001
         docmsg = "doc error: " + str(e)[:45]        # stays in Needs Review — not auto-sent
+    try:                                            # log the auto-routing decision (override-rate view)
+        import supabase_db as _sdb
+        _sdb.supplier_change_log(order_no=o.get("order_no") or tag, item_id=iid,
+                                 new_supplier=sup or route, source="auto",
+                                 old_supplier=prev_sup, conf=res.get("conf"),
+                                 stage=o.get("stage"))
+    except Exception:  # noqa: BLE001
+        pass
     return {"Order": tag, "Supplier": sup or route, "Result": f"routed → {docmsg}"}
 
 
@@ -1352,6 +1361,14 @@ def _order_detail(o):
             data_sources.op_set_supplier(iid, nsup)
             o["supplier"] = nsup
             st.toast(f"{o.get('order_no')} · supplier → {nsup or '(cleared)'}")
+            try:                                     # log the MANUAL override (override-rate view)
+                import supabase_db as _sdb
+                _sdb.supplier_change_log(
+                    order_no=o.get("order_no"), item_id=iid, new_supplier=nsup, source="manual",
+                    old_supplier=csup, actor=st.session_state.get("username")
+                    or st.session_state.get("name"))
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as ex:  # noqa: BLE001
             st.toast("Supplier didn't save: " + str(ex)[:60])
     stopts = [""] + list(data_sources.OP_STAGES)
@@ -1804,11 +1821,45 @@ def _quote_to_po(orders, sup_opts):
                         st.error("Upload failed: " + str(e)[:180])
 
 
+def _render_routing_stats():
+    """Compact supplier-routing log: auto vs manual and the first-time-right rate (30 days)."""
+    try:
+        import supabase_db as _sdb
+        if not _sdb.configured():
+            return
+        rows = _sdb.supplier_change_recent(days=30) or []
+    except Exception:  # noqa: BLE001
+        return
+    if not rows:
+        return
+    auto = [r for r in rows if r.get("source") == "auto"]
+    manual = [r for r in rows if r.get("source") == "manual"]
+    n_auto, n_manual = len(auto), len(manual)
+    sent = [r for r in auto if (r.get("stage") or "") == "SEND PO"]
+    with st.expander(f"📋 Routing log — {n_auto} auto-routed · {n_manual} manual override(s) · 30 days"):
+        rate = (1 - n_manual / (n_auto + n_manual)) * 100 if (n_auto + n_manual) else 0.0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Auto-routed", n_auto)
+        c2.metric("Auto-sent (SEND PO)", len(sent))
+        c3.metric("Manual overrides", n_manual, help="Supplier changed in the TradeHub dropdown")
+        st.caption(f"First-time-right (no manual override in TradeHub): **{rate:.1f}%**. Edits made "
+                   "directly on the Monday board aren't captured here — only changes through TradeHub.")
+        if manual:
+            import pandas as _pd
+            df = _pd.DataFrame([{"When": (r.get("at") or "")[:16].replace("T", " "),
+                                 "Order": r.get("order_no"), "From": r.get("old_supplier") or "—",
+                                 "To": r.get("new_supplier"), "By": r.get("actor") or "—"}
+                                for r in manual[:50]])
+            st.markdown("**Manual overrides** — where the routing was corrected:")
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+
 def render():
     st.markdown(
         """<div class="ts-brandbar"><span class="wm">Trade<b>Hub</b>
         <span class="sec">Order Processing</span></span></div>""",
         unsafe_allow_html=True)
+    _render_routing_stats()
 
     # Blocky (Bebas Neue) styling, scoped to the primary action buttons (Process ALL / SELECTED).
     st.markdown(

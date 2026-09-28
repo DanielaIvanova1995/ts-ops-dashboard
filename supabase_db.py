@@ -554,6 +554,47 @@ def invoice_check_clear(sub_id: str) -> bool:
         return False
 
 
+def supplier_change_log(order_no, item_id, new_supplier, source: str,
+                        old_supplier=None, conf=None, stage=None, actor=None) -> bool:
+    """Record a supplier assignment on an order. source='auto' (TradeHub routed it) or 'manual'
+    (someone picked it in the TradeHub dropdown). Powers the routing override-rate view. Needs the
+    'supplier_change_log' table."""
+    if not configured():
+        return False
+    try:
+        row = {"item_id": str(item_id), "order_no": str(order_no or "")[:40],
+               "new_supplier": str(new_supplier or "")[:120], "source": str(source)[:10],
+               "at": _now()}
+        if old_supplier is not None:
+            row["old_supplier"] = str(old_supplier)[:120]
+        if conf:
+            row["conf"] = str(conf)[:10]
+        if stage:
+            row["stage"] = str(stage)[:40]
+        if actor:
+            row["actor"] = str(actor)[:80]
+        _client().table("supplier_change_log").insert(row).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def supplier_change_recent(days: int = 30, limit: int = 5000) -> list:
+    """Supplier assignments/changes in the last N days (newest first) — [{item_id, order_no,
+    old_supplier, new_supplier, source, conf, stage, actor, at}]."""
+    if not configured():
+        return []
+    try:
+        import datetime as _d
+        since = (_d.datetime.now(_d.timezone.utc) - _d.timedelta(days=days)).isoformat()
+        r = (_client().table("supplier_change_log")
+             .select("item_id,order_no,old_supplier,new_supplier,source,conf,stage,actor,at")
+             .gte("at", since).order("at", desc=True).limit(limit).execute())
+        return r.data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def audit(actor: str, action: str, detail: str = "", ref: str = "") -> bool:
     if not configured():
         return False
