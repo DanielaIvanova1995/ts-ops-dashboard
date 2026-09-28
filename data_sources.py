@@ -3674,20 +3674,66 @@ def reconcile_order_inv_slots(order_item_id, token: str | None = None) -> int:
     return n_filled
 
 
-def delete_subitem(sub_id, token: str | None = None) -> bool:
+def delete_subitem(sub_id, token: str | None = None, attempts: int = 6) -> bool:
     """Delete a subitem (an invoice / credit note) from Monday. DESTRUCTIVE and permanent —
-    the caller must confirm first. Raises on API failure."""
+    the caller must confirm first. Raises on API failure.
+
+    Retries on Monday's rate-limit / complexity-budget throttling (HTTP 429 or a
+    'Complexity budget exhausted' error), backing off for the wait Monday asks for. Without
+    this, deleting many subitems in a burst (e.g. the bulk 'delete duplicates' button) had the
+    later deletes silently throttled, so they survived and the button had to be clicked again."""
+    import time as _time
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
     q = "mutation ($id: ID!) { delete_item(item_id: $id) { id } }"
-    r = requests.post(MONDAY_API, json={"query": q, "variables": {"id": str(sub_id)}},
-                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
-    r.raise_for_status()
-    payload = r.json()
-    if "errors" in payload:
-        raise RuntimeError(f"Monday rejected delete: {payload['errors']}")
-    return True
+    last_err = None
+    for i in range(max(1, attempts)):
+        r = requests.post(MONDAY_API, json={"query": q, "variables": {"id": str(sub_id)}},
+                          headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+        if r.status_code == 429:                       # rate limited — wait and retry
+            wait = _monday_retry_after(r) or (2 ** i)
+            _time.sleep(min(wait, 30))
+            last_err = "HTTP 429 rate limited"
+            continue
+        r.raise_for_status()
+        payload = r.json()
+        errs = payload.get("errors")
+        if errs:
+            blob = str(errs).lower()
+            if any(w in blob for w in ("complexity", "rate limit", "try again", "throttle",
+                                       "minute", "too many")):
+                wait = _monday_retry_after(r) or _retry_seconds_from_errors(errs) or (2 ** i)
+                _time.sleep(min(wait, 30))
+                last_err = f"Monday throttled delete: {errs}"
+                continue
+            raise RuntimeError(f"Monday rejected delete: {errs}")
+        return True
+    raise RuntimeError(last_err or "Monday delete failed after retries")
+
+
+def _monday_retry_after(resp):
+    """Seconds to wait from a Retry-After header, or None."""
+    try:
+        v = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+        return int(float(v)) if v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_seconds_from_errors(errs):
+    """Pull a 'try again in N seconds' / retry_in_seconds hint out of a Monday errors payload."""
+    import re as _re
+    try:
+        for e in (errs or []):
+            ext = (e.get("extensions") or {}) if isinstance(e, dict) else {}
+            for k in ("retry_in_seconds", "retryInSeconds", "retry_after"):
+                if isinstance(ext.get(k), (int, float)):
+                    return int(ext[k])
+        m = _re.search(r"in\s+(\d+)\s+second", str(errs), _re.I)
+        return int(m.group(1)) if m else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def get_invoice_status(sub_id, token: str | None = None) -> str | None:

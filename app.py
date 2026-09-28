@@ -4626,12 +4626,17 @@ def _invoice_tab(key, is_queue):
         cda, cdb = st.columns([1, 2])
         if cda.button(f"🗑 Delete {_extras} duplicate cop{'y' if _extras == 1 else 'ies'}",
                       key=f"deldups_{key}", type="primary", use_container_width=True):
-            _, ndel, ncol = _auto_dedup(list(dup_pool.values()))
+            with st.spinner(f"Deleting {_extras} duplicate cop"
+                            f"{'y' if _extras == 1 else 'ies'} from Monday…"):
+                _, ndel, ncol = _auto_dedup(list(dup_pool.values()))
             invoices_by_status.clear()
             invoice_count.clear()
+            short = ndel < _extras
             st.session_state["inv_flash"] = (
                 f"Deleted {ndel} duplicate cop{'y' if ndel == 1 else 'ies'} from Monday"
-                + (f" and cleared {ncol} INV column(s)" if ncol else "") + ".")
+                + (f" and cleared {ncol} INV column(s)" if ncol else "") + "."
+                + (f" {_extras - ndel} were still throttled by Monday — click again to finish them."
+                   if short else ""))
             st.rerun()
         cdb.caption("Removes the extra copy of any invoice logged twice on its order (keeping "
                     "one) and clears its amount from the order total.")
