@@ -1711,32 +1711,39 @@ def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 200,
 
 
 def fetch_message_attachments(mailbox: str, message_id: str, token: str | None = None,
-                              max_items: int = 4, max_bytes: int = 4_500_000) -> list:
+                              max_items: int = 6, max_bytes: int = 10_000_000) -> list:
     """Return a message's image/PDF attachments (inline or file) as blocks ready for the
-    Anthropic vision API: [{media_type, data(base64), name}]. Used so the quoter can read
-    a photo or a basket screenshot the customer attached, not just the email text. Skips
-    anything that isn't an image or PDF, and anything over max_bytes."""
+    Anthropic vision API: [{media_type, data(base64), name}]. Used so the quoter can read a
+    photo, a drawing, or a basket screenshot the customer attached, not just the email text.
+    Skips anything that isn't an image or PDF and anything over max_bytes. Skips tiny INLINE
+    images (email-signature logos), and puts the DRAWINGS first (PDFs, then largest) so the
+    real content is never crowded out by leftover signature graphics."""
     token = token or ms_token()
     r = requests.get(
         f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments",
         headers={"Authorization": f"Bearer {token}"},
         params={"$select": "name,contentType,size,contentBytes,isInline,@odata.type"},
-        timeout=30,
+        timeout=45,
     )
     r.raise_for_status()
     ok = {"image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"}
-    out = []
+    cands = []
     for a in r.json().get("value", []):
         ctype = (a.get("contentType") or "").split(";")[0].strip().lower()
         data = a.get("contentBytes")
-        if not data or ctype not in ok:
+        size = a.get("size") or 0
+        if not data or ctype not in ok or size > max_bytes:
             continue
-        if (a.get("size") or 0) > max_bytes:
+        # Email-signature logos ride along as small INLINE images — skip them so they don't
+        # eat a slot (or add noise) ahead of the actual drawing/photo.
+        if a.get("isInline") and ctype.startswith("image/") and size < 50_000:
             continue
-        out.append({"media_type": ctype, "data": data, "name": a.get("name") or "attachment"})
-        if len(out) >= max_items:
-            break
-    return out
+        cands.append({"media_type": ctype, "data": data, "name": a.get("name") or "attachment",
+                      "_pdf": ctype == "application/pdf", "_size": size})
+    # Drawings first: PDFs before images, then largest first (a full drawing over a thumbnail).
+    cands.sort(key=lambda c: (not c["_pdf"], -c["_size"]))
+    return [{"media_type": c["media_type"], "data": c["data"], "name": c["name"]}
+            for c in cands[:max_items]]
 
 
 def tag_message(mailbox: str, message_id: str, add_categories=None, mark_read=None,
