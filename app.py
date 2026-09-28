@@ -6295,18 +6295,19 @@ def _email_cladding_takeoff(clad):
                                        f"{(' — ' + colour) if colour else ''} "
                                        f"({ext} corners × {height:.1f} m)",
                         "qty": L3(ext * height),
-                        "search": f"James Hardie {product} external corner trim {colour}".strip()})
+                        "search": f"Hardie Plank external corner {colour}".strip()})
         intc = clad.get("internal_corners") or 0
         if intc:
             raw.append({"description": f"{product} internal corner trim"
                                        f"{(' — ' + colour) if colour else ''} "
                                        f"({intc} corners × {height:.1f} m)",
                         "qty": L3(intc * height),
-                        "search": f"James Hardie {product} internal corner trim {colour}".strip()})
-        raw.append({"description": "James Hardie starter / base vent strip", "qty": L3(width),
-                    "search": "James Hardie starter track vent strip"})
-        raw.append({"description": "James Hardie top vent strip", "qty": L3(width),
-                    "search": "James Hardie top vent strip"})
+                        "search": f"Hardie Plank internal corner {colour}".strip()})
+        raw.append({"description": "James Hardie starter strip & ventilation profile",
+                    "qty": L3(width),
+                    "search": "Hardie Plank starter strip ventilation"})
+        raw.append({"description": "James Hardie top ventilation strip", "qty": L3(width),
+                    "search": "Hardie Plank top ventilation strip"})
         nwin = clad.get("num_windows")
         if nwin is None and openings > 0:
             nwin = max(1, round(openings / 1.5))

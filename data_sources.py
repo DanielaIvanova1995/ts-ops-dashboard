@@ -2160,19 +2160,17 @@ def _match_branded(code: str, desc: str, brand: str, token: str):
             return exact
 
     seen = {}
-    queries = []
     if code:
-        queries.append(f"sku:{code}")
-    queries.append(f"{brand} {desc}".strip())
-    queries.append((desc or code or brand).strip())
-    for qy in queries:
-        if not qy:
-            continue
         try:
-            for c in shopify_search_variants(qy, first=20, token=token):
+            for c in shopify_search_variants(f"sku:{code}", first=20, token=token):
                 seen[c["variant_id"]] = c
         except Exception:  # noqa: BLE001
             pass
+    for qy in (f"{brand} {desc}".strip(), (desc or code or brand).strip()):
+        if not qy:
+            continue
+        for c in _variant_search_flex(qy, token, first=20):
+            seen[c["variant_id"]] = c
     branded = [c for c in seen.values()
                if bl in ((c.get("vendor") or "") + " " + (c.get("title") or "")).lower()]
     return _best_title_match(branded, desc or code) if branded else None
@@ -2183,17 +2181,83 @@ def _norm_sku(s: str) -> str:
     return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
-def _best_title_match(cands: list, query: str):
-    """Pick the candidate whose title best overlaps the query words; tie-break on
-    having a price and being in stock."""
+# Customer/take-off wording often differs word-for-word from our product titles for the
+# same thing (e.g. "vent" vs "ventilation", "trim"/"profile", "panel"/"plank"). Canonicalise
+# these so title-overlap scoring rewards a real match. Keys and values both get canonicalised.
+_QUOTE_SYNS = {
+    "vent": "ventilation", "vents": "ventilation", "ventilation": "ventilation",
+    "ventilated": "ventilation",
+    "profile": "profile", "profiles": "profile", "trim": "profile", "trims": "profile",
+    "metaltrim": "profile",
+    "corner": "corner", "corners": "corner",
+    "strip": "strip", "strips": "strip",
+    "plank": "plank", "planks": "plank",
+    "screw": "screw", "screws": "screw", "fixing": "screw", "fixings": "screw",
+    "batten": "batten", "battens": "batten",
+    "board": "board", "boards": "board",
+}
+
+# Words that customers/we tack on but our titles usually DON'T carry, and which — because
+# Shopify's variant search AND-matches every term — make an otherwise-good query return
+# ZERO candidates. Stripped only in the fallback pass, never from the first exact attempt.
+_QUOTE_NOISE = {"panel", "metaltrim", "metal", "profile", "profiles", "nt3", "pack",
+                "the", "and", "for", "with", "james"}
+
+
+def _canon_words(text: str) -> set:
     import re as _re
-    qwords = {w for w in _re.findall(r"[a-z0-9]+", (query or "").lower()) if len(w) > 2}
+    return {_QUOTE_SYNS.get(w, w)
+            for w in _re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) > 2}
+
+
+def _best_title_match(cands: list, query: str):
+    """Pick the candidate whose title best overlaps the query words (synonym-aware, so
+    vent/ventilation and trim/profile count as matches); tie-break on price and stock."""
+    qwords = _canon_words(query)
 
     def score(c):
-        twords = set(_re.findall(r"[a-z0-9]+", (c.get("title") or "").lower()))
+        twords = _canon_words(c.get("title"))
         return (len(qwords & twords), c.get("price") is not None, bool(c.get("available")))
 
     return max(cands, key=score) if cands else None
+
+
+def _variant_search_flex(query: str, token: str, first: int = 10) -> list:
+    """Shopify's variant search AND-matches terms, so one word absent from every title
+    returns nothing. Try the exact query first (preserves existing behaviour); only if
+    that finds nothing, retry with noise words + bare dimension tokens removed, then by
+    dropping trailing words, unioning what turns up so a noisily-worded line still matches."""
+    import re as _re
+    try:
+        cands = shopify_search_variants(query, first=first, token=token)
+    except Exception:  # noqa: BLE001
+        cands = []
+    if cands:
+        return cands
+    words = _re.findall(r"[A-Za-z0-9]+", query or "")
+    seen = {}
+
+    def run(qy):
+        if not qy:
+            return
+        try:
+            for c in shopify_search_variants(qy, first=first, token=token):
+                seen.setdefault(c["variant_id"], c)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 1) drop noise words and pure dimension tokens (e.g. 50mm, 3000mm, 3m, 1ltr)
+    core = [w for w in words
+            if w.lower() not in _QUOTE_NOISE
+            and not _re.fullmatch(r"\d+(mm|cm|m|ltr|l|kg|g)?", w.lower())]
+    run(" ".join(core))
+    # 2) still nothing? progressively drop trailing words until something matches
+    base = core or words
+    for k in range(len(base) - 1, 1, -1):
+        if seen:
+            break
+        run(" ".join(base[:k]))
+    return list(seen.values())
 
 
 def match_quote_variant(code: str | None, description: str | None,
@@ -2225,14 +2289,11 @@ def match_quote_variant(code: str | None, description: str | None,
         if cands:  # close SKU hit (e.g. variant suffix)
             return cands[0]
 
-    # 2) Best title match in the range.
+    # 2) Best title match in the range (tolerant of noisy wording — see _variant_search_flex).
     query = desc or code
     if not query:
         return None
-    try:
-        cands = shopify_search_variants(query, first=10, token=token)
-    except Exception:  # noqa: BLE001
-        cands = []
+    cands = _variant_search_flex(query, token, first=10)
     return _best_title_match(cands, query)
 
 
