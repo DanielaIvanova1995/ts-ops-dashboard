@@ -6093,7 +6093,7 @@ _TRADE_DISCOUNT_NOTE = (
     "you need, how many, and the delivery postcode, and we'll review it and come back to you.")
 # Bump this whenever the parse/quote logic changes — stale cached quotes in a live
 # session then auto-recompute instead of showing old results.
-QUOTE_PARSE_VERSION = 10
+QUOTE_PARSE_VERSION = 11
 
 
 @st.cache_data(ttl=300, show_spinner=False)
