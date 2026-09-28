@@ -939,7 +939,9 @@ def _process_split(o, res):
             f"{l.get('title')} | Quantity: {l.get('qty')} | SKU: {l.get('sku') or ''}"
             for l in glines)
         try:
-            data_sources.set_order_number(pid, "name", f"{order_no}-{idx}")
+            # Verify-and-retry the rename: duplicate_item is async, so a plain rename can be lost
+            # and leave "{order} (copy)". This confirms the name stuck (→ never a stray "(copy)").
+            data_sources.op_rename_item(pid, f"{order_no}-{idx}")
             data_sources.set_order_number(pid, OP["items"], items_text)
             if gsup:
                 data_sources.op_set_supplier(pid, gsup)

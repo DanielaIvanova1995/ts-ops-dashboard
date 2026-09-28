@@ -3430,6 +3430,32 @@ def set_order_number(item_id, column_id: str, value, token: str | None = None) -
     return True
 
 
+def op_rename_item(item_id, new_name: str, token: str | None = None, attempts: int = 4) -> bool:
+    """Rename an Orders-board item's NAME and VERIFY it stuck. `duplicate_item` is asynchronous, so
+    a rename fired too soon can be silently lost — leaving the copy as 'X (copy)'. This sets the
+    name, reads it back, and retries (short backoff) until it matches. Returns True if confirmed."""
+    import time as _t
+    token = token or get_token()
+    for i in range(max(1, attempts)):
+        try:
+            set_order_number(item_id, "name", new_name, token=token)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            r = requests.post(
+                MONDAY_API, json={"query": "query($i:[ID!]){items(ids:$i){name}}",
+                                  "variables": {"i": [str(item_id)]}},
+                headers={"Authorization": token, "API-Version": "2024-10"}, timeout=20)
+            r.raise_for_status()
+            got = (((r.json().get("data") or {}).get("items") or [{}])[0] or {}).get("name")
+            if got == new_name:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        _t.sleep(0.6 + 0.4 * i)     # let the async duplicate settle, then try again
+    return False
+
+
 # The order's INV1..INVn total slots (feed Total profit / order margin). An invoice's total goes
 # into the first EMPTY one — the step the Make scenarios did via their router branches.
 INV_TOTAL_COLS = ["numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
