@@ -79,6 +79,26 @@ def _is_delivery_note(subject: str, sender: str) -> bool:
     return bool(_DELIVERY_NOTE_SUBJECT.search(subject or ""))
 
 
+# Auto-archive noise (→ Natasha - Auto-archive = the automated_system folder). Daniela 2026-09-29:
+# Rexel ORDER CONFIRMATIONS, and supplier auto-acknowledgements like GAP's "your email has been
+# passed to one of the team … within 3 business hours". Kept tight so real supplier replies aren't
+# archived: Rexel confirmations are matched by sender+subject; the auto-ack phrases are distinctive
+# of an auto-responder (a customer/supplier never writes them to us in a real reply).
+_AUTO_ACK_BODY = _re.compile(
+    r"(passed to (one of|a member of|our|the)[^.\n]{0,25}team|"
+    r"be in contact with you within|"
+    r"this is an automat|automated (response|reply|message|email)|"
+    r"please do not reply to this|do not reply to this (e-?mail|message))", _re.I)
+
+
+def _is_auto_archive(subject: str, sender: str, body: str = "") -> bool:
+    """True if this is automated noise to file straight into Natasha - Auto-archive."""
+    s = (sender or "").lower()
+    if "rexel" in s and _re.search(r"\border (confirmation|acknowledg\w*)\b", subject or "", _re.I):
+        return True
+    return bool(_AUTO_ACK_BODY.search(body or ""))
+
+
 NATASHA_NOETA_FOLDER = _F + "AAPQP8E-AAA="   # Natasha - Supplier - No ETA
 
 
@@ -127,12 +147,16 @@ def move_delivery_notes(mailbox: str | None = None, src_folder_id: str | None = 
     return out
 
 
-def _dest_id(category: str, owner: str, subject: str = "", sender: str = "") -> str | None:
+def _dest_id(category: str, owner: str, subject: str = "", sender: str = "",
+             body: str = "") -> str | None:
     """The destination folder id for a classified email. A genuine delivery note / POD always goes
-    to Robyn's Supplier ETAs folder. Otherwise: a per-owner folder for a supplier reply that has
-    one, else the category's folder (exactly as Make decided)."""
+    to Robyn's Supplier ETAs folder; automated noise (Rexel order confirmations, supplier auto-acks)
+    goes to Natasha - Auto-archive. Otherwise: a per-owner folder for a supplier reply that has one,
+    else the category's folder (exactly as Make decided)."""
     if _is_delivery_note(subject, sender):
         return ROBYN_ETA_FOLDER
+    if _is_auto_archive(subject, sender, body):
+        return CATEGORY_FOLDER["automated_system"]      # = Natasha - Auto-archive
     if category == "supplier_no_eta" and owner in OWNER_FOLDER:
         return OWNER_FOLDER[owner]
     return CATEGORY_FOLDER.get(category)
@@ -194,10 +218,12 @@ def _handle_message(mailbox, msg, dry_run, summary, token):
         return
     cat, owner = c["category"], c["thread_owner"]
     rec.update(category=cat, owner=owner)
-    subj, sndr = msg.get("subject", ""), msg.get("from", "")
-    dest_id = _dest_id(cat, owner, subj, sndr)
+    subj, sndr, body = msg.get("subject", ""), msg.get("from", ""), msg.get("body", "")
+    dest_id = _dest_id(cat, owner, subj, sndr, body)
     if _is_delivery_note(subj, sndr):
         rec["folder"] = "delivery note → Robyn - Supplier ETAs"
+    elif _is_auto_archive(subj, sndr, body):
+        rec["folder"] = "auto-archive → Natasha - Auto-archive"
     elif dest_id in OWNER_FOLDER.values():
         rec["folder"] = "supplier reply → " + owner
     else:
