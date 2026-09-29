@@ -36,8 +36,11 @@ INBOX_ID = ("AAMkAGUzYjQwOWIyLWE2NDktNDhhMS04OGRmLWY2NDM3YTRkNzc0MgAuAAAAAADNPrx
 # Destination Outlook folder IDs, copied verbatim from the Make scenario. Category -> folder id.
 _F = "AAMkAGUzYjQwOWIyLWE2NDktNDhhMS04OGRmLWY2NDM3YTRkNzc0MgAuAAAAAADNPrxz3I1jRrPdjo9vFUNzAQA9StLmUbsCToOil6HnGLWN"
 CATEGORY_FOLDER = {
-    "supplier_with_eta":              _F + "AAPQP8E_AAA=",
-    "supplier_no_eta":                _F + "AAPQP8E-AAA=",   # owner none/natasha/unknown (Make default)
+    "supplier_with_eta":              _F + "AAPQP8E_AAA=",   # Robyn - Supplier ETAs
+    # supplier_no_eta now ALSO files to "Robyn - Supplier ETAs" (was "Natasha - Supplier - No ETA"
+    # = ...AAPQP8E-AAA=) — Daniela 2026-09-29: Robyn handles supplier ETAs now. Per-owner supplier
+    # replies (megan/malyeka, below) are unchanged — only the Natasha default moved.
+    "supplier_no_eta":                _F + "AAPQP8E_AAA=",   # Robyn - Supplier ETAs (default owner)
     "customer_after_sales":           _F + "AAPQP8FAAAA=",
     "customer_new_order_or_quote":    _F + "AAPQP8FGAAA=",
     "customer_pre_delivery_question": _F + "AAPQP8FIAAA=",
