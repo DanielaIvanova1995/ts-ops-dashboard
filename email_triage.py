@@ -37,10 +37,7 @@ INBOX_ID = ("AAMkAGUzYjQwOWIyLWE2NDktNDhhMS04OGRmLWY2NDM3YTRkNzc0MgAuAAAAAADNPrx
 _F = "AAMkAGUzYjQwOWIyLWE2NDktNDhhMS04OGRmLWY2NDM3YTRkNzc0MgAuAAAAAADNPrxz3I1jRrPdjo9vFUNzAQA9StLmUbsCToOil6HnGLWN"
 CATEGORY_FOLDER = {
     "supplier_with_eta":              _F + "AAPQP8E_AAA=",   # Robyn - Supplier ETAs
-    # supplier_no_eta now ALSO files to "Robyn - Supplier ETAs" (was "Natasha - Supplier - No ETA"
-    # = ...AAPQP8E-AAA=) — Daniela 2026-09-29: Robyn handles supplier ETAs now. Per-owner supplier
-    # replies (megan/malyeka, below) are unchanged — only the Natasha default moved.
-    "supplier_no_eta":                _F + "AAPQP8E_AAA=",   # Robyn - Supplier ETAs (default owner)
+    "supplier_no_eta":                _F + "AAPQP8E-AAA=",   # Natasha - Supplier - No ETA (default)
     "customer_after_sales":           _F + "AAPQP8FAAAA=",
     "customer_new_order_or_quote":    _F + "AAPQP8FGAAA=",
     "customer_pre_delivery_question": _F + "AAPQP8FIAAA=",
@@ -60,9 +57,82 @@ OWNER_FOLDER = {
 }
 
 
-def _dest_id(category: str, owner: str) -> str | None:
-    """The destination folder id for a classified email — exactly as Make decided: a per-owner
-    folder for a supplier reply that has one, otherwise the category's folder."""
+# "Robyn - Supplier ETAs" folder (= the supplier_with_eta folder). Daniela 2026-09-29: genuine
+# supplier DELIVERY NOTES / PODs go here, whatever else the classifier calls them — Robyn handles
+# supplier ETAs/deliveries. Everything else in supplier_no_eta still files to Natasha's folder.
+ROBYN_ETA_FOLDER = _F + "AAPQP8E_AAA="
+
+# A delivery note / proof-of-delivery, spotted from the subject or sender (the classifier has no
+# separate category for these). Kept tight so PO acknowledgements, order confirmations, ETA-chase
+# replies and quotes are NOT swept up — only real delivery/POD notifications.
+import re as _re  # noqa: E402
+_DELIVERY_NOTE_SUBJECT = _re.compile(
+    r"\b(deliver(?:y|ed)\s+note|delivery\s+notification|proof\s+of\s+delivery|despatch\s+note|"
+    r"dispatch\s+note|goods\s+received\s+note|\bP\.?O\.?D\b)\b", _re.I)
+_DELIVERY_NOTE_SENDERS = ("track-pod.com",)
+
+
+def _is_delivery_note(subject: str, sender: str) -> bool:
+    """True if this looks like a genuine supplier delivery note / POD (→ Robyn's folder)."""
+    if any(s in (sender or "").lower() for s in _DELIVERY_NOTE_SENDERS):
+        return True
+    return bool(_DELIVERY_NOTE_SUBJECT.search(subject or ""))
+
+
+NATASHA_NOETA_FOLDER = _F + "AAPQP8E-AAA="   # Natasha - Supplier - No ETA
+
+
+def move_delivery_notes(mailbox: str | None = None, src_folder_id: str | None = None,
+                        dest_folder_id: str | None = None, dry_run: bool = False,
+                        limit: int = 400, token=None) -> dict:
+    """One-off backlog cleanup: move genuine delivery-note / POD emails OUT of the Natasha
+    Supplier-No-ETA folder INTO Robyn's Supplier ETAs folder. ONLY messages `_is_delivery_note`
+    flags are touched — PO acknowledgements, order confirmations, ETA replies, quotes, proformas
+    and credits are left exactly where they are. dry_run reports what it WOULD move.
+    Returns {ok, scanned, delivery_notes, moved, would_move, failed, items, error}."""
+    mailbox = mailbox or MAILBOX
+    src = src_folder_id or NATASHA_NOETA_FOLDER
+    dest = dest_folder_id or ROBYN_ETA_FOLDER
+    out = {"ok": True, "scanned": 0, "delivery_notes": 0, "moved": 0, "would_move": 0,
+           "failed": 0, "items": [], "error": None}
+    try:
+        token = token or ds.ms_token()
+    except Exception as e:  # noqa: BLE001
+        out.update(ok=False, error=f"Outlook not reachable: {str(e)[:160]}")
+        return out
+    try:
+        msgs = ds.list_folder_messages_full(mailbox, src, limit=limit, token=token)
+    except Exception as e:  # noqa: BLE001
+        out.update(ok=False, error=f"Couldn't list folder: {str(e)[:160]}")
+        return out
+    out["scanned"] = len(msgs)
+    for m in msgs:
+        if not _is_delivery_note(m.get("subject", ""), m.get("from", "")):
+            continue
+        out["delivery_notes"] += 1
+        item = {"subject": m.get("subject"), "sender": m.get("from")}
+        if dry_run:
+            out["would_move"] += 1
+            item["status"] = "would move"
+            out["items"].append(item)
+            continue
+        try:
+            ds.move_message_to_folder(mailbox, m["id"], dest, token=token)
+            out["moved"] += 1
+            item["status"] = "moved"
+        except Exception as e:  # noqa: BLE001
+            out["failed"] += 1
+            item["status"] = f"failed: {str(e)[:80]}"
+        out["items"].append(item)
+    return out
+
+
+def _dest_id(category: str, owner: str, subject: str = "", sender: str = "") -> str | None:
+    """The destination folder id for a classified email. A genuine delivery note / POD always goes
+    to Robyn's Supplier ETAs folder. Otherwise: a per-owner folder for a supplier reply that has
+    one, else the category's folder (exactly as Make decided)."""
+    if _is_delivery_note(subject, sender):
+        return ROBYN_ETA_FOLDER
     if category == "supplier_no_eta" and owner in OWNER_FOLDER:
         return OWNER_FOLDER[owner]
     return CATEGORY_FOLDER.get(category)
@@ -124,10 +194,14 @@ def _handle_message(mailbox, msg, dry_run, summary, token):
         return
     cat, owner = c["category"], c["thread_owner"]
     rec.update(category=cat, owner=owner)
-    rec["folder"] = ("supplier reply → " + owner) if _dest_id(cat, owner) in OWNER_FOLDER.values() \
-        else cat
-
-    dest_id = _dest_id(cat, owner)
+    subj, sndr = msg.get("subject", ""), msg.get("from", "")
+    dest_id = _dest_id(cat, owner, subj, sndr)
+    if _is_delivery_note(subj, sndr):
+        rec["folder"] = "delivery note → Robyn - Supplier ETAs"
+    elif dest_id in OWNER_FOLDER.values():
+        rec["folder"] = "supplier reply → " + owner
+    else:
+        rec["folder"] = cat
     if not dest_id:
         # No mapped folder (shouldn't happen — every category is mapped) — leave it, log it.
         rec.update(status="failed", detail=f"no folder mapped for {cat}")

@@ -5599,6 +5599,46 @@ def render_email_triage():
 
     render_llm_costs()
 
+    # --- One-off: move existing delivery notes out of Natasha's No-ETA folder to Robyn's ETAs ---
+    with st.expander("📦 Move existing delivery notes → Robyn - Supplier ETAs (one-off backlog)"):
+        st.caption("Moves ONLY genuine supplier **delivery notes / PODs** (e.g. 'Delivery Note', "
+                   "'Delivery Notification', POD, track-pod) out of **Natasha - Supplier - No ETA** "
+                   "into **Robyn - Supplier ETAs**. PO acknowledgements, order confirmations, "
+                   "ETA-chase replies, quotes, proformas and credits are left where they are. "
+                   "Preview first to see exactly what would move.")
+        d1, d2 = st.columns(2)
+        if d1.button("👁 Preview delivery notes", key="dn_preview", use_container_width=True):
+            with st.spinner("Finding delivery notes…"):
+                try:
+                    st.session_state["dn_result"] = email_triage.move_delivery_notes(dry_run=True)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["dn_result"] = {"ok": False, "error": str(e)[:200]}
+        if d2.button("📦 Move delivery notes now", key="dn_move", type="primary",
+                     use_container_width=True):
+            with st.spinner("Moving delivery notes to Robyn's folder…"):
+                try:
+                    st.session_state["dn_result"] = email_triage.move_delivery_notes(dry_run=False)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["dn_result"] = {"ok": False, "error": str(e)[:200]}
+        dn = st.session_state.get("dn_result")
+        if dn:
+            if not dn.get("ok"):
+                st.error("Couldn't run: " + str(dn.get("error")))
+            else:
+                if dn.get("would_move"):
+                    st.success(f"Would move {dn['would_move']} delivery note(s) of {dn['scanned']} "
+                               "emails scanned.")
+                elif dn.get("moved") or dn.get("failed"):
+                    st.success(f"Moved {dn['moved']} delivery note(s) to Robyn - Supplier ETAs"
+                               + (f"; {dn['failed']} failed" if dn.get("failed") else "") + ".")
+                else:
+                    st.info(f"No delivery notes found in the folder ({dn['scanned']} emails scanned).")
+                if dn.get("items"):
+                    st.dataframe(pd.DataFrame([{"Subject": (i.get("subject") or "")[:70],
+                                               "From": i.get("sender"), "Status": i.get("status")}
+                                              for i in dn["items"]]),
+                                 hide_index=True, use_container_width=True)
+
     # --- Preview / run ---
     c1, c2 = st.columns(2)
     if c1.button("👁 Preview (classify, move nothing)", key="tri_preview", use_container_width=True):
