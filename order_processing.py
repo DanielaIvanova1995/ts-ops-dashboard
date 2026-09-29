@@ -1369,14 +1369,24 @@ def _process_one(o):
         _write_po_total(iid, kind, doc)          # numbers6 = the PO's inc-VAT total
         docmsg = f"{kind.upper()} attached ✓" if r.get("ok") else f"{kind} attach UNVERIFIED"
         # PO is now on the item → safe to advance an auto-send order to SEND PO (Monday emails).
-        # If the upload wasn't verified, it stays in Needs Review — never email without the PDF.
+        # Two guards before auto-sending, else HOLD in Needs Review (already the current stage):
+        #   1. the PO PDF must be verified-attached (never email without the PDF), and
+        #   2. there must be a Branch email ON MONDAY for the automation to send to — verified by
+        #      reading the item back, so a blank email can never fire a PO to nowhere.
         if intended_stage == "SEND PO":
-            if r.get("ok"):
-                data_sources.op_set_status(iid, "SEND PO")
-                o["stage"] = "SEND PO"
-                docmsg += " · → SEND PO (auto)"
-            else:
+            if not r.get("ok"):
                 docmsg += " · held in Needs Review (PO not verified — not auto-sent)"
+            else:
+                try:
+                    send_email = data_sources.op_get_branch_email(iid)
+                except Exception:  # noqa: BLE001 — if we can't confirm, don't auto-send
+                    send_email = o.get("branch_email") or None
+                if not send_email:
+                    docmsg += " · held in Needs Review (no branch email on Monday — not auto-sent)"
+                else:
+                    data_sources.op_set_status(iid, "SEND PO")
+                    o["stage"] = "SEND PO"
+                    docmsg += " · → SEND PO (auto)"
     except ValueError:                           # validation gate blocked it
         docmsg = "doc BLOCKED — missing a field"   # stays in Needs Review — not auto-sent
     except Exception as e:  # noqa: BLE001

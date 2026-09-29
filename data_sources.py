@@ -5053,6 +5053,30 @@ def op_set_branch(item_id, branch=None, email=None, phone=None, token: str | Non
     return True
 
 
+def op_get_branch_email(item_id, token: str | None = None) -> str | None:
+    """Read the Branch email currently on an order (the address Monday's SEND PO automation emails
+    the PO to). Returns the email string, or None if the column is empty. Used to make sure a PO is
+    never auto-advanced to SEND PO with nowhere to send it."""
+    import json as _json
+    token = token or get_token()
+    q = ("query($i:[ID!]){items(ids:$i){column_values(ids:[\"" + OP_COLS["branch_email"]
+         + "\"]){ text value }}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"i": [str(item_id)]}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    items = (r.json().get("data") or {}).get("items") or []
+    if not items:
+        return None
+    cv = (items[0].get("column_values") or [{}])[0]
+    email = (cv.get("text") or "").strip()
+    if not email and cv.get("value"):
+        try:
+            email = (_json.loads(cv["value"]) or {}).get("email") or ""
+        except Exception:  # noqa: BLE001
+            email = ""
+    return email.strip() or None
+
+
 def op_duplicate_item(item_id, token: str | None = None):
     """Duplicate an order item on the Orders board (for splitting an order across suppliers).
     Returns the new item's id. Monday's create_item is blocked, so we duplicate + edit."""
