@@ -40,7 +40,8 @@ CANON = {
 # Travis Perkins orders are placed through their online PORTAL (not an emailed PO), so they must
 # land on "Go To Portal" and never auto-advance to SEND PO — even once the nearest branch is
 # resolved from the postcode (Daniela 2026-09-29). TP stays in NEEDS_BRANCH too: it's both.
-PORTAL = {"PJH", "Toolbank", "Velux", "Nuie", "National Skirting", "Rexel", "Travis Perkins"}
+PORTAL = {"PJH", "Toolbank", "Velux", "Nuie", "National Skirting", "Rexel", "Travis Perkins",
+          "Walls and Floors"}
 QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices", "AJW"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
@@ -300,7 +301,7 @@ def _stage_for(supplier, route, quote, portal):
 # area nuance); mixed (split) orders; and anything needing a quote, a portal or a branch decision.
 # Flip AUTO_SEND_PO to False to turn the whole thing off (everything reverts to Needs Review).
 AUTO_SEND_PO = True
-PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics", "travisperkins"}
+PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics", "travisperkins", "wallsandfloors"}
 PO_AUTOSEND_EXCLUDE_WORDS = ("hardie", "freefoam", "fortex", "zest")
 
 
