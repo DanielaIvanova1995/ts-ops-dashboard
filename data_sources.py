@@ -3056,13 +3056,17 @@ def create_invoice_subitem(parent_item_id, invoice_no: str, total, due_date: str
     """Create the invoice subitem under an order — the native replacement for the Make
     createSubitem step. Sets total (numbers4), Payment Status (status7__1), the invoice date
     (date_mm3d1ear) and, if given, the due date (date0). Returns {id, board_id}. The PDF is
-    attached separately via add_pdf_to_subitem_file. Raises on Monday error."""
+    attached separately via add_pdf_to_subitem_file. Raises on Monday error.
+
+    Invoice date is ALWAYS set — if none was read from the PDF, it defaults to today (Daniela
+    2026-09-29: there must always be an invoice date)."""
+    import datetime as _dt
     import json as _json
-    cv: dict = {"status7__1": {"label": status_label}}
+    inv_date = str(invoice_date)[:10] if invoice_date else _dt.date.today().isoformat()
+    cv: dict = {"status7__1": {"label": status_label},
+                "date_mm3d1ear": {"date": inv_date}}
     if isinstance(total, (int, float)):
         cv["numbers4"] = total
-    if invoice_date:
-        cv["date_mm3d1ear"] = {"date": str(invoice_date)[:10]}
     if due_date:
         cv["date0"] = {"date": str(due_date)[:10]}
     q = ("mutation($p:ID!,$n:String!,$cv:JSON!){create_subitem(parent_item_id:$p,item_name:$n,"

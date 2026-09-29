@@ -489,6 +489,8 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
             attached = ds.add_pdf_to_subitem_file(
                 sub_id, a["bytes"], a.get("name") or f"{inv_no}.pdf")
             rec["detail"] = "PDF attached" if attached else "subitem made (PDF unverified)"
+            if not inv_date:                     # no date on the PDF → defaulted to today
+                rec["detail"] += " · invoice date defaulted to today"
         except Exception as e:  # noqa: BLE001
             rec["detail"] = f"subitem made but PDF attach failed: {str(e)[:100]}"
         # Put the invoice total into the order's INV slot (feeds profit + margin) — the step the Make
