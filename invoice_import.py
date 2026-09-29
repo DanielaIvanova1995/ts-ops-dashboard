@@ -21,11 +21,45 @@ import hashlib
 import re
 
 import data_sources as ds
+import order_routing
 
 try:
     import supabase_db
 except Exception:  # noqa: BLE001 — importer still runs without Supabase (Monday dedup is the backstop)
     supabase_db = None
+
+
+def _norm_sup(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _resolve_supplier_label(name: str) -> str | None:
+    """Best-guess Monday Supplier label for a free-text invoice supplier name, via order_routing's
+    CANON map — so a trading name resolves to who we file under (e.g. 'Roxor Group' → Nuie,
+    'Painters World' → Decor8). Longest matching CANON key wins to avoid short false hits."""
+    n = _norm_sup(name)
+    if not n:
+        return None
+    best = None
+    for key, label in order_routing.CANON.items():
+        if key and key in n and (best is None or len(key) > len(best[0])):
+            best = (key, label)
+    return best[1] if best else None
+
+
+def _sup_match(invoice_supplier: str, monday_supplier: str) -> bool:
+    """True if an invoice's supplier is the same company as a Monday order line's supplier —
+    tolerant of trading names (via CANON) and of extra words like 'Ltd'."""
+    a, b = _norm_sup(invoice_supplier), _norm_sup(monday_supplier)
+    if not a or not b:
+        return False
+    inv_label, mon_label = _resolve_supplier_label(invoice_supplier), _resolve_supplier_label(monday_supplier)
+    for x in (inv_label, invoice_supplier):
+        for y in (mon_label, monday_supplier):
+            nx, ny = _norm_sup(x), _norm_sup(y)
+            if nx and ny and (nx == ny or nx in ny or ny in nx):
+                return True
+    return a in b or b in a
 
 # Bump if _INVOICE_HEADER_SYSTEM changes, so the durable parse cache re-reads once then re-caches.
 HEADER_PARSE_VERSION = 1
@@ -304,6 +338,31 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
         _finish(key, "failed", rec, summary, dry_run)
         return "failed"
     rec["order"] = order.get("name")
+
+    # SPLIT ORDERS: one order number can have sibling lines (e.g. 31146-1, 31146-2), each a DIFFERENT
+    # supplier. Attach THIS invoice to the sibling whose SUPPLIER matches the invoice's supplier, so a
+    # Decor8 invoice never lands on the Nuie line and vice versa. Only reassigns on an unambiguous
+    # single supplier match; keeps the number-matched line otherwise (and flags a clear mismatch).
+    inv_sup = parsed.get("supplier_name")
+    if inv_sup and rec.get("order_no"):
+        try:
+            sibs = ds.find_order_items_by_number(rec["order_no"], token=None)
+        except Exception:  # noqa: BLE001
+            sibs = []
+        if len(sibs) > 1:
+            matches = [s for s in sibs if _sup_match(inv_sup, s.get("supplier"))]
+            cur_sup = next((s.get("supplier") for s in sibs
+                            if str(s["id"]) == str(order["id"])), "") or ""
+            if len(matches) == 1 and str(matches[0]["id"]) != str(order["id"]):
+                m = matches[0]
+                order = {"id": m["id"], "name": m["name"]}
+                rec["order_no"] = m.get("order_no") or rec["order_no"]
+                rec["order"] = m.get("name")
+                rec["detail"] = (f"split: invoice supplier '{inv_sup}' → line "
+                                 f"{m.get('order_no')} ({m.get('supplier')})")
+            elif not matches and cur_sup and not _sup_match(inv_sup, cur_sup):
+                rec["detail"] = (f"⚠️ split: invoice supplier '{inv_sup}' doesn't match line "
+                                 f"{rec['order_no']} ({cur_sup}) and no sibling matched — check the split")
 
     # De-dup #2: is this invoice number ALREADY a subitem on the order? (re-sent email / Make copy)
     try:

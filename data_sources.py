@@ -2959,6 +2959,36 @@ def find_order_item_by_number(order_no: str, token: str | None = None) -> dict |
     return {"id": items[0]["id"], "name": items[0].get("name")} if items else None
 
 
+def find_order_items_by_number(order_no: str, token: str | None = None) -> list:
+    """All order items that share this order's BASE number — the number itself and its split
+    siblings (e.g. '31146', '31146-1', '31146-2') — each with its supplier. Lets an imported invoice
+    be attached to the split line whose SUPPLIER matches the invoice, so a Decor8 invoice never lands
+    on the Nuie line and vice versa. Returns [{id, name, order_no, supplier}]."""
+    import re as _re
+    num = (order_no or "").strip()
+    if not num:
+        return []
+    base = _re.sub(r"-\d+$", "", num)             # 31146-1 → 31146 (base for the whole split)
+    q = ('query($b:ID!,$v:String!){boards(ids:[$b]){items_page(limit:25,query_params:{rules:['
+         '{column_id:"text_mkv6z0nt",compare_value:[$v],operator:contains_text}]}){items{id name '
+         'column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd"]){id text}}}}}')
+    try:
+        data = _monday_gql(q, {"b": str(ORDERS_BOARD_ID), "v": base}, token)
+    except Exception:  # noqa: BLE001
+        return []
+    items = ((((data.get("boards") or [{}])[0]).get("items_page") or {}).get("items") or [])
+    out = []
+    for it in items:
+        cv = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+        ono = (cv.get("text_mkv6z0nt") or "").strip()
+        # contains-match can over-reach (e.g. base '3114' catching '31140'); keep only the exact
+        # base or a real 'base-<n>' split sibling.
+        if ono == base or _re.fullmatch(_re.escape(base) + r"-\d+", ono):
+            out.append({"id": it["id"], "name": it.get("name"), "order_no": ono,
+                        "supplier": (cv.get("dropdown_mkyqdeqd") or "").strip()})
+    return out
+
+
 def find_order_by_subitem_invoice_no(invoice_no, token: str | None = None) -> dict | None:
     """Find the ORDER a given invoice number is logged under: search the Subitems board for a
     subitem whose name contains that number and return its parent order {id, name, order_no}, or
