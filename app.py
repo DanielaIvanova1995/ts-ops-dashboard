@@ -7187,7 +7187,8 @@ def _render_quote_block(email):
         try:
             li = [{"variantId": l["match"]["variant_id"], "quantity": l["qty"]} for l in matched]
             do = data_sources.create_draft_order(li, email=cust_email, note=note,
-                                                 name=cust_name, phone=cust_phone)
+                                                 name=cust_name, phone=cust_phone,
+                                                 postcode=q.get("postcode"))
         except Exception as e:  # noqa: BLE001
             draft_err = str(e)
         ref = do["name"] if do else None

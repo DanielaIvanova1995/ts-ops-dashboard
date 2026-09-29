@@ -2298,28 +2298,42 @@ def match_quote_variant(code: str | None, description: str | None,
 
 
 def create_draft_order(line_items, email=None, note=None, token: str | None = None,
-                       name=None, phone=None) -> dict:
+                       name=None, phone=None, postcode=None, country_code="GB") -> dict:
     """Create a Shopify draft order from line_items [{variantId, quantity}]. Shopify
     prices it. Returns {id, name, invoiceUrl, total}. Needs write_draft_orders.
     `email`/`name`/`phone` are the CUSTOMER's (from the form body, not the sender).
     Retries once with a freshly-minted token if the cached one lacks the scope (so a
-    just-granted scope works without rebooting the app)."""
+    just-granted scope works without rebooting the app).
+
+    VAT: the store is taxesIncluded=false (prices are ex-VAT), so Shopify must ADD 20% VAT.
+    Every draft is given a UK tax region (country GB, + postcode when known) so VAT is ALWAYS
+    applied — without an address Shopify skips the shop-region fallback once a customer is linked,
+    which is why customer-linked quote drafts were coming out with £0 VAT."""
     store = get_secret("SHOPIFY_STORE")
     mutation = ("mutation ($input: DraftOrderInput!) { draftOrderCreate(input: $input) { "
-                "draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount } } } "
-                "userErrors { field message } } }")
+                "draftOrder { id name invoiceUrl totalPriceSet { shopMoney { amount } } "
+                "totalTaxSet { shopMoney { amount } } } userErrors { field message } } }")
     inp = {"lineItems": [{"variantId": li["variantId"], "quantity": int(li["quantity"])}
-                         for li in line_items]}
+                         for li in line_items],
+           "taxExempt": False}                       # never exempt — always charge VAT
     if email:
         inp["email"] = email
     if note:
         inp["note"] = note
     if phone:
         inp["phone"] = phone
+    # A UK tax region on EVERY draft → Shopify always adds 20% VAT (postcode included when known so
+    # the figure is exact for the delivery area).
+    addr = {"countryCode": (country_code or "GB").upper()}
+    if postcode and str(postcode).strip():
+        addr["zip"] = str(postcode).strip()
+    inp["shippingAddress"] = dict(addr)
+    bill = dict(addr)
     if name:
         parts = name.strip().split(None, 1)
-        inp["billingAddress"] = {"firstName": parts[0],
-                                 "lastName": parts[1] if len(parts) > 1 else ""}
+        bill["firstName"] = parts[0]
+        bill["lastName"] = parts[1] if len(parts) > 1 else ""
+    inp["billingAddress"] = bill
 
     def _attempt(tok):
         r = requests.post(
@@ -2346,6 +2360,7 @@ def create_draft_order(line_items, email=None, note=None, token: str | None = No
         raise RuntimeError(res["userErrors"][0]["message"])
     d = res["draftOrder"]
     d["total"] = float((d.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
+    d["tax"] = float((d.get("totalTaxSet") or {}).get("shopMoney", {}).get("amount") or 0)
     return d
 
 
