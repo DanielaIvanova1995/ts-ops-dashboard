@@ -5123,6 +5123,103 @@ def op_duplicate_item(item_id, token: str | None = None):
     return ((p.get("data") or {}).get("duplicate_item") or {}).get("id")
 
 
+# --- Restoring archived orders (Archive 2026 → main Orders board) ------------------------------
+ARCHIVE_2026_BOARD_ID = 18420888867          # "Archive 2026" board
+ARCHIVE_ORDER_NO_COL = "text_mm51rs8h"       # its "Order no." column
+ARCHIVE_SUPPLIER_COL = "dropdown_mm519agg"   # its "Supplier" column
+ORDERS_DELIVERED_GROUP = "group_mkv7mvgm"    # main Orders board → "Delivered Orders (MALYEKA)" group
+
+# Column TYPES that carry a literal value we can safely map straight across boards. Status/dropdown
+# map by label INDEX (which differs between boards) so we DON'T map them — a mis-mapped status could
+# even read as 'SEND PO'. Supplier is re-set separately by label after the move.
+_MOVE_SAFE_TYPES = {"text", "long_text", "numbers", "numeric", "date", "email", "phone",
+                    "link", "hour", "people", "week", "world_clock", "location"}
+
+
+def find_archive_order_items(order_no: str, token: str | None = None) -> list:
+    """Find item(s) on the Archive 2026 board by order number (its Order no. column, else an exact
+    item-name match), each with its supplier label. Returns [{id, name, order_no, supplier}]."""
+    num = (order_no or "").strip()
+    if not num:
+        return []
+    q = ("query($b:ID!,$col:String!,$val:String!){items_page_by_column_values(board_id:$b,limit:10,"
+         "columns:[{column_id:$col,column_values:[$val]}]){items{id name column_values(ids:[\""
+         + ARCHIVE_ORDER_NO_COL + "\",\"" + ARCHIVE_SUPPLIER_COL + "\"]){id text}}}}")
+    try:
+        data = _monday_gql(q, {"b": str(ARCHIVE_2026_BOARD_ID), "col": ARCHIVE_ORDER_NO_COL,
+                               "val": num}, token)
+        items = ((data.get("items_page_by_column_values") or {}).get("items") or [])
+    except Exception:  # noqa: BLE001
+        items = []
+    if not items:                      # fallback: the order number is often the item NAME
+        q2 = ('query($b:ID!,$v:String!){boards(ids:[$b]){items_page(limit:10,query_params:{rules:['
+              '{column_id:"name",compare_value:[$v],operator:contains_text}]}){items{id name '
+              'column_values(ids:["' + ARCHIVE_ORDER_NO_COL + '","' + ARCHIVE_SUPPLIER_COL
+              + '"]){id text}}}}}')
+        try:
+            data2 = _monday_gql(q2, {"b": str(ARCHIVE_2026_BOARD_ID), "v": num}, token)
+            items = [it for it in ((((data2.get("boards") or [{}])[0]).get("items_page") or {})
+                                   .get("items") or []) if (it.get("name") or "").strip() == num]
+        except Exception:  # noqa: BLE001
+            items = []
+    out = []
+    for it in items:
+        cv = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+        out.append({"id": it["id"], "name": it.get("name"),
+                    "order_no": (cv.get(ARCHIVE_ORDER_NO_COL) or "").strip(),
+                    "supplier": (cv.get(ARCHIVE_SUPPLIER_COL) or "").strip()})
+    return out
+
+
+def _board_columns(board_id, token: str | None = None) -> list:
+    data = _monday_gql("query($b:[ID!]){boards(ids:$b){columns{id title type}}}",
+                       {"b": [str(board_id)]}, token)
+    return (((data.get("boards") or [{}])[0]).get("columns") or [])
+
+
+def archive_to_orders_column_map(token: str | None = None) -> list:
+    """[{source, target}] mapping Archive-2026 columns to the matching main-Orders columns by
+    title+type, for the SAFE literal types only (see _MOVE_SAFE_TYPES) — so a cross-board move keeps
+    order no., customer details, dates, £/INV columns and branch email, and never mis-maps a
+    status/dropdown by index."""
+    import re as _re
+    src = _board_columns(ARCHIVE_2026_BOARD_ID, token)
+    dst = _board_columns(ORDERS_BOARD_ID, token)
+
+    def _k(c):
+        return (_re.sub(r"[^a-z0-9]", "", (c.get("title") or "").lower()), c.get("type"))
+
+    dst_by = {}
+    for c in dst:
+        dst_by.setdefault(_k(c), c["id"])
+    out = []
+    for c in src:
+        if c.get("type") not in _MOVE_SAFE_TYPES:
+            continue
+        t = dst_by.get(_k(c))
+        if t:
+            out.append({"source": c["id"], "target": t})
+    return out
+
+
+def move_item_to_board(item_id, dest_board_id, dest_group_id, columns_mapping=None,
+                       token: str | None = None):
+    """Move an item to another board + group, carrying the mapped columns' values. Returns the item
+    id. `columns_mapping` is [{source, target}] of column ids (unmapped columns are NOT carried)."""
+    token = token or get_token()
+    q = ("mutation($b:ID!,$g:String!,$i:ID!,$cm:[ColumnMappingInput!]){move_item_to_board("
+         "board_id:$b,group_id:$g,item_id:$i,columns_mapping:$cm){id}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": str(dest_board_id), "g": str(dest_group_id), "i": str(item_id),
+        "cm": columns_mapping or []}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=45)
+    r.raise_for_status()
+    p = r.json()
+    if "errors" in p:
+        raise RuntimeError(f"Monday move failed: {p['errors']}")
+    return ((p.get("data") or {}).get("move_item_to_board") or {}).get("id")
+
+
 def op_archive_item(item_id, token: str | None = None):
     """Archive an order item (used when merging split parts — the absorbed part is archived, not
     hard-deleted, so it's recoverable from Monday's archive). Returns the archived item id."""

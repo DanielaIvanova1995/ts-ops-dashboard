@@ -6073,6 +6073,57 @@ def _render_invoice_import():
                            + (f" · {bf['no_order']} couldn't find their order" if bf['no_order'] else ""))
                 if bf.get("items"):
                     st.dataframe(pd.DataFrame(bf["items"]), use_container_width=True, hide_index=True)
+        # Restore archived orders: invoices that failed with "no order on Monday for PO …" usually
+        # mean the order was archived. Bring those orders back from Archive 2026 → Delivered so the
+        # invoices can be re-imported. Preview first; restore ONE to eyeball, then the rest.
+        with st.expander("♻️ Restore archived orders (for 'no order on Monday' fails) → Delivered"):
+            st.caption("Reads the failed-import list, finds each order on the **Archive 2026** board "
+                       "and moves it back to **Delivered Orders** on the main board (carrying order "
+                       "no., customer, dates, £/INV columns and branch email; supplier is re-set by "
+                       "name; statuses are left blank so nothing can mis-fire). Then re-run the "
+                       "import above and the invoices land as **Needs Review** subitems. Preview "
+                       "first, then restore one to check before doing the rest.")
+            rc1, rc2, rc3 = st.columns(3)
+            if rc1.button("👁 Preview", key="ri_prev", use_container_width=True):
+                with st.spinner("Checking the archive for these orders…"):
+                    try:
+                        st.session_state["ri_res"] = invoice_import.restore_archived_orders(dry_run=True)
+                    except Exception as e:  # noqa: BLE001
+                        st.session_state["ri_res"] = {"ok": False, "error": str(e)[:200]}
+            if rc2.button("♻️ Restore ONE (test)", key="ri_one", use_container_width=True):
+                with st.spinner("Restoring one order…"):
+                    try:
+                        st.session_state["ri_res"] = invoice_import.restore_archived_orders(
+                            dry_run=False, limit=1)
+                    except Exception as e:  # noqa: BLE001
+                        st.session_state["ri_res"] = {"ok": False, "error": str(e)[:200]}
+            if rc3.button("♻️ Restore all", key="ri_all", type="primary", use_container_width=True):
+                with st.spinner("Restoring archived orders…"):
+                    try:
+                        st.session_state["ri_res"] = invoice_import.restore_archived_orders(
+                            dry_run=False, limit=200)
+                    except Exception as e:  # noqa: BLE001
+                        st.session_state["ri_res"] = {"ok": False, "error": str(e)[:200]}
+            ri = st.session_state.get("ri_res")
+            if ri:
+                if not ri.get("ok"):
+                    st.error("Couldn't run: " + str(ri.get("error")))
+                else:
+                    verb = "Would restore" if ri.get("dry_run") else "Restored"
+                    st.success(f"{ri['failed_pos']} failed order(s) in the log · {verb} "
+                               f"**{ri.get('would_restore') or ri.get('restored')}** · already live "
+                               f"{ri['already_live']} · not on archive {ri['not_found']}"
+                               + (f" · move failed {ri['failed']}" if ri.get('failed') else "")
+                               + ("  · (capped — click again)" if ri.get('capped') else ""))
+                    if not ri.get("dry_run") and (ri.get("restored") or 0):
+                        st.info("Now run **Import** above to attach the invoices (they'll be Needs "
+                                "Review).")
+                    if ri.get("items"):
+                        st.dataframe(pd.DataFrame([{"PO": r.get("po"), "Order": r.get("name"),
+                                                   "Supplier": r.get("supplier"),
+                                                   "Status": r.get("status")} for r in ri["items"]]),
+                                     use_container_width=True, hide_index=True)
+
         fails = supabase_db.invoice_import_recent(limit=50, status="failed")
         with st.expander(f"⚠️ Failed to import ({len(fails)}) — need a look", expanded=bool(fails)):
             if not fails:

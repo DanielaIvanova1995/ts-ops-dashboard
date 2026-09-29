@@ -29,6 +29,94 @@ except Exception:  # noqa: BLE001 — importer still runs without Supabase (Mond
     supabase_db = None
 
 
+def _failed_pos_from_log(limit: int = 800) -> list:
+    """Distinct order/PO numbers of invoices that FAILED to import because the order wasn't on the
+    main board ('no order on Monday for PO …') — read from the durable import log."""
+    if not (supabase_db and supabase_db.configured()):
+        return []
+    rows = supabase_db.invoice_import_recent(limit=limit, status="failed") or []
+    pos, seen = [], set()
+    for r in rows:
+        d = r.get("detail") or ""
+        m = re.search(r"no order on Monday for PO\s+['\"]?([A-Za-z0-9][A-Za-z0-9/_-]*)", d)
+        if not m:
+            continue
+        po = m.group(1).strip().strip("'\"")
+        if po and po.lower() not in ("none", "null") and po.lower() not in seen:
+            seen.add(po.lower())
+            pos.append(po)
+    return pos
+
+
+def restore_archived_orders(dry_run: bool = False, limit: int = 25) -> dict:
+    """Move orders that invoices failed to import against — because they'd been archived — from the
+    'Archive 2026' board BACK to the main Orders board's 'Delivered Orders' group, so the invoices
+    can be re-imported. Reads the failed-import log itself. Maps every safe field across by name, and
+    re-sets the Supplier by label after the move (a dropdown can't be mapped by index across boards).
+    Skips any order that's already live, or not found on the archive. dry_run reports only.
+    Returns {ok, failed_pos, already_live, not_found, restored, would_restore, failed, capped, items}."""
+    out = {"ok": True, "dry_run": dry_run, "failed_pos": 0, "already_live": 0, "not_found": 0,
+           "restored": 0, "would_restore": 0, "failed": 0, "capped": False, "items": [], "error": None}
+    pos = _failed_pos_from_log()
+    out["failed_pos"] = len(pos)
+    if not pos:
+        return out
+    colmap = None
+    if not dry_run:
+        try:
+            colmap = ds.archive_to_orders_column_map()
+        except Exception as e:  # noqa: BLE001
+            out.update(ok=False, error=f"couldn't map columns: {str(e)[:150]}")
+            return out
+    done = 0
+    for po in pos:
+        rec = {"po": po}
+        try:
+            live = ds.find_order_item_by_number(po)
+        except Exception:  # noqa: BLE001
+            live = None
+        if live:
+            out["already_live"] += 1
+            rec["status"] = "already on Orders — skipped"
+            out["items"].append(rec)
+            continue
+        try:
+            arc = ds.find_archive_order_items(po)
+        except Exception:  # noqa: BLE001
+            arc = []
+        if not arc:
+            out["not_found"] += 1
+            rec["status"] = "not found on Archive 2026"
+            out["items"].append(rec)
+            continue
+        a = arc[0]
+        rec.update(archive_item=a["id"], name=a.get("name"), supplier=a.get("supplier"))
+        if dry_run:
+            out["would_restore"] += 1
+            rec["status"] = "would restore → Delivered Orders"
+            out["items"].append(rec)
+            continue
+        if done >= limit:
+            out["capped"] = True
+            break
+        try:
+            ds.move_item_to_board(a["id"], ds.ORDERS_BOARD_ID, ds.ORDERS_DELIVERED_GROUP, colmap)
+            # Re-set the supplier by label (the dropdown can't map by index across boards).
+            if a.get("supplier"):
+                try:
+                    ds.op_set_supplier(a["id"], a["supplier"])
+                except Exception:  # noqa: BLE001
+                    pass
+            out["restored"] += 1
+            done += 1
+            rec["status"] = "restored → Delivered Orders"
+        except Exception as e:  # noqa: BLE001
+            out["failed"] += 1
+            rec["status"] = f"move failed: {str(e)[:90]}"
+        out["items"].append(rec)
+    return out
+
+
 def _norm_sup(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
