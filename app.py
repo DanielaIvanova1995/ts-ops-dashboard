@@ -6722,6 +6722,57 @@ def _quote_fallback_match(description):
     return best
 
 
+def _hardie_quote_colour(parsed):
+    """If this quote is a James Hardie job, return its colour (from HARDIE_COLOURS, '' if none named);
+    None if it isn't a Hardie job. Lets the discrete-item matcher lock every line to James Hardie
+    products in the right colour — instead of matching a 'trim' to a random fascia trim, or defaulting
+    a colour to Anthracite Grey."""
+    blob = " ".join([str(parsed.get("summary") or ""), str(parsed.get("product_range") or "")]
+                    + [str(i.get("description") or "") for i in (parsed.get("items") or [])]).lower()
+    if "hardie" not in blob:
+        return None
+    for c in HARDIE_COLOURS:
+        if c.lower() in blob:
+            return c
+    return ""
+
+
+# Colour-specific James Hardie products (append the job colour); the rest are one product per line
+# (touch-up paint, vents, screws, EPDM, internal corner, NT3 are single products — no colour word).
+_HARDIE_COLOUR_TERMS = {"James Hardie Plank cladding", "Hardie Plank External Corner"}
+
+
+def _hardie_line_search(desc, colour):
+    """Map a customer's Hardie line ('2 external trims', 'door frame trims', …) to the exact James
+    Hardie product search term (+ colour where the product is colour-specific)."""
+    dl = (desc or "").lower()
+    if "epdm" in dl:
+        term = "James Hardie EPDM Tape 20m"
+    elif "screw" in dl or "fixing" in dl:
+        term = "James Hardie Plank Fixing Screws"
+    elif "paint" in dl:
+        term = "Hardie Touch Up Paint"
+    elif ("door" in dl or "window" in dl or "reveal" in dl or "nt3" in dl):
+        term = "James Hardie NT3 Trim"
+    elif "internal" in dl and ("corner" in dl or "trim" in dl):
+        term = "James Hardie Plank Internal Corner"
+    elif "external" in dl and ("corner" in dl or "trim" in dl):
+        term = "Hardie Plank External Corner"
+    elif "top" in dl and ("vent" in dl or "ventilation" in dl):
+        term = "James Hardie Plank Top Ventilation Strip"
+    elif "starter" in dl or "ventilation" in dl or ("vent" in dl):
+        term = "James Hardie Plank Starter Strip Ventilation Profile"
+    elif "abutment" in dl or "end stop" in dl or "endstop" in dl or "end cap" in dl:
+        term = "Hardie Plank Abutment Profile"
+    elif "plank" in dl or "board" in dl or "cladding" in dl:
+        term = "James Hardie Plank cladding"
+    else:
+        term = "James Hardie " + (desc or "").strip()
+    if colour and term in _HARDIE_COLOUR_TERMS:
+        term = f"{term} {colour}"
+    return term
+
+
 def _build_quote(email):
     """Full build for ONE email: reuse the shared parse, then lazily add Shopify
     matching and the composed clarify email (computed once, stored on the parse)."""
@@ -6757,21 +6808,39 @@ def _build_quote(email):
             parsed["caveats"] = (parsed.get("caveats") or []) + (clad_cav or [])
             parsed["can_quote"] = True
         else:
+            # James Hardie job? Lock every line to James Hardie products in the job colour, so a
+            # 'trim' can't match a random fascia trim and the colour can't default to Anthracite.
+            hardie_colour = _hardie_quote_colour(parsed)
             lines = []
             for it in (parsed.get("items") or []):
+                desc = it.get("description")
                 try:
-                    match = data_sources.match_quote_variant(it.get("code"), it.get("description"))
+                    if hardie_colour is not None:
+                        match = data_sources.match_quote_variant(
+                            None, _hardie_line_search(desc, hardie_colour), brand="Hardie")
+                    else:
+                        match = data_sources.match_quote_variant(it.get("code"), desc)
                 except Exception:  # noqa: BLE001
                     match = None
-                lines.append({"description": it.get("description"), "qty": it.get("qty") or 1,
-                              "match": match})
+                lines.append({"description": desc, "qty": it.get("qty") or 1, "match": match})
             parsed["lines"] = lines
+            parsed["_hardie_colour"] = hardie_colour
         # Any line the primary matcher couldn't price → retry with the invoice-checker's
-        # token scorer over a broader Shopify search (matches on distinctive shared words).
+        # token scorer over a broader Shopify search (matches on distinctive shared words). For a
+        # James Hardie job keep the retry LOCKED to Hardie — better a 'no match' to flag than a
+        # non-Hardie trim slipped in.
+        _hc = parsed.get("_hardie_colour")
         for l in parsed["lines"]:
             m = l.get("match")
             if not (m and m.get("price") is not None):
-                fb = _quote_fallback_match(l.get("description"))
+                if _hc is not None:
+                    try:
+                        fb = data_sources.match_quote_variant(
+                            None, _hardie_line_search(l.get("description"), _hc), brand="Hardie")
+                    except Exception:  # noqa: BLE001
+                        fb = None
+                else:
+                    fb = _quote_fallback_match(l.get("description"))
                 if fb and fb.get("price") is not None:
                     l["match"] = fb
                     l["_fallback"] = True
