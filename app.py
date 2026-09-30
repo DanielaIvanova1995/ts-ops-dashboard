@@ -9403,6 +9403,8 @@ def _render_statement_recon():
                               "balance": bnum.get("balance")})
         else:
             _k = _norm_inv_no(inv, sup)
+            _present = _k in mon_status          # the invoice IS a subitem on Monday (any status,
+            #                                      including a BLANK Payment Status)
             _mst = mon_status.get(_k, "")
             _ml = _mst.lower()
             _mon_ok = ("approved" in _ml or "matched" in _ml)
@@ -9426,7 +9428,7 @@ def _render_statement_recon():
                                   "due": _due_label(_bb.get("due")), "bill_no": _bb.get("doc_no") or inv,
                                   "bill_date": _bb.get("date"), "due_date": _bb.get("due"),
                                   "original": _bb.get("total"), "balance": _bb.get("balance")})
-            elif _mst:                          # on Monday in some status
+            elif _present:                      # a subitem on Monday (approved, unapproved, OR blank)
                 if _mon_ok:
                     status = ("🟢 On Monday & approved — not yet matched to a QuickBooks bill "
                               "(check the invoice no.)")
