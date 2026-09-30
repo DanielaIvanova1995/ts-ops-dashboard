@@ -2525,8 +2525,10 @@ def fetch_sample_orders(since_days: int = 2) -> list[dict]:
     store = get_secret("SHOPIFY_STORE")
     tok = shopify_products_token()
     since = (_dt.date.today() - _dt.timedelta(days=int(since_days))).isoformat()
+    # NB: no customer{...} field — that needs the read_customers scope, which our token doesn't have.
+    # The order-level email + shippingAddress cover the name/email/phone we need.
     q = ("query($q:String!){orders(first:100, query:$q, sortKey:CREATED_AT, reverse:true){edges{node{"
-         "name createdAt totalPriceSet{shopMoney{amount}} email customer{firstName lastName email phone} "
+         "name createdAt totalPriceSet{shopMoney{amount}} email "
          "shippingAddress{name zip phone} lineItems(first:30){edges{node{title variantTitle quantity}}}}}}}")
     r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
                       json={"query": q, "variables": {"q": f"created_at:>={since} sample"}},
@@ -2543,7 +2545,6 @@ def fetch_sample_orders(since_days: int = 2) -> list[dict]:
         samp = [l for l in lines if "sample" in (l.get("title") or "").lower()]
         if not samp:
             continue
-        cust = n.get("customer") or {}
         ship = n.get("shippingAddress") or {}
         prod: dict = {}
         for l in samp:
@@ -2554,12 +2555,10 @@ def fetch_sample_orders(since_days: int = 2) -> list[dict]:
                 prod[t].append(v)
         samples_text = "\n".join(t + ((" — " + ", ".join(vs)) if vs else "") for t, vs in prod.items())
         amt = float((n.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
-        name = (ship.get("name")
-                or ((cust.get("firstName") or "") + " " + (cust.get("lastName") or "")).strip()
-                or n.get("email") or "Customer")
+        name = ship.get("name") or n.get("email") or "Customer"
         out.append({"order": n["name"], "date": (n.get("createdAt") or "")[:10], "customer": name,
-                    "email": n.get("email") or cust.get("email") or "",
-                    "phone": ship.get("phone") or cust.get("phone") or "",
+                    "email": n.get("email") or "",
+                    "phone": ship.get("phone") or "",
                     "postcode": ship.get("zip") or "", "samples_text": samples_text,
                     "total": amt, "high": amt > 5})
     return out
@@ -2706,33 +2705,51 @@ def fetch_abandoned_checkouts(since_days: int = 14) -> list[dict]:
     store = get_secret("SHOPIFY_STORE")
     tok = shopify_products_token()
     since = (_dt.date.today() - _dt.timedelta(days=int(since_days))).isoformat()
-    q = ("query($q:String!){abandonedCheckouts(first:100, query:$q, sortKey:CREATED_AT, reverse:true)"
-         "{edges{node{id abandonedCheckoutUrl createdAt totalPriceSet{shopMoney{amount}} "
-         "customer{firstName lastName email phone} lineItems(first:30){edges{node{title quantity}}}}}}}")
-    r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
-                      json={"query": q, "variables": {"q": f"created_at:>={since}"}},
-                      headers={"X-Shopify-Access-Token": tok, "Content-Type": "application/json"},
-                      timeout=30)
-    r.raise_for_status()
-    payload = r.json()
+    # customer{email} needs the read_customers scope; try it, but fall back to the checkout's own
+    # billing/shipping address (name + phone, no scope needed) so the feed still works without it.
+    q_full = ("query($q:String!){abandonedCheckouts(first:100, query:$q, sortKey:CREATED_AT, reverse:true)"
+              "{edges{node{id abandonedCheckoutUrl createdAt totalPriceSet{shopMoney{amount}} "
+              "customer{firstName lastName email phone} billingAddress{name phone} "
+              "shippingAddress{name phone} lineItems(first:30){edges{node{title quantity}}}}}}}")
+    q_lite = ("query($q:String!){abandonedCheckouts(first:100, query:$q, sortKey:CREATED_AT, reverse:true)"
+              "{edges{node{id abandonedCheckoutUrl createdAt totalPriceSet{shopMoney{amount}} "
+              "billingAddress{name phone} shippingAddress{name phone} "
+              "lineItems(first:30){edges{node{title quantity}}}}}}}")
+
+    def _fetch(query):
+        r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                          json={"query": query, "variables": {"q": f"created_at:>={since}"}},
+                          headers={"X-Shopify-Access-Token": tok, "Content-Type": "application/json"},
+                          timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    payload = _fetch(q_full)
+    if payload.get("errors") and "read_customers" in str(payload["errors"]):
+        payload = _fetch(q_lite)          # token lacks read_customers → addresses-only (no email)
     if payload.get("errors"):
         raise RuntimeError(f"Shopify error: {str(payload['errors'])[:200]}")
     out: list[dict] = []
     for e in payload.get("data", {}).get("abandonedCheckouts", {}).get("edges", []):
         n = e["node"]
         cust = n.get("customer") or {}
+        bill = n.get("billingAddress") or {}
+        ship = n.get("shippingAddress") or {}
         email = (cust.get("email") or "").strip()
         amt = float((n.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
-        if not email or amt <= 0:
+        name = (((cust.get("firstName") or "") + " " + (cust.get("lastName") or "")).strip()
+                or ship.get("name") or bill.get("name") or "").strip()
+        phone = cust.get("phone") or ship.get("phone") or bill.get("phone") or ""
+        if amt <= 0 or not (email or name):        # need a value and some way to identify them
             continue
         lines = [li["node"] for li in n.get("lineItems", {}).get("edges", [])]
         items_text = "\n".join(f"{int(l.get('quantity') or 1)} x {(l.get('title') or '').strip()}"
                                for l in lines if l.get("title"))
-        name = ((cust.get("firstName") or "") + " " + (cust.get("lastName") or "")).strip() or email
+        name = name or email
         url = n.get("abandonedCheckoutUrl") or ""
         out.append({"token": _ac_token(url) or str(n.get("id") or ""), "url": url,
                     "date": (n.get("createdAt") or "")[:10], "customer": name, "email": email,
-                    "phone": cust.get("phone") or "", "items_text": items_text, "total": amt})
+                    "phone": phone or "", "items_text": items_text, "total": amt})
     return out
 
 
