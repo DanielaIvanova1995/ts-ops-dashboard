@@ -8185,12 +8185,12 @@ def _render_sample_feed_panel():
                     _sample_leads_cached.clear()
                 except Exception as e:  # noqa: BLE001
                     st.session_state["sfeed_res"] = {"ok": False, "error": str(e)[:200]}
-        if c3.button("⏪ Backfill 120 days", key="sfeed_backfill", use_container_width=True,
-                     help="One-off catch-up: scan the last 120 days and add any sample orders that "
+        if c3.button("⏪ Backfill 13 days", key="sfeed_backfill", use_container_width=True,
+                     help="One-off catch-up: scan the last 13 days and add any sample orders that "
                           "aren't on the board yet (safe — de-duped on Order #)."):
-            with st.spinner("Backfilling sample orders (last 120 days)…"):
+            with st.spinner("Backfilling sample orders (last 13 days)…"):
                 try:
-                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=120,
+                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=13,
                                                                                  dry_run=False)
                     _sample_leads_cached.clear()
                 except Exception as e:  # noqa: BLE001
