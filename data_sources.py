@@ -2676,6 +2676,169 @@ def run_sample_feed(since_days: int = 2, dry_run: bool = False, token: str | Non
             "orders": (would if dry_run else created)}
 
 
+# ---- Abandoned-checkout follow-up feed (mirrors the sample feed) ----------------------------
+ABANDONED_BOARD_ID = 18422807553
+ABANDONED_TO_CONTACT_GROUP = "group_mm5eqn93"        # "🔥 To Contact Today"
+ABANDONED_COLS = {
+    "value": "numeric_mm5emyzj", "date": "date_mm5efba7", "checkout_link": "link_mm5ejysq",
+    "email": "email_mm5e5f69", "phone": "phone_mm5exfj3", "items": "long_text_mm5e6m04",
+}
+
+
+def _ac_valkey(s) -> str:
+    """A stable £-value key for dedup (handles '£468.71', '468.7', 468.71 → '468.71')."""
+    import re as _re
+    m = _re.search(r"\d+(?:\.\d+)?", str(s or ""))
+    return f"{float(m.group(0)):.2f}" if m else ""
+
+
+def _ac_token(url_or_id: str) -> str:
+    import re as _re
+    m = _re.search(r"/checkouts/(?:ac/)?([A-Za-z0-9]+)/recover", str(url_or_id or ""))
+    return m.group(1) if m else str(url_or_id or "")
+
+
+def fetch_abandoned_checkouts(since_days: int = 14) -> list[dict]:
+    """Recent Shopify ABANDONED CHECKOUTS (started, not completed), one entry each. Read-only.
+    Returns [{token, url, date, customer, email, phone, items_text, total}] — only those with an
+    email and a value > 0 (a recovered checkout becomes an order and drops off this list)."""
+    import datetime as _dt
+    store = get_secret("SHOPIFY_STORE")
+    tok = shopify_products_token()
+    since = (_dt.date.today() - _dt.timedelta(days=int(since_days))).isoformat()
+    q = ("query($q:String!){abandonedCheckouts(first:100, query:$q, sortKey:CREATED_AT, reverse:true)"
+         "{edges{node{id abandonedCheckoutUrl createdAt totalPriceSet{shopMoney{amount}} "
+         "customer{firstName lastName email phone} lineItems(first:30){edges{node{title quantity}}}}}}}")
+    r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                      json={"query": q, "variables": {"q": f"created_at:>={since}"}},
+                      headers={"X-Shopify-Access-Token": tok, "Content-Type": "application/json"},
+                      timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {str(payload['errors'])[:200]}")
+    out: list[dict] = []
+    for e in payload.get("data", {}).get("abandonedCheckouts", {}).get("edges", []):
+        n = e["node"]
+        cust = n.get("customer") or {}
+        email = (cust.get("email") or "").strip()
+        amt = float((n.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
+        if not email or amt <= 0:
+            continue
+        lines = [li["node"] for li in n.get("lineItems", {}).get("edges", [])]
+        items_text = "\n".join(f"{int(l.get('quantity') or 1)} x {(l.get('title') or '').strip()}"
+                               for l in lines if l.get("title"))
+        name = ((cust.get("firstName") or "") + " " + (cust.get("lastName") or "")).strip() or email
+        url = n.get("abandonedCheckoutUrl") or ""
+        out.append({"token": _ac_token(url) or str(n.get("id") or ""), "url": url,
+                    "date": (n.get("createdAt") or "")[:10], "customer": name, "email": email,
+                    "phone": cust.get("phone") or "", "items_text": items_text, "total": amt})
+    return out
+
+
+def abandoned_board_index(token: str | None = None) -> set:
+    """Dedup keys already on the Abandoned Checkouts board: each item's recovery-URL token AND an
+    'e:email|value' key (so even the older manually-added items without a link aren't re-added)."""
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    ids = [ABANDONED_COLS["checkout_link"], ABANDONED_COLS["email"], ABANDONED_COLS["value"]]
+    seen: set = set()
+    cursor = None
+    for _ in range(25):
+        q = ("query($b:[ID!],$ids:[String!],$c:String){boards(ids:$b){items_page(limit:200,cursor:$c)"
+             "{cursor items{column_values(ids:$ids){id text}}}}}")
+        r = requests.post(MONDAY_API, json={"query": q, "variables": {
+            "b": [str(ABANDONED_BOARD_ID)], "ids": ids, "c": cursor}},
+            headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+        r.raise_for_status()
+        p = r.json()
+        if p.get("errors"):
+            raise RuntimeError(f"Monday API error: {str(p['errors'])[:200]}")
+        boards = (p.get("data") or {}).get("boards") or [{}]
+        page = boards[0].get("items_page", {}) if boards else {}
+        for it in page.get("items", []):
+            cv = {c["id"]: (c.get("text") or "") for c in it.get("column_values", [])}
+            tk = _ac_token(cv.get(ABANDONED_COLS["checkout_link"]) or "")
+            if tk:
+                seen.add("t:" + tk)
+            em = (cv.get(ABANDONED_COLS["email"]) or "").strip().lower()
+            vk = _ac_valkey(cv.get(ABANDONED_COLS["value"]))
+            if em and vk:
+                seen.add(f"e:{em}|{vk}")
+        cursor = page.get("cursor")
+        if not cursor:
+            break
+    return seen
+
+
+def _create_abandoned_item(c, token) -> str | None:
+    import json as _json
+    import re as _re
+    title = f"{c.get('customer') or 'Customer'} — £{c.get('total', 0):,.2f}"
+    cols: dict = {ABANDONED_COLS["value"]: c.get("total") or 0}
+    if c.get("date"):
+        cols[ABANDONED_COLS["date"]] = {"date": str(c["date"])[:10]}
+    if c.get("email"):
+        cols[ABANDONED_COLS["email"]] = {"email": c["email"], "text": c["email"]}
+    ph = _re.sub(r"[^0-9+]", "", str(c.get("phone") or ""))
+    if ph:
+        cols[ABANDONED_COLS["phone"]] = {"phone": ph, "countryShortName": "GB"}
+    if c.get("url"):
+        cols[ABANDONED_COLS["checkout_link"]] = {"url": c["url"], "text": "Recover checkout"}
+    if c.get("items_text"):
+        cols[ABANDONED_COLS["items"]] = {"text": c["items_text"]}
+    q = ("mutation($b:ID!,$g:String!,$n:String!,$c:JSON!){create_item(board_id:$b,group_id:$g,"
+         "item_name:$n,column_values:$c,create_labels_if_missing:true){id}}")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {
+        "b": str(ABANDONED_BOARD_ID), "g": ABANDONED_TO_CONTACT_GROUP,
+        "n": title[:255], "c": _json.dumps(cols)}},
+        headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    p = r.json()
+    if p.get("errors"):
+        raise RuntimeError(str(p["errors"])[:200])
+    return (((p.get("data") or {}).get("create_item") or {}).get("id"))
+
+
+def run_abandoned_feed(since_days: int = 14, dry_run: bool = False, token: str | None = None) -> dict:
+    """Feed: pull recent Shopify abandoned checkouts and add any NEW ones to the Abandoned Checkouts
+    board's 'To Contact Today' group. De-dups on the recovery-URL token AND email|value. Summary dict."""
+    token = token or get_token()
+    if not token:
+        return {"ok": False, "error": "No MONDAY_API_TOKEN configured"}
+    try:
+        checkouts = fetch_abandoned_checkouts(since_days=since_days)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "Shopify: " + str(e)[:200]}
+    try:
+        seen = abandoned_board_index(token)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "Monday: " + str(e)[:200]}
+    created, would = [], []
+    skipped_dupe = failed = 0
+    for c in checkouts:
+        key_t = "t:" + str(c.get("token") or "")
+        key_e = f"e:{(c.get('email') or '').strip().lower()}|{_ac_valkey(c.get('total'))}"
+        if key_t in seen or key_e in seen:
+            skipped_dupe += 1
+            continue
+        seen.add(key_t)
+        seen.add(key_e)                              # guard against dups within this run
+        if dry_run:
+            would.append(c["customer"])
+            continue
+        try:
+            _create_abandoned_item(c, token)
+            created.append(c["customer"])
+        except Exception:  # noqa: BLE001
+            failed += 1
+    return {"ok": True, "dry_run": dry_run, "found": len(checkouts),
+            "created": len(created), "would_add": len(would),
+            "skipped_dupe": skipped_dupe, "failed": failed,
+            "orders": (would if dry_run else created)}
+
+
 def monday_asset_url(asset_id, token: str | None = None) -> str | None:
     """Temporary signed download URL for a Monday file asset."""
     token = token or get_token()

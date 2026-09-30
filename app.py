@@ -5826,7 +5826,9 @@ def _bg_worker():
         import supabase_db
         try:
             cfg = supabase_db.config_get("sample_feed") or {}
-            res = data_sources.run_sample_feed(since_days=int(cfg.get("since_days") or 2),
+            # Wider default window (30d) so each run self-heals any gap; dedup on Order # makes
+            # re-scanning safe, so the board stays complete even if a run was missed.
+            res = data_sources.run_sample_feed(since_days=int(cfg.get("since_days") or 30),
                                                dry_run=False)
             supabase_db.config_set("sample_feed_status", {
                 "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
@@ -5840,6 +5842,29 @@ def _bg_worker():
         except Exception as e:  # noqa: BLE001
             try:
                 supabase_db.config_set("sample_feed_status", {
+                    "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ok": False, "error": str(e)[:200], "reason": reason})
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _run_abandoned_feed(reason):
+        import datetime as _dt
+        import supabase_db
+        try:
+            cfg = supabase_db.config_get("abandoned_feed") or {}
+            res = data_sources.run_abandoned_feed(since_days=int(cfg.get("since_days") or 30),
+                                                  dry_run=False)
+            supabase_db.config_set("abandoned_feed_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "created": res.get("created"), "found": res.get("found"),
+                "skipped_dupe": res.get("skipped_dupe"), "failed": res.get("failed"),
+                "ok": res.get("ok"), "error": res.get("error"), "reason": reason})
+            if res.get("created"):
+                supabase_db.audit("scheduler" if reason == "auto" else "manual", "abandoned_feed",
+                                  f"added {res.get('created')} abandoned checkout(s)", "")
+        except Exception as e:  # noqa: BLE001
+            try:
+                supabase_db.config_set("abandoned_feed_status", {
                     "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                     "ok": False, "error": str(e)[:200], "reason": reason})
             except Exception:  # noqa: BLE001
@@ -5892,7 +5917,7 @@ def _bg_worker():
 
     def _loop():
         import supabase_db
-        next_import = next_check = next_triage = next_qtriage = next_sfeed = 0.0
+        next_import = next_check = next_triage = next_qtriage = next_sfeed = next_afeed = 0.0
         while True:
             fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
             state["trigger"].clear()
@@ -5936,11 +5961,22 @@ def _bg_worker():
                 next_qtriage = _time.time() + 900
             try:
                 sfcfg = supabase_db.config_get("sample_feed") or {}
-                if sfcfg.get("auto_enabled") and _time.time() >= next_sfeed:
-                    next_sfeed = _time.time() + max(3600, int(sfcfg.get("interval_min") or 720) * 60)
+                # Default ON + daily — Daniela wants sample orders added automatically as they come
+                # in; only an explicit auto_enabled=False turns it off.
+                if sfcfg.get("auto_enabled", True) and _time.time() >= next_sfeed:
+                    next_sfeed = _time.time() + max(3600, int(sfcfg.get("interval_min") or 1440) * 60)
                     _run_sample_feed("auto")
             except Exception:  # noqa: BLE001
                 next_sfeed = _time.time() + 3600
+            try:
+                afcfg = supabase_db.config_get("abandoned_feed") or {}
+                # Default ON + daily, same as the sample feed — abandoned checkouts get added as they
+                # come in; only an explicit auto_enabled=False turns it off.
+                if afcfg.get("auto_enabled", True) and _time.time() >= next_afeed:
+                    next_afeed = _time.time() + max(3600, int(afcfg.get("interval_min") or 1440) * 60)
+                    _run_abandoned_feed("auto")
+            except Exception:  # noqa: BLE001
+                next_afeed = _time.time() + 3600
 
     threading.Thread(target=_loop, name="invoice-worker", daemon=True).start()
     return state
@@ -8133,18 +8169,28 @@ def _render_sample_feed_panel():
         if not _ok:
             st.warning("Supabase isn't connected — the auto-schedule + history need it. You can still "
                        "Preview / Add now.")
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         if c1.button("👁 Preview (add nothing)", key="sfeed_prev", use_container_width=True):
             with st.spinner("Checking Shopify for new sample orders…"):
                 try:
-                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=2,
+                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=30,
                                                                                  dry_run=True)
                 except Exception as e:  # noqa: BLE001
                     st.session_state["sfeed_res"] = {"ok": False, "error": str(e)[:200]}
         if c2.button("▶ Add new ones now", key="sfeed_run", type="primary", use_container_width=True):
             with st.spinner("Adding new sample orders to the board…"):
                 try:
-                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=2,
+                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=30,
+                                                                                 dry_run=False)
+                    _sample_leads_cached.clear()
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["sfeed_res"] = {"ok": False, "error": str(e)[:200]}
+        if c3.button("⏪ Backfill 120 days", key="sfeed_backfill", use_container_width=True,
+                     help="One-off catch-up: scan the last 120 days and add any sample orders that "
+                          "aren't on the board yet (safe — de-duped on Order #)."):
+            with st.spinner("Backfilling sample orders (last 120 days)…"):
+                try:
+                    st.session_state["sfeed_res"] = data_sources.run_sample_feed(since_days=120,
                                                                                  dry_run=False)
                     _sample_leads_cached.clear()
                 except Exception as e:  # noqa: BLE001
@@ -8165,16 +8211,89 @@ def _render_sample_feed_panel():
         if _ok:
             _cfg = _sdb.config_get("sample_feed") or {}
             cc1, cc2 = st.columns(2)
-            auto_on = cc1.toggle("Run automatically", value=bool(_cfg.get("auto_enabled")),
-                                 key="sfeed_auto")
+            auto_on = cc1.toggle("Run automatically", value=bool(_cfg.get("auto_enabled", True)),
+                                 key="sfeed_auto", help="ON by default — adds new sample orders daily.")
             every = cc2.number_input("Every … minutes", min_value=60, max_value=1440,
-                                     value=int(_cfg.get("interval_min") or 720), step=60,
+                                     value=int(_cfg.get("interval_min") or 1440), step=60,
                                      key="sfeed_int")
             if st.button("Save schedule", key="sfeed_save"):
-                _cfg.update(auto_enabled=bool(auto_on), interval_min=int(every), since_days=2)
+                _cfg.update(auto_enabled=bool(auto_on), interval_min=int(every), since_days=30)
                 _sdb.config_set("sample_feed", _cfg)
                 st.success("Saved — the automatic sample feed is " + ("ON." if auto_on else "OFF."))
             _stat = _sdb.config_get("sample_feed_status") or {}
+            if _stat.get("at"):
+                st.caption(f"🤖 Last run {str(_stat['at'])[:16].replace('T', ' ')} UTC — added "
+                           f"{_stat.get('created', 0)}, found {_stat.get('found', 0)}, failed "
+                           f"{_stat.get('failed', 0)}.")
+
+
+def _render_abandoned_feed_panel():
+    """Preview / run / auto-schedule the daily pull of Shopify abandoned checkouts onto the
+    ABANDONED CHECKOUTS board's 'To Contact Today' group."""
+    try:
+        import supabase_db as _sdb
+    except Exception:  # noqa: BLE001
+        _sdb = None
+    _ok = bool(_sdb and _sdb.configured())
+    with st.expander("🛒 Auto-add abandoned checkouts to the follow-up board (daily feed)"):
+        st.caption("Pulls recent Shopify **abandoned checkouts** (started but not paid) and adds any "
+                   "new ones to **🔥 To Contact Today** — with the customer, value, items and a "
+                   "recover-checkout link. De-duped so the same checkout is never added twice; a "
+                   "recovered checkout becomes an order and drops off Shopify's list.")
+        if not _ok:
+            st.warning("Supabase isn't connected — the auto-schedule + history need it. You can still "
+                       "Preview / Add now.")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("👁 Preview (add nothing)", key="afeed_prev", use_container_width=True):
+            with st.spinner("Checking Shopify for abandoned checkouts…"):
+                try:
+                    st.session_state["afeed_res"] = data_sources.run_abandoned_feed(since_days=30,
+                                                                                    dry_run=True)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["afeed_res"] = {"ok": False, "error": str(e)[:200]}
+        if c2.button("▶ Add new ones now", key="afeed_run", type="primary", use_container_width=True):
+            with st.spinner("Adding abandoned checkouts to the board…"):
+                try:
+                    st.session_state["afeed_res"] = data_sources.run_abandoned_feed(since_days=30,
+                                                                                    dry_run=False)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["afeed_res"] = {"ok": False, "error": str(e)[:200]}
+        if c3.button("⏪ Backfill 90 days", key="afeed_backfill", use_container_width=True,
+                     help="One-off catch-up: scan the last 90 days and add any abandoned checkouts "
+                          "not on the board yet (safe — de-duped)."):
+            with st.spinner("Backfilling abandoned checkouts (last 90 days)…"):
+                try:
+                    st.session_state["afeed_res"] = data_sources.run_abandoned_feed(since_days=90,
+                                                                                    dry_run=False)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["afeed_res"] = {"ok": False, "error": str(e)[:200]}
+        res = st.session_state.get("afeed_res")
+        if res:
+            if not res.get("ok"):
+                st.error("Couldn't run: " + str(res.get("error")))
+            else:
+                verb = "Would add" if res.get("dry_run") else "Added"
+                n = res.get("would_add", 0) if res.get("dry_run") else res.get("created", 0)
+                st.success(f"{verb} **{n}** · found {res.get('found', 0)} · skipped "
+                           f"{res.get('skipped_dupe', 0)} already on the board · failed "
+                           f"{res.get('failed', 0)}")
+                if res.get("orders"):
+                    st.caption(("Would add: " if res.get("dry_run") else "Added: ")
+                               + ", ".join(res["orders"][:40]))
+        if _ok:
+            _cfg = _sdb.config_get("abandoned_feed") or {}
+            cc1, cc2 = st.columns(2)
+            auto_on = cc1.toggle("Run automatically", value=bool(_cfg.get("auto_enabled", True)),
+                                 key="afeed_auto", help="ON by default — adds new abandoned checkouts daily.")
+            every = cc2.number_input("Every … minutes", min_value=60, max_value=1440,
+                                     value=int(_cfg.get("interval_min") or 1440), step=60,
+                                     key="afeed_int")
+            if st.button("Save schedule", key="afeed_save"):
+                _cfg.update(auto_enabled=bool(auto_on), interval_min=int(every), since_days=30)
+                _sdb.config_set("abandoned_feed", _cfg)
+                st.success("Saved — the automatic abandoned-checkout feed is "
+                           + ("ON." if auto_on else "OFF."))
+            _stat = _sdb.config_get("abandoned_feed_status") or {}
             if _stat.get("at"):
                 st.caption(f"🤖 Last run {str(_stat['at'])[:16].replace('T', ' ')} UTC — added "
                            f"{_stat.get('created', 0)}, found {_stat.get('found', 0)}, failed "
@@ -8305,6 +8424,7 @@ def _render_sample_leads():
                "+ an Outlook draft to the customer, logs to the **Quotes Log** as a phone lead, and "
                "marks the call **Quoted**.")
     _render_sample_feed_panel()
+    _render_abandoned_feed_panel()
     _, cref = st.columns([4, 1])
     if cref.button("↻ Refresh", use_container_width=True, key="sample_refresh"):
         _sample_leads_cached.clear()
