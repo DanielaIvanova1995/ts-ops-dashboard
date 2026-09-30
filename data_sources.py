@@ -2361,6 +2361,10 @@ def create_draft_order(line_items, email=None, note=None, token: str | None = No
     d = res["draftOrder"]
     d["total"] = float((d.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
     d["tax"] = float((d.get("totalTaxSet") or {}).get("shopMoney", {}).get("amount") or 0)
+    # Admin URL to the EDITABLE draft order (invoiceUrl is the customer checkout, which can't be
+    # edited) — so we can open it in Shopify Admin to change items/qty/price before it's sent.
+    _num = str(d.get("id") or "").split("/")[-1]
+    d["admin_url"] = f"https://{store}/admin/draft_orders/{_num}" if _num else d.get("invoiceUrl")
     return d
 
 

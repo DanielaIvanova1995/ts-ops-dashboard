@@ -7297,7 +7297,7 @@ def _render_quote_block(email):
         except Exception as e:  # noqa: BLE001
             draft_err = str(e)
         ref = do["name"] if do else None
-        url = do["invoiceUrl"] if do else None
+        url = do.get("admin_url") or do.get("invoiceUrl") if do else None
         total_amt = do["total"] if do else total
 
         # 2) Compose the quote email from the priced lines (works with or without the draft).
@@ -7376,7 +7376,7 @@ def _render_quote_block(email):
                 st.caption("Shopify said: " + draft_err[:180])
         bits = []
         if url:
-            bits.append(f"[Open the Shopify draft order]({url})")
+            bits.append(f"[Open the Shopify draft order (editable)]({url})")
         if link:
             bits.append(f"[Open the Outlook draft]({link})")
         if bits:
@@ -7669,7 +7669,7 @@ def render_cladding_calc():
                     li, note=f"James Hardie cladding take-off — {data['product_label']} "
                     f"{data['texture']} {data['colour']} — {meta['net']:.1f} m²")
                 st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}).")
-                st.markdown(f"[Open the Shopify draft order]({do['invoiceUrl']})")
+                st.markdown(f"[Open the Shopify draft order (editable)]({do.get('admin_url') or do['invoiceUrl']})")
             except Exception as e:  # noqa: BLE001
                 st.error("Couldn't create the draft: " + str(e)[:240] + " — Shopify may need the "
                          "**write_draft_orders** scope.")
@@ -7900,7 +7900,7 @@ def _render_ezglaze_calc():
                     li, note=f"EZ Glaze roof (Molan) — {data['colour']} — "
                     f"{data['width']}×{data['slope']}m")
                 st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}).")
-                st.markdown(f"[Open the Shopify draft order]({do['invoiceUrl']})")
+                st.markdown(f"[Open the Shopify draft order (editable)]({do.get('admin_url') or do['invoiceUrl']})")
             except Exception as e:  # noqa: BLE001
                 st.error("Couldn't create the draft: " + str(e)[:240])
         if len(matched) < len(lines):
@@ -8048,7 +8048,7 @@ def _render_multiwall_poly():
                     li, note=f"Polycarbonate roof (Molan) — {data['sheet_type']} {data['colour']} "
                     f"— {data['width']}×{data['rake']}m")
                 st.success(f"Created Shopify draft order **{do['name']}** (£{do['total']:,.2f}).")
-                st.markdown(f"[Open the Shopify draft order]({do['invoiceUrl']})")
+                st.markdown(f"[Open the Shopify draft order (editable)]({do.get('admin_url') or do['invoiceUrl']})")
             except Exception as e:  # noqa: BLE001
                 st.error("Couldn't create the draft: " + str(e)[:240])
         if len(matched) < len(lines):
