@@ -4306,7 +4306,19 @@ def qbo_valid_access():
         raise RuntimeError("QuickBooks isn't connected yet.")
     if t.get("access_token") and int(t.get("access_expiry", 0)) > int(_t.time()):
         return t["access_token"], t["realm_id"]
-    j = _qbo_token_request({"grant_type": "refresh_token", "refresh_token": t["refresh_token"]})
+    try:
+        j = _qbo_token_request({"grant_type": "refresh_token", "refresh_token": t["refresh_token"]})
+    except RuntimeError as e:
+        # A dead/expired refresh token (invalid_grant) → clear it so the panel offers Connect again
+        # (a stale token otherwise reads as 'connected', hiding the reconnect button), and say so.
+        if "auth rejected" in str(e).lower() or "invalid_grant" in str(e).lower():
+            try:
+                qbo_store_tokens({})
+            except Exception:  # noqa: BLE001
+                pass
+            raise RuntimeError("QuickBooks needs reconnecting — the saved connection has expired. "
+                               "Open the QuickBooks panel and click Connect QuickBooks.")
+        raise
     t["access_token"] = j.get("access_token")
     t["access_expiry"] = int(_t.time()) + int(j.get("expires_in", 3600)) - 60
     t["refresh_token"] = j.get("refresh_token", t["refresh_token"])
