@@ -1030,6 +1030,12 @@ def _norm_inv_no(inv, supplier=None):
         s = s[1:]
     if key.startswith("eurocell") or key.startswith("toolbank"):
         s = s.lstrip("0") or s
+    # PJH is inconsistent across statement / Monday / QuickBooks: the leading 'I' is sometimes there
+    # and sometimes not, AND leading zeros vary (I024248 vs 24248 vs 024248). Reduce every PJH invoice
+    # number to its SIGNIFICANT DIGITS ONLY (drop the I, any other letters, and leading zeros), so all
+    # three sides normalise to the same key and always match (Daniela 2026-09-30).
+    if key.startswith("pjh"):
+        s = re.sub(r"[^0-9]", "", s).lstrip("0") or s
     return s
 
 
