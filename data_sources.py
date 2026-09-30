@@ -2870,6 +2870,126 @@ def run_abandoned_feed(since_days: int = 14, dry_run: bool = False, token: str |
             "orders": (would if dry_run else created)}
 
 
+# ---- Shopify DRAFT ORDERS → Quotes Tracker feed --------------------------------------------------
+# Relay every Shopify draft order (incl. ones staff create by hand in Shopify) onto the Quotes Log,
+# so the tracker is complete. TradeHub's own quotes already log there; dedup on the draft # stops
+# anything being logged twice.
+def fetch_shopify_drafts(since_days: int = 14) -> list[dict]:
+    """OPEN Shopify draft orders in the window. Read-only, no read_customers scope (uses the draft's
+    own email + billing/shipping address). Returns [{draft_no, id, url, admin_url, date, customer,
+    email, phone, postcode, items_text, value_ex_vat}]."""
+    import datetime as _dt
+    store = get_secret("SHOPIFY_STORE")
+    tok = shopify_products_token()
+    since = (_dt.date.today() - _dt.timedelta(days=int(since_days))).isoformat()
+    # draftOrders has no CREATED_AT sort key — filter by created_at in the query, don't sort.
+    q = ("query($q:String!){draftOrders(first:100, query:$q){edges"
+         "{node{id name createdAt email invoiceUrl totalPriceSet{shopMoney{amount}} "
+         "subtotalPriceSet{shopMoney{amount}} billingAddress{name phone zip} "
+         "shippingAddress{name phone zip} lineItems(first:30){edges{node{title quantity}}}}}}}")
+    r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                      json={"query": q, "variables": {"q": f"status:open created_at:>={since}"}},
+                      headers={"X-Shopify-Access-Token": tok, "Content-Type": "application/json"},
+                      timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {str(payload['errors'])[:200]}")
+    out: list[dict] = []
+    for e in payload.get("data", {}).get("draftOrders", {}).get("edges", []):
+        n = e["node"]
+        bill = n.get("billingAddress") or {}
+        ship = n.get("shippingAddress") or {}
+        email = (n.get("email") or "").strip()
+        name = (ship.get("name") or bill.get("name") or email or "Customer").strip()
+        val = float((n.get("subtotalPriceSet") or {}).get("shopMoney", {}).get("amount")
+                    or (n.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
+        if val <= 0:                              # skip £0 / empty drafts (not a real quote)
+            continue
+        lines = [li["node"] for li in n.get("lineItems", {}).get("edges", [])]
+        items_text = "\n".join(f"{int(l.get('quantity') or 1)} x {(l.get('title') or '').strip()}"
+                               for l in lines if l.get("title"))
+        _num = str(n.get("id") or "").split("/")[-1]
+        out.append({"draft_no": n.get("name"), "id": n.get("id"), "url": n.get("invoiceUrl") or "",
+                    "admin_url": f"https://{store}/admin/draft_orders/{_num}" if _num else "",
+                    "date": (n.get("createdAt") or "")[:10], "customer": name, "email": email,
+                    "phone": ship.get("phone") or bill.get("phone") or "",
+                    "postcode": ship.get("zip") or bill.get("zip") or "",
+                    "items_text": items_text, "value_ex_vat": round(val, 2)})
+    return out
+
+
+def quotes_log_draft_numbers(token: str | None = None) -> set:
+    """Draft #s already on the Quotes Log (digits only, from text_mm5efxax) — for dedup."""
+    import re as _re
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    seen: set = set()
+    cursor = None
+    for _ in range(25):
+        q = ("query($b:[ID!],$c:String){boards(ids:$b){items_page(limit:200,cursor:$c){cursor items{"
+             "column_values(ids:[\"text_mm5efxax\"]){text}}}}}")
+        r = requests.post(MONDAY_API, json={"query": q, "variables": {
+            "b": [str(QUOTES_LOG_BOARD_ID)], "c": cursor}},
+            headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+        r.raise_for_status()
+        p = r.json()
+        if p.get("errors"):
+            raise RuntimeError(f"Monday API error: {str(p['errors'])[:200]}")
+        page = (((p.get("data") or {}).get("boards") or [{}])[0]).get("items_page", {})
+        for it in page.get("items", []):
+            for cv in it.get("column_values", []):
+                d = _re.sub(r"\D", "", (cv.get("text") or ""))
+                if d:
+                    seen.add(d)
+        cursor = page.get("cursor")
+        if not cursor:
+            break
+    return seen
+
+
+def run_quote_log_feed(since_days: int = 14, dry_run: bool = False, token: str | None = None) -> dict:
+    """Relay OPEN Shopify draft orders onto the Quotes Log — any whose draft # isn't already there.
+    De-dups on the draft number (digits). Logged as a 'Shopify draft' lead. Summary dict."""
+    import re as _re
+    token = token or get_token()
+    if not token:
+        return {"ok": False, "error": "No MONDAY_API_TOKEN configured"}
+    try:
+        drafts = fetch_shopify_drafts(since_days=since_days)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "Shopify: " + str(e)[:200]}
+    try:
+        seen = quotes_log_draft_numbers(token)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "Monday: " + str(e)[:200]}
+    created, would = [], []
+    skipped_dupe = failed = 0
+    for d in drafts:
+        key = _re.sub(r"\D", "", str(d.get("draft_no") or ""))
+        if key and key in seen:
+            skipped_dupe += 1
+            continue
+        if key:
+            seen.add(key)
+        if dry_run:
+            would.append(d["draft_no"])
+            continue
+        try:
+            create_quote_log_item(d["customer"], email=d.get("email"), phone=d.get("phone"),
+                                  postcode=d.get("postcode"), value_ex_vat=d.get("value_ex_vat"),
+                                  draft_no=d.get("draft_no"), stage="Quoted", lead="Shopify draft",
+                                  enquiry_date=d.get("date"), token=token)
+            created.append(d["draft_no"])
+        except Exception:  # noqa: BLE001
+            failed += 1
+    return {"ok": True, "dry_run": dry_run, "found": len(drafts),
+            "created": len(created), "would_add": len(would),
+            "skipped_dupe": skipped_dupe, "failed": failed,
+            "orders": (would if dry_run else created)}
+
+
 def monday_asset_url(asset_id, token: str | None = None) -> str | None:
     """Temporary signed download URL for a Monday file asset."""
     token = token or get_token()

@@ -5870,6 +5870,29 @@ def _bg_worker():
             except Exception:  # noqa: BLE001
                 pass
 
+    def _run_quote_log_feed(reason):
+        import datetime as _dt
+        import supabase_db
+        try:
+            cfg = supabase_db.config_get("quote_log_feed") or {}
+            res = data_sources.run_quote_log_feed(since_days=int(cfg.get("since_days") or 14),
+                                                  dry_run=False)
+            supabase_db.config_set("quote_log_feed_status", {
+                "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                "created": res.get("created"), "found": res.get("found"),
+                "skipped_dupe": res.get("skipped_dupe"), "failed": res.get("failed"),
+                "ok": res.get("ok"), "error": res.get("error"), "reason": reason})
+            if res.get("created"):
+                supabase_db.audit("scheduler" if reason == "auto" else "manual", "quote_log_feed",
+                                  f"relayed {res.get('created')} Shopify draft(s) to Quotes Log", "")
+        except Exception as e:  # noqa: BLE001
+            try:
+                supabase_db.config_set("quote_log_feed_status", {
+                    "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ok": False, "error": str(e)[:200], "reason": reason})
+            except Exception:  # noqa: BLE001
+                pass
+
     def _run_manual_check(sub_ids):
         """Check & process JUST these subitems, off the page thread — so a big selection (e.g. many
         Eurocell invoices) can't drop the websocket and 'kick you out'. Same engine as the scheduler."""
@@ -5918,6 +5941,7 @@ def _bg_worker():
     def _loop():
         import supabase_db
         next_import = next_check = next_triage = next_qtriage = next_sfeed = next_afeed = 0.0
+        next_qlfeed = 0.0
         while True:
             fired = state["trigger"].wait(timeout=20)   # wake on manual trigger, else poll every 20s
             state["trigger"].clear()
@@ -5977,6 +6001,14 @@ def _bg_worker():
                     _run_abandoned_feed("auto")
             except Exception:  # noqa: BLE001
                 next_afeed = _time.time() + 3600
+            try:
+                qlcfg = supabase_db.config_get("quote_log_feed") or {}
+                # Default ON + daily — relay Shopify draft orders to the Quotes Tracker.
+                if qlcfg.get("auto_enabled", True) and _time.time() >= next_qlfeed:
+                    next_qlfeed = _time.time() + max(3600, int(qlcfg.get("interval_min") or 1440) * 60)
+                    _run_quote_log_feed("auto")
+            except Exception:  # noqa: BLE001
+                next_qlfeed = _time.time() + 3600
 
     threading.Thread(target=_loop, name="invoice-worker", daemon=True).start()
     return state
@@ -8300,6 +8332,78 @@ def _render_abandoned_feed_panel():
                            f"{_stat.get('failed', 0)}.")
 
 
+def _render_quote_log_feed_panel():
+    """Preview / run / auto-schedule the relay of Shopify DRAFT ORDERS onto the Quotes Tracker."""
+    try:
+        import supabase_db as _sdb
+    except Exception:  # noqa: BLE001
+        _sdb = None
+    _ok = bool(_sdb and _sdb.configured())
+    with st.expander("🧾 Relay Shopify draft orders to the Quotes Tracker (daily feed)"):
+        st.caption("Adds ANY open Shopify **draft order** (including ones made by hand in Shopify) to "
+                   "the **Quotes Tracker** — customer, £ value ex-VAT, draft #, logged as a "
+                   "**'Shopify draft'** lead. De-duped on the draft number, so quotes TradeHub already "
+                   "logged aren't added again.")
+        if not _ok:
+            st.warning("Supabase isn't connected — the auto-schedule + history need it. You can still "
+                       "Preview / Add now.")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("👁 Preview (add nothing)", key="qlfeed_prev", use_container_width=True):
+            with st.spinner("Checking Shopify draft orders…"):
+                try:
+                    st.session_state["qlfeed_res"] = data_sources.run_quote_log_feed(since_days=14,
+                                                                                     dry_run=True)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["qlfeed_res"] = {"ok": False, "error": str(e)[:200]}
+        if c2.button("▶ Add new ones now", key="qlfeed_run", type="primary", use_container_width=True):
+            with st.spinner("Relaying draft orders to the Quotes Tracker…"):
+                try:
+                    st.session_state["qlfeed_res"] = data_sources.run_quote_log_feed(since_days=14,
+                                                                                     dry_run=False)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["qlfeed_res"] = {"ok": False, "error": str(e)[:200]}
+        if c3.button("⏪ Backfill 7 days", key="qlfeed_backfill", use_container_width=True,
+                     help="One-off catch-up: relay any open draft orders from the last 7 days that "
+                          "aren't on the Quotes Tracker yet (safe — de-duped on draft #)."):
+            with st.spinner("Backfilling draft orders (last 7 days)…"):
+                try:
+                    st.session_state["qlfeed_res"] = data_sources.run_quote_log_feed(since_days=7,
+                                                                                     dry_run=False)
+                except Exception as e:  # noqa: BLE001
+                    st.session_state["qlfeed_res"] = {"ok": False, "error": str(e)[:200]}
+        res = st.session_state.get("qlfeed_res")
+        if res:
+            if not res.get("ok"):
+                st.error("Couldn't run: " + str(res.get("error")))
+            else:
+                verb = "Would add" if res.get("dry_run") else "Added"
+                n = res.get("would_add", 0) if res.get("dry_run") else res.get("created", 0)
+                st.success(f"{verb} **{n}** · found {res.get('found', 0)} open draft(s) · skipped "
+                           f"{res.get('skipped_dupe', 0)} already logged · failed "
+                           f"{res.get('failed', 0)}")
+                if res.get("orders"):
+                    st.caption(("Would add: " if res.get("dry_run") else "Added: ")
+                               + ", ".join(res["orders"][:40]))
+        if _ok:
+            _cfg = _sdb.config_get("quote_log_feed") or {}
+            cc1, cc2 = st.columns(2)
+            auto_on = cc1.toggle("Run automatically", value=bool(_cfg.get("auto_enabled", True)),
+                                 key="qlfeed_auto", help="ON by default — relays new draft orders daily.")
+            every = cc2.number_input("Every … minutes", min_value=60, max_value=1440,
+                                     value=int(_cfg.get("interval_min") or 1440), step=60,
+                                     key="qlfeed_int")
+            if st.button("Save schedule", key="qlfeed_save"):
+                _cfg.update(auto_enabled=bool(auto_on), interval_min=int(every), since_days=14)
+                _sdb.config_set("quote_log_feed", _cfg)
+                st.success("Saved — the automatic draft-order relay is "
+                           + ("ON." if auto_on else "OFF."))
+            _stat = _sdb.config_get("quote_log_feed_status") or {}
+            if _stat.get("at"):
+                st.caption(f"🤖 Last run {str(_stat['at'])[:16].replace('T', ' ')} UTC — added "
+                           f"{_stat.get('created', 0)}, found {_stat.get('found', 0)}, failed "
+                           f"{_stat.get('failed', 0)}.")
+
+
 def _render_hardie_quickform(eid):
     """A guided James Hardie intake for a new starter: one colour for the whole job, boards by
     panel-count OR m², then trim quantities. On submit it writes a clean requirement line into the
@@ -8425,6 +8529,7 @@ def _render_sample_leads():
                "marks the call **Quoted**.")
     _render_sample_feed_panel()
     _render_abandoned_feed_panel()
+    _render_quote_log_feed_panel()
     _, cref = st.columns([4, 1])
     if cref.button("↻ Refresh", use_container_width=True, key="sample_refresh"):
         _sample_leads_cached.clear()
