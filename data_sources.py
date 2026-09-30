@@ -2455,6 +2455,7 @@ SAMPLE_COLS = {
     "outcome": "color_mm7da0kb", "attempts": "numeric_mm7dffvg", "last_attempt": "date_mm7d4fws",
     "notes": "long_text_mm7dk7x7", "owner": "multiple_person_mm7d7qnq",
     "no_quote_reason": "dropdown_mm7d3tgf", "quotes_log_link": "board_relation_mm7dge5p",
+    "shopify_link": "link_mm7pyb1h",
 }
 SAMPLE_GROUP_QUOTE_REQUIRED = "group_mm7dsdd"   # holding pen once quoted / linked to Quotes Log
 SAMPLE_OUTCOME_QUOTE = "Spoke - Quote Required"
@@ -2532,7 +2533,7 @@ def fetch_sample_orders(since_days: int = 2) -> list[dict]:
     # NB: no customer{...} field — that needs the read_customers scope, which our token doesn't have.
     # The order-level email + shippingAddress cover the name/email/phone we need.
     q = ("query($q:String!){orders(first:100, query:$q, sortKey:CREATED_AT, reverse:true){edges{node{"
-         "name createdAt totalPriceSet{shopMoney{amount}} email "
+         "id name createdAt totalPriceSet{shopMoney{amount}} email "
          "shippingAddress{name zip phone} lineItems(first:30){edges{node{title variantTitle quantity}}}}}}}")
     r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
                       json={"query": q, "variables": {"q": f"created_at:>={since} sample"}},
@@ -2560,11 +2561,13 @@ def fetch_sample_orders(since_days: int = 2) -> list[dict]:
         samples_text = "\n".join(t + ((" — " + ", ".join(vs)) if vs else "") for t, vs in prod.items())
         amt = float((n.get("totalPriceSet") or {}).get("shopMoney", {}).get("amount") or 0)
         name = ship.get("name") or n.get("email") or "Customer"
+        _oid = str(n.get("id") or "").split("/")[-1]
         out.append({"order": n["name"], "date": (n.get("createdAt") or "")[:10], "customer": name,
                     "email": n.get("email") or "",
                     "phone": ship.get("phone") or "",
                     "postcode": ship.get("zip") or "", "samples_text": samples_text,
-                    "total": amt, "high": amt > 5})
+                    "total": amt, "high": amt > 5,
+                    "order_url": f"https://{store}/admin/orders/{_oid}" if _oid else ""})
     return out
 
 
@@ -2624,6 +2627,8 @@ def _create_sample_call_item(order, token) -> str | None:
         cols[SAMPLE_COLS["phone"]] = {"phone": ph, "countryShortName": "GB"}
     if order.get("postcode"):
         cols[SAMPLE_COLS["postcode"]] = str(order["postcode"])[:20]
+    if order.get("order_url"):
+        cols[SAMPLE_COLS["shopify_link"]] = {"url": order["order_url"], "text": order.get("order") or "Order"}
     if order.get("high"):
         cols[SAMPLE_COLS["notes"]] = {
             "text": "Larger sample order (£%.2f) — check the order before quoting." % order["total"]}
@@ -2685,6 +2690,7 @@ ABANDONED_TO_CONTACT_GROUP = "group_mm5eqn93"        # "🔥 To Contact Today"
 ABANDONED_COLS = {
     "value": "numeric_mm5emyzj", "date": "date_mm5efba7", "checkout_link": "link_mm5ejysq",
     "email": "email_mm5e5f69", "phone": "phone_mm5exfj3", "items": "long_text_mm5e6m04",
+    "shopify_link": "link_mm5e50k",
 }
 
 
@@ -2751,9 +2757,11 @@ def fetch_abandoned_checkouts(since_days: int = 14) -> list[dict]:
                                for l in lines if l.get("title"))
         name = name or email
         url = n.get("abandonedCheckoutUrl") or ""
+        _cid = str(n.get("id") or "").split("/")[-1]
         out.append({"token": _ac_token(url) or str(n.get("id") or ""), "url": url,
                     "date": (n.get("createdAt") or "")[:10], "customer": name, "email": email,
-                    "phone": phone or "", "items_text": items_text, "total": amt})
+                    "phone": phone or "", "items_text": items_text, "total": amt,
+                    "admin_url": f"https://{store}/admin/checkouts/{_cid}" if _cid else ""})
     return out
 
 
@@ -2807,6 +2815,8 @@ def _create_abandoned_item(c, token) -> str | None:
         cols[ABANDONED_COLS["phone"]] = {"phone": ph, "countryShortName": "GB"}
     if c.get("url"):
         cols[ABANDONED_COLS["checkout_link"]] = {"url": c["url"], "text": "Recover checkout"}
+    if c.get("admin_url"):
+        cols[ABANDONED_COLS["shopify_link"]] = {"url": c["admin_url"], "text": "View in Shopify"}
     if c.get("items_text"):
         cols[ABANDONED_COLS["items"]] = {"text": c["items_text"]}
     q = ("mutation($b:ID!,$g:String!,$n:String!,$c:JSON!){create_item(board_id:$b,group_id:$g,"
