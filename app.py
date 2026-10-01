@@ -9209,7 +9209,8 @@ def _bulk_reconcile_one(s, limits):
         else:
             status, n_missing = "🔴 Not found in QuickBooks", n_missing + 1
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
-                     "Date": ln.get("date") or "", "Amount": amt, "Unpaid": val,
+                     "Invoice date": ln.get("date") or "", "Amount": amt, "Unpaid": val,
+                     "Due date": ln.get("due_date") or "",
                      "Paid under": paid_ref, "vs QuickBooks": status})
     cl = limits.get(_norm_code(sup)) or (limits.get(_norm_code(mp["name"])) if mp else None)
     stated = stmt.get("balance")
@@ -9684,8 +9685,8 @@ def _render_statement_recon():
                 status, n_missing = "🔴 Missing from Monday — not input yet", n_missing + 1
                 missing_total += val
         rows.append({"Invoice": inv, "Order": ln.get("order_ref") or "",
-                     "Date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
-                     "Due": (_due_label(bnum.get("due")) if bnum and not bnum["paid"] else ""),
+                     "Invoice date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
+                     "Due date": ln.get("due_date") or "",
                      "Paid under": paid_ref, "vs QuickBooks": status})
 
     parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]

@@ -4518,8 +4518,10 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
     """Read a supplier statement of account with Claude — from a PDF (URL or bytes) OR from
     already-extracted `text` (Excel/CSV statements). Returns:
     {supplier, customer_ref, statement_date, currency, balance,
-     lines:[{date, type(invoice|credit|payment), invoice_no, order_ref, amount, unpaid}],
-     aged:{current, m1, m2, m3, m4plus}}. Amounts GBP; credits/payments negative."""
+     lines:[{date, due_date, type(invoice|credit|payment), invoice_no, order_ref, amount, unpaid}],
+     aged:{current, m1, m2, m3, m4plus}}. `date` = the invoice/document (issue) date for the line;
+     `due_date` = the payment due date for the line if the statement shows one. Amounts GBP;
+     credits/payments negative."""
     import base64 as _b64
     import json as _json
     import re as _re
@@ -4537,7 +4539,10 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
         'balance. This is the single headline total the supplier is chasing. Do NOT add up the '
         'individual invoice lines yourself, and do NOT use an aged-analysis bucket or a sub-total — '
         'use the printed outstanding balance. Number.>,'
-        '"lines":[{"date":"YYYY-MM-DD",'
+        '"lines":[{"date":"the invoice/document (issue) date for this line, YYYY-MM-DD",'
+        '"due_date":"the payment DUE date for this line if the statement shows one (a separate '
+        '\\"Due Date\\"/\\"Date Due\\"/\\"Payment Due\\" column, or the invoice date plus the stated '
+        'payment terms if the statement prints a due date), YYYY-MM-DD, else null",'
         '"type":"invoice OR credit OR payment (invoices/SL Inv = invoice; credit notes = credit; '
         'receipts/payments = payment)",'
         '"invoice_no":"the supplier document/invoice/credit number for this line",'
