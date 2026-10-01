@@ -3417,10 +3417,13 @@ def add_pdf_to_subitem_file(subitem_id, pdf_bytes: bytes, filename: str,
     return False
 
 
-def find_or_create_mail_folder(mailbox: str, name: str, token: str | None = None) -> str | None:
+def find_or_create_mail_folder(mailbox: str, name: str, token: str | None = None,
+                               create: bool = True) -> str | None:
     """Return the id of the mailbox folder called `name` (searched anywhere in the tree), creating
     it at the mailbox root if it doesn't exist. Used for the fixed 'Fully Processed - Claude'
-    archive folder so processed invoice emails always land in one place. None on failure."""
+    archive folder so processed invoice emails always land in one place, and for the per-person
+    supplier-reply folders (MS/MC/RJ). `create=False` only looks it up (no side effects — used by
+    dry-runs). None on failure / not found."""
     token = token or ms_token()
     target = _norm(name)
     try:
@@ -3429,6 +3432,8 @@ def find_or_create_mail_folder(mailbox: str, name: str, token: str | None = None
                 return f["id"]
     except Exception:  # noqa: BLE001
         pass
+    if not create:
+        return None
     try:
         r = requests.post(f"{GRAPH}/users/{mailbox}/mailFolders",
                           headers={"Authorization": f"Bearer {token}",
@@ -3594,17 +3599,21 @@ _TRIAGE_SYSTEM = (
     "Superstore Online / hello@tradesuperstoreonline.co.uk). Otherwise false.\n"
     "- \"thread_owner\": when is_reply_to_our_thread is true, look at the most recent message from "
     "our team in the quoted history (the one the sender is replying to) and read its sign-off. Return "
-    "one of: \"megan\", \"malyeka\", \"natasha\". Map variants: Meg -> megan. (Melissa no longer "
-    "works here — if an old thread is signed by Melissa/Mel, return \"unknown\", not her name.) "
-    "If you cannot confidently identify a single name — no sign-off, a generic \"Trade "
-    "Superstore Online Team\" sign-off, or several conflicting names — return \"unknown\". When "
-    "is_reply_to_our_thread is false, return \"none\".\n"
+    "one of: \"megan_steer\", \"megan_clark\", \"robyn\", \"natasha\". Our team use their FULL names "
+    "in sign-offs, so distinguish the two Megans by surname: \"Megan Steer\" -> megan_steer, "
+    "\"Megan Clark\" -> megan_clark. If it is signed only \"Megan\" or \"Meg\" with no surname, "
+    "return megan_steer. \"Robyn\" or \"Robyn Jackson\" -> robyn. \"Natasha\" -> natasha. "
+    "(Melissa and Malyeka no longer work here — if an old thread is signed by Melissa/Mel or "
+    "Malyeka, return \"unknown\", not their name.) If you cannot confidently identify a single "
+    "name — no sign-off, a generic \"Trade Superstore Online Team\" sign-off, or several "
+    "conflicting names — return \"unknown\". When is_reply_to_our_thread is false, return "
+    "\"none\".\n"
     "- Always include both fields in every response, including customer and automated emails (use "
     "false and \"none\").\n\n"
     "OUTPUT: Return ONLY a single JSON object and nothing else — no preamble, no reasoning, no "
     "markdown fences. Exactly these three fields:\n"
     "{\"category\": \"<category>\", \"is_reply_to_our_thread\": <true|false>, \"thread_owner\": "
-    "\"<megan|malyeka|natasha|unknown|none>\"}"
+    "\"<megan_steer|megan_clark|robyn|natasha|unknown|none>\"}"
 )
 
 TRIAGE_CATEGORIES = (

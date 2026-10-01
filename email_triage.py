@@ -48,13 +48,38 @@ CATEGORY_FOLDER = {
     "automated_system":               _F + "AAPQP8FDAAA=",
     "unsure":                         _F + "AAPQP8FCAAA=",
 }
-# Per-owner supplier-reply folders (Make routed supplier_no_eta by the thread owner's sign-off).
-# Melissa has left, so there's no Melissa folder — the classifier returns "unknown" for her old
-# threads and they fall back to the default supplier_no_eta folder.
-OWNER_FOLDER = {
-    "megan":   _F + "AAPQP8FLAAA=",
-    "malyeka": _F + "AAPQP8FMAAA=",
+# Per-owner supplier-reply folders (supplier replies are filed by the thread owner's sign-off).
+# Daniela 2026-09-30: each owner now has their OWN "initials - Supplier replies" folder —
+# Megan Steer -> MS, Megan Clark -> MC, Robyn Jackson -> RJ. The folders are resolved by NAME at
+# run time (and created if missing) rather than hard-coded ids, so TradeHub provisions them itself.
+# Melissa and Malyeka have left — the classifier returns "unknown" for their old threads, which
+# fall back to the default supplier_no_eta folder (Natasha - Supplier - No ETA).
+OWNER_FOLDER_NAMES = {
+    "megan_steer": "MS - Supplier replies",
+    "megan_clark": "MC - Supplier replies",
+    "robyn":       "RJ - Supplier replies",
 }
+
+
+def _resolve_owner_folders(mailbox: str, token, create: bool = True) -> dict:
+    """Map each owner -> their supplier-reply folder id, resolving by name (creating missing folders
+    on a live run; find-only when create=False, i.e. dry-runs). Lists the folder tree once, then only
+    reaches out again for any folder that still needs creating. An owner whose folder can't be
+    resolved is simply omitted, so routing safely falls back to the default supplier folder."""
+    found: dict[str, str] = {}
+    by_name: dict[str, str] = {}
+    try:
+        for f in ds.list_mail_folders_tree(mailbox, token=token):
+            by_name[ds._norm(f["name"])] = f["id"]
+    except Exception:  # noqa: BLE001
+        by_name = {}
+    for owner, name in OWNER_FOLDER_NAMES.items():
+        fid = by_name.get(ds._norm(name))
+        if not fid and create:
+            fid = ds.find_or_create_mail_folder(mailbox, name, token=token, create=True)
+        if fid:
+            found[owner] = fid
+    return found
 
 
 # "Robyn - Supplier ETAs" folder (= the supplier_with_eta folder). Daniela 2026-09-29: genuine
@@ -148,17 +173,19 @@ def move_delivery_notes(mailbox: str | None = None, src_folder_id: str | None = 
 
 
 def _dest_id(category: str, owner: str, subject: str = "", sender: str = "",
-             body: str = "") -> str | None:
+             body: str = "", owner_ids: dict | None = None) -> str | None:
     """The destination folder id for a classified email. A genuine delivery note / POD always goes
     to Robyn's Supplier ETAs folder; automated noise (Rexel order confirmations, supplier auto-acks)
-    goes to Natasha - Auto-archive. Otherwise: a per-owner folder for a supplier reply that has one,
-    else the category's folder (exactly as Make decided)."""
+    goes to Natasha - Auto-archive. Otherwise: a per-owner folder (MS/MC/RJ) for a supplier reply
+    whose owner has one, else the category's folder (exactly as Make decided). `owner_ids` maps
+    owner -> resolved folder id (from _resolve_owner_folders)."""
+    owner_ids = owner_ids or {}
     if _is_delivery_note(subject, sender):
         return ROBYN_ETA_FOLDER
     if _is_auto_archive(subject, sender, body):
         return CATEGORY_FOLDER["automated_system"]      # = Natasha - Auto-archive
-    if category == "supplier_no_eta" and owner in OWNER_FOLDER:
-        return OWNER_FOLDER[owner]
+    if category == "supplier_no_eta" and owner in owner_ids:
+        return owner_ids[owner]
     return CATEGORY_FOLDER.get(category)
 
 
@@ -191,17 +218,21 @@ def run_triage(dry_run: bool = False, since_days: int | None = None, max_total: 
         summary.update(ok=False, error=f"Couldn't read the inbox: {str(e)[:160]}")
         return summary
 
+    # Resolve the per-person supplier-reply folders once per run (create them on a live run; just
+    # look them up on a dry-run). Missing ones simply fall back to the default supplier folder.
+    owner_ids = _resolve_owner_folders(mailbox, token, create=not dry_run)
+
     handled = 0
     for m in msgs:
         if max_total and handled >= max_total:
             summary["capped"] = True
             break
-        _handle_message(mailbox, m, dry_run, summary, token)
+        _handle_message(mailbox, m, dry_run, summary, token, owner_ids)
         handled += 1
     return summary
 
 
-def _handle_message(mailbox, msg, dry_run, summary, token):
+def _handle_message(mailbox, msg, dry_run, summary, token, owner_ids=None):
     """Classify + file one email. Never raises — records the outcome and moves on."""
     iid = msg["internet_id"]
     # De-dup: already triaged (and moved)?
@@ -216,16 +247,17 @@ def _handle_message(mailbox, msg, dry_run, summary, token):
         rec.update(status="failed", detail=f"couldn't classify: {str(e)[:120]}")
         _finish(iid, "failed", rec, summary, dry_run)
         return
+    owner_ids = owner_ids or {}
     cat, owner = c["category"], c["thread_owner"]
     rec.update(category=cat, owner=owner)
     subj, sndr, body = msg.get("subject", ""), msg.get("from", ""), msg.get("body", "")
-    dest_id = _dest_id(cat, owner, subj, sndr, body)
+    dest_id = _dest_id(cat, owner, subj, sndr, body, owner_ids)
     if _is_delivery_note(subj, sndr):
         rec["folder"] = "delivery note → Robyn - Supplier ETAs"
     elif _is_auto_archive(subj, sndr, body):
         rec["folder"] = "auto-archive → Natasha - Auto-archive"
-    elif dest_id in OWNER_FOLDER.values():
-        rec["folder"] = "supplier reply → " + owner
+    elif dest_id in owner_ids.values():
+        rec["folder"] = "supplier reply → " + OWNER_FOLDER_NAMES.get(owner, owner)
     else:
         rec["folder"] = cat
     if not dest_id:
@@ -243,7 +275,7 @@ def _handle_message(mailbox, msg, dry_run, summary, token):
     try:
         ds.move_message_to_folder(mailbox, msg["id"], dest_id, token=token)
         rec.update(status="moved", detail=f"filed as {cat}"
-                   + (f" ({owner})" if owner in OWNER_FOLDER else ""))
+                   + (f" ({OWNER_FOLDER_NAMES[owner]})" if owner in owner_ids else ""))
         _finish(iid, "moved", rec, summary, dry_run)
     except Exception as e:  # noqa: BLE001
         rec.update(status="failed", detail=f"move failed: {str(e)[:120]}")
