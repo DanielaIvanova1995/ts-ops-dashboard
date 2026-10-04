@@ -406,11 +406,29 @@ def carron_expected(goods_value, ship):
     return zc["large"]
 
 
-def expected_delivery(supplier, goods_value, ship=None):
+def _dolle_rates():
+    """{norm_sku: delivery£} for Dolle from price_overrides.json '_delivery'.'dolle'."""
+    ov = _price_overrides()
+    raw = (ov.get("_delivery") or {})
+    # key may be 'dolle'/'Dolle' — match case-insensitively
+    for k, m in raw.items():
+        if norm_code(k) == "dolle":
+            return {norm_code(s): v for s, v in (m or {}).items()
+                    if isinstance(v, (int, float))}
+    return {}
+
+
+def expected_delivery(supplier, goods_value, ship=None, order=None):
     if is_carron(supplier):
         return carron_expected(goods_value, ship)
     if is_ctie(supplier):
         return ctie_expected(goods_value, ship)
+    if norm_code(supplier).startswith("dolle"):
+        # Dolle carriage = the HIGHEST per-product band among the ORDER's SKUs (a mixed order is
+        # charged the single highest shipping rate, not the sum). None if no order SKU is priced.
+        rates = _dolle_rates()
+        vals = [rates[k.split("#")[0]] for k in (order or {}) if k.split("#")[0] in rates]
+        return round(max(vals), 2) if vals else None
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None
@@ -504,7 +522,7 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
 
         if is_delivery(sku_raw) or is_delivery(desc):
             saw_delivery = True
-            known = expected_delivery(supplier, delivery_goods, carron_ship)
+            known = expected_delivery(supplier, delivery_goods, carron_ship, order)
             zinfo = f" ({carron_zone_label(carron_ship)})" if is_carron(supplier) else ""
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
@@ -605,7 +623,7 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
 
     carriage = parsed.get("carriage")
     if isinstance(carriage, (int, float)) and carriage > tol and not saw_delivery:
-        known = expected_delivery(supplier, delivery_goods, carron_ship)
+        known = expected_delivery(supplier, delivery_goods, carron_ship, order)
         cissues = []
         if known is not None:
             if carriage > known + tol:
