@@ -995,6 +995,20 @@ def _process_split(o, res):
             pid = o["item_id"] if idx == 1 else data_sources.op_duplicate_item(o["item_id"])
         except Exception as e:  # noqa: BLE001
             return f"couldn't duplicate the Monday item: {str(e)[:60]}"
+        # A duplicated part (idx>=2) inherits the ORIGINAL's invoice subitems — Monday's
+        # duplicate_item always copies subitems across. Left in place, the new part would carry the
+        # FIRST supplier's invoice (e.g. a Decor8 invoice sitting on the Toolbank part), which then
+        # looks like a mis-matched/duplicated invoice. Strip them so each part starts clean and only
+        # ever gets its OWN supplier's invoice from the importer.
+        if idx >= 2:
+            try:
+                for _sub in data_sources.order_subitem_ids(pid):
+                    try:
+                        data_sources.delete_subitem(_sub)
+                    except Exception:  # noqa: BLE001
+                        pass
+            except Exception:  # noqa: BLE001
+                pass
         items_text = "\n".join(
             f"{l.get('title')} | Quantity: {l.get('qty')} | SKU: {l.get('sku') or ''}"
             for l in glines)

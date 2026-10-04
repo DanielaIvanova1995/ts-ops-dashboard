@@ -3364,6 +3364,17 @@ def order_subitem_invoice_numbers(order_item_id, token: str | None = None) -> li
     return [(s.get("name") or "").strip() for s in subs if s.get("name")]
 
 
+def order_subitem_ids(order_item_id, token: str | None = None) -> list:
+    """The subitem ids (invoices/credit notes) logged under an order → [id, …]. Used when a split
+    part is created by DUPLICATING another part: Monday's duplicate_item copies the original's
+    subitems across, so the new part would otherwise inherit the first supplier's invoice — this
+    lists them so they can be stripped before the part gets its own invoice."""
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){subitems{id}}}",
+                       {"i": [str(order_item_id)]}, token)
+    subs = (((data.get("items") or [{}])[0]).get("subitems") or [])
+    return [str(s.get("id")) for s in subs if s.get("id")]
+
+
 def create_invoice_subitem(parent_item_id, invoice_no: str, total, due_date: str | None = None,
                            invoice_date: str | None = None, status_label: str = "Needs Review",
                            token: str | None = None) -> dict:
