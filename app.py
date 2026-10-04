@@ -1289,6 +1289,11 @@ def _title_tokens(s):
             # are still dropped as noise.
             if part in _TOK_STOP or (len(part) < 2 and not part.isdigit()):
                 continue
+            # Normalise simple plurals so singular/plural wording lines up — e.g. a supplier's
+            # 'Fixing Buttons' invoice line matches our 'Fix Button' order line. Only 5+ char
+            # alphabetic words, and never a '…ss' word (keeps 'glass'/'class' intact).
+            if part.isalpha() and len(part) >= 5 and part.endswith("s") and part[-2] != "s":
+                part = part[:-1]
             out.add(part)
     return out
 

@@ -113,6 +113,10 @@ def title_tokens(s):
         for part in _TOK_ABBREV.get(w, w).split():
             if part in _TOK_STOP or (len(part) < 2 and not part.isdigit()):
                 continue
+            # Normalise simple plurals (buttons→button) so singular/plural wording lines up;
+            # 5+ char alphabetic words only, never a '…ss' word (keeps 'glass'/'class').
+            if part.isalpha() and len(part) >= 5 and part.endswith("s") and part[-2] != "s":
+                part = part[:-1]
             out.add(part)
     return out
 
