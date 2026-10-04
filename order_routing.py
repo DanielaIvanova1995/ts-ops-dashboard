@@ -170,22 +170,41 @@ FREEFOAM_FORTEX_EMAIL = {
 }
 
 
+# CREDIT-account stockists — Daniela 2026-10-02: in a multi-supplier area, ALWAYS prefer a credit
+# account first (better cashflow), then whoever's next in the map's own order.
+_FF_CREDIT = {"Stalwart", "BD Plastics", "PPW", "Future Building Products"}
+
+
 def freefoam_fortex_route(pc):
     """Freefoam & Fortex → a regional stockist chosen by delivery postcode area (Daniela 2026-10-02).
-    Always QUOTE-first (packing slip, no prices yet). Returns {supplier, branch_email, alts, reason,
-    conf}. An unmapped area or a blank postcode returns supplier=None so the line goes to review for
-    a human to pick a supplier."""
+    Always QUOTE-first (packing slip, no prices yet). Returns {supplier, branch, branch_email,
+    branch_phone, alts, reason, conf}. In a multi-stockist area, CREDIT accounts come first (then the
+    map's order). If the area has no stockist yet BUT falls inside a UPB depot area, it goes to that
+    UPB depot (still a quote); otherwise supplier=None so the line goes to review for a human to pick."""
     area = postcode_area(pc)
     sups = FREEFOAM_FORTEX_MAP.get(area or "")
     if not sups:
-        return {"supplier": None, "branch_email": None, "alts": [], "conf": "low",
+        # No regional stockist yet — but if it's a UPB depot area, send it to UPB as a quote.
+        for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
+                            ("UPB Aldridge", _UPB_ALDRIDGE)):
+            if area in keys:
+                return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
+                        "branch_phone": _UPB_DEPOT_PHONE.get(depot), "alts": [], "conf": "high",
+                        "reason": f"Freefoam/Fortex — no local stockist for {area}, in UPB area "
+                                  f"→ {depot} (quote)"}
+        return {"supplier": None, "branch": None, "branch_email": None, "branch_phone": None,
+                "alts": [], "conf": "low",
                 "reason": f"Freefoam/Fortex — no stockist mapped for area "
                           f"{area or '(no postcode)'} yet — pick a supplier"}
-    primary, alts = sups[0], sups[1:]
+    # Credit accounts first (stable — keeps the map's order within the credit and the cash tiers).
+    ordered = sorted(sups, key=lambda s: 0 if s in _FF_CREDIT else 1)
+    primary, alts = ordered[0], ordered[1:]
     alt_txt = f" · alternatives: {', '.join(alts)}" if alts else ""
-    return {"supplier": primary, "branch_email": FREEFOAM_FORTEX_EMAIL.get(primary),
+    credit_note = " [credit]" if primary in _FF_CREDIT else ""
+    return {"supplier": primary, "branch": None,
+            "branch_email": FREEFOAM_FORTEX_EMAIL.get(primary), "branch_phone": None,
             "alts": alts, "conf": "high",
-            "reason": f"Freefoam/Fortex — {area} → {primary} (quote){alt_txt}"}
+            "reason": f"Freefoam/Fortex — {area} → {primary}{credit_note} (quote){alt_txt}"}
 
 
 def postcode_area(pc):
@@ -314,7 +333,8 @@ def route_line(line, area_pc=None, sku_supplier=None):
         if not sup:
             return out("PICK", None, fr["reason"], fr["conf"], quote=True)
         return out(sup, sup, fr["reason"], fr["conf"], quote=True,
-                   branch_email=fr.get("branch_email"))
+                   branch=fr.get("branch"), branch_email=fr.get("branch_email"),
+                   branch_phone=fr.get("branch_phone"))
     # Hardie / Cladco — UPB in their own areas, else National Plastics (nearest branch).
     if any(k in blob for k in ("hardie", "cladco")):
         hr = hardie_route(area_pc, smooth="smooth" in tl)

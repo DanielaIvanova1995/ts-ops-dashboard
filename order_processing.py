@@ -714,7 +714,14 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
             po_lines.append([(it.get("SKU") or "-"), _po_desc(it) + _exp_note, qty, _money(cost),
                              _money(lt)])
 
-    make_slip = is_portal or in_house or bool(unpriced_items)
+    # Freefoam / Fortex are QUOTE-first across the board (Daniela 2026-10-02): the doc is ALWAYS a
+    # packing slip with no prices — even when the part routes to UPB (which DOES have prices loaded),
+    # so a priced PO never goes out before the quote is agreed. Detected by the product brand, not
+    # the supplier (UPB sells plenty else), so it only forces the slip for the Freefoam/Fortex lines.
+    ff_quote = any(("freefoam" in ((it.get("Item") or "") + " " + (it.get("SKU") or "")).lower()
+                    or "fortex" in ((it.get("Item") or "") + " " + (it.get("SKU") or "")).lower())
+                   for it in items)
+    make_slip = is_portal or in_house or bool(unpriced_items) or ff_quote
 
     if make_slip:
         lines = [[(it.get("SKU") or "-"), _po_desc(it) + _exp_note, (it.get("Qty") or "1")]
