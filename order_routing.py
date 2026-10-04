@@ -31,8 +31,9 @@ CANON = {
     "nationalplastics": "National Plastics",   # distinct from NBP
     "markovitz": "Markovitz",                    # builders' merchant — PO to Amy Charlesworth
     "ajw": "AJW", "ajwdistribution": "AJW",     # AJW Distribution — Cedral quotes
-    # brand locks
-    "jameshardie": "UPB", "hardie": "UPB", "freefoam": "UPB", "fortex": "UPB", "cladco": "UPB",
+    # brand locks (Freefoam + Fortex now route by postcode to regional stockists — see
+    # FREEFOAM_FORTEX_MAP / freefoam_fortex_route — so they are NOT locked to UPB here any more.)
+    "jameshardie": "UPB", "hardie": "UPB", "cladco": "UPB",
 }
 
 # MB Decor removed 2026-09-06 — Daniela wants POs (emailed to orders@mbdecor.co.uk) not packing
@@ -49,7 +50,8 @@ IN_HOUSE = {"SAMPLES", "CLEARANCE"}
 # on file with all their rules; just remove from this set to switch them back on). NBP paused.
 EXCLUDED_SUPPLIERS = {"NBP"}
 
-# ---- James Hardie / Freefoam / Fortex / Cladco postcode routing (Aug 2026 map, avoid NBP) ----
+# ---- James Hardie / Cladco postcode routing (Aug 2026 map, avoid NBP) ----
+# (Freefoam + Fortex moved to their own regional-stockist map below — FREEFOAM_FORTEX_MAP.)
 # Postcode AREAS (the leading letters of a postcode) → who supplies.
 _SCOTLAND = {"AB", "DD", "DG", "EH", "FK", "G", "HS", "IV", "KA", "KW", "KY", "ML", "PA", "PH",
              "TD", "ZE"}
@@ -75,6 +77,115 @@ _UPB_DEPOT = {"UPB Newmarket": "callumpainter@upbuildingproducts.com",
 _UPB_DEPOT_PHONE = {"UPB Newmarket": "01638501927",
                     "UPB Ipswich": "01473747122",
                     "UPB Aldridge": "07485928894"}   # all confirmed (Daniela 2026-09-13)
+
+# ---- Freefoam + Fortex regional-stockist map (Daniela 2026-10-02, supplier-delivery-map.pdf) ----
+# The WHOLE Freefoam and Fortex range now comes from regional plastics stockists, chosen by the
+# delivery postcode AREA. Every one is QUOTE-FIRST for now (stage "Needs Quote", the doc is a
+# packing slip with NO prices) until Daniela loads each supplier's pricelist. Where an area lists
+# several stockists, the FIRST is the default and the rest are alternatives the processor can switch
+# to in the grid. Areas NOT in this map have no supplier yet → the line goes to review to pick one.
+# Supplier labels here are the Monday Supplier dropdown labels (auto-created on first use).
+FREEFOAM_FORTEX_MAP = {
+    "AB": ["Central Plastics and Roofing"],
+    "BA": ["Alliance Building Plastics"],
+    "BB": ["Bury Plastics", "T Roofing Supplies"],
+    "BD": ["TruSeal", "Bury Plastics"],
+    "BH": ["Alliance Building Plastics"],
+    "BL": ["Bury Plastics", "T Roofing Supplies"],
+    "BN": ["Crawley Plastics"],
+    "BR": ["Crawley Plastics"],
+    "BS": ["Roofbase", "Alliance Building Plastics", "PPW"],
+    "CF": ["Roofbase", "PPW"],
+    "CH": ["T Roofing Supplies"],
+    "CR": ["Crawley Plastics"],
+    "CT": ["Crawley Plastics"],
+    "CW": ["Bury Plastics", "T Roofing Supplies"],
+    "DD": ["Central Plastics and Roofing"],
+    "DE": ["Future Building Products", "TruSeal"],
+    "DG": ["Central Plastics and Roofing"],
+    "DH": ["BD Plastics"],
+    "DL": ["BD Plastics"],
+    "DN": ["Future Building Products", "TruSeal"],
+    "DT": ["Alliance Building Plastics"],
+    "EH": ["Central Plastics and Roofing"],
+    "EX": ["Roofbase"],
+    "FK": ["Central Plastics and Roofing"],
+    "FY": ["T Roofing Supplies"],
+    "G":  ["Central Plastics and Roofing"],
+    "GL": ["Roofbase", "PPW"],
+    "GU": ["Crawley Plastics", "Alliance Building Plastics"],
+    "HD": ["Future Building Products", "Bury Plastics", "T Roofing Supplies"],
+    "HG": ["BD Plastics"],
+    "HR": ["PPW"],
+    "HX": ["Bury Plastics"],
+    "IV": ["Central Plastics and Roofing"],
+    "KA": ["Central Plastics and Roofing"],
+    "KT": ["Crawley Plastics"],
+    "KY": ["Central Plastics and Roofing"],
+    "L":  ["Bury Plastics", "T Roofing Supplies"],
+    "LA": ["Bury Plastics"],
+    "LE": ["Roofbase", "Future Building Products", "TruSeal"],
+    "LN": ["Future Building Products", "TruSeal"],
+    "LS": ["TruSeal"],
+    "M":  ["TruSeal", "Bury Plastics", "T Roofing Supplies"],
+    "ME": ["Crawley Plastics"],
+    "ML": ["Central Plastics and Roofing"],
+    "NE": ["BD Plastics"],
+    "NG": ["Future Building Products", "TruSeal"],
+    "NP": ["PPW"],
+    "OL": ["Bury Plastics", "T Roofing Supplies"],
+    "PA": ["Central Plastics and Roofing"],
+    "PE": ["Future Building Products"],
+    "PH": ["Central Plastics and Roofing"],
+    "PL": ["Roofbase"],
+    "PO": ["Stalwart", "Crawley Plastics", "Alliance Building Plastics"],
+    "PR": ["Bury Plastics", "T Roofing Supplies"],
+    "RH": ["Crawley Plastics"],
+    "S":  ["Future Building Products", "TruSeal"],
+    "SA": ["Roofbase", "PPW"],
+    "SK": ["Bury Plastics", "T Roofing Supplies"],
+    "SM": ["Crawley Plastics"],
+    "SN": ["Roofbase", "Alliance Building Plastics"],
+    "SO": ["Stalwart", "Alliance Building Plastics"],
+    "SP": ["Alliance Building Plastics"],
+    "SR": ["BD Plastics"],
+    "ST": ["Future Building Products", "TruSeal"],
+    "TA": ["Alliance Building Plastics"],
+    "TD": ["Central Plastics and Roofing"],
+    "TN": ["Crawley Plastics"],
+    "TS": ["BD Plastics"],
+    "WA": ["Bury Plastics", "T Roofing Supplies"],
+    "WF": ["Future Building Products"],
+    "WN": ["Bury Plastics", "T Roofing Supplies"],
+    "WR": ["PPW"],
+    "YO": ["BD Plastics"],
+}
+# PO / quote-request emails for the Freefoam/Fortex stockists. Only the confirmed ones are here;
+# the rest are blank until Daniela sends them (the order still routes + makes the packing slip, it
+# just has no email to send to yet). CREDIT accounts: Stalwart, BD Plastics, PPW, Future Building
+# Products. The others are CASH.
+FREEFOAM_FORTEX_EMAIL = {
+    "Stalwart": "sales@stalwartproducts.co.uk",
+    "TruSeal": "steven.pritchard@trusealplastics.co.uk",
+}
+
+
+def freefoam_fortex_route(pc):
+    """Freefoam & Fortex → a regional stockist chosen by delivery postcode area (Daniela 2026-10-02).
+    Always QUOTE-first (packing slip, no prices yet). Returns {supplier, branch_email, alts, reason,
+    conf}. An unmapped area or a blank postcode returns supplier=None so the line goes to review for
+    a human to pick a supplier."""
+    area = postcode_area(pc)
+    sups = FREEFOAM_FORTEX_MAP.get(area or "")
+    if not sups:
+        return {"supplier": None, "branch_email": None, "alts": [], "conf": "low",
+                "reason": f"Freefoam/Fortex — no stockist mapped for area "
+                          f"{area or '(no postcode)'} yet — pick a supplier"}
+    primary, alts = sups[0], sups[1:]
+    alt_txt = f" · alternatives: {', '.join(alts)}" if alts else ""
+    return {"supplier": primary, "branch_email": FREEFOAM_FORTEX_EMAIL.get(primary),
+            "alts": alts, "conf": "high",
+            "reason": f"Freefoam/Fortex — {area} → {primary} (quote){alt_txt}"}
 
 
 def postcode_area(pc):
@@ -126,23 +237,6 @@ def _np_branch(pc):
     return {"branch_name": name, "email": email, "phone": phone, "miles": None}
 
 
-def freefoam_route(pc):
-    """Freefoam → ALWAYS UPB for now (Daniela 2026-09-13): the matching UPB depot for the postcode,
-    and if it's OUTSIDE all UPB areas, default to UPB Aldridge. (The rest-of-country plan comes
-    later.) Each supplier prices from its OWN list."""
-    area = postcode_area(pc)
-    for depot, keys in (("UPB Newmarket", _UPB_NEWMARKET), ("UPB Ipswich", _UPB_IPSWICH),
-                        ("UPB Aldridge", _UPB_ALDRIDGE)):
-        if area in keys:
-            return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
-                    "branch_phone": _UPB_DEPOT_PHONE.get(depot),
-                    "reason": f"Freefoam — UPB own area {depot} ({area})", "conf": "high"}
-    depot = "UPB Aldridge"
-    return {"supplier": "UPB", "branch": depot, "branch_email": _UPB_DEPOT[depot],
-            "branch_phone": _UPB_DEPOT_PHONE.get(depot),
-            "reason": f"Freefoam — outside UPB areas → {depot} (default)", "conf": "med"}
-
-
 def _zest_branch(pc):
     """Nearest National Plastics branch (full network) for a Zest order → {branch_name, email,
     phone, miles} or None. Live geocoder (branch_finder); no offline fallback (branch list is large,
@@ -157,7 +251,7 @@ def _zest_branch(pc):
 
 
 def hardie_route(pc, smooth=False):
-    """Route a Hardie/Freefoam/Fortex/Cladco line by delivery postcode (Daniela, 2026-09-13):
+    """Route a Hardie/Cladco line by delivery postcode (Daniela, 2026-09-13):
     ONLY UPB (in their own depot areas) and National Plastics (everywhere else, nearest of their 3
     branches). Squaredeal is a BACKUP only (kept for Smooth, which only they stock). Each supplier
     prices from its OWN list. Returns {supplier, branch, branch_email, branch_phone, reason, conf,
@@ -212,13 +306,17 @@ def route_line(line, area_pc=None, sku_supplier=None):
     if "clearance" in tl or sku.lower().startswith("clear"):
         return out("CLEARANCE", None, "Clearance stock we hold — in-house", "high")
 
-    # Freefoam → always UPB for now (matching depot, else Aldridge) — Daniela 2026-09-13.
-    if "freefoam" in blob:
-        fr = freefoam_route(area_pc)
-        return out("UPB", "UPB", fr["reason"], fr["conf"], branch=fr.get("branch"),
-                   branch_email=fr.get("branch_email"), branch_phone=fr.get("branch_phone"))
-    # Hardie / Fortex / Cladco — UPB in their own areas, else National Plastics (nearest branch).
-    if any(k in blob for k in ("hardie", "fortex", "cladco")):
+    # Freefoam & Fortex → regional stockist by delivery postcode (Daniela 2026-10-02). Always a
+    # QUOTE (packing slip, no prices yet). Unmapped area / no postcode → PICK (review).
+    if "freefoam" in blob or "fortex" in blob:
+        fr = freefoam_fortex_route(area_pc)
+        sup = fr.get("supplier")
+        if not sup:
+            return out("PICK", None, fr["reason"], fr["conf"], quote=True)
+        return out(sup, sup, fr["reason"], fr["conf"], quote=True,
+                   branch_email=fr.get("branch_email"))
+    # Hardie / Cladco — UPB in their own areas, else National Plastics (nearest branch).
+    if any(k in blob for k in ("hardie", "cladco")):
         hr = hardie_route(area_pc, smooth="smooth" in tl)
         return out(hr["supplier"], hr["supplier"], hr["reason"], hr["conf"],
                    quote=hr.get("quote", False), needs_branch=hr.get("needs_branch", False),

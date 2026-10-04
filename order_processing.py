@@ -65,7 +65,10 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "C TIE": "sales@ctie.co.uk",
                      "Hurlingham Baths": "sales@hurlinghambaths.co.uk",
                      "Hurlingham": "sales@hurlinghambaths.co.uk",
-                     "National Skirting": "info@nationalskirting.co.uk"}
+                     "National Skirting": "info@nationalskirting.co.uk",
+                     # Freefoam / Fortex regional stockists (Daniela 2026-10-02) — more to follow
+                     "Stalwart": "sales@stalwartproducts.co.uk",
+                     "TruSeal": "steven.pritchard@trusealplastics.co.uk"}
 
 # Head-office contact number per supplier, for the Branch contact number when the order ISN'T a
 # branch order (Eurocell/Travis Perkins get the nearest branch's number from the branch finder
