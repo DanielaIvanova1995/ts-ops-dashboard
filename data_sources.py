@@ -1397,6 +1397,10 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "asset_id": asset_id, "file_name": file_name,
             "file_url": (cv.get("file_mm38gx3j", {}) or {}).get("text") or None,
             "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
+            # The Monday item NAME — carries the split-part suffix ("31824-2") that the base
+            # order_no ("31824") drops. Used for DISPLAY so split parts are distinguishable; the
+            # base order_no is still what dedup / sibling-matching / reconcile key on.
+            "order_part": (parent.get("name") or "").strip() or None,
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
             "query_note": (cv.get("text_mm3gh2za", {}) or {}).get("text") or "",   # discrepancy reason

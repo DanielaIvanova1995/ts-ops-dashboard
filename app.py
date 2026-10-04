@@ -3217,7 +3217,7 @@ HELLO_MAILBOX = "hello@tradesuperstoreonline.co.uk"            # internal team i
 def _underdelivery_email(inv, rec_detail, n_total):
     """Internal note to the team (hello@) that an order has been under-delivered so far, listing
     what's still outstanding, so they can chase the supplier for the rest."""
-    onum = inv.get("order_no") or "?"
+    onum = inv.get("order_part") or inv.get("order_no") or "?"  # show split suffix (-1/-2)
     sup = inv.get("supplier") or "the supplier"
     shorts = [d for d in rec_detail.values() if d["short"] > 0]
     body = [f"Order {onum} ({sup}) has been under-delivered so far."]
@@ -3447,7 +3447,7 @@ def _run_one_invoice(inv, lbsku):
     cc1, cc2 = st.columns(2)
     with cc1:
         st.caption("Order number — hover, click the copy icon")
-        st.code(inv.get("order_no") or "—", language=None)
+        st.code(inv.get("order_part") or inv.get("order_no") or "—", language=None)
     with cc2:
         st.caption("Invoice number")
         st.code(inv.get("invoice_no") or "—", language=None)
@@ -3640,7 +3640,7 @@ def _run_one_invoice(inv, lbsku):
                 f'<div style="font-size:13px;color:var(--ink);line-height:1.4">{_esc(msg)}</div></div>')
 
     order = _order_candidates(inv)  # same source the check used (live Shopify, else Monday)
-    onum = inv.get("order_no") or "?"
+    onum = inv.get("order_part") or inv.get("order_no") or "?"  # show split suffix (-1/-2)
     qmiss = [l for l in res["lines"] if any(t in ("qty", "notorder") for t, _ in l["issues"])]
     missing = res.get("missing") or []
     short = res.get("short") or {}
@@ -3650,7 +3650,7 @@ def _run_one_invoice(inv, lbsku):
     miss_str = ", ".join(missing)
 
     # Reconcile invoiced quantities across ALL of the order's checked invoices (split deliveries).
-    rec_status, rec_detail = _order_reconcile(onum)
+    rec_status, rec_detail = _order_reconcile(inv.get("order_no") or onum)
     still_short = [f"{d['sku']} (invoiced {int(round(d['invoiced']))} of {d['ordered']})"
                    for d in rec_detail.values() if d["short"] > 0]
 
@@ -4753,7 +4753,8 @@ def _invoice_tab(key, is_queue):
                 st.caption("Check & process skips these (there's nothing to read). Attach the "
                            "invoice PDF to the subitem on Monday and they become checkable.")
                 _npdf_df = pd.DataFrame([{
-                    "Invoice": i.get("invoice_no") or "—", "Order": i.get("order_no") or "—",
+                    "Invoice": i.get("invoice_no") or "—",
+                    "Order": i.get("order_part") or i.get("order_no") or "—",
                     "Supplier": i.get("supplier") or "—", "£": i.get("total"),
                     "Added": _fmt_actioned(i.get("actioned_at")) if i.get("actioned_at") else ""}
                     for i in no_pdf])
@@ -4809,7 +4810,7 @@ def _invoice_tab(key, is_queue):
         omark = ("  · DUPLICATE" if inv.get("_dup")
                  else f"  · DUP? same £ as {inv['_dup_amt']}" if inv.get("_dup_amt")
                  else f"  · ×{inv['n_invoices']}" if (inv.get("n_invoices") or 0) >= 2 else "")
-        row["Order"] = (inv.get("order_no") or "") + omark
+        row["Order"] = (inv.get("order_part") or inv.get("order_no") or "") + omark
         row["Supplier"] = inv.get("supplier") or ""
         if is_recent:
             row["Result"] = _recent_result(inv.get("status"))
