@@ -43,7 +43,7 @@ CANON = {
 # resolved from the postcode (Daniela 2026-09-29). TP stays in NEEDS_BRANCH too: it's both.
 PORTAL = {"PJH", "Toolbank", "Velux", "Nuie", "National Skirting", "Rexel", "Travis Perkins",
           "Walls and Floors"}
-QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices", "AJW"}
+QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices", "AJW", "Brundle"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
 IN_HOUSE = {"SAMPLES", "CLEARANCE"}
 # Suppliers we're NOT buying from right now — never route to them or count their feed prices (kept
