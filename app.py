@@ -9011,34 +9011,41 @@ def _statement_file_text(up):
     return "\n".join(out)
 
 
-def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None):
-    """Tick invoices → build a remittance → send it → mark paid in QuickBooks. Reused by both a
-    fresh reconciliation and a reopened saved one, so you never reconcile a statement twice.
-    live_verify re-checks each line against QuickBooks first, so a bill that's been paid or cleared
-    since the statement was reconciled drops off before you'd pay it again. stmt_balance = the
-    statement's own outstanding balance; if the ready-to-pay total dwarfs it, nothing is pre-ticked
-    (QuickBooks is probably out of sync — bills paid but not marked paid), so you can't overpay."""
+def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None,
+                  paid_lines=None, credit_lines=None):
+    """Tick invoices (and credit notes) → build a remittance → send it → mark paid in QuickBooks.
+    pay_lines = UNPAID invoices ready to pay (a QB bill-payment is written only for these).
+    paid_lines = invoices ALREADY paid in QB — selectable so a remittance can still be sent for a
+    payment already made (never re-paid in QB). credit_lines = credit notes on the statement,
+    deducted as NEGATIVE lines so the remittance nets off (QB has no vendor-credit API, so the
+    credit is applied against the bills in QuickBooks by hand). 'Select all / Clear all' tick the
+    lot. Reused by a fresh reconciliation and a reopened saved one."""
+    paid_lines = paid_lines or []
+    credit_lines = credit_lines or []
     if live_verify and vid:
         try:
             fresh = {str(b["id"]): b for b in data_sources.qbo_vendor_bills(vid)}
-            keep, dropped = [], 0
+            keep, moved = [], 0
             for p in pay_lines:
                 b = fresh.get(str(p.get("bill_id")))
-                if b is None or b.get("paid"):
-                    dropped += 1
+                if b is None:
+                    continue
+                if b.get("paid"):
+                    paid_lines.append(dict(p, paid=True))   # settled since — remittance only
+                    moved += 1
                 else:
                     keep.append(p)
             pay_lines = keep
-            if dropped:
-                st.caption(f"↻ {dropped} invoice(s) have since been paid or cleared in QuickBooks — "
-                           "removed from this list.")
+            if moved:
+                st.caption(f"↻ {moved} invoice(s) have since been paid in QuickBooks — moved to the "
+                           "already-paid list (remittance only).")
         except Exception:  # noqa: BLE001
             pass
-    if not pay_lines:
+    if not (pay_lines or paid_lines or credit_lines):
         st.info("Nothing left ready to pay for this supplier.")
         return
     _pk = key
-    st.markdown("##### 💷 Pay these — tick, build a remittance, send it")
+    st.markdown("##### 💷 Pay these — tick invoices (and credit notes), build a remittance, send it")
     total_all = sum(p["amt"] for p in pay_lines if isinstance(p.get("amt"), (int, float)))
     overpay = (stmt_balance is not None
                and total_all > stmt_balance + max(1.0, 0.02 * stmt_balance))
@@ -9047,46 +9054,91 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
                  f"(£{stmt_balance:,.2f}).** Nothing is pre-ticked — tick **only** what you're "
                  "actually paying. This almost always means QuickBooks isn't reconciled (bills were "
                  "paid but never marked paid in QuickBooks, so they still look open).")
-    pay_df = pd.DataFrame([{"Pay": not overpay, "Invoice": p["inv"], "Order": p["order"],
+
+    # One list: unpaid (payable) first, then already-paid (remittance only). A 🔵 marks paid ones.
+    inv_rows = [dict(p, paid=False) for p in pay_lines] + [dict(p, paid=True) for p in paid_lines]
+
+    # Select all / Clear all — flips the default tick and re-keys the editors so it re-applies.
+    _dkey, _nkey = f"_paydef_{_pk}", f"_paynonce_{_pk}"
+    if _dkey not in st.session_state:
+        st.session_state[_dkey] = not overpay
+    _sa, _sc, _ = st.columns([1, 1, 3])
+    if _sa.button("✔ Select all", key=f"selall_{_pk}", use_container_width=True):
+        st.session_state[_dkey] = True
+        st.session_state[_nkey] = st.session_state.get(_nkey, 0) + 1
+    if _sc.button("✖ Clear all", key=f"selnone_{_pk}", use_container_width=True):
+        st.session_state[_dkey] = False
+        st.session_state[_nkey] = st.session_state.get(_nkey, 0) + 1
+    _default = bool(st.session_state[_dkey])
+    _nonce = st.session_state.get(_nkey, 0)
+
+    pay_df = pd.DataFrame([{"Pay": _default, "Invoice": p["inv"], "Order": p.get("order") or "",
                             "Amount": _gbp(p["amt"]),
-                            # The invoice's DUE DATE from the statement (absolute date), not a
-                            # relative "in N days" label. Falls back to the QuickBooks bill's due
-                            # date when the statement gave no per-line due date — still a real date.
-                            # A 🔴 marks an OVERDUE invoice (data_editor can't colour text red).
+                            # Statement due date (absolute), 🔴 if overdue (data_editor can't go red).
                             "Due date": (str(p.get("stmt_due") or p.get("due_date") or "")[:10]
                                          + (" 🔴" if _is_overdue(p.get("inv_date")) else "")),
-                            "Approved": "✅ Approved" if p.get("bill_id") else "⚠ NOT approved"}
-                           for p in pay_lines])
+                            "Status": ("🔵 already paid (remittance only)" if p.get("paid")
+                                       else ("✅ Approved" if p.get("bill_id") else "⚠ NOT approved"))}
+                           for p in inv_rows])
     edited = st.data_editor(
-        pay_df, hide_index=True, use_container_width=True, key=f"payedit_{_pk}",
+        pay_df, hide_index=True, use_container_width=True, key=f"payedit_{_pk}_{_nonce}",
         disabled=[c for c in pay_df.columns if c != "Pay"],
         column_config={"Pay": st.column_config.CheckboxColumn("Pay"),
-                       "Approved": st.column_config.TextColumn(
-                           "Approved",
-                           help="Approved & entered in QuickBooks. Only approved invoices reach "
-                                "this list — this column is just a safety check.")})
-    if any(not p.get("bill_id") for p in pay_lines):
-        st.warning("⚠ Something here isn't approved in QuickBooks — untick it before paying.")
+                       "Status": st.column_config.TextColumn(
+                           "Status", help="✅ approved & in QuickBooks · 🔵 already paid (sending a "
+                                          "remittance only) · ⚠ not approved — untick before paying.")})
     try:
         ticks = edited["Pay"]
-        picked_lines = [pay_lines[i] for i in range(len(pay_lines)) if bool(ticks.iloc[i])]
+        picked_inv = [inv_rows[i] for i in range(len(inv_rows)) if bool(ticks.iloc[i])]
     except Exception:  # noqa: BLE001
-        picked_lines = list(pay_lines)
-    rem_total = sum(p["amt"] for p in picked_lines if isinstance(p["amt"], (int, float)))
-    st.markdown(f"**{len(picked_lines)} invoice(s) selected · £{rem_total:,.2f}**")
+        picked_inv = list(inv_rows)
+
+    # Credit notes to offset — negative lines, pre-ticked. QB/Monday carry the same CN number.
+    picked_credits = []
+    if credit_lines:
+        st.markdown("**Credit notes to offset** — deducted from the remittance")
+        cdf = pd.DataFrame([{"Apply": _default, "Credit note": c.get("cn") or "credit",
+                             "Order": c.get("order") or "", "Amount": "−" + _gbp(c["amt"]),
+                             "On Monday": "✓" if c.get("on_monday") else "—"}
+                            for c in credit_lines])
+        cedit = st.data_editor(
+            cdf, hide_index=True, use_container_width=True, key=f"credit_{_pk}_{_nonce}",
+            disabled=[c for c in cdf.columns if c != "Apply"],
+            column_config={"Apply": st.column_config.CheckboxColumn("Apply"),
+                           "On Monday": st.column_config.TextColumn(
+                               "On Monday", help="✓ = this credit-note number is on Monday too.")})
+        try:
+            ct = cedit["Apply"]
+            picked_credits = [credit_lines[i] for i in range(len(credit_lines)) if bool(ct.iloc[i])]
+        except Exception:  # noqa: BLE001
+            picked_credits = list(credit_lines)
+
+    if any((not p.get("paid")) and (not p.get("bill_id")) for p in picked_inv):
+        st.warning("⚠ Something ticked isn't approved in QuickBooks — untick it before paying.")
+    inv_total = sum(p["amt"] for p in picked_inv if isinstance(p.get("amt"), (int, float)))
+    credit_total = sum(c["amt"] for c in picked_credits if isinstance(c.get("amt"), (int, float)))
+    rem_total = round(inv_total - credit_total, 2)
+    _msg = f"**{len(picked_inv)} invoice(s) (£{inv_total:,.2f})**"
+    if picked_credits:
+        _msg += f" − **{len(picked_credits)} credit note(s) (£{credit_total:,.2f})**"
+    st.markdown(_msg + f" · net remittance **£{rem_total:,.2f}**")
     # Short supplier name in front of the B-date so two same-day remittances don't collide on the
     # QuickBooks Ref no. (DocNumber must be unique per bill payment), e.g. "PJH B160826".
     ref = st.text_input("Remittance / payment reference (also the QuickBooks Ref no.)",
                         key=f"remref_{_pk}",
                         value=f"{sup.split()[0] if sup else 'REM'} B{now_uk().strftime('%d%m%y')}")
-    # Build the remittance-advice PDF the supplier receives (QuickBooks-style document).
+    # Build the remittance-advice PDF the supplier receives (QuickBooks-style document): the ticked
+    # invoices as positive lines, then each ticked credit note as a NEGATIVE line so the total nets.
     pdf_lines = [{"bill_no": p.get("bill_no") or p.get("inv"), "bill_date": p.get("bill_date"),
                   "due_date": p.get("due_date"),
                   "original": p.get("original") if p.get("original") is not None else p.get("amt"),
                   "balance": p.get("balance") if p.get("balance") is not None else p.get("amt"),
-                  "payment": p.get("amt")} for p in picked_lines]
+                  "payment": p.get("amt")} for p in picked_inv]
+    pdf_lines += [{"bill_no": "CN " + str(c.get("cn") or ""), "bill_date": c.get("date"),
+                   "due_date": None, "original": -c["amt"], "balance": -c["amt"],
+                   "payment": -c["amt"]} for c in picked_credits]
     pdf_bytes = None
-    if picked_lines:
+    if picked_inv or picked_credits:
         try:
             pdf_bytes = data_sources.build_remittance_pdf(
                 sup, ref, now_uk().strftime("%d/%m/%Y"), pdf_lines, rem_total)
@@ -9104,7 +9156,7 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
                            value=SUPPLIER_EMAILS.get(_norm_code(sup), ""), key=f"remto_{_pk}")
     if e2.button("✉ Send remittance", key=f"remsend_{_pk}", type="primary",
                  use_container_width=True,
-                 disabled=not (rem_to.strip() and picked_lines)):
+                 disabled=not (rem_to.strip() and (picked_inv or picked_credits))):
         subj = f"Remittance Advice — {ref}"
         sent = drafted = False
         dlink = None
@@ -9125,6 +9177,16 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
             st.success(f"Remittance PDF {'sent to' if sent else 'drafted for'} "
                        f"{rem_to.strip()}." + link)
     # ---- Mark paid in QuickBooks (writes a BillPayment). Confirmed, never automatic. ----
+    # Only the ticked UNPAID invoices get a QB bill-payment: already-paid ones are remittance-only,
+    # and credit notes can't be applied via the API (no VendorCredit) — apply those in QB by hand.
+    pay_now = [p for p in picked_inv if not p.get("paid") and p.get("bill_id")]
+    pay_now_total = round(sum(p["amt"] for p in pay_now if isinstance(p.get("amt"), (int, float))), 2)
+    if picked_credits:
+        st.caption("⚠ Credit notes on this remittance are **not** written to QuickBooks — apply each "
+                   "credit against its bill in QuickBooks by hand so the net matches.")
+    if any(p.get("paid") for p in picked_inv):
+        st.caption("🔵 Already-paid invoices are included on the remittance only — they're not "
+                   "re-paid in QuickBooks.")
     st.markdown("**Mark paid in QuickBooks**")
     try:
         banks = data_sources.qbo_bank_accounts()
@@ -9135,29 +9197,31 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
         bmap = {b["name"]: b["id"] for b in banks}
         bank = st.selectbox("Pay from (QuickBooks bank account)", list(bmap.keys()), key=f"bank_{_pk}")
         mpend = f"markpend_{_pk}"
-        if st.button(f"Mark {len(picked_lines)} paid in QuickBooks", key=f"markpaid_{_pk}",
-                     disabled=not picked_lines):
+        if st.button(f"Mark {len(pay_now)} paid in QuickBooks", key=f"markpaid_{_pk}",
+                     disabled=not pay_now):
             st.session_state[mpend] = True
         if st.session_state.get(mpend):
-            st.warning(f"Record a **£{rem_total:,.2f}** bill payment in QuickBooks from **{bank}**, "
-                       f"settling **{len(picked_lines)}** invoice(s), reference **{ref}**? This "
-                       "writes to QuickBooks and marks them paid. You still pay the money via your "
-                       "bank separately.")
+            st.warning(f"Record a **£{pay_now_total:,.2f}** bill payment in QuickBooks from "
+                       f"**{bank}**, settling **{len(pay_now)}** invoice(s), reference **{ref}**? "
+                       "This writes to QuickBooks and marks them paid. You still pay the money via "
+                       "your bank separately."
+                       + (" Credit notes must be applied in QuickBooks separately." if picked_credits
+                          else ""))
             yy, nn = st.columns(2)
             if yy.button("Yes — mark paid in QuickBooks", key=f"markyes_{_pk}", type="primary"):
                 st.session_state.pop(mpend, None)
                 try:
                     data_sources.qbo_pay_bills(
                         vid, bmap[bank],
-                        [{"bill_id": p["bill_id"], "amount": p["amt"]} for p in picked_lines],
+                        [{"bill_id": p["bill_id"], "amount": p["amt"]} for p in pay_now],
                         memo=ref, doc_no=ref, date=now_uk().strftime("%Y-%m-%d"))
-                    st.success(f"✅ Marked {len(picked_lines)} invoice(s) paid in QuickBooks "
-                               f"(ref {ref}). Now pay £{rem_total:,.2f} via your bank.")
+                    st.success(f"✅ Marked {len(pay_now)} invoice(s) paid in QuickBooks "
+                               f"(ref {ref}). Remittance total to pay by bank: £{rem_total:,.2f}.")
                     st.session_state.pop("_stmt_bills_cache", None)
                     try:                       # audit trail (best-effort)
                         import supabase_db
                         supabase_db.audit(_signed_in_email(), "bill_payment",
-                                          f"{sup} — {len(picked_lines)} invoice(s), £{rem_total:,.2f}",
+                                          f"{sup} — {len(pay_now)} invoice(s), £{pay_now_total:,.2f}",
                                           ref)
                     except Exception:  # noqa: BLE001
                         pass
@@ -9381,11 +9445,14 @@ def _render_statement_recon():
                     st.dataframe(_recon_overdue_style(_sdf), hide_index=True,
                                  use_container_width=True)
                 # Pay it off straight from the saved copy (re-checked live against QuickBooks).
-                if snap.get("pay_lines") and snap.get("vid"):
+                if (snap.get("pay_lines") or snap.get("paid_lines") or snap.get("credit_lines")) \
+                        and snap.get("vid"):
                     if st.toggle("💷 Pay this off", key=paytog):
-                        _pay_workflow(snap["supplier"], snap["vid"], snap["pay_lines"],
+                        _pay_workflow(snap["supplier"], snap["vid"], snap.get("pay_lines") or [],
                                       f"saved_{_k}", live_verify=True,
-                                      stmt_balance=snap.get("stmt_total"))
+                                      stmt_balance=snap.get("stmt_total"),
+                                      paid_lines=snap.get("paid_lines") or [],
+                                      credit_lines=snap.get("credit_lines") or [])
                 elif snap.get("to_pay"):
                     st.caption("Reconcile this statement once more to enable paying it off from here "
                                "(it was saved before that feature existed).")
@@ -9601,7 +9668,7 @@ def _render_statement_recon():
     _cands = set()
     for _ln in (stmt.get("lines") or []):
         _iv = (_ln.get("invoice_no") or "").strip()
-        if _iv and (_ln.get("type") or "").lower() == "invoice":
+        if _iv and (_ln.get("type") or "").lower() in ("invoice", "credit"):
             _cands.update({_iv, _iv.lstrip("0"), _norm_inv_no(_iv, sup)})
     try:
         _found = data_sources.subitems_status_by_names([c for c in _cands if c])
@@ -9637,6 +9704,7 @@ def _render_statement_recon():
             bill_by_doc.setdefault(_norm_inv_no(b["doc_no"], sup), b)
 
     rows, action_rows, pay_lines, create_bill_rows = [], [], [], []
+    paid_lines = []        # invoices already PAID in QB — selectable for a remittance (not re-paid)
     n_pay = n_paid = n_missing = n_disc = n_action = 0
     to_pay = paid_total = disc_total = missing_total = action_total = stmt_total = 0.0
     used = set()
@@ -9665,6 +9733,13 @@ def _render_statement_recon():
                       else "🔵 Marked paid in QB")
             n_paid += 1
             paid_total += val
+            # Already paid in QB — offer it for a REMITTANCE (payment made, remittance not sent yet).
+            paid_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
+                               "bill_id": b["id"], "paid": True, "paid_ref": paid_ref,
+                               "stmt_due": ln.get("due_date"), "inv_date": ln.get("date"),
+                               "bill_no": b.get("doc_no") or inv, "bill_date": b.get("date"),
+                               "due_date": b.get("due"), "original": b.get("total"),
+                               "balance": b.get("balance")})
         elif bnum and not bnum["paid"]:
             # ONLY an invoice-NUMBER match to an unpaid bill is trusted as ready to pay. An amount-
             # only match to an unpaid bill is a coincidence, never auto-payable — it falls through.
@@ -9734,6 +9809,26 @@ def _render_statement_recon():
                      "Invoice date": ln.get("date") or "", "Amount": amt, "Unpaid": unpaid,
                      "Due date": ln.get("due_date") or "",
                      "Paid under": paid_ref, "vs QuickBooks": status})
+
+    # Credit notes on the statement (type == "credit"): negative lines to OFFSET in the remittance
+    # (Daniela 2026-10-05). QB/Monday should carry the same credit-note number, so we match by number
+    # for confidence. QuickBooks has no vendor-credit API here, so these net the remittance DOCUMENT
+    # only — apply the credit against the bills in QuickBooks by hand.
+    credit_lines = []
+    for ln in (stmt.get("lines") or []):
+        if (ln.get("type") or "").lower() != "credit":
+            continue
+        cno = str(ln.get("invoice_no") or "").strip()
+        camt = ln.get("amount")
+        if not isinstance(camt, (int, float)):
+            continue
+        camt = round(abs(camt), 2)
+        if camt <= 0:
+            continue
+        _ck = _norm_inv_no(cno, sup)
+        credit_lines.append({"cn": cno or "credit", "order": ln.get("order_ref") or "",
+                             "amt": camt, "date": ln.get("date") or "",
+                             "on_monday": _ck in mon_status})
 
     parts = [f"**{n_pay}** ready to pay (£{to_pay:,.2f})"]
     if n_action:
@@ -9860,8 +9955,9 @@ def _render_statement_recon():
         st.caption("No credit limit found for this supplier on the Monday Suppliers board.")
 
     # ---- Build a remittance from the ready-to-pay invoices, email it, mark paid in QB ----
-    if pay_lines:
-        _pay_workflow(sup, vid, pay_lines, _norm_code(sup), stmt_balance=on_stmt)
+    if pay_lines or paid_lines or credit_lines:
+        _pay_workflow(sup, vid, pay_lines, _norm_code(sup), stmt_balance=on_stmt,
+                      paid_lines=paid_lines, credit_lines=credit_lines)
 
     # ---- Keep it for later: auto-save this reconciliation (once per statement) so you can come
     # back in a day or two and pay off it without re-uploading. ----
@@ -9869,6 +9965,7 @@ def _render_statement_recon():
             "statement_date": stmt.get("statement_date"), "summary": " · ".join(parts),
             "to_pay": round(to_pay, 2), "stmt_total": round(on_stmt, 2),
             "credit_limit": credit_limit, "rows": rows, "pay_lines": pay_lines,
+            "paid_lines": paid_lines, "credit_lines": credit_lines,
             "statement_asset": None}
     _saved_set = st.session_state.setdefault("_recon_autosaved", {})
     if sig not in _saved_set:
