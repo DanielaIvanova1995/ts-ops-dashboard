@@ -106,14 +106,18 @@ def _is_delivery_note(subject: str, sender: str) -> bool:
 
 # Auto-archive noise (→ Natasha - Auto-archive = the automated_system folder). Daniela 2026-09-29:
 # Rexel ORDER CONFIRMATIONS, and supplier auto-acknowledgements like GAP's "your email has been
-# passed to one of the team … within 3 business hours". Kept tight so real supplier replies aren't
-# archived: Rexel confirmations are matched by sender+subject; the auto-ack phrases are distinctive
-# of an auto-responder (a customer/supplier never writes them to us in a real reply).
+# passed to one of the team … within 3 business hours". Rexel confirmations are matched by
+# sender+subject; the body phrases must be a true "we got your email, someone will respond"
+# auto-responder with NO order content.
+# NARROWED 2026-10-05 (Daniela): the old generic footer phrases ("this is an automated message",
+# "please do not reply to this email", "do not reply to this message") were archiving GENUINE
+# supplier replies — order confirmations, PO replies, ETA/order updates (C TIE SO-confirmations,
+# "Re: Purchase Order …", "National Skirting Order … Update", "Re: Order …") — because those carry
+# the same auto-footer. Dropped them; only the GAP-style "received your email" acknowledgements
+# (which have no order number and need no action) now auto-archive via the body.
 _AUTO_ACK_BODY = _re.compile(
     r"(passed to (one of|a member of|our|the)[^.\n]{0,25}team|"
-    r"be in contact with you within|"
-    r"this is an automat|automated (response|reply|message|email)|"
-    r"please do not reply to this|do not reply to this (e-?mail|message))", _re.I)
+    r"be in contact with you within)", _re.I)
 
 
 def _is_auto_archive(subject: str, sender: str, body: str = "") -> bool:
