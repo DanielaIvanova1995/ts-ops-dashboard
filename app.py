@@ -1893,6 +1893,7 @@ DELIVERY_CHARGES = {
     # review rather than auto-approved even when the carriage line itself is within £14.
     "chasehardware": {"name": "Chase Hardware", "flat": 14.0},
     "markovitz": {"name": "Markovitz", "flat": 35.0, "free_over": 350.0},   # £35 <£350 net, free over
+    "velux": {"name": "Velux", "flat": 50.0},   # always £50 + VAT carriage (Daniela 2026-10-05)
     # JB Kind delivery is by NUMBER OF DOORS, not goods value — handled separately below.
 }
 
