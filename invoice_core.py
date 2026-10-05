@@ -429,6 +429,12 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
         rates = _dolle_rates()
         vals = [rates[k.split("#")[0]] for k in (order or {}) if k.split("#")[0] in rates]
         return round(max(vals), 2) if vals else None
+    if norm_code(supplier) == "gap":
+        # GAP's Derby branch delivers to our office (DE21 4ED) FREE — so a GAP order shipped there
+        # expects no carriage; any charge is an overcharge to query/credit (Daniela 2026-10-05).
+        _pc = re.sub(r"[^a-z0-9]", "", str((ship or {}).get("postcode") or "").lower())
+        if _pc == "de214ed":
+            return 0.0
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
         return None

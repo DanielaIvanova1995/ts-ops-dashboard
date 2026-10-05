@@ -2344,10 +2344,26 @@ def _nuie_expected(lines, ship):
     return max(NUIE_RATES[c][idx] for c in cats)
 
 
+# Our Derby office (normalised). GAP's Derby branch delivers here FREE, so a GAP order shipped to
+# our office should carry NO delivery charge — see _expected_delivery + GAP_DELIVERY_CREDIT_EMAIL.
+_OUR_OFFICE_PC = "de214ed"
+GAP_DELIVERY_CREDIT_EMAIL = "chris.humphries@gaptrade.com"   # Chris Humphries — credit GAP carriage
+
+
+def _is_our_office(ship):
+    """True if the order's delivery postcode is our Derby office (DE21 4ED)."""
+    pc = re.sub(r"[^a-z0-9]", "", str((ship or {}).get("postcode") or "").lower())
+    return bool(pc) and pc == _OUR_OFFICE_PC
+
+
 def _expected_delivery(supplier, goods_value, ship=None, lines=None):
     """Expected (max legitimate) ex-VAT delivery charge for a supplier given the order's goods
     value (Carron/Ctie/Nuie use the delivery address; JB Kind uses the door count from `lines`).
     None if no rule on file / can't be priced."""
+    # GAP delivered to OUR office is FREE (Derby branch) — Daniela 2026-10-05. Any carriage on such
+    # a GAP invoice is an overcharge to query + get credited (Chris Humphries).
+    if _norm_code(supplier) == "gap" and _is_our_office(ship):
+        return 0.0
     if _is_carron(supplier):
         return _carron_expected(goods_value, ship)
     if _is_ctie(supplier):
@@ -3882,10 +3898,15 @@ def _run_one_invoice(inv, lbsku):
             subj0, body0 = _discrepancy_email(inv, res)
             _supn = _norm_code(inv.get("supplier"))
             _mapped = SUPPLIER_EMAILS.get(_supn)
+            _deliv_issue = any(t == "delivery" for l in res["lines"] for t, _m in l["issues"])
             if _supn == "eurocell":
                 # Eurocell: the branch that raised the invoice + Karla Turner (area contact).
                 _branch = (parsed.get("branch_email") or inv.get("supplier_email") or "").strip()
                 default_to = ", ".join(dict.fromkeys([e for e in (_branch, _mapped) if e]))
+            elif _supn == "gap" and _deliv_issue:
+                # GAP carriage credit goes to Chris Humphries — GAP's Derby branch delivers to our
+                # office free, so a delivery charge on an office order must be credited (Daniela).
+                default_to = GAP_DELIVERY_CREDIT_EMAIL
             else:
                 default_to = _mapped or inv.get("supplier_email") or ""
             st.session_state.setdefault(f"eto_{sub}", default_to)
