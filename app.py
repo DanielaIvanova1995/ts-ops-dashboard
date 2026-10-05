@@ -8885,6 +8885,33 @@ def _qbo_connected_quiet():
         return False
 
 
+def _is_overdue(date_str):
+    """Overdue by Daniela's month rule (2026-10-05): an invoice is overdue once its INVOICE date is
+    2+ calendar months before the current month — in October everything from August back is overdue,
+    in November everything from September back, etc. (pay-by-end-of-the-following-month terms). Takes
+    a YYYY-MM-DD string; False if it can't be read."""
+    try:
+        from datetime import date
+        d = date.fromisoformat(str(date_str)[:10])
+    except Exception:  # noqa: BLE001
+        return False
+    today = now_uk().date()
+    months_ago = (today.year - d.year) * 12 + (today.month - d.month)
+    return months_ago >= 2
+
+
+def _recon_overdue_style(df):
+    """Style a reconciliation table so OVERDUE rows (by _is_overdue on the 'Invoice date' column)
+    render in red. Returns a pandas Styler for st.dataframe. Safe if the column is absent."""
+    col = "Invoice date" if "Invoice date" in df.columns else ("Date" if "Date" in df.columns else None)
+
+    def _row(r):
+        od = _is_overdue(r.get(col)) if col else False
+        return ["color:#dc2626;font-weight:600" if od else "" for _ in r]
+
+    return df.style.apply(_row, axis=1)
+
+
 def _due_label(due_str):
     """'in 12 days' / 'due today' / 'OVERDUE 3 days' from a YYYY-MM-DD due date; '' if none."""
     if not due_str:
@@ -9025,7 +9052,9 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
                             # The invoice's DUE DATE from the statement (absolute date), not a
                             # relative "in N days" label. Falls back to the QuickBooks bill's due
                             # date when the statement gave no per-line due date — still a real date.
-                            "Due date": (str(p.get("stmt_due") or p.get("due_date") or "")[:10]),
+                            # A 🔴 marks an OVERDUE invoice (data_editor can't colour text red).
+                            "Due date": (str(p.get("stmt_due") or p.get("due_date") or "")[:10]
+                                         + (" 🔴" if _is_overdue(p.get("inv_date")) else "")),
                             "Approved": "✅ Approved" if p.get("bill_id") else "⚠ NOT approved"}
                            for p in pay_lines])
     edited = st.data_editor(
@@ -9214,6 +9243,7 @@ def _bulk_reconcile_one(s, limits):
             pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
                               "bill_id": b["id"], "due": _due_label(b.get("due")),
                               "stmt_due": ln.get("due_date"),   # due date AS PRINTED on the statement
+                              "inv_date": ln.get("date"),   # invoice date — for the overdue check
                               "bill_no": b.get("doc_no") or inv, "bill_date": b.get("date"),
                               "due_date": b.get("due"), "original": b.get("total"),
                               "balance": b.get("balance")})
@@ -9348,7 +9378,8 @@ def _render_statement_recon():
                     for _c in ("Amount", "Unpaid"):
                         if _c in _sdf.columns:
                             _sdf[_c] = _sdf[_c].map(_gbp)
-                    st.dataframe(_sdf, hide_index=True, use_container_width=True)
+                    st.dataframe(_recon_overdue_style(_sdf), hide_index=True,
+                                 use_container_width=True)
                 # Pay it off straight from the saved copy (re-checked live against QuickBooks).
                 if snap.get("pay_lines") and snap.get("vid"):
                     if st.toggle("💷 Pay this off", key=paytog):
@@ -9642,6 +9673,7 @@ def _render_statement_recon():
             pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
                               "bill_id": bnum["id"], "due": _due_label(bnum.get("due")),
                               "stmt_due": ln.get("due_date"),   # due date AS PRINTED on the statement
+                              "inv_date": ln.get("date"),   # invoice date — for the overdue check
                               "bill_no": bnum.get("doc_no") or inv, "bill_date": bnum.get("date"),
                               "due_date": bnum.get("due"), "original": bnum.get("total"),
                               "balance": bnum.get("balance")})
@@ -9671,6 +9703,7 @@ def _render_statement_recon():
                                   "amt": round(val, 2), "bill_id": _bb["id"],
                                   "due": _due_label(_bb.get("due")), "bill_no": _bb.get("doc_no") or inv,
                                   "stmt_due": ln.get("due_date"),   # due date AS PRINTED on the statement
+                                  "inv_date": ln.get("date"),   # invoice date — for the overdue check
                                   "bill_date": _bb.get("date"), "due_date": _bb.get("due"),
                                   "original": _bb.get("total"), "balance": _bb.get("balance")})
             elif _present:                      # a subitem on Monday (approved, unapproved, OR blank)
@@ -9780,7 +9813,8 @@ def _render_statement_recon():
         df = pd.DataFrame(rows)
         for _c in ("Amount", "Unpaid"):
             df[_c] = df[_c].map(_gbp)
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        st.caption("Rows in **red** are overdue (invoice dated 2+ months before this month).")
+        st.dataframe(_recon_overdue_style(df), hide_index=True, use_container_width=True)
 
     # "On the statement" = the balance the statement itself states (what we actually owe), NOT the
     # sum of every invoice line — a full/aged statement lists already-paid items too, which would
