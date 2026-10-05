@@ -70,6 +70,7 @@ SUPPLIER_EMAILS = {
     "pjh": "accounts@pjh.uk",
     "gap": "carrie.morris@gap.uk.com",
     "toolbank": "abasterfield@toolbank.com",            # Alison Basterfield
+    "deanta": "salesledger@deanta.co.uk",               # all Deanta discrepancies (Daniela 2026-10-05)
 }
 SUPPLIER_CHARGES = {
     "gap": (

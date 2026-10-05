@@ -2172,6 +2172,7 @@ SUPPLIER_EMAILS = {
     "eurocell": "karla.turner@eurocell.co.uk",          # Karla Turner (+ branch email from invoice)
     "toolbank": "abasterfield@toolbank.com",            # Alison Basterfield
     "chasehardware": "jean.jones@chase-hardware.co.uk",  # Jean Jones (invoice discrepancy queries)
+    "deanta": "salesledger@deanta.co.uk",               # all Deanta discrepancies (Daniela 2026-10-05)
 }
 
 # Per-supplier overrides. no_pricelist = don't price-check vs the pricelist (we
