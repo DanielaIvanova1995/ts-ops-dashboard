@@ -684,13 +684,35 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                 _sl_cache[sid] = data_sources.fetch_order_line_items(sid)
             except Exception:  # noqa: BLE001
                 _sl_cache[sid] = []
-        _by_sku = {re.sub(r"[^a-z0-9]", "", (sl.get("sku") or "").lower()): sl
-                   for sl in (_sl_cache[sid] or []) if sl.get("sku")}
+        # Group by SKU — a SKU can repeat across DIFFERENT products (e.g. VL7 is used for both the
+        # VL Coloured Fixing Screws and the Plank Fixing Screws on order 31768). Keyed by SKU alone,
+        # the later line overwrites the earlier one, so the first line got the WRONG product name and
+        # lost its variant. Keep every line and match each Monday line to the best same-SKU Shopify
+        # line by title, consuming it so two lines sharing a SKU each keep their own name + variant.
+        _by_sku = {}
+        for sl in (_sl_cache[sid] or []):
+            k = re.sub(r"[^a-z0-9]", "", (sl.get("sku") or "").lower())
+            if k:
+                _by_sku.setdefault(k, []).append(sl)
+
+        def _words(s):
+            return set(re.findall(r"[a-z0-9]+", (s or "").lower()))
+
+        _used = set()
         for _it in items:
-            sl = _by_sku.get(re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower()))
-            if sl:                                # base title + variant kept separate for the PO
-                _it["Item"] = (sl.get("base_title") or sl.get("title") or "").strip()
-                _it["Variant"] = (sl.get("variant") or "").strip()
+            cands = [sl for sl in _by_sku.get(re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower()),
+                                               []) if id(sl) not in _used]
+            if not cands:
+                continue
+            if len(cands) == 1:
+                sl = cands[0]
+            else:                                 # shared SKU → pick the best title match for THIS line
+                _mw = _words(_it.get("Item"))
+                sl = max(cands, key=lambda s: len(_mw & _words(
+                    (s.get("base_title") or s.get("title") or "") + " " + (s.get("variant") or ""))))
+            _used.add(id(sl))
+            _it["Item"] = (sl.get("base_title") or sl.get("title") or "").strip()
+            _it["Variant"] = (sl.get("variant") or "").strip()
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
