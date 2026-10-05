@@ -131,6 +131,15 @@ def _is_auto_archive(subject: str, sender: str, body: str = "") -> bool:
 NATASHA_NOETA_FOLDER = _F + "AAPQP8E-AAA="   # Natasha - Supplier - No ETA
 
 
+# National Skirting order/status NOTIFICATION emails → Robyn's Supplier ETAs folder (Daniela
+# 2026-10-05: "all stream-notification-like emails from national skirting should go into Supplier
+# ETAs"). They're automated order updates (e.g. "National Skirting Order 122008 Update"), so Robyn
+# — who handles supplier ETAs/deliveries — should get them, not Natasha's No-ETA folder.
+def _is_national_skirting(subject: str, sender: str) -> bool:
+    s = (sender or "").lower()
+    return "nationalskirting" in s or "national skirting" in s
+
+
 def move_delivery_notes(mailbox: str | None = None, src_folder_id: str | None = None,
                         dest_folder_id: str | None = None, dry_run: bool = False,
                         limit: int = 400, token=None) -> dict:
@@ -184,8 +193,8 @@ def _dest_id(category: str, owner: str, subject: str = "", sender: str = "",
     whose owner has one, else the category's folder (exactly as Make decided). `owner_ids` maps
     owner -> resolved folder id (from _resolve_owner_folders)."""
     owner_ids = owner_ids or {}
-    if _is_delivery_note(subject, sender):
-        return ROBYN_ETA_FOLDER
+    if _is_delivery_note(subject, sender) or _is_national_skirting(subject, sender):
+        return ROBYN_ETA_FOLDER                          # delivery notes + National Skirting notices
     if _is_auto_archive(subject, sender, body):
         return CATEGORY_FOLDER["automated_system"]      # = Natasha - Auto-archive
     if category == "supplier_no_eta" and owner in owner_ids:
@@ -256,7 +265,9 @@ def _handle_message(mailbox, msg, dry_run, summary, token, owner_ids=None):
     rec.update(category=cat, owner=owner)
     subj, sndr, body = msg.get("subject", ""), msg.get("from", ""), msg.get("body", "")
     dest_id = _dest_id(cat, owner, subj, sndr, body, owner_ids)
-    if _is_delivery_note(subj, sndr):
+    if _is_national_skirting(subj, sndr):
+        rec["folder"] = "National Skirting notice → Robyn - Supplier ETAs"
+    elif _is_delivery_note(subj, sndr):
         rec["folder"] = "delivery note → Robyn - Supplier ETAs"
     elif _is_auto_archive(subj, sndr, body):
         rec["folder"] = "auto-archive → Natasha - Auto-archive"
