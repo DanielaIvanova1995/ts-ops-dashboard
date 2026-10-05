@@ -1886,9 +1886,12 @@ DELIVERY_CHARGES = {
     "gap": {"name": "GAP", "flat": 20.83, "free_over": 150.0},   # <£150 net → £20.83 + VAT
     "deanta": {"name": "Deanta", "flat": 8.0},                   # £8 carriage (confirmed)
     "decor8": {"name": "Decor8", "flat": 5.99, "free_over": 50.0},
-    # Chase Hardware: £5 under 2kg, £10 above — but we don't hold weights yet, so accept either
-    # (flat £10 ceiling = anything up to £10 passes; only >£10 flags). Tighten once we have weights.
-    "chasehardware": {"name": "Chase Hardware", "flat": 10.0},
+    # Chase Hardware: they sometimes bill £14 + VAT carriage (undefined when), so accept up to £14
+    # (ceiling — anything up to £14 passes; only >£14 flags). Daniela 2026-10-05: fine to accept as
+    # long as the order margin doesn't fall under 10% — which the default 10% push floor already
+    # enforces (Chase Hardware has no SUPPLIER_RULES override), so a thin-margin order is held for
+    # review rather than auto-approved even when the carriage line itself is within £14.
+    "chasehardware": {"name": "Chase Hardware", "flat": 14.0},
     "markovitz": {"name": "Markovitz", "flat": 35.0, "free_over": 350.0},   # £35 <£350 net, free over
     # JB Kind delivery is by NUMBER OF DOORS, not goods value — handled separately below.
 }

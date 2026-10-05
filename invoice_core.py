@@ -31,7 +31,8 @@ DELIVERY_CHARGES = {
     "gap": {"name": "GAP", "flat": 20.83, "free_over": 150.0},
     "deanta": {"name": "Deanta", "flat": 8.0},
     "decor8": {"name": "Decor8", "flat": 5.99, "free_over": 50.0},
-    "chasehardware": {"name": "Chase Hardware", "flat": 10.0},
+    "chasehardware": {"name": "Chase Hardware", "flat": 14.0},   # accept up to £14 carriage (undefined
+    #   when they charge it); the default 10% push floor still holds a thin-margin order for review.
 }
 DECOR8_DISCOUNT = 0.12
 DECOR8_MIN_DISCOUNT = 0.10
