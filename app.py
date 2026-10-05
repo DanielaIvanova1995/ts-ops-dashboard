@@ -1300,11 +1300,14 @@ def _title_tokens(s):
 
 @st.cache_data(ttl=900, show_spinner=False, max_entries=256)
 def _shopify_order_lines(order_id):
-    """Live Shopify order line items (cached). None if orders aren't readable."""
-    try:
-        return data_sources.fetch_order_line_items(order_id)
-    except Exception:  # noqa: BLE001 — fall back to Monday's copy of the order
-        return None
+    """Live Shopify order line items. RAISES on a failed/empty read so the failure is NOT cached —
+    st.cache_data only stores successful returns. (A cached None from a transient Shopify blip used
+    to stick for 15 min, making the checker fall back to Monday's order text, which can be stale /
+    missing lines — wrongly flagging a line that IS on the order as 'not on the order'.)"""
+    lines = data_sources.fetch_order_line_items(order_id)
+    if not lines:
+        raise RuntimeError("no Shopify order lines")
+    return lines
 
 
 @st.cache_data(ttl=900, show_spinner=False, max_entries=256)
@@ -1341,7 +1344,10 @@ def _order_candidates(meta):
     back to Monday's order_items text if Shopify can't be read."""
     sid = meta.get("shopify_order_id")
     if sid:
-        lines = _shopify_order_lines(sid)
+        try:
+            lines = _shopify_order_lines(sid)
+        except Exception:  # noqa: BLE001 — Shopify unreadable right now; fall back to Monday
+            lines = None
         if lines:
             out = {}
             for i, l in enumerate(lines):
