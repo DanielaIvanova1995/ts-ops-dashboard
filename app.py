@@ -9021,7 +9021,11 @@ def _pay_workflow(sup, vid, pay_lines, key, live_verify=False, stmt_balance=None
                  "actually paying. This almost always means QuickBooks isn't reconciled (bills were "
                  "paid but never marked paid in QuickBooks, so they still look open).")
     pay_df = pd.DataFrame([{"Pay": not overpay, "Invoice": p["inv"], "Order": p["order"],
-                            "Amount": _gbp(p["amt"]), "Due": p.get("due", ""),
+                            "Amount": _gbp(p["amt"]),
+                            # The invoice's DUE DATE from the statement (absolute date), not a
+                            # relative "in N days" label. Falls back to the QuickBooks bill's due
+                            # date when the statement gave no per-line due date — still a real date.
+                            "Due date": (str(p.get("stmt_due") or p.get("due_date") or "")[:10]),
                             "Approved": "✅ Approved" if p.get("bill_id") else "⚠ NOT approved"}
                            for p in pay_lines])
     edited = st.data_editor(
@@ -9209,6 +9213,7 @@ def _bulk_reconcile_one(s, limits):
             to_pay += val
             pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
                               "bill_id": b["id"], "due": _due_label(b.get("due")),
+                              "stmt_due": ln.get("due_date"),   # due date AS PRINTED on the statement
                               "bill_no": b.get("doc_no") or inv, "bill_date": b.get("date"),
                               "due_date": b.get("due"), "original": b.get("total"),
                               "balance": b.get("balance")})
@@ -9636,6 +9641,7 @@ def _render_statement_recon():
             to_pay += val
             pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "", "amt": round(val, 2),
                               "bill_id": bnum["id"], "due": _due_label(bnum.get("due")),
+                              "stmt_due": ln.get("due_date"),   # due date AS PRINTED on the statement
                               "bill_no": bnum.get("doc_no") or inv, "bill_date": bnum.get("date"),
                               "due_date": bnum.get("due"), "original": bnum.get("total"),
                               "balance": bnum.get("balance")})
@@ -9664,6 +9670,7 @@ def _render_statement_recon():
                 pay_lines.append({"inv": inv, "order": ln.get("order_ref") or "",
                                   "amt": round(val, 2), "bill_id": _bb["id"],
                                   "due": _due_label(_bb.get("due")), "bill_no": _bb.get("doc_no") or inv,
+                                  "stmt_due": ln.get("due_date"),   # due date AS PRINTED on the statement
                                   "bill_date": _bb.get("date"), "due_date": _bb.get("due"),
                                   "original": _bb.get("total"), "balance": _bb.get("balance")})
             elif _present:                      # a subitem on Monday (approved, unapproved, OR blank)

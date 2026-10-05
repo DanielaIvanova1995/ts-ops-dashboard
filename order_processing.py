@@ -31,7 +31,7 @@ PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / s
 # Perkins / UPB (nearest branch or depot), GAP (Monday auto-fills from the GAP tag), and portal-only
 # PJH / Toolbank. Suppliers the rulebook marks "confirm" are left out until Daniela gives the email.
 SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills transport@ (wrong)
-                     "Vista": "orders@vistaeng.co.uk",   # confirmed (not the rulebook's sales@)
+                     "Vista": "sales@vistaeng.co.uk",   # Sales Mailbox — Daniela 2026-10-05, NEVER Sally
                      "Plastivan": "becky.thompson@plastivan.co.uk",   # Becky Thompson
                      "Bricklink": "tessallingham@bricklink.co.uk",    # Tess Allingham
                      "MB Decor": "orders@mbdecor.co.uk",              # DecorOrders
