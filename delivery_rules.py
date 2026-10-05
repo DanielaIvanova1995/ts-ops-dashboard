@@ -40,7 +40,9 @@ def _product_lines(lines):
 
 # --- Flat / free-over suppliers (confident) -------------------------------------------------
 FLAT = {
-    "upb": (12.50, 100), "nbp": (17.00, 250), "eurocell": (12.50, 100),
+    # UPB: £15 + VAT when the order is under £100 ex-VAT, free at/above £100 (Daniela 2026-10-05;
+    # matches the invoice-check rate). Was £12.50.
+    "upb": (15.00, 100), "nbp": (17.00, 250), "eurocell": (12.50, 100),
     "travisperkins": (24.99, 100), "gap": (20.83, 150), "pjh": (37.50, 1000),
     "molan": (23.74, None), "decor8": (5.99, 50),
     "chasehardware": (10.00, None), "bricklink": (16.99, 100),
