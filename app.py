@@ -1595,9 +1595,7 @@ def _pricelist_index():
 
 
 def _is_code(tok):
-    """A token that looks like a product code (so it won't false-match plain words or
-    bare pack sizes): letter+digit mix of 3+ chars (VL7, HP3600) or a 5+ digit number
-    (5300436)."""
+    """True for a product-code-like token: a letter+digit mix of 3+ chars such as VL7 or HP3600, or a 5+ digit number such as 5300436 — so plain words and bare pack sizes do not false-match."""
     has_d = any(c.isdigit() for c in tok)
     has_a = any(c.isalpha() for c in tok)
     return (len(tok) >= 3 and has_d and has_a) or (len(tok) >= 5 and tok.isdigit())
