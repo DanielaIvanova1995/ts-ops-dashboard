@@ -6632,7 +6632,7 @@ def _email_cedral_takeoff(clad):
 
     boards = math.ceil(net / cov * 1.10)     # +10% waste
     raw = [{"description": f"{product} cladding board" + (f" — {colour}" if colour else ""),
-            "qty": boards, "search": f"{product} {colour}".strip()}]
+            "qty": boards, "search": f"{product} Plank {colour}".strip()}]
     cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) ÷ "
                f"{cov} m²/board + 10% waste = {boards} {product} boards.")
     if not colour:
@@ -6661,27 +6661,27 @@ def _email_cedral_takeoff(clad):
             cav.append("Assumed 4 external corners (not confirmed) — tell us the exact number and "
                        "we'll adjust.")
         if ext:
-            raw.append({"description": f"Cedral external corner profile ({ext} × {height:.1f} m)",
+            raw.append({"description": f"{product} external corner profile ({ext} × {height:.1f} m)",
                         "qty": L3(ext * height),
-                        "search": f"Cedral external corner profile {colour}".strip()})
+                        "search": f"{product} Plank External Corner {colour}".strip()})
         intc = clad.get("internal_corners") or 0
         if intc:
-            raw.append({"description": f"Cedral internal corner profile ({intc} × {height:.1f} m)",
+            raw.append({"description": f"{product} internal corner profile ({intc} × {height:.1f} m)",
                         "qty": L3(intc * height),
-                        "search": f"Cedral internal corner profile {colour}".strip()})
-        raw.append({"description": "Cedral starter / base ventilation profile", "qty": L3(width),
-                    "search": "Cedral starter profile"})
+                        "search": f"{product} Plank Internal Corner {colour}".strip()})
+        raw.append({"description": f"{product} start / base profile", "qty": L3(width),
+                    "search": f"{product} Plank Start Profile {colour}".strip()})
         nwin = clad.get("num_windows")
         if nwin is None and openings > 0:
             nwin = max(1, round(openings / 1.5))
-            cav.append(f"Assumed {nwin} window/opening(s) to trim (from {openings:.1f} m² of "
-                       "openings) — confirm the number/size and we'll refine.")
         if nwin:
-            raw.append({"description": f"Cedral window/door surround profile ({nwin} opening(s))",
-                        "qty": L3(nwin * 5.0),
-                        "search": f"Cedral window door surround profile {colour}".strip()})
-        cav.append("Trim pack sized from the corners, run width and openings above (3 m lengths, "
-                   "rounded up). Send exact elevation widths / corner counts to tighten it.")
+            # Cedral has no single 'window surround' — reveal/sill detailing uses the start,
+            # connection or end profiles depending on the build-up, so flag rather than guess.
+            cav.append(f"{nwin} window/door opening(s) noted — Cedral reveal/sill trims (start, "
+                       "connection or end profiles) depend on the detailing, so send the opening "
+                       "sizes and finish and we'll add the right reveal trims.")
+        cav.append("Trim pack sized from the corners and run width above (Cedral profiles come in "
+                   "3 m lengths, rounded up). Send exact elevation widths / corner counts to tighten it.")
 
     batten_lm = net / 0.6
     if clad.get("wants_battens"):
