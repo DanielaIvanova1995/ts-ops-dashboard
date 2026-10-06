@@ -6926,9 +6926,24 @@ def _hardie_line_search(desc, colour):
     return term
 
 
-def _build_quote(email):
-    """Full build for ONE email: reuse the shared parse, then lazily add Shopify
-    matching and the composed clarify email (computed once, stored on the parse)."""
+# Cladding systems the quoter can be FORCED to — because "Click" and "Lap" exist for BOTH Cedral
+# and James Hardie, so the word alone is ambiguous. Key = label shown in the picker; value =
+# (system, product) stamped onto the enquiry so the right take-off + coverage + trims are used.
+_CLAD_SYSTEMS = {
+    "Auto-detect from the email": None,
+    "James Hardie — HardiePlank (Lap)": ("hardie", "Hardie Plank"),
+    "James Hardie — VL Plank (Click)": ("hardie", "Hardie VL Plank"),
+    "Cedral — Lap": ("cedral", "Cedral Lap"),
+    "Cedral — Click": ("cedral", "Cedral Click"),
+    "Vox Kerrafront": ("kerrafront", "Kerrafront"),
+}
+
+
+def _build_quote(email, system_override=None):
+    """Full build for ONE email: reuse the shared parse, then lazily add Shopify matching and the
+    composed clarify email (computed once, stored on the parse). `system_override` (a _CLAD_SYSTEMS
+    key) forces which cladding system to quote — used when 'Click'/'Lap' is ambiguous between
+    Cedral and James Hardie; it rebuilds the cladding lines without re-reading the email."""
     cache = _quote_cache()
     parsed = cache.get(email["id"])
     if not _parse_is_current(parsed):
@@ -6936,8 +6951,19 @@ def _build_quote(email):
         cache[email["id"]] = parsed
     if parsed.get("error"):
         return parsed
+    if "_base_caveats" not in parsed:               # the parse's own caveats, kept for a re-pick
+        parsed["_base_caveats"] = list(parsed.get("caveats") or [])
+    _clad0 = parsed.get("cladding") or {}
+    _is_clad = bool(_clad0.get("is_cladding") and (_clad0.get("gross_area_m2") or 0) > 0)
+    _ovr = system_override if (_is_clad and _CLAD_SYSTEMS.get(system_override)) else None
+    if _ovr != parsed.get("_clad_override"):        # system choice changed → rebuild the lines
+        parsed.pop("lines", None)
+        parsed["caveats"] = list(parsed["_base_caveats"])
+        parsed["_clad_override"] = _ovr
     if "lines" not in parsed:
-        clad = parsed.get("cladding") or {}
+        clad = dict(_clad0)
+        if _ovr:                                    # force the chosen system + product
+            clad["system"], clad["product"] = _CLAD_SYSTEMS[_ovr]
         raw_clad, clad_cav = (None, None)
         if clad.get("is_cladding") and (clad.get("gross_area_m2") or 0) > 0:
             sys_ = (clad.get("system") or "").lower()
@@ -7302,6 +7328,20 @@ def _render_quote_block(email):
         else:
             st.error("Couldn't read the email: " + q["error"][:200])
         return
+
+    # 'Click' and 'Lap' exist for BOTH Cedral and James Hardie, so when the brand/system is
+    # ambiguous (or the email just says "Click"), let the user pick the exact system and re-price.
+    _cm = q.get("cladding") or {}
+    if _cm.get("is_cladding") and (_cm.get("gross_area_m2") or 0) > 0:
+        _sel = st.selectbox(
+            "Cladding system to quote", list(_CLAD_SYSTEMS), key=f"cladsys_{eid}",
+            help="Both Cedral and James Hardie have a 'Click' and a 'Lap'. If the enquiry didn't "
+                 "make the brand/system clear, pick it here (match it to the board size the "
+                 "customer gave — Cedral Lap 190×10, Cedral Click 186×12, Hardie VL/Click 214×11) "
+                 "and we'll re-price to that system.")
+        if _CLAD_SYSTEMS.get(_sel):
+            with st.spinner(f"Re-pricing as {_sel}…"):
+                q = _build_quote(email, system_override=_sel)
 
     lines = q.get("lines") or []
     matched = [l for l in lines if l["match"] and l["match"].get("price") is not None]
