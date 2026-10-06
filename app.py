@@ -6513,8 +6513,13 @@ def _email_cladding_takeoff(clad):
     sensible assumptions each flagged as a caveat (we calculate rather than punt).
     Returns (raw_lines, caveats). raw_lines: [{description, qty, search}]."""
     import math
-    is_vl = "vl" in (clad.get("product") or "").lower()
-    product = clad.get("product") or ("Hardie VL Plank" if is_vl else "Hardie Plank")
+    # James Hardie has TWO cladding systems: LAP (HardiePlank, overlapped weatherboard, 0.54 m²/board)
+    # and the interlocking VL Plank — which customers also call "Click" (0.72 m²/board, 214×11mm, its
+    # OWN trim set). Detect VL/Click/interlocking, and force the real product name so boards + trims
+    # match Shopify (a customer saying "Hardie Click" must still search "Hardie VL Plank").
+    _pl = (clad.get("product") or "").lower()
+    is_vl = any(k in _pl for k in ("vl", "click", "interlock"))
+    product = "Hardie VL Plank" if is_vl else "Hardie Plank"
     cov = 0.72 if is_vl else 0.54          # VL Plank ~0.72 m²/board; lap HardiePlank 0.54
     gross = clad.get("gross_area_m2") or 0
     openings = clad.get("openings_m2") or 0
@@ -6551,7 +6556,43 @@ def _email_cladding_takeoff(clad):
     def L3(lm):                            # trims come in 3 m lengths, round up
         return max(1, math.ceil(lm / 3.0))
 
-    if clad.get("wants_trims"):
+    if clad.get("wants_trims") and is_vl:
+        # VL Plank ("Click") interlocking trim pack — its own profiles, NOT the lap trims below.
+        ext = clad.get("external_corners")
+        if ext is None:
+            ext = 4
+            cav.append("Assumed 4 external corners (not confirmed) — tell us the exact number and "
+                       "we'll adjust.")
+        if ext:
+            raw.append({"description": f"Hardie VL Plank 2-part corner profile "
+                                       f"({ext} corners × {height:.1f} m)",
+                        "qty": L3(ext * height),
+                        "search": "Hardie VL Plank 2-part Corner Profile"})
+        intc = clad.get("internal_corners") or 0
+        if intc:
+            raw.append({"description": f"Hardie VL Plank J profile — internal corners / abutments "
+                                       f"({intc} × {height:.1f} m)",
+                        "qty": L3(intc * height),
+                        "search": "Hardie VL Plank J Profile"})
+        raw.append({"description": "Hardie VL Plank starter profile", "qty": L3(width),
+                    "search": "Hardie VL Plank Starter Profile"})
+        nwin = clad.get("num_windows")
+        if nwin is None and openings > 0:
+            nwin = max(1, round(openings / 1.5))
+            cav.append(f"Assumed {nwin} window/opening(s) to trim (from {openings:.1f} m² of "
+                       "openings) — confirm the number/size and we'll refine.")
+        if nwin:
+            raw.append({"description": f"Hardie VL Plank window reveal trim ({nwin} opening(s))",
+                        "qty": L3(nwin * 5.0),
+                        "search": "Hardie VL Plank Window Reveal Trim"})
+            raw.append({"description": f"Hardie VL Plank window head & vertical starter trim "
+                                       f"({nwin} opening(s))",
+                        "qty": L3(nwin * 2.0),
+                        "search": "Hardie VL Plank Window Head Vertical Starter Trim"})
+        cav.append("VL Plank (interlocking 'Click') trim pack — 2-part corner, J profile, starter "
+                   "and window trims, sized from the corners / run width / openings (3 m lengths, "
+                   "rounded up). Send exact elevations to tighten it.")
+    elif clad.get("wants_trims"):
         ext = clad.get("external_corners")
         if ext is None:
             ext = 4
@@ -6594,9 +6635,11 @@ def _email_cladding_takeoff(clad):
                     "qty": max(1, math.ceil(batten_lm / 3.0)),
                     "search": "treated timber batten 25 x 50"})
     if clad.get("wants_screws"):
-        raw.append({"description": "James Hardie cladding screws (box of 250)",
+        raw.append({"description": ("James Hardie VL coloured fixing screws (box of 250)" if is_vl
+                                    else "James Hardie cladding screws (box of 250)"),
                     "qty": max(1, math.ceil(boards * 7 / 250)),
-                    "search": f"James Hardie cladding fixing screws {colour}".strip()})
+                    "search": ("Hardie VL Coloured Fixing Screws" if is_vl
+                               else f"James Hardie cladding fixing screws {colour}".strip())})
     if clad.get("wants_epdm"):
         raw.append({"description": "EPDM joint tape (20 m roll)",
                     "qty": max(1, math.ceil(batten_lm / 20)),
