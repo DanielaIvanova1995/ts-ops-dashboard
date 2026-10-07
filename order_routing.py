@@ -358,8 +358,12 @@ def route_line(line, area_pc=None, sku_supplier=None):
     # Cedral (fibre-cement cladding) → quote from AJW Distribution until we get their pricelist
     # (Daniela, 2026-08-24). Tag/name check overrides whatever vendor it sits under.
     if "cedral" in tags or "cedral" in blob:
-        return out("AJW", "AJW", "Cedral → AJW Distribution for a quote (no pricelist yet)",
-                   "high", quote=True, branch_email="kevin.addison@ajwdistribution.co.uk")
+        # Cedral now comes from AJW Distribution, NOT Southern Sheeting (Daniela 2026-10-07).
+        # Stage = Needs Review (no AJW pricelist yet, so Natasha reviews) + email Kevin Addison.
+        # The Cedral products sit under the "SS" (Southern Sheeting) Shopify vendor, so this rule
+        # MUST stay ABOVE the vendor→CANON lookup below or they'd route to Southern Sheeting.
+        return out("AJW", "AJW", "Cedral → AJW Distribution (Kevin Addison) — review",
+                   "high", branch_email="kevin.addison@ajwdistribution.co.uk")
     # Shopify VENDOR is the authoritative router for everything else — check it FIRST, so a
     # Storm polycarbonate (vendor "Storm") or a Toolbank tool never gets grabbed by a brand/SKU
     # rule below.
@@ -419,8 +423,8 @@ def _stage_for(supplier, route, quote, portal):
 # area nuance); mixed (split) orders; and anything needing a quote, a portal or a branch decision.
 # Flip AUTO_SEND_PO to False to turn the whole thing off (everything reverts to Needs Review).
 AUTO_SEND_PO = True
-PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics", "travisperkins", "wallsandfloors"}
-PO_AUTOSEND_EXCLUDE_WORDS = ("hardie", "freefoam", "fortex", "zest")
+PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics", "travisperkins", "wallsandfloors", "ajw"}
+PO_AUTOSEND_EXCLUDE_WORDS = ("hardie", "freefoam", "fortex", "zest", "cedral")
 
 
 def _po_autosend_ok(result):
