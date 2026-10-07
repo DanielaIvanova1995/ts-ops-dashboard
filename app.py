@@ -5636,8 +5636,9 @@ def render_email_triage():
                "(supplier / customer categories, plus Megan's & Malyeka's supplier-reply folders). "
                "A few Claude tokens per email, no Make operations. Already-triaged emails are skipped.")
     if not _ok:
-        st.warning("Supabase isn't connected — de-dup + history are off, so run **Preview** only "
-                   "until it's set (a live run would still work, but there'd be no history).")
+        st.caption("ℹ️ History/de-dup are off (Supabase not connected) — that's fine: triage still "
+                   "files mail correctly, and because a filed email leaves the Inbox a re-run won't "
+                   "touch it again. Live **Triage now** works; there's just no stored history.")
 
     render_llm_costs()
 
@@ -5682,18 +5683,30 @@ def render_email_triage():
                                  hide_index=True, use_container_width=True)
 
     # --- Preview / run ---
+    # Window + per-run cap so a BACKLOG can be cleared (default 7 days / 40 won't touch older or
+    # bigger piles). Raise 'days' to reach old mail and 'max' above the backlog to do it in one go.
+    tw1, tw2 = st.columns(2)
+    _days = int(tw1.number_input("How far back (days)", 1, 180, email_triage.DEFAULT_SINCE_DAYS,
+                                 key="tri_days",
+                                 help="Triage only reads Inbox mail received within this many days. "
+                                      "Raise it to reach a backlog that built up over weeks."))
+    _cap = int(tw2.number_input("Max emails this run", 10, 500, 40, step=10, key="tri_cap",
+                                help="Upper limit per click. Set it above your backlog (e.g. 150) to "
+                                     "file them all in one go; otherwise click again for the next batch."))
     c1, c2 = st.columns(2)
     if c1.button("👁 Preview (classify, move nothing)", key="tri_preview", use_container_width=True):
-        with st.spinner("Classifying recent inbox emails…"):
+        with st.spinner("Classifying inbox emails…"):
             try:
-                st.session_state["tri_result"] = email_triage.run_triage(dry_run=True, max_total=40)
+                st.session_state["tri_result"] = email_triage.run_triage(
+                    dry_run=True, since_days=_days, max_total=_cap)
             except Exception as e:  # noqa: BLE001
                 st.session_state["tri_result"] = {"ok": False, "error": str(e)[:200]}
     if c2.button("▶ Triage now (move for real)", key="tri_run", type="primary",
-                 use_container_width=True, disabled=not _ok):
+                 use_container_width=True):
         with st.spinner("Triaging + filing emails…"):
             try:
-                st.session_state["tri_result"] = email_triage.run_triage(dry_run=False, max_total=40)
+                st.session_state["tri_result"] = email_triage.run_triage(
+                    dry_run=False, since_days=_days, max_total=_cap)
             except Exception as e:  # noqa: BLE001
                 st.session_state["tri_result"] = {"ok": False, "error": str(e)[:200]}
 
