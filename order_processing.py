@@ -640,9 +640,17 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     # hand-edited Adjust address still wins.
     to_post = (o.get("branch") or "").strip().upper().startswith("TO POST")
     deliver_to_us = (supplier in DELIVER_TO_US or to_post) and not address_override
-    dl = list(OUR_ADDRESS_LINES) if deliver_to_us else (
-        address_override or (ship or {}).get("lines")
-        or [x.strip() for x in (o.get("address") or "").split(",") if x.strip()])
+    # DELIVERY ADDRESS = the Shopify SHIPPING address ONLY (or a hand-typed Adjust override, or OUR
+    # address for deliver-to-us / TO POST). NEVER Monday's stored address — it can be the customer's
+    # BILLING address, which on order 31641 sent the goods to the wrong place. If the Shopify
+    # shipping address can't be read, leave `dl` BLANK so validate_doc BLOCKS the PO (the processor
+    # then confirms the address in Adjust) rather than silently printing a wrong/billing address.
+    if deliver_to_us:
+        dl = list(OUR_ADDRESS_LINES)
+    elif address_override:
+        dl = list(address_override)
+    else:
+        dl = list((ship or {}).get("lines") or [])
     order_no = o.get("order_no") or o.get("name") or ""
     contact = f"{o.get('customer') or ''}".strip()
     phone = (ship or {}).get("phone") or o.get("phone") or ""
@@ -1449,14 +1457,17 @@ def _process_one(o):
 
 
 def _ship(sid):
-    """Cached Shopify SHIPPING address (the delivery address) for one order."""
+    """Cached Shopify SHIPPING address (the delivery address) for one order. A FAILED read is NOT
+    cached — so a transient Shopify blip doesn't stick and wrongly block the PO; it retries next
+    time (a successful read, even with an empty address, is cached)."""
     cache = st.session_state.setdefault("_op_ship", {})
-    if sid not in cache:
+    if cache.get(sid) is None:
         try:
             cache[sid] = data_sources.fetch_order_shipping_full(sid)
         except Exception:  # noqa: BLE001
-            cache[sid] = None
-    return cache[sid]
+            cache.pop(sid, None)
+            return None
+    return cache.get(sid)
 
 
 def _order_detail(o):

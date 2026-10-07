@@ -90,7 +90,8 @@ def validate_doc(d, kind):
     if not (kind == "slip" and d.get("tso")):
         dl = d.get("dl")
         if not isinstance(dl, list) or not dl or any(_blank(x) for x in dl):
-            errs.append(f"[{label}] delivery address is missing, empty or has a blank line")
+            errs.append(f"[{label}] no Shopify SHIPPING (delivery) address — confirm the delivery "
+                        "address in Adjust before generating (we never use the billing address)")
     lines = d.get("lines")
     if not isinstance(lines, list) or not lines:
         errs.append(f"[{label}] has NO order lines — every document must have at least one")
