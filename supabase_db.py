@@ -21,17 +21,40 @@ from data_sources import get_secret          # reuse the quote/whitespace-tolera
 _CLIENT = None
 
 
+# Accept the common env-var spellings, so it connects however the key was named on the host
+# (the Supabase dashboard calls it 'service_role' / 'Secret key'; people name the var various ways).
+_URL_NAMES = ("SUPABASE_URL", "SUPABASE_PROJECT_URL")
+_KEY_NAMES = ("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY",
+              "SUPABASE_KEY")
+
+
+def _supabase_url():
+    for n in _URL_NAMES:
+        v = get_secret(n)
+        if v:
+            return v
+    return None
+
+
+def _supabase_key():
+    for n in _KEY_NAMES:
+        v = get_secret(n)
+        if v:
+            return v
+    return None
+
+
 def configured() -> bool:
     """True only when a Supabase project is wired up. Callers use this to decide whether to use
     Supabase or fall back to the existing Monday/disk storage."""
-    return bool(get_secret("SUPABASE_URL") and get_secret("SUPABASE_SERVICE_KEY"))
+    return bool(_supabase_url() and _supabase_key())
 
 
 def _client():
     global _CLIENT
     if _CLIENT is None:
         from supabase import create_client        # imported lazily so the app runs without the lib
-        _CLIENT = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_SERVICE_KEY"))
+        _CLIENT = create_client(_supabase_url(), _supabase_key())
     return _CLIENT
 
 
