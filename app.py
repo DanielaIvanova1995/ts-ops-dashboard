@@ -8243,19 +8243,33 @@ def _render_quote_triage_panel():
                    "Anything it's unsure about is **left in the queue**, never mis-filed. The Quotes "
                    "list below reads the **1 - Quote To Price** folder, so this keeps it clean.")
         if not _ok:
-            st.warning("Supabase isn't connected — de-dup + history are off, so run **Preview** only.")
+            st.caption("ℹ️ History/de-dup are off (Supabase not connected) — that's fine: sorting "
+                       "still works, and a filed enquiry leaves the queue so a re-run won't touch it "
+                       "again. **Sort now** works; there's just no stored history.")
+        # Window + per-run cap so a BACKLOG can be cleared (default 7 days / 40 won't touch older or
+        # bigger piles). Raise days to reach old enquiries and the cap above the pile.
+        _qd = getattr(quote_triage, "DEFAULT_SINCE_DAYS", 7)
+        qw1, qw2 = st.columns(2)
+        _qdays = int(qw1.number_input("How far back (days)", 1, 180, _qd, key="qtri_days",
+                                      help="Only reads queue mail received within this many days. "
+                                           "Raise it to clear a backlog."))
+        _qcap = int(qw2.number_input("Max emails this run", 10, 500, 40, step=10, key="qtri_cap",
+                                     help="Upper limit per click. Set it above your backlog to sort "
+                                          "them all in one go; otherwise click again for the next batch."))
         c1, c2 = st.columns(2)
         if c1.button("👁 Preview (sort nothing)", key="qtri_prev", use_container_width=True):
             with st.spinner("Classifying the quote queue…"):
                 try:
-                    st.session_state["qtri_res"] = quote_triage.run_triage(dry_run=True, max_total=40)
+                    st.session_state["qtri_res"] = quote_triage.run_triage(
+                        dry_run=True, since_days=_qdays, max_total=_qcap)
                 except Exception as e:  # noqa: BLE001
                     st.session_state["qtri_res"] = {"ok": False, "error": str(e)[:200]}
         if c2.button("▶ Sort now (move for real)", key="qtri_run", type="primary",
-                     use_container_width=True, disabled=not _ok):
+                     use_container_width=True):
             with st.spinner("Sorting the quote queue…"):
                 try:
-                    st.session_state["qtri_res"] = quote_triage.run_triage(dry_run=False, max_total=40)
+                    st.session_state["qtri_res"] = quote_triage.run_triage(
+                        dry_run=False, since_days=_qdays, max_total=_qcap)
                 except Exception as e:  # noqa: BLE001
                     st.session_state["qtri_res"] = {"ok": False, "error": str(e)[:200]}
         res = st.session_state.get("qtri_res")
