@@ -6539,7 +6539,9 @@ def _email_cladding_takeoff(clad):
     net = max(0.0, gross - openings)
     if net <= 0:
         return None, None
-    colour = (clad.get("colour") or "").strip()
+    colour_in = (clad.get("colour") or "").strip()
+    colour, _chow = _resolve_clad_colour(colour_in, HARDIE_COLOURS)   # map 'sage green' → the real
+    colour = colour or ""                                            #   Hardie colour, never default
     cav = []
 
     boards = math.ceil(net / cov * 1.10)   # +10% waste
@@ -6548,8 +6550,14 @@ def _email_cladding_takeoff(clad):
             "search": f"{product} {colour}".strip()}]
     cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) "
                f"÷ {cov} m²/board + 10% waste = {boards} boards.")
-    if not colour:
+    if not colour_in:
         cav.append("Colour/finish not confirmed — please let us know which colour you'd like.")
+    elif _chow == "fuzzy":
+        cav.append(f"Quoted in James Hardie **{colour}** as the closest match to '{colour_in}' — "
+                   "please confirm the exact colour.")
+    elif _chow == "unrecognised":
+        cav.append(f"'{colour_in}' isn't a James Hardie colour we recognise — please confirm the "
+                   "exact colour (we have NOT defaulted it to a grey).")
 
     # Geometry for trim sizing: use stated height/width, else derive from the area with a
     # sensible height assumption (flagged) so we can still size the starter/top/corner trims.
@@ -6683,7 +6691,9 @@ def _email_cedral_takeoff(clad):
     net = max(0.0, gross - openings)
     if net <= 0:
         return None, None
-    colour = (clad.get("colour") or "").strip()
+    colour_in = (clad.get("colour") or "").strip()
+    colour, _chow = _resolve_clad_colour(colour_in, CEDRAL_COLOURS)   # map 'sage green' → a real
+    colour = colour or ""                                            #   Cedral colour, never default
     cav = []
 
     boards = math.ceil(net / cov * 1.10)     # +10% waste
@@ -6691,8 +6701,14 @@ def _email_cedral_takeoff(clad):
             "qty": boards, "search": f"{product} Plank {colour}".strip()}]
     cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) ÷ "
                f"{cov} m²/board + 10% waste = {boards} {product} boards.")
-    if not colour:
+    if not colour_in:
         cav.append("Colour/finish not confirmed — please confirm which Cedral colour you'd like.")
+    elif _chow == "fuzzy":
+        cav.append(f"Quoted in Cedral **{colour}** as the closest match to '{colour_in}' — please "
+                   "confirm the exact colour.")
+    elif _chow == "unrecognised":
+        cav.append(f"'{colour_in}' isn't a Cedral colour we recognise — please confirm the exact "
+                   "colour (we have NOT defaulted it).")
 
     height = clad.get("wall_height_m") or 0
     width = clad.get("total_width_m") or 0
@@ -6900,7 +6916,8 @@ def _hardie_quote_colour(parsed):
     for c in HARDIE_COLOURS:
         if c.lower() in blob:
             return c
-    return ""
+    c, _how = _resolve_clad_colour(blob, HARDIE_COLOURS)   # e.g. 'sage green' → Mountain Sage
+    return c or ""
 
 
 # Colour-specific James Hardie products (append the job colour); the rest are one product per line
@@ -7676,6 +7693,42 @@ HARDIE_COLOURS = [
     "Midnight Black", "Monterey Taupe", "Mountain Sage", "Pearl Grey", "Rich Espresso",
     "Sail Cloth", "Soft Green", "Timber Bark", "Traditional Red", "Woodland Cream",
 ]
+# Cedral fibre-cement colours in the Shopify range (woodgrain/smooth). Used to resolve a stated
+# colour to a REAL product colour so a quote never silently defaults to the wrong one.
+CEDRAL_COLOURS = [
+    "White", "Vanilla White", "Clay Brown", "Platinum Grey", "Chalk White", "Sky Blue",
+    "Steel Grey", "Slate Grey", "Walnut Brown", "Black", "Silver Grey", "Pearl Grey",
+    "Pewter Grey", "Sand Yellow", "Brick Red", "Ocean Blue", "Basalt Grey", "Metal Green",
+    "Tea Green", "Pebble Grey", "Cocoa Brown",
+]
+# Bare family words that map ambiguously on their own (every palette has several greys/greens), so
+# a fuzzy match on ONLY one of these isn't trusted enough to pick a specific colour.
+_COLOUR_FAMILY = {"grey", "gray", "green", "blue", "brown", "white", "black", "red", "yellow",
+                  "cream", "taupe", "mist", "slate"}
+
+
+def _resolve_clad_colour(stated, palette):
+    """Map a stated colour (from an email, e.g. 'sage green') to a REAL palette colour so a quote
+    NEVER silently defaults to the wrong one (the Anthracite Grey bug). Returns (colour, how):
+    how = 'exact' (palette name found) | 'fuzzy' (best guess — caller should ask to confirm) |
+    'unrecognised' (a colour was stated but matches nothing — flag it) | 'none' (none stated)."""
+    import re as _re
+    s = (stated or "").strip().lower()
+    if not s:
+        return None, "none"
+    for c in palette:                       # the exact palette name appears in the stated text
+        if c.lower() in s:
+            return c, "exact"
+    sw = set(_re.findall(r"[a-z]+", s))
+    best, score, best_distinctive = None, 0, False
+    for c in palette:
+        shared = sw & set(_re.findall(r"[a-z]+", c.lower()))
+        if len(shared) > score:
+            best, score = c, len(shared)
+            best_distinctive = any(w not in _COLOUR_FAMILY for w in shared)
+    if best and score >= 1:                 # a sage/sail/iron… word (or ≥2 words) → trust as a guess
+        return best, "fuzzy"
+    return None, "unrecognised"
 # Trim / accessory rows for the quick form: (key, label, product title used for pricing, wants colour)
 HARDIE_TRIMS = [
     ("ext", "External corner (3m)", "Hardie Plank External Corner", True),
