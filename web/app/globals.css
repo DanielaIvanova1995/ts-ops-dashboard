@@ -91,6 +91,21 @@ tbody tr:hover { background: #FCFAF8; }
 .pill.dash { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
 
 th.mid, td.mid { text-align: center; width: 64px; }
+th.chk, td.chk { width: 34px; text-align: center; }
+th.chk input, td.chk input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--brand); }
+tbody tr.sel { background: #FFF6F0; }
+tbody tr.sel:hover { background: #FEEFE4; }
+
+/* Process progress panel */
+.proc-panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 11px 14px; margin-bottom: 10px; }
+.proc-head { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.proc-bar { height: 7px; background: #EEF0F3; border-radius: 999px; overflow: hidden; margin: 9px 0; }
+.proc-bar > span { display: block; height: 100%; background: var(--brand); border-radius: 999px; transition: width .2s ease; }
+.proc-results { display: flex; flex-direction: column; gap: 3px; max-height: 220px; overflow-y: auto; }
+.proc-row { font-size: 12.5px; padding: 3px 8px; border-radius: 6px; }
+.proc-row.ok { background: var(--green-bg); color: var(--green); }
+.proc-row.warn { background: var(--amber-bg); color: #7A3E06; }
+.proc-row b { margin-right: 6px; }
 
 /* £ to us mismatch warning */
 .sell-cell { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }

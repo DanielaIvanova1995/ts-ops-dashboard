@@ -363,41 +363,120 @@ def route(item_id: str, body: RouteIn):
 import datetime as _dt   # noqa: E402
 
 
-@app.post("/orders/{item_id}/po", dependencies=[Depends(require_key)])
-def generate_po(item_id: str):
-    """Generate the PO (or packing slip) and attach it to the Monday order — REUSES the live app's
-    order_processing._build_doc (same Shopify-shipping-only address rule + never-cross pricing) and
-    order_docs PDF builders. Blocks (never attaches) if validate_doc finds a problem — e.g. no
-    Shopify shipping address — so a wrong/billing/blank address can't go out."""
-    import order_processing as op   # lazy: pulls pandas/streamlit, only when a PO is actually built
-    import order_docs
-    try:
-        rows = ds.fetch_new_orders()
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read the order: {e}")
-    o = next((r for r in rows if str(r.get("item_id")) == str(item_id)), None)
-    if not o:
-        raise HTTPException(status_code=404, detail="Order not found in the NEW ORDERS group")
-    try:
-        kind, doc = op._build_doc(o)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't build the document: {e}")
+def _fetch_one_order(item_id: str) -> dict | None:
+    """One Monday order as fetch_new_orders shapes it (so _build_doc gets the exact same dict),
+    fetched by item_id — avoids scanning the whole group per PO/process call."""
+    ids = ",".join(f'"{c}"' for c in ds.OP_COLS.values())
+    q = ("query($i:[ID!]){items(ids:$i){ id name assets{id name url public_url file_size} "
+         "column_values(ids:[%s]){id text} }}" % ids)
+    data = ds._monday_gql(q, {"i": [str(item_id)]}, ds.get_token())
+    items = data.get("items") or []
+    if not items:
+        return None
+    it = items[0]
+    inv = {v: k for k, v in ds.OP_COLS.items()}
+    row = {"item_id": it["id"], "name": it.get("name") or "",
+           "po_assets": [{"id": a.get("id"), "name": a.get("name"), "url": a.get("url"),
+                          "public_url": a.get("public_url"), "size": a.get("file_size")}
+                         for a in (it.get("assets") or [])]}
+    for cv in (it.get("column_values") or []):
+        key = inv.get(cv.get("id"))
+        if key:
+            row[key] = cv.get("text") or ""
+    return row
+
+
+def _attach_doc(op, order_docs, item_id: str, o: dict) -> dict:
+    """Build the PO/slip for order `o` and attach it to Monday. Blocks (no attach) if validate_doc
+    finds a problem (e.g. no Shopify shipping address). Returns a result dict."""
+    kind, doc = op._build_doc(o)
     errs = order_docs.validate_doc(doc, kind)
     if errs:
-        return {"ok": False, "blocked": True, "kind": kind, "errors": errs,
-                "supplier": doc.get("supplier") or None}
-    try:
-        date_str = _dt.date.today().strftime("%d %B %Y")
-        builder = order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf
-        pdf = builder(doc, date_str=date_str)
-        name = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_Trade_Superstore_Online.pdf"
-        r = ds.op_upload_po(item_id, pdf, name)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't generate/attach the PDF: {e}")
+        return {"ok": False, "blocked": True, "kind": kind, "errors": errs}
+    date_str = _dt.date.today().strftime("%d %B %Y")
+    builder = order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf
+    pdf = builder(doc, date_str=date_str)
+    name = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_Trade_Superstore_Online.pdf"
+    r = ds.op_upload_po(item_id, pdf, name)
     ok = bool(r.get("ok"))
     return {"ok": ok, "attached": ok, "blocked": False, "kind": kind, "name": name,
-            "total": doc.get("total"), "supplier": doc.get("supplier") or None,
-            "detail": None if ok else "upload didn't verify — try again"}
+            "total": doc.get("total"), "detail": None if ok else "upload didn't verify — try again"}
+
+
+@app.post("/orders/{item_id}/po", dependencies=[Depends(require_key)])
+def generate_po(item_id: str):
+    """Generate the PO (or packing slip) and attach it — reuses order_processing._build_doc (Shopify-
+    shipping-only address rule + never-cross pricing). Blocks (never attaches) on any missing field."""
+    import order_processing as op
+    import order_docs
+    o = _fetch_one_order(item_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    try:
+        res = _attach_doc(op, order_docs, item_id, o)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't generate/attach the PDF: {e}")
+    res["supplier"] = (o.get("supplier") or "") or None
+    return res
+
+
+@app.post("/orders/{item_id}/process", dependencies=[Depends(require_key)])
+def process_order(item_id: str):
+    """One-click process: route the order → write supplier/branch/stage to Monday → generate + attach
+    the PO/slip. Mirrors the live app's _process_one BUT never auto-advances to SEND PO (holds at
+    Needs Review — emailing the supplier stays a separate, deliberate step). Splits / unidentifiable
+    orders are handed back for manual handling rather than guessed."""
+    import order_processing as op
+    import order_docs
+    o = _fetch_one_order(item_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    tag = o.get("name") or o.get("order_no") or item_id
+    sid = (o.get("shopify_id") or "").strip()
+    if not sid:
+        return {"ok": False, "order": tag, "result": "no Shopify ID — skipped"}
+    try:
+        lines = ds.fetch_order_lines_with_vendor(sid)
+        pc = (ds.fetch_order_shipping(sid) or {}).get("postcode")
+        res = routing.route_order(lines, postcode=pc, sku_supplier=_api_sole_feed_supplier)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't route: {e}")
+    if res.get("split"):
+        return {"ok": False, "order": tag, "result": "splits across suppliers — handle manually",
+                "summary": routing.summary(res)}
+    sup, route_ = res.get("overall_supplier"), res.get("route")
+    if route_ == "PICK" or not sup:
+        return {"ok": False, "order": tag, "result": "couldn't identify a supplier — assign manually"}
+    try:
+        ds.op_set_supplier(item_id, sup)
+        o["supplier"] = sup
+        if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
+            ds.op_set_branch(item_id, branch=res.get("branch"), email=res.get("branch_email"),
+                             phone=res.get("branch_phone"))
+            o["branch"] = res.get("branch") or o.get("branch")
+            o["branch_email"] = res.get("branch_email") or o.get("branch_email")
+        op._fix_po_email(item_id, sup, o)                       # correct PO email (Molan/Vista/…)
+        op._fix_lpd_home_email(item_id, sup, sid, o, lines=res.get("lines"))  # LPD Home → lpdhome
+        op._mark_del_method(item_id, sup)                       # samples → "To Post"
+        stage = res.get("stage") or "Needs Review"
+        if stage == "SEND PO":                                  # never auto-send from the new board
+            stage = "Needs Review"
+        ds.op_set_status(item_id, stage)
+        o["stage"] = stage
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Routed, but couldn't write to Monday: {e}")
+    try:
+        doc_res = _attach_doc(op, order_docs, item_id, o)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Supplier set, but PO failed: {e}")
+    doc_res.update(order=tag, supplier=sup, stage=stage, route=route_)
+    if doc_res.get("blocked"):
+        doc_res["result"] = "supplier set — PO BLOCKED: " + "; ".join(doc_res.get("errors") or [])
+    elif doc_res.get("ok"):
+        doc_res["result"] = f"→ {sup} · {doc_res.get('kind', 'po').upper()} attached"
+    else:
+        doc_res["result"] = f"→ {sup} · PO didn't attach"
+    return doc_res
 
 
 @app.get("/order-totals", dependencies=[Depends(require_key)])

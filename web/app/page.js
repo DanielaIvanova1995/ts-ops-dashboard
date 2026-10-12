@@ -98,6 +98,9 @@ export default function Board() {
   const [detail, setDetail] = useState(null);
   const [detailErr, setDetailErr] = useState("");
 
+  const [selected, setSelected] = useState(() => new Set());
+  const [proc, setProc] = useState(null); // {running, done, total, results:[{order,text,kind}]}
+
   useEffect(() => {
     let k = null;
     try { k = localStorage.getItem(KEY_STORE); } catch {}
@@ -165,6 +168,43 @@ export default function Board() {
     }
   }, [orders, apiFetch, flash]);
 
+  // "Process" one order: if it already has a supplier, just (re)generate the PO for that supplier
+  // (keeps your manual choice); if it's unrouted, route it first then generate. Updates the row.
+  const processOne = useCallback(async (o) => {
+    const path = o.supplier ? `/orders/${o.item_id}/po` : `/orders/${o.item_id}/process`;
+    const res = await apiFetch(path, { method: "POST" });
+    if (!res.ok) throw new Error(`process ${res.status}`);
+    const d = await res.json();
+    setOrders((os) => os.map((x) => (x.item_id === o.item_id
+      ? { ...x, supplier: d.supplier ?? x.supplier, stage: d.stage ?? x.stage, has_po: d.attached ? true : x.has_po }
+      : x)));
+    return d;
+  }, [apiFetch]);
+
+  const processSelected = useCallback(async () => {
+    const ids = orders.filter((o) => selected.has(o.item_id));
+    if (!ids.length) return;
+    const results = [];
+    setProc({ running: true, done: 0, total: ids.length, results: [] });
+    for (const o of ids) {
+      let text = "—", kind = "warn";
+      try {
+        const d = await processOne(o);
+        text = d.result || (d.blocked ? "blocked" : d.ok ? "done" : "—");
+        kind = d.ok ? "ok" : "warn";
+      } catch (e) {
+        if (String(e.message) === "unauthorised") break;
+        text = "error: " + String(e.message || e);
+      }
+      results.push({ order: o.order_no, text, kind });
+      setProc({ running: true, done: results.length, total: ids.length, results: [...results] });
+    }
+    setProc((p) => ({ ...(p || {}), running: false }));
+    setSelected(new Set());
+    flash(`Processed ${results.length}`);
+    load();
+  }, [orders, selected, processOne, flash, load]);
+
   const openDetail = useCallback(async (o) => {
     setDrawer(o); setDetail(null); setDetailErr("");
     try {
@@ -198,6 +238,17 @@ export default function Board() {
 
   const totalSell = useMemo(() => filtered.reduce((s, o) => s + (num(o.sell) || 0), 0), [filtered]);
   function toggleSort(field) { setSort((s) => (s.field === field ? { field, dir: s.dir * -1 } : { field, dir: 1 })); }
+  function toggleSel(id) { setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  function toggleAll() {
+    setSelected((s) => {
+      const ids = filtered.map((o) => o.item_id);
+      const allOn = ids.length && ids.every((i) => s.has(i));
+      const n = new Set(s);
+      ids.forEach((i) => (allOn ? n.delete(i) : n.add(i)));
+      return n;
+    });
+  }
+  const allSelected = filtered.length > 0 && filtered.every((o) => selected.has(o.item_id));
   function arrow(field) { return sort.field === field ? <span className="arrow">{sort.dir > 0 ? "▲" : "▼"}</span> : null; }
   const supplierOpts = meta.suppliers || [];
   const stageOpts = meta.stages || [];
@@ -243,7 +294,29 @@ export default function Board() {
           <option value="All">All suppliers</option>
           {suppliersPresent.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        {selected.size > 0 && (
+          <button className="btn primary" onClick={processSelected} disabled={proc?.running}>
+            {proc?.running ? `Processing ${proc.done}/${proc.total}…` : `Process selected (${selected.size})`}
+          </button>
+        )}
       </div>
+
+      {proc && (
+        <div className="proc-panel">
+          <div className="proc-head">
+            {proc.running ? <><span className="spinner" />Processing {proc.done} of {proc.total}…</>
+              : <>Processed {proc.results.length}. <button className="linkish" onClick={() => setProc(null)}>dismiss</button></>}
+          </div>
+          {proc.total > 0 && <div className="proc-bar"><span style={{ width: `${Math.round((proc.done / proc.total) * 100)}%` }} /></div>}
+          {proc.results.length > 0 && (
+            <div className="proc-results">
+              {proc.results.map((r, i) => (
+                <div key={i} className={`proc-row ${r.kind}`}><b>{r.order}</b> {r.text}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card">
         {status === "loading" && orders.length === 0 && (
@@ -258,6 +331,7 @@ export default function Board() {
             <table>
               <thead>
                 <tr>
+                  <th className="chk"><input type="checkbox" checked={allSelected} onChange={toggleAll} title="Select all shown" /></th>
                   <th className="sortable" onClick={() => toggleSort("order_no")}>Order{arrow("order_no")}</th>
                   <th className="sortable" onClick={() => toggleSort("customer")}>Customer{arrow("customer")}</th>
                   <th className="sortable" onClick={() => toggleSort("supplier")}>Supplier{arrow("supplier")}</th>
@@ -274,7 +348,8 @@ export default function Board() {
                   const stgList = o.stage && !stageOpts.includes(o.stage) ? [o.stage, ...stageOpts] : stageOpts;
                   const n = counts[o.item_id] || 0;
                   return (
-                    <tr key={o.item_id}>
+                    <tr key={o.item_id} className={selected.has(o.item_id) ? "sel" : ""}>
+                      <td className="chk"><input type="checkbox" checked={selected.has(o.item_id)} onChange={() => toggleSel(o.item_id)} /></td>
                       <td className="ono">
                         <span className="ono-wrap">
                           <button className="linkish" onClick={() => openDetail(o)}>{o.order_no}</button>
@@ -324,7 +399,7 @@ export default function Board() {
                   );
                 })}
                 {status === "ok" && filtered.length === 0 && (
-                  <tr><td colSpan={8}><div className="state">No orders match.</div></td></tr>
+                  <tr><td colSpan={9}><div className="state">No orders match.</div></td></tr>
                 )}
               </tbody>
             </table>
@@ -339,8 +414,7 @@ export default function Board() {
       {drawer && (
         <OrderDrawer
           order={drawer} detail={detail} err={detailErr} onClose={() => setDrawer(null)}
-          apiFetch={apiFetch} flash={flash} reload={load}
-          onRouted={(id, sup, stg) => setOrders((os) => os.map((o) => (o.item_id === id ? { ...o, supplier: sup ?? o.supplier, stage: stg ?? o.stage } : o)))}
+          onProcess={processOne} flash={flash} reload={load}
         />
       )}
       {toast && <div className={`toast ${toast.kind === "err" ? "err" : ""}`}>{toast.msg}</div>}
@@ -348,55 +422,28 @@ export default function Board() {
   );
 }
 
-function OrderDrawer({ order, detail, err, onClose, apiFetch, flash, onRouted, reload }) {
-  const [routing, setRouting] = useState(false);
-  const [routeMsg, setRouteMsg] = useState(null);
-  const [poing, setPoing] = useState(false);
-  const [poMsg, setPoMsg] = useState(null);
+function OrderDrawer({ order, detail, err, onClose, onProcess, flash, reload }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
 
-  async function doPo() {
-    setPoing(true); setPoMsg(null);
+  async function doProcess() {
+    setBusy(true); setMsg(null);
     try {
-      const res = await apiFetch(`/orders/${order.item_id}/po`, { method: "POST" });
-      if (!res.ok) throw new Error(`po ${res.status}`);
-      const d = await res.json();
+      const d = await onProcess(order);
       if (d.blocked) {
-        setPoMsg({ kind: "warn", text: "Can’t generate yet — " + (d.errors || []).join("; ") });
-        flash("PO blocked", "err");
+        setMsg({ kind: "warn", text: "Can’t complete — " + (d.errors || []).join("; ") });
+        flash("Blocked", "err");
       } else if (d.ok) {
-        const label = d.kind === "po" ? "PO" : "Packing slip";
-        setPoMsg({ kind: "ok", text: `${label} attached${d.total ? ` · total £${Number(d.total).toFixed(2)}` : ""}` });
-        flash(`${label} attached`);
+        setMsg({ kind: "ok", text: d.result || "Done." });
+        flash("Processed");
         reload && reload();
       } else {
-        setPoMsg({ kind: "warn", text: d.detail || "Didn’t attach — try again." });
-        flash("PO not attached", "err");
+        setMsg({ kind: "warn", text: d.result || d.detail || "Couldn’t process." });
+        flash(d.result || "Not processed", "err");
       }
     } catch (e) {
-      if (String(e.message) !== "unauthorised") setPoMsg({ kind: "warn", text: String(e.message || e) });
-    } finally { setPoing(false); }
-  }
-
-  async function doRoute() {
-    setRouting(true); setRouteMsg(null);
-    try {
-      const res = await apiFetch(`/orders/${order.item_id}/route`, {
-        method: "POST", body: JSON.stringify({ shopify_id: order.shopify_id || "", apply: true }),
-      });
-      if (!res.ok) throw new Error(`route ${res.status}`);
-      const d = await res.json();
-      const s = d.suggestion || {};
-      if (d.applied) {
-        onRouted(order.item_id, s.supplier, s.applied_stage || s.stage);
-        setRouteMsg({ kind: "ok", text: `Routed to ${s.supplier}${s.branch ? ` (${s.branch})` : ""} · stage: ${s.applied_stage || s.stage}` });
-        flash(`Routed → ${s.supplier}`);
-      } else {
-        setRouteMsg({ kind: "warn", text: d.note || s.summary || "Couldn’t route automatically." });
-        flash(d.note || "Not routed", "err");
-      }
-    } catch (e) {
-      if (String(e.message) !== "unauthorised") setRouteMsg({ kind: "warn", text: String(e.message || e) });
-    } finally { setRouting(false); }
+      if (String(e.message) !== "unauthorised") setMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setBusy(false); }
   }
 
   const sx = detail?.shopify;
@@ -415,12 +462,12 @@ function OrderDrawer({ order, detail, err, onClose, apiFetch, flash, onRouted, r
         </div>
 
         <div className="drawer-actions">
-          <button className="btn primary" onClick={doRoute} disabled={routing}>{routing ? "Routing…" : "Route order"}</button>
-          <button className="btn" onClick={doPo} disabled={poing}>{poing ? "Generating…" : "Generate PO"}</button>
+          <button className="btn primary" onClick={doProcess} disabled={busy}>
+            {busy ? "Processing…" : (order.supplier ? "Generate PO" : "Process order")}
+          </button>
           {order.shopify_url && <a className="btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer">Shopify</a>}
         </div>
-        {routeMsg && <div className={`route-msg ${routeMsg.kind}`}>{routeMsg.text}</div>}
-        {poMsg && <div className={`route-msg ${poMsg.kind}`}>{poMsg.text}</div>}
+        {msg && <div className={`route-msg ${msg.kind}`}>{msg.text}</div>}
 
         {!detail && !err && <div className="state"><span className="spinner" />Loading order…</div>}
         {err && <div className="state err">Couldn’t load detail ({err}).</div>}
