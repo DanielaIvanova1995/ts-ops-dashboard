@@ -431,6 +431,10 @@ def _attach_doc(op, order_docs, item_id: str, o: dict, overrides=None) -> dict:
     name = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_Trade_Superstore_Online.pdf"
     r = ds.op_upload_po(item_id, pdf, name)
     ok = bool(r.get("ok"))
+    try:
+        op._write_po_total(item_id, kind, doc)   # numbers6 = £ supplier (PO inc-VAT total); POs only
+    except Exception:  # noqa: BLE001 — best effort, never break the attach
+        pass
     return {"ok": ok, "attached": ok, "blocked": False, "kind": kind, "name": name,
             "total": doc.get("total"), "detail": None if ok else "upload didn't verify — try again"}
 
@@ -586,6 +590,12 @@ def process_order(item_id: str):
     sup, route_ = res.get("overall_supplier"), res.get("route")
     if route_ == "PICK" or not sup:
         return {"ok": False, "order": tag, "result": "couldn't identify a supplier — assign manually"}
+    # Routing sets stage = "SEND PO" only for clear, high-confidence, non-excluded matches (its
+    # _po_autosend_ok + AUTO_SEND_PO kill switch). We hold those at Needs Review until the PO is
+    # attached, then advance to SEND PO — exactly like the live app's _process_one. Every other
+    # routed stage (Needs Review / Needs Quote / Go To Portal) is set straight away.
+    intended = res.get("stage") or "Needs Review"
+    init_stage = "Needs Review" if intended == "SEND PO" else intended
     try:
         ds.op_set_supplier(item_id, sup)
         o["supplier"] = sup
@@ -597,22 +607,38 @@ def process_order(item_id: str):
         op._fix_po_email(item_id, sup, o)                       # correct PO email (Molan/Vista/…)
         op._fix_lpd_home_email(item_id, sup, sid, o, lines=res.get("lines"))  # LPD Home → lpdhome
         op._mark_del_method(item_id, sup)                       # samples → "To Post"
-        stage = res.get("stage") or "Needs Review"
-        if stage == "SEND PO":                                  # never auto-send from the new board
-            stage = "Needs Review"
-        ds.op_set_status(item_id, stage)
-        o["stage"] = stage
+        ds.op_set_status(item_id, init_stage)
+        o["stage"] = init_stage
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Routed, but couldn't write to Monday: {e}")
     try:
         doc_res = _attach_doc(op, order_docs, item_id, o)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Supplier set, but PO failed: {e}")
-    doc_res.update(order=tag, supplier=sup, stage=stage, route=route_)
+    # Safe to SEND PO? Two guards (same as _process_one): PO verified-attached AND a branch email is
+    # confirmed on Monday (read back) so the automation can't fire to nowhere.
+    final_stage, auto_sent = init_stage, False
+    if intended == "SEND PO" and doc_res.get("ok"):
+        try:
+            send_email = ds.op_get_branch_email(item_id)
+        except Exception:  # noqa: BLE001
+            send_email = o.get("branch_email")
+        if send_email:
+            try:
+                ds.op_set_status(item_id, "SEND PO")
+                final_stage, auto_sent = "SEND PO", True
+                o["stage"] = "SEND PO"
+            except Exception:  # noqa: BLE001
+                pass
+    doc_res.update(order=tag, supplier=sup, stage=final_stage, route=route_)
+    kind_up = (doc_res.get("kind") or "po").upper()
     if doc_res.get("blocked"):
         doc_res["result"] = "supplier set — PO BLOCKED: " + "; ".join(doc_res.get("errors") or [])
     elif doc_res.get("ok"):
-        doc_res["result"] = f"→ {sup} · {doc_res.get('kind', 'po').upper()} attached"
+        tail = (" · → SEND PO (auto)" if auto_sent
+                else " · held at Needs Review (not auto-sent)" if intended == "SEND PO"
+                else f" · {final_stage}")
+        doc_res["result"] = f"→ {sup} · {kind_up} attached{tail}"
     else:
         doc_res["result"] = f"→ {sup} · PO didn't attach"
     return doc_res
