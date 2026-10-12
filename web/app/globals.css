@@ -1,0 +1,99 @@
+:root {
+  --brand: #F26A21;
+  --brand-dark: #D9551A;
+  --ink: #1C1F26;
+  --muted: #6B7280;
+  --line: #E6E8EC;
+  --bg: #F6F7F9;
+  --card: #FFFFFF;
+  --green: #15803D; --green-bg: #E7F6EC;
+  --amber: #B45309; --amber-bg: #FCF3E3;
+  --blue: #1D4ED8;  --blue-bg: #E8EEFF;
+  --muted-bg: #F1F2F4;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 20px 64px; }
+
+/* Top bar */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--card); border: 1px solid var(--line);
+  border-top: 3px solid var(--brand);
+  border-radius: var(--radius); padding: 14px 20px; margin-bottom: 18px;
+}
+.wordmark { font-size: 22px; font-weight: 800; letter-spacing: .3px; }
+.wordmark b { color: var(--brand); font-weight: 800; }
+.wordmark .sec { color: var(--muted); font-weight: 600; margin-left: 8px; font-size: 15px; }
+.topbar .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.count { color: var(--muted); font-size: 13px; }
+.count b { color: var(--ink); }
+
+/* Button */
+.btn {
+  appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, transform .02s ease;
+}
+.btn:hover { background: #FAFAFB; border-color: #D7DAE0; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
+
+/* Table card */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; padding: 11px 14px; background: #FBFBFC;
+  border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+tbody td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: #FCFAF8; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ono { font-weight: 700; }
+.cust { color: var(--ink); }
+.sub { color: var(--muted); font-size: 12px; }
+
+/* Pills */
+.pill {
+  display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  letter-spacing: .02em; white-space: nowrap;
+}
+.pill.green { color: var(--green); background: var(--green-bg); }
+.pill.amber { color: var(--amber); background: var(--amber-bg); }
+.pill.blue { color: var(--blue); background: var(--blue-bg); }
+.pill.grey { color: var(--muted); background: var(--muted-bg); }
+.pill.dash { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
+
+/* States */
+.state { padding: 40px 20px; text-align: center; color: var(--muted); }
+.state.err { color: #B91C1C; }
+.spinner {
+  display: inline-block; width: 18px; height: 18px; border: 2px solid var(--line);
+  border-top-color: var(--brand); border-radius: 50%; animation: spin .7s linear infinite;
+  vertical-align: -4px; margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+a.link { color: var(--brand-dark); text-decoration: none; font-weight: 600; }
+a.link:hover { text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .wrap { padding: 12px 12px 48px; }
+  thead { display: none; }
+  tbody td { display: flex; justify-content: space-between; gap: 12px; padding: 8px 14px; }
+  tbody tr { display: block; padding: 6px 0; border-bottom: 2px solid var(--line); }
+}
