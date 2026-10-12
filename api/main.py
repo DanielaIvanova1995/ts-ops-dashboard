@@ -15,6 +15,8 @@ import os
 import sys
 from pathlib import Path
 
+import requests                                        # noqa: E402 (reused — Shopify/Monday HTTP)
+
 # Make the repo root importable so we reuse the existing TradeHub modules as-is.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -64,6 +66,8 @@ def health():
 
 def _order_out(o: dict) -> dict:
     """Trim a Monday order row to the fields the board needs (UI-friendly, stable shape)."""
+    assets = o.get("po_assets") or []
+    po = assets[0] if assets else {}
     return {
         "item_id": o.get("item_id"),
         "order_no": o.get("order_no") or o.get("name"),
@@ -74,7 +78,9 @@ def _order_out(o: dict) -> dict:
         "sell": o.get("sell") or None,
         "cost_supplier": o.get("cost_supplier") or None,
         "shopify_id": (o.get("shopify_id") or "").strip() or None,
-        "has_po": bool(o.get("po_assets")),
+        "has_po": bool(assets),
+        "po_url": (po.get("public_url") or po.get("url")) if po else None,
+        "po_name": po.get("name") if po else None,
     }
 
 
@@ -130,3 +136,121 @@ def set_stage(item_id: str, body: StageIn):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't set stage: {e}")
     return {"ok": True, "item_id": item_id, "stage": (body.stage or "").strip() or None}
+
+
+# ---- Order detail (summary box) + Monday updates --------------------------------------------------
+_SHOPIFY_API = "2024-10"
+
+
+def _sm(node, key):
+    """Pull a float out of a Shopify `<key>Set { shopMoney { amount } }` block, or None."""
+    try:
+        return float((((node or {}).get(key) or {}).get("shopMoney") or {}).get("amount"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _addr_lines(a):
+    if not a:
+        return []
+    parts = [a.get("name"), a.get("company"), a.get("address1"), a.get("address2"),
+             " ".join(x for x in [a.get("city"), a.get("province")] if x),
+             a.get("zip"), a.get("country")]
+    return [str(x).strip() for x in parts if x and str(x).strip()]
+
+
+def _shopify_order_detail(shopify_id: str) -> dict:
+    store = ds.get_secret("SHOPIFY_STORE")
+    token = ds.shopify_products_token()
+    gid = f"gid://shopify/Order/{str(shopify_id).strip()}"
+    query = (
+        "query($id: ID!) { order(id: $id) { name createdAt updatedAt displayFinancialStatus "
+        "customer { firstName lastName email phone } "
+        "shippingAddress { name company address1 address2 city province zip country phone } "
+        "billingAddress { name company address1 address2 city province zip country phone } "
+        "totalPriceSet { shopMoney { amount currencyCode } } "
+        "subtotalPriceSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } "
+        "totalTaxSet { shopMoney { amount } } "
+        "lineItems(first: 100) { edges { node { title variantTitle quantity sku "
+        "originalUnitPriceSet { shopMoney { amount } } discountedTotalSet { shopMoney { amount } } "
+        "} } } } }")
+    r = requests.post(f"https://{store}/admin/api/{_SHOPIFY_API}/graphql.json",
+                      json={"query": query, "variables": {"id": gid}},
+                      headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                      timeout=25)
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        raise RuntimeError(f"Shopify error: {payload['errors']}")
+    return (payload.get("data") or {}).get("order") or {}
+
+
+def _monday_item_updates(item_id: str) -> dict:
+    """The Monday item's last-changed time + its updates feed (the 'updates bubble' content)."""
+    q = ("query($i:[ID!]){items(ids:$i){ name updated_at "
+         "updates(limit:50){ id body created_at creator{ name } } }}")
+    data = ds._monday_gql(q, {"i": [str(item_id)]}, ds.get_token())
+    items = data.get("items") or []
+    it = items[0] if items else {}
+    ups = [{"id": u.get("id"), "body": u.get("body"), "created_at": u.get("created_at"),
+            "creator": (u.get("creator") or {}).get("name")} for u in (it.get("updates") or [])]
+    return {"monday_name": it.get("name"), "monday_updated_at": it.get("updated_at"), "updates": ups}
+
+
+@app.get("/orders/{item_id}/detail", dependencies=[Depends(require_key)])
+def order_detail(item_id: str, shopify_id: str | None = None):
+    """Everything for the summary box: customer, BOTH addresses, line items, live totals, when the
+    order last changed (Shopify + Monday), and the Monday updates thread. `shopify_id` is passed by
+    the board (it already has it); Monday updates come from item_id."""
+    out: dict = {"item_id": item_id}
+    try:
+        out.update(_monday_item_updates(item_id))
+    except Exception as e:  # noqa: BLE001
+        out["updates"], out["updates_error"] = [], str(e)[:150]
+    if shopify_id:
+        try:
+            o = _shopify_order_detail(shopify_id)
+            cust = o.get("customer") or {}
+            name = " ".join(x for x in [cust.get("firstName"), cust.get("lastName")] if x)
+            items = []
+            for e in ((o.get("lineItems") or {}).get("edges") or []):
+                n = e.get("node") or {}
+                vt = (n.get("variantTitle") or "").strip()
+                if vt.lower() == "default title":
+                    vt = ""
+                items.append({"title": n.get("title"), "variant": vt,
+                              "sku": (n.get("sku") or "").strip() or None, "qty": n.get("quantity"),
+                              "unit": _sm(n, "originalUnitPriceSet"),
+                              "line_total": _sm(n, "discountedTotalSet")})
+            sa, ba = o.get("shippingAddress") or {}, o.get("billingAddress") or {}
+            out["shopify"] = {
+                "order_name": o.get("name"), "created_at": o.get("createdAt"),
+                "updated_at": o.get("updatedAt"), "financial_status": o.get("displayFinancialStatus"),
+                "customer": {"name": name, "email": cust.get("email"), "phone": cust.get("phone")},
+                "shipping": {"lines": _addr_lines(sa), "phone": sa.get("phone")},
+                "billing": {"lines": _addr_lines(ba), "phone": ba.get("phone")},
+                "totals": {"total": _sm(o, "totalPriceSet"), "subtotal": _sm(o, "subtotalPriceSet"),
+                           "shipping": _sm(o, "totalShippingPriceSet"), "tax": _sm(o, "totalTaxSet"),
+                           "currency": (((o.get("totalPriceSet") or {}).get("shopMoney") or {})
+                                        .get("currencyCode"))},
+                "items": items,
+            }
+        except Exception as e:  # noqa: BLE001
+            out["shopify_error"] = str(e)[:150]
+    return out
+
+
+@app.get("/updates-counts", dependencies=[Depends(require_key)])
+def updates_counts():
+    """Update count per order in the NEW ORDERS group — one Monday call, for the row bubbles."""
+    q = ("query($b:[ID!],$g:[String!]){boards(ids:$b){groups(ids:$g){"
+         "items_page(limit:200){items{ id updates{ id } }}}}}")
+    try:
+        data = ds._monday_gql(q, {"b": [str(ds.ORDERS_BOARD_ID)], "g": [ds.ORDERS_NEW_GROUP]},
+                              ds.get_token())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read updates: {e}")
+    boards = data.get("boards") or []
+    groups = (boards[0].get("groups") if boards else []) or []
+    items = ((groups[0].get("items_page") or {}).get("items") if groups else []) or []
+    return {"counts": {it["id"]: len(it.get("updates") or []) for it in items}}

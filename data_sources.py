@@ -5299,7 +5299,7 @@ def fetch_new_orders(limit: int = 2000, token: str | None = None) -> list:
     Reads straight from Monday (paginated — pulls the WHOLE group, not just the first 60)."""
     token = token or get_token()
     ids = ",".join(f'"{c}"' for c in OP_COLS.values())
-    fields = ("id name assets{id name url file_size} "
+    fields = ("id name assets{id name url public_url file_size} "
               "column_values(ids:[%s]){id text}" % ids)
     first_q = ("query($b:[ID!],$g:[String!],$lim:Int!){boards(ids:$b){groups(ids:$g){"
                "items_page(limit:$lim){cursor items{%s}}}}}" % fields)
@@ -5324,6 +5324,7 @@ def fetch_new_orders(limit: int = 2000, token: str | None = None) -> list:
     for it in items:
         row = {"item_id": it["id"], "name": it.get("name") or "",
                "po_assets": [{"id": a.get("id"), "name": a.get("name"), "url": a.get("url"),
+                              "public_url": a.get("public_url"),
                               "size": a.get("file_size")} for a in (it.get("assets") or [])]}
         for cv in (it.get("column_values") or []):
             key = inv.get(cv.get("id"))
