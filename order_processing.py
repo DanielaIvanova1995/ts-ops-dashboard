@@ -47,7 +47,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Huws Gray": "colin.tansley@huwsgray.co.uk",     # Colin Tansley, Derby
                      "Storm": "sales@stormbuildingproducts.com",
                      "Rexel": "adam.mussa@rexel.co.uk",
-                     "LPD DOORS": "sales@lpddoors.co.uk",
+                     "LPD": "sales@lpddoors.co.uk",
                      "JB Kind": "jordan.lees@jbkind.com",
                      "Deanta": "ecommerce@deanta.co.uk",
                      "Carron": "sales@carronheating.co.uk",
@@ -64,7 +64,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Brundle": "connor.branigan@brundle.com",        # Connor Branigan
                      "Edmundson": "steve.hallsworth@eel.co.uk",       # Steve Hallsworth
                      "Mercardo": "mark.jackson@mercado.co.uk",        # Mark Jackson
-                     "C TIE": "sales@ctie.co.uk",
+                     "Ctie": "sales@ctie.co.uk",
                      "Hurlingham Baths": "sales@hurlinghambaths.co.uk",
                      "Hurlingham": "sales@hurlinghambaths.co.uk",
                      "National Skirting": "info@nationalskirting.co.uk",
@@ -80,7 +80,7 @@ SUPPLIER_HEAD_OFFICE_PHONE = {
     "Southern Sheeting": "01342315300", "Decor8": "0161 763 7007", "Rexel": "0330 045 0606",
     "National Plastics": "07836 273 948",   # Will Chammings
     "Markovitz": "01246 938376",   # Amy Charlesworth
-    "LPD DOORS": "0113 251 3948", "JB Kind": "01283 554197", "Carron": "01400 263 310",
+    "LPD": "0113 251 3948", "JB Kind": "01283 554197", "Carron": "01400 263 310",
     "Hurlingham": "01400 263 310", "Hurlingham Baths": "01400 263 310",
     "Walls and Floors": "01536 410484", "Permaroof": "01773 608808", "Newplas": "01332 322160",
     "Bricklink": "0141 286 3600", "Brickservices": "0141 286 3600", "Plastivan": "0117 300 5625",
@@ -262,7 +262,7 @@ def _parse_monday_items(txt):
 
 def _canon_sup(s):
     """Normalise a supplier name to ONE canonical key, so the feed/Airtable name and our order
-    label match even when they differ (the feed calls it 'LPD', we label orders 'LPD DOORS').
+    label match even when they differ (the feed may say 'LPD Doors'; we label orders 'LPD').
     Uses the routing CANON map (which already knows lpd == lpddoors)."""
     n = re.sub(r"[^a-z0-9]", "", (s or "").lower())
     lbl = order_routing.CANON.get(n)
@@ -291,7 +291,7 @@ def _pricing():
 @st.cache_data(show_spinner=False)
 def _pricing_table(stamp):
     """{normalised SKU: {supplier_canon: cost}} from the pricing feed (Airtable-derived).
-    Supplier names are canonicalised (see _canon_sup) so 'LPD' in the feed matches 'LPD DOORS'
+    Supplier names are canonicalised (see _canon_sup) so 'LPD Doors' in the feed matches 'LPD'
     on the order. `stamp` (the price files' newest mtime) is part of the cache key, so the table
     is rebuilt whenever a price file changes rather than living for the whole session."""
     try:
@@ -1167,7 +1167,7 @@ def _fix_lpd_home_email(iid, supplier, sid, o=None, lines=None):
     """LPD's Home Furniture range (Shopify tag 'Home Furniture', vendor LPD) is ordered from LPD's
     home division, not the doors branch — send those POs to orders@lpdhome.co.uk instead of
     sales@lpddoors.co.uk. Run AFTER _fix_po_email so it overrides the default LPD email."""
-    if _canon_sup(supplier) != _canon_sup("LPD DOORS"):
+    if _canon_sup(supplier) != _canon_sup("LPD"):
         return
     if lines is None:
         if not sid:

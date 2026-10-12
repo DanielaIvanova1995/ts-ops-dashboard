@@ -2478,7 +2478,7 @@ _SUPPLIER_IDENT = {
     "huwsgray": "Huws Gray", "jbkind": "JB Kind", "deanta": "Deanta", "carron": "Carron",
     "toolbank": "Toolbank", "decor8": "Decor8", "nationalskirting": "National Skirting",
     "velux": "Velux", "permaroof": "Permaroof", "gap": "GAP", "nbp": "NBP", "upb": "UPB",
-    "storm": "Storm", "lpddoors": "LPD DOORS", "chasehardware": "Chase Hardware",
+    "storm": "Storm", "lpd": "LPD", "lpddoors": "LPD", "chasehardware": "Chase Hardware",
     "wallsandfloors": "Walls and Floors", "edmundson": "Edmundson", "brundle": "Brundle",
 }
 

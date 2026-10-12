@@ -19,7 +19,7 @@ CANON = {
     "hurlinghambaths": "Hurlingham Baths",
     "nationalskirting": "National Skirting", "molan": "Molan", "storm": "Storm",
     "pjh": "PJH", "nuie": "Nuie", "roxor": "Nuie", "decor8": "Decor8", "paintersworld": "Decor8",
-    "rexel": "Rexel", "toolbank": "Toolbank", "lpd": "LPD DOORS", "lpddoors": "LPD DOORS",
+    "rexel": "Rexel", "toolbank": "Toolbank", "lpd": "LPD", "lpddoors": "LPD",
     "jbkind": "JB Kind", "deanta": "Deanta", "carron": "Carron", "hurlingham": "Hurlingham",
     "chasehardware": "Chase Hardware", "chhardware": "Chase Hardware",
     "wallsandfloors": "Walls and Floors",
@@ -27,7 +27,7 @@ CANON = {
     "mbdiy": "MB Decor", "mbdecordiy": "MB Decor", "mbdecordly": "MB Decor",
     "permaroof": "Permaroof", "newplas": "newplas", "bricklink": "Bricklink",
     "brickservices": "Brickservices", "plastivan": "Plastivan", "brundle": "Brundle",
-    "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "C TIE",
+    "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "Ctie",
     "nationalplastics": "National Plastics",   # distinct from NBP
     "markovitz": "Markovitz",                    # builders' merchant — PO to Amy Charlesworth
     "ajw": "AJW", "ajwdistribution": "AJW",     # AJW Distribution — Cedral quotes
