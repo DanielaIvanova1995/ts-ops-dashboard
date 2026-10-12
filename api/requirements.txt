@@ -1,5 +1,6 @@
-# TradeHub API (new web-app backend). Kept minimal; it reuses the repo's existing modules, which
-# already pull in `requests` etc. via the main requirements. fpdf2 is added when PO generation lands.
+# TradeHub API (new web-app backend). It REUSES the repo's modules (data_sources, order_routing,
+# order_docs, …), so it installs the app's full dependency set plus the web-server libs. This keeps
+# every reused function working (PDF generation, pricing, Supabase, etc.), not just /orders.
+-r ../requirements.txt
 fastapi>=0.115
 uvicorn[standard]>=0.30
-requests>=2.31
