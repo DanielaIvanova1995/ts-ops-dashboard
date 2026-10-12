@@ -14,12 +14,13 @@ function stageClass(stage) {
   return "grey";
 }
 
-function money(v) {
-  if (v === null || v === undefined || v === "") return "—";
+function num(v) {
   const n = Number(v);
-  return Number.isFinite(n)
-    ? "£" + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : String(v);
+  return Number.isFinite(n) ? n : null;
+}
+function money(v) {
+  const n = num(v);
+  return n === null ? "—" : "£" + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function Board() {
@@ -29,35 +30,36 @@ export default function Board() {
 
   const [orders, setOrders] = useState([]);
   const [meta, setMeta] = useState({ suppliers: [], stages: [] });
-  const [status, setStatus] = useState("idle"); // idle | loading | ok | error
+  const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState(null);
-  const [toast, setToast] = useState(null); // {msg, kind}
+  const [toast, setToast] = useState(null);
 
-  // Read a stored code on first load.
+  // tools
+  const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState("All");
+  const [supplierFilter, setSupplierFilter] = useState("All");
+  const [sort, setSort] = useState({ field: null, dir: 1 });
+
   useEffect(() => {
     let k = null;
     try { k = localStorage.getItem(KEY_STORE); } catch {}
-    if (k) setAccessKey(k);
-    else setNeedKey(true);
+    if (k) setAccessKey(k); else setNeedKey(true);
   }, []);
 
   const flash = useCallback((msg, kind = "ok") => {
     setToast({ msg, kind });
-    setTimeout(() => setToast(null), 2600);
+    setTimeout(() => setToast(null), 2400);
   }, []);
 
   const apiFetch = useCallback(async (path, opts = {}) => {
     const res = await fetch(`${API}${path}`, {
-      ...opts,
-      cache: "no-store",
+      ...opts, cache: "no-store",
       headers: { "Content-Type": "application/json", "X-TradeHub-Key": accessKey || "", ...(opts.headers || {}) },
     });
     if (res.status === 401) {
       try { localStorage.removeItem(KEY_STORE); } catch {}
-      setAccessKey(null);
-      setNeedKey(true);
-      setError("Wrong access code — try again.");
+      setAccessKey(null); setNeedKey(true); setError("Wrong access code — try again.");
       throw new Error("unauthorised");
     }
     return res;
@@ -72,8 +74,7 @@ export default function Board() {
       const data = await oRes.json();
       setOrders(data.orders || []);
       if (mRes.ok) setMeta(await mRes.json());
-      setUpdatedAt(new Date());
-      setStatus("ok");
+      setUpdatedAt(new Date()); setStatus("ok");
     } catch (e) {
       if (String(e.message) !== "unauthorised") { setError(String(e.message || e)); setStatus("error"); }
     }
@@ -93,27 +94,55 @@ export default function Board() {
     setAccessKey(null); setOrders([]); setNeedKey(true); setStatus("idle");
   }
 
-  // Optimistic field update: change locally now, save to Monday, revert on failure.
   const saveField = useCallback(async (item_id, field, value) => {
     const prev = orders.find((o) => o.item_id === item_id)?.[field] ?? null;
-    const next = value || null;
-    setOrders((os) => os.map((o) => (o.item_id === item_id ? { ...o, [field]: next } : o)));
+    setOrders((os) => os.map((o) => (o.item_id === item_id ? { ...o, [field]: value || null } : o)));
     try {
-      const res = await apiFetch(`/orders/${item_id}/${field}`, {
-        method: "POST",
-        body: JSON.stringify({ [field]: value }),
-      });
+      const res = await apiFetch(`/orders/${item_id}/${field}`, { method: "POST", body: JSON.stringify({ [field]: value }) });
       if (!res.ok) throw new Error(`save ${res.status}`);
-      flash(`${field === "supplier" ? "Supplier" : "Stage"} saved`, "ok");
+      flash(`${field === "supplier" ? "Supplier" : "Stage"} saved`);
     } catch (e) {
       setOrders((os) => os.map((o) => (o.item_id === item_id ? { ...o, [field]: prev } : o)));
       if (String(e.message) !== "unauthorised") flash(`Couldn't save — ${String(e.message || e)}`, "err");
     }
   }, [orders, apiFetch, flash]);
 
-  // Ensure the current value is always a selectable option (even if not in the live label list).
-  const supplierOpts = useMemo(() => meta.suppliers || [], [meta]);
-  const stageOpts = useMemo(() => meta.stages || [], [meta]);
+  const stagesPresent = useMemo(
+    () => Array.from(new Set(orders.map((o) => o.stage).filter(Boolean))).sort(), [orders]);
+  const suppliersPresent = useMemo(
+    () => Array.from(new Set(orders.map((o) => o.supplier).filter(Boolean))).sort(), [orders]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let rows = orders.filter((o) => {
+      if (stageFilter !== "All" && (o.stage || "") !== stageFilter) return false;
+      if (supplierFilter !== "All" && (o.supplier || "") !== supplierFilter) return false;
+      if (q) {
+        const hay = `${o.order_no || ""} ${o.customer || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    if (sort.field) {
+      const f = sort.field, dir = sort.dir;
+      rows = [...rows].sort((a, b) => {
+        let av = a[f], bv = b[f];
+        if (f === "sell" || f === "cost_supplier") { av = num(av) ?? -Infinity; bv = num(bv) ?? -Infinity; return (av - bv) * dir; }
+        return String(av || "").localeCompare(String(bv || "")) * dir;
+      });
+    }
+    return rows;
+  }, [orders, query, stageFilter, supplierFilter, sort]);
+
+  const totalSell = useMemo(
+    () => filtered.reduce((s, o) => s + (num(o.sell) || 0), 0), [filtered]);
+
+  function toggleSort(field) {
+    setSort((s) => (s.field === field ? { field, dir: s.dir * -1 } : { field, dir: 1 }));
+  }
+  function arrow(field) { return sort.field === field ? <span className="arrow">{sort.dir > 0 ? "▲" : "▼"}</span> : null; }
+  const supplierOpts = meta.suppliers || [];
+  const stageOpts = meta.stages || [];
 
   if (needKey) {
     return (
@@ -141,11 +170,24 @@ export default function Board() {
             {status === "ok" ? <><b>{orders.length}</b> orders</> : status === "loading" ? "Loading…" : ""}
             {updatedAt && status === "ok" ? ` · ${updatedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}
           </span>
-          <button className="btn" onClick={signOut} title="Clear the access code on this device">Sign out</button>
+          <button className="btn" onClick={signOut}>Sign out</button>
           <button className="btn primary" onClick={load} disabled={status === "loading"}>
             {status === "loading" ? "Refreshing…" : "Refresh"}
           </button>
         </div>
+      </div>
+
+      <div className="toolbar">
+        <input className="search" placeholder="Search order no. or customer…" value={query}
+          onChange={(e) => setQuery(e.target.value)} />
+        <select className="filter" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+          <option value="All">All stages</option>
+          {stagesPresent.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select className="filter" value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)}>
+          <option value="All">All suppliers</option>
+          {suppliersPresent.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
 
       <div className="card">
@@ -153,52 +195,62 @@ export default function Board() {
           <div className="state"><span className="spinner" />Reading the NEW ORDERS board from Monday…</div>
         )}
         {status === "error" && (
-          <div className="state err">
-            Couldn’t reach the API ({error}).<br />
-            <span className="sub">Check the API service is running and the access code is correct.</span>
-          </div>
+          <div className="state err">Couldn’t reach the API ({error}).<br />
+            <span className="sub">Check the API is running and the access code is correct.</span></div>
         )}
         {(status === "ok" || orders.length > 0) && (
-          <table>
-            <thead>
-              <tr>
-                <th>Order</th><th>Customer</th><th>Supplier</th><th>Stage</th>
-                <th className="num">£ to us</th><th className="num">£ supplier</th><th>PO</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((o) => {
-                const supList = o.supplier && !supplierOpts.includes(o.supplier) ? [o.supplier, ...supplierOpts] : supplierOpts;
-                const stgList = o.stage && !stageOpts.includes(o.stage) ? [o.stage, ...stageOpts] : stageOpts;
-                return (
-                  <tr key={o.item_id}>
-                    <td className="ono">{o.order_no}</td>
-                    <td className="cust">{o.customer || "—"}</td>
-                    <td>
-                      <select className="cell-select" value={o.supplier || ""}
-                        onChange={(e) => saveField(o.item_id, "supplier", e.target.value)}>
-                        <option value="">— unrouted —</option>
-                        {supList.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </td>
-                    <td>
-                      <select className={`cell-select ${stageClass(o.stage)}`} value={o.stage || ""}
-                        onChange={(e) => saveField(o.item_id, "stage", e.target.value)}>
-                        <option value="">—</option>
-                        {stgList.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </td>
-                    <td className="num">{money(o.sell)}</td>
-                    <td className="num">{money(o.cost_supplier)}</td>
-                    <td>{o.has_po ? <span className="pill green">attached</span> : <span className="pill dash">none</span>}</td>
-                  </tr>
-                );
-              })}
-              {status === "ok" && orders.length === 0 && (
-                <tr><td colSpan={7}><div className="state">No orders in the NEW ORDERS group right now. 🎉</div></td></tr>
-              )}
-            </tbody>
-          </table>
+          <>
+            <table>
+              <thead>
+                <tr>
+                  <th className="sortable" onClick={() => toggleSort("order_no")}>Order{arrow("order_no")}</th>
+                  <th className="sortable" onClick={() => toggleSort("customer")}>Customer{arrow("customer")}</th>
+                  <th className="sortable" onClick={() => toggleSort("supplier")}>Supplier{arrow("supplier")}</th>
+                  <th className="sortable" onClick={() => toggleSort("stage")}>Stage{arrow("stage")}</th>
+                  <th className="num sortable" onClick={() => toggleSort("sell")}>£ to us{arrow("sell")}</th>
+                  <th className="num sortable" onClick={() => toggleSort("cost_supplier")}>£ supplier{arrow("cost_supplier")}</th>
+                  <th>PO</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((o) => {
+                  const supList = o.supplier && !supplierOpts.includes(o.supplier) ? [o.supplier, ...supplierOpts] : supplierOpts;
+                  const stgList = o.stage && !stageOpts.includes(o.stage) ? [o.stage, ...stageOpts] : stageOpts;
+                  return (
+                    <tr key={o.item_id}>
+                      <td className="ono">{o.order_no}</td>
+                      <td className="cust">{o.customer || "—"}</td>
+                      <td>
+                        <select className="cell-select" value={o.supplier || ""}
+                          onChange={(e) => saveField(o.item_id, "supplier", e.target.value)}>
+                          <option value="">— unrouted —</option>
+                          {supList.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <select className={`cell-select ${stageClass(o.stage)}`} value={o.stage || ""}
+                          onChange={(e) => saveField(o.item_id, "stage", e.target.value)}>
+                          <option value="">—</option>
+                          {stgList.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+                      <td className="num">{money(o.sell)}</td>
+                      <td className="num">{money(o.cost_supplier)}</td>
+                      <td>{o.has_po ? <span className="pill green">attached</span> : <span className="pill dash">none</span>}</td>
+                    </tr>
+                  );
+                })}
+                {status === "ok" && filtered.length === 0 && (
+                  <tr><td colSpan={7}><div className="state">No orders match.</div></td></tr>
+                )}
+              </tbody>
+            </table>
+            <div className="totals">
+              Showing <b>{filtered.length}</b> of {orders.length}
+              <span className="spacer" />
+              £ to us (shown): <b>{money(totalSell)}</b>
+            </div>
+          </>
         )}
       </div>
 
