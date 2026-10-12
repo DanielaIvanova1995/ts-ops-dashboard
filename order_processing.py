@@ -2007,7 +2007,15 @@ def render():
         st.error("Couldn't read the orders board: " + str(e)[:200])
         return
     sup_labels = _supplier_labels()
+    _board(orders, sup_labels)
 
+
+@st.fragment
+def _board(orders, sup_labels):
+    """The interactive order board, wrapped in a Streamlit fragment so ticking a ✓ checkbox or
+    editing a Supplier / Stage cell reruns ONLY this board — not the whole ~10k-line app — which
+    makes selecting and editing feel instant. The Refresh and Process buttons still call st.rerun()
+    (full-app scope) because they refetch the board from Monday."""
     # Top row: Refresh / Splits on the left, Process ALL / SELECTED on the right.
     tc = st.columns([1.0, 1.0, 2.6, 1.3, 1.7])
     if tc[0].button(":material/refresh: Refresh"):

@@ -8,3 +8,19 @@ font = "sans serif"
 
 [server]
 headless = true
+# Don't watch the source files for changes at runtime — the code is baked into the Docker image
+# and never changes while running, so watching wastes CPU/inotify watches and can trigger spurious
+# reruns. "none" keeps the server quiet between genuine user actions.
+fileWatcherType = "none"
+runOnSave = false
+# Behind Render's proxy: compressed WebSocket frames get mangled ("Bad message format" → constant
+# reconnect/restart), so send plain frames. Also set as a CLI flag in the Dockerfile; kept here too.
+enableWebsocketCompression = false
+
+[browser]
+# No phone-home on every session — one less network call per load.
+gatherUsageStats = false
+
+[runner]
+# Don't re-run the whole script just because a widget's value was read; only rerun on real input.
+fastReruns = true
