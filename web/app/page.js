@@ -339,7 +339,7 @@ export default function Board() {
       {drawer && (
         <OrderDrawer
           order={drawer} detail={detail} err={detailErr} onClose={() => setDrawer(null)}
-          apiFetch={apiFetch} flash={flash}
+          apiFetch={apiFetch} flash={flash} reload={load}
           onRouted={(id, sup, stg) => setOrders((os) => os.map((o) => (o.item_id === id ? { ...o, supplier: sup ?? o.supplier, stage: stg ?? o.stage } : o)))}
         />
       )}
@@ -348,9 +348,34 @@ export default function Board() {
   );
 }
 
-function OrderDrawer({ order, detail, err, onClose, apiFetch, flash, onRouted }) {
+function OrderDrawer({ order, detail, err, onClose, apiFetch, flash, onRouted, reload }) {
   const [routing, setRouting] = useState(false);
   const [routeMsg, setRouteMsg] = useState(null);
+  const [poing, setPoing] = useState(false);
+  const [poMsg, setPoMsg] = useState(null);
+
+  async function doPo() {
+    setPoing(true); setPoMsg(null);
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/po`, { method: "POST" });
+      if (!res.ok) throw new Error(`po ${res.status}`);
+      const d = await res.json();
+      if (d.blocked) {
+        setPoMsg({ kind: "warn", text: "Can’t generate yet — " + (d.errors || []).join("; ") });
+        flash("PO blocked", "err");
+      } else if (d.ok) {
+        const label = d.kind === "po" ? "PO" : "Packing slip";
+        setPoMsg({ kind: "ok", text: `${label} attached${d.total ? ` · total £${Number(d.total).toFixed(2)}` : ""}` });
+        flash(`${label} attached`);
+        reload && reload();
+      } else {
+        setPoMsg({ kind: "warn", text: d.detail || "Didn’t attach — try again." });
+        flash("PO not attached", "err");
+      }
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setPoMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setPoing(false); }
+  }
 
   async function doRoute() {
     setRouting(true); setRouteMsg(null);
@@ -391,9 +416,11 @@ function OrderDrawer({ order, detail, err, onClose, apiFetch, flash, onRouted })
 
         <div className="drawer-actions">
           <button className="btn primary" onClick={doRoute} disabled={routing}>{routing ? "Routing…" : "Route order"}</button>
-          {order.shopify_url && <a className="btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer">Open in Shopify</a>}
+          <button className="btn" onClick={doPo} disabled={poing}>{poing ? "Generating…" : "Generate PO"}</button>
+          {order.shopify_url && <a className="btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer">Shopify</a>}
         </div>
         {routeMsg && <div className={`route-msg ${routeMsg.kind}`}>{routeMsg.text}</div>}
+        {poMsg && <div className={`route-msg ${poMsg.kind}`}>{poMsg.text}</div>}
 
         {!detail && !err && <div className="state"><span className="spinner" />Loading order…</div>}
         {err && <div className="state err">Couldn’t load detail ({err}).</div>}

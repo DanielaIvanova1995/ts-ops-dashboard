@@ -360,6 +360,46 @@ def route(item_id: str, body: RouteIn):
     return {"ok": True, "suggestion": suggestion, "applied": applied, "note": note}
 
 
+import datetime as _dt   # noqa: E402
+
+
+@app.post("/orders/{item_id}/po", dependencies=[Depends(require_key)])
+def generate_po(item_id: str):
+    """Generate the PO (or packing slip) and attach it to the Monday order — REUSES the live app's
+    order_processing._build_doc (same Shopify-shipping-only address rule + never-cross pricing) and
+    order_docs PDF builders. Blocks (never attaches) if validate_doc finds a problem — e.g. no
+    Shopify shipping address — so a wrong/billing/blank address can't go out."""
+    import order_processing as op   # lazy: pulls pandas/streamlit, only when a PO is actually built
+    import order_docs
+    try:
+        rows = ds.fetch_new_orders()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the order: {e}")
+    o = next((r for r in rows if str(r.get("item_id")) == str(item_id)), None)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found in the NEW ORDERS group")
+    try:
+        kind, doc = op._build_doc(o)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build the document: {e}")
+    errs = order_docs.validate_doc(doc, kind)
+    if errs:
+        return {"ok": False, "blocked": True, "kind": kind, "errors": errs,
+                "supplier": doc.get("supplier") or None}
+    try:
+        date_str = _dt.date.today().strftime("%d %B %Y")
+        builder = order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf
+        pdf = builder(doc, date_str=date_str)
+        name = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_Trade_Superstore_Online.pdf"
+        r = ds.op_upload_po(item_id, pdf, name)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't generate/attach the PDF: {e}")
+    ok = bool(r.get("ok"))
+    return {"ok": ok, "attached": ok, "blocked": False, "kind": kind, "name": name,
+            "total": doc.get("total"), "supplier": doc.get("supplier") or None,
+            "detail": None if ok else "upload didn't verify — try again"}
+
+
 @app.get("/order-totals", dependencies=[Depends(require_key)])
 def order_totals():
     """Live Shopify total + subtotal per order in the NEW ORDERS group, keyed by Monday item_id —

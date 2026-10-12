@@ -25,6 +25,27 @@ import order_routing
 
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
+
+# ---- Headless reuse (the new web-app API imports this module and calls _build_doc with no
+# Streamlit runtime). In Streamlit these pass straight through to st.session_state / st.cache_data,
+# so the app's behaviour is UNCHANGED; headless they fall back to plain module-level caches. ----
+_HEADLESS_CACHE: dict = {}
+_PRICING_HEADLESS: dict = {}
+
+
+def _in_streamlit() -> bool:
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _sess():
+    """st.session_state inside Streamlit; a plain module dict when running headless (the API)."""
+    return st.session_state if _in_streamlit() else _HEADLESS_CACHE
+
+
 PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / safe to process
 _PROCESS_CHUNK = 8               # "Process all/selected" runs this many per rerun, then continues,
                                  # so a big group can never stall the Render connection in one go.
@@ -284,8 +305,14 @@ def _prices_stamp():
 
 def _pricing():
     """{normalised SKU: {supplier_canon: cost}} — thin wrapper that busts the cache when the price
-    files change (see _prices_stamp)."""
-    return _pricing_table(_prices_stamp())
+    files change (see _prices_stamp). Headless (API): memoise by stamp in a module dict so the 14 MB
+    feed isn't rebuilt on every line (st.cache_data doesn't cache without a Streamlit runtime)."""
+    stamp = _prices_stamp()
+    if _in_streamlit():
+        return _pricing_table(stamp)
+    if _PRICING_HEADLESS.get("stamp") != stamp:
+        _PRICING_HEADLESS.update(stamp=stamp, table=_pricing_table(stamp))
+    return _PRICING_HEADLESS["table"]
 
 
 @st.cache_data(show_spinner=False)
@@ -694,7 +721,7 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
     # predate this / omit it, so pull the folded product+variant title from Shopify and match by SKU.
     # (Skipped when the processor hand-edited the lines in Adjust — respect their wording.)
     if sid and items_override is None:
-        _sl_cache = st.session_state.setdefault("_op_shoplines", {})
+        _sl_cache = _sess().setdefault("_op_shoplines", {})
         if sid not in _sl_cache:
             try:
                 _sl_cache[sid] = data_sources.fetch_order_line_items(sid)
@@ -1468,7 +1495,7 @@ def _ship(sid):
     """Cached Shopify SHIPPING address (the delivery address) for one order. A FAILED read is NOT
     cached — so a transient Shopify blip doesn't stick and wrongly block the PO; it retries next
     time (a successful read, even with an empty address, is cached)."""
-    cache = st.session_state.setdefault("_op_ship", {})
+    cache = _sess().setdefault("_op_ship", {})
     if cache.get(sid) is None:
         try:
             cache[sid] = data_sources.fetch_order_shipping_full(sid)
