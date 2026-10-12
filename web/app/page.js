@@ -414,7 +414,7 @@ export default function Board() {
       {drawer && (
         <OrderDrawer
           order={drawer} detail={detail} err={detailErr} onClose={() => setDrawer(null)}
-          onProcess={processOne} flash={flash} reload={load}
+          onProcess={processOne} apiFetch={apiFetch} flash={flash} reload={load}
         />
       )}
       {toast && <div className={`toast ${toast.kind === "err" ? "err" : ""}`}>{toast.msg}</div>}
@@ -422,29 +422,100 @@ export default function Board() {
   );
 }
 
-function OrderDrawer({ order, detail, err, onClose, onProcess, flash, reload }) {
+function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, reload }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+
+  // Adjust
+  const [adjOpen, setAdjOpen] = useState(false);
+  const [addr, setAddr] = useState("");
+  const [deliv, setDeliv] = useState("");
+  const [note, setNote] = useState("");
+  const [adjBusy, setAdjBusy] = useState(false);
+  const [adjMsg, setAdjMsg] = useState(null);
+  // Split
+  const [splitBusy, setSplitBusy] = useState(false);
+  const [splitMsg, setSplitMsg] = useState(null);
+  // Merge
+  const [siblings, setSiblings] = useState([]);
+  const [mergeSel, setMergeSel] = useState(() => new Set());
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState(null);
+
+  // Prefill the Adjust address from the Shopify shipping address once the detail loads.
+  useEffect(() => {
+    const lines = detail?.shopify?.shipping?.lines;
+    if (lines && lines.length) setAddr((a) => (a ? a : lines.join("\n")));
+  }, [detail]);
+
+  // Load split-part siblings (for Merge) when the drawer opens.
+  useEffect(() => {
+    let live = true;
+    apiFetch(`/orders/${order.item_id}/siblings`).then((r) => r.ok && r.json())
+      .then((d) => { if (live && d) setSiblings(d.siblings || []); }).catch(() => {});
+    return () => { live = false; };
+  }, [order.item_id, apiFetch]);
 
   async function doProcess() {
     setBusy(true); setMsg(null);
     try {
       const d = await onProcess(order);
-      if (d.blocked) {
-        setMsg({ kind: "warn", text: "Can’t complete — " + (d.errors || []).join("; ") });
-        flash("Blocked", "err");
-      } else if (d.ok) {
-        setMsg({ kind: "ok", text: d.result || "Done." });
-        flash("Processed");
-        reload && reload();
-      } else {
-        setMsg({ kind: "warn", text: d.result || d.detail || "Couldn’t process." });
-        flash(d.result || "Not processed", "err");
-      }
+      if (d.blocked) { setMsg({ kind: "warn", text: "Can’t complete — " + (d.errors || []).join("; ") }); flash("Blocked", "err"); }
+      else if (d.ok) { setMsg({ kind: "ok", text: d.result || "Done." }); flash("Processed"); reload && reload(); }
+      else { setMsg({ kind: "warn", text: d.result || d.detail || "Couldn’t process." }); flash(d.result || "Not processed", "err"); }
     } catch (e) {
       if (String(e.message) !== "unauthorised") setMsg({ kind: "warn", text: String(e.message || e) });
     } finally { setBusy(false); }
   }
+
+  async function doGen() {
+    setAdjBusy(true); setAdjMsg(null);
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/po`, {
+        method: "POST",
+        body: JSON.stringify({ address: addr || null, delivery: deliv === "" ? null : Number(deliv), notes: note || null }),
+      });
+      if (!res.ok) throw new Error(`po ${res.status}`);
+      const d = await res.json();
+      if (d.blocked) setAdjMsg({ kind: "warn", text: "Can’t generate — " + (d.errors || []).join("; ") });
+      else if (d.ok) { setAdjMsg({ kind: "ok", text: `${d.kind === "po" ? "PO" : "Packing slip"} attached${d.total ? ` · £${Number(d.total).toFixed(2)}` : ""}` }); flash("PO attached"); reload && reload(); }
+      else setAdjMsg({ kind: "warn", text: d.detail || "Didn’t attach." });
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setAdjMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setAdjBusy(false); }
+  }
+
+  async function doSplit() {
+    setSplitBusy(true); setSplitMsg(null);
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/split`, { method: "POST" });
+      if (!res.ok) throw new Error(`split ${res.status}`);
+      const d = await res.json();
+      setSplitMsg({ kind: d.ok ? "ok" : "warn", text: d.result || d.summary || "—" });
+      if (d.ok) { flash("Split created"); reload && reload(); }
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setSplitMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setSplitBusy(false); }
+  }
+
+  async function doMerge() {
+    const ids = [...mergeSel];
+    if (ids.length < 2) { setMergeMsg({ kind: "warn", text: "Tick at least two parts to merge." }); return; }
+    if (!mergeTarget) { setMergeMsg({ kind: "warn", text: "Choose which supplier fulfils the merged part." }); return; }
+    setMergeBusy(true); setMergeMsg(null);
+    try {
+      const res = await apiFetch(`/orders/merge`, { method: "POST", body: JSON.stringify({ part_item_ids: ids, target_supplier: mergeTarget }) });
+      if (!res.ok) throw new Error(`merge ${res.status}`);
+      const d = await res.json();
+      setMergeMsg({ kind: d.ok ? "ok" : "warn", text: d.result || "—" });
+      if (d.ok) { flash("Merged"); reload && reload(); setTimeout(onClose, 900); }
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setMergeMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setMergeBusy(false); }
+  }
+  function toggleMerge(id) { setMergeSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  const mergeSuppliers = Array.from(new Set(siblings.map((s) => s.supplier).filter(Boolean)));
 
   const sx = detail?.shopify;
   const cur = sx?.totals?.currency === "GBP" ? "£" : "£";
@@ -468,6 +539,54 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, flash, reload }) 
           {order.shopify_url && <a className="btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer">Shopify</a>}
         </div>
         {msg && <div className={`route-msg ${msg.kind}`}>{msg.text}</div>}
+
+        {/* Adjust & generate */}
+        <div className="tool">
+          <button className="tool-toggle" onClick={() => setAdjOpen((v) => !v)}>
+            {adjOpen ? "▾" : "▸"} Adjust &amp; generate PO
+          </button>
+          {adjOpen && (
+            <div className="tool-body">
+              <label className="fld"><span>Delivery address (Shopify)</span>
+                <textarea rows={5} value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="Delivery address" /></label>
+              <label className="fld"><span>Delivery £ ex VAT — leave blank for auto</span>
+                <input type="number" step="0.01" value={deliv} onChange={(e) => setDeliv(e.target.value)} placeholder="auto" /></label>
+              <label className="fld"><span>Note on the PO (optional)</span>
+                <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
+              <button className="btn primary" onClick={doGen} disabled={adjBusy}>{adjBusy ? "Generating…" : "Generate PO with these"}</button>
+              {adjMsg && <div className={`route-msg ${adjMsg.kind}`}>{adjMsg.text}</div>}
+            </div>
+          )}
+        </div>
+
+        {/* Split */}
+        <div className="tool">
+          <button className="btn" onClick={doSplit} disabled={splitBusy}>{splitBusy ? "Splitting…" : "Split order (2+ suppliers)"}</button>
+          {splitMsg && <div className={`route-msg ${splitMsg.kind}`}>{splitMsg.text}</div>}
+        </div>
+
+        {/* Merge — only when this order has split parts */}
+        {siblings.length > 1 && (
+          <div className="tool">
+            <div className="tool-label">Merge split parts into one delivery</div>
+            <div className="merge-list">
+              {siblings.map((s) => (
+                <label key={s.item_id} className="merge-row">
+                  <input type="checkbox" checked={mergeSel.has(s.item_id)} onChange={() => toggleMerge(s.item_id)} />
+                  <span><b>{s.name}</b> <span className="sub">{s.supplier || "—"}{s.items ? ` · ${s.items}` : ""}</span></span>
+                </label>
+              ))}
+            </div>
+            <div className="merge-ctl">
+              <select className="filter" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+                <option value="">— fulfil merged part with —</option>
+                {mergeSuppliers.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <button className="btn primary" onClick={doMerge} disabled={mergeBusy}>{mergeBusy ? "Merging…" : "Merge"}</button>
+            </div>
+            {mergeMsg && <div className={`route-msg ${mergeMsg.kind}`}>{mergeMsg.text}</div>}
+          </div>
+        )}
 
         {!detail && !err && <div className="state"><span className="spinner" />Loading order…</div>}
         {err && <div className="state err">Couldn’t load detail ({err}).</div>}

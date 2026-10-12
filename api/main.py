@@ -386,10 +386,42 @@ def _fetch_one_order(item_id: str) -> dict | None:
     return row
 
 
-def _attach_doc(op, order_docs, item_id: str, o: dict) -> dict:
-    """Build the PO/slip for order `o` and attach it to Monday. Blocks (no attach) if validate_doc
-    finds a problem (e.g. no Shopify shipping address). Returns a result dict."""
-    kind, doc = op._build_doc(o)
+def _doc_kwargs(ov) -> dict:
+    """Turn Adjust-panel overrides into _build_doc kwargs (address_override / delivery_override /
+    notes_extra). Address may be a newline string or a list; blank fields are ignored."""
+    if not ov:
+        return {}
+    kw = {}
+    addr = ov.get("address")
+    if isinstance(addr, str):
+        addr = [ln.strip() for ln in addr.splitlines() if ln.strip()]
+    if addr:
+        kw["address_override"] = list(addr)
+    if ov.get("delivery") not in (None, ""):
+        try:
+            kw["delivery_override"] = float(ov["delivery"])
+        except (TypeError, ValueError):
+            pass
+    notes = ov.get("notes")
+    if isinstance(notes, str):
+        notes = [notes.strip()] if notes.strip() else None
+    if notes:
+        kw["notes_extra"] = list(notes)
+    return kw
+
+
+def _deliv_of(doc) -> float | None:
+    """Recover the ex-VAT delivery £ from a PO doc (total = (goods+deliv)*1.2)."""
+    t, g = doc.get("total"), doc.get("goods")
+    if isinstance(t, (int, float)) and isinstance(g, (int, float)):
+        return round(t / 1.2 - g, 2)
+    return None
+
+
+def _attach_doc(op, order_docs, item_id: str, o: dict, overrides=None) -> dict:
+    """Build the PO/slip for order `o` (with any Adjust overrides) and attach it to Monday. Blocks
+    (no attach) if validate_doc finds a problem (e.g. no Shopify shipping address)."""
+    kind, doc = op._build_doc(o, **_doc_kwargs(overrides))
     errs = order_docs.validate_doc(doc, kind)
     if errs:
         return {"ok": False, "blocked": True, "kind": kind, "errors": errs}
@@ -403,21 +435,128 @@ def _attach_doc(op, order_docs, item_id: str, o: dict) -> dict:
             "total": doc.get("total"), "detail": None if ok else "upload didn't verify — try again"}
 
 
+class PoIn(BaseModel):
+    address: str | None = None     # newline-separated delivery address override
+    delivery: float | None = None  # delivery £ (ex VAT) override
+    notes: str | None = None       # an extra note line for the PO
+
+
 @app.post("/orders/{item_id}/po", dependencies=[Depends(require_key)])
-def generate_po(item_id: str):
+def generate_po(item_id: str, body: PoIn | None = None):
     """Generate the PO (or packing slip) and attach it — reuses order_processing._build_doc (Shopify-
-    shipping-only address rule + never-cross pricing). Blocks (never attaches) on any missing field."""
+    shipping-only address rule + never-cross pricing). Blocks (never attaches) on any missing field.
+    Optional Adjust overrides (address / delivery / notes) are applied via _build_doc."""
     import order_processing as op
     import order_docs
     o = _fetch_one_order(item_id)
     if not o:
         raise HTTPException(status_code=404, detail="Order not found")
     try:
-        res = _attach_doc(op, order_docs, item_id, o)
+        res = _attach_doc(op, order_docs, item_id, o, overrides=(body.dict() if body else None))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't generate/attach the PDF: {e}")
     res["supplier"] = (o.get("supplier") or "") or None
     return res
+
+
+@app.post("/orders/{item_id}/po-preview", dependencies=[Depends(require_key)])
+def preview_po(item_id: str, body: PoIn | None = None):
+    """Build the PO/slip WITHOUT attaching — for the Adjust panel. Returns the delivery address used,
+    the priced lines, delivery £, total, any unpriced lines, and validation problems (e.g. missing
+    address) so the user can fix them before generating."""
+    import order_processing as op
+    import order_docs
+    o = _fetch_one_order(item_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    try:
+        kind, doc = op._build_doc(o, **_doc_kwargs(body.dict() if body else None))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build preview: {e}")
+    errs = order_docs.validate_doc(doc, kind)
+    return {
+        "kind": kind, "supplier": doc.get("supplier") or None, "dl": doc.get("dl") or [],
+        "lines": doc.get("lines") or [], "unpriced": doc.get("unpriced") or [],
+        "goods": doc.get("goods"), "delivery": _deliv_of(doc), "total": doc.get("total"),
+        "errors": errs,
+    }
+
+
+@app.post("/orders/{item_id}/split", dependencies=[Depends(require_key)])
+def split_order(item_id: str):
+    """Execute a split on Monday for an order that routes to 2+ suppliers (reuses
+    order_processing._process_split: makes a part per supplier, prices + attaches each part's PO)."""
+    import order_processing as op
+    o = _fetch_one_order(item_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    sid = (o.get("shopify_id") or "").strip()
+    if not sid:
+        return {"ok": False, "result": "no Shopify ID — can't split"}
+    try:
+        lines = ds.fetch_order_lines_with_vendor(sid)
+        pc = (ds.fetch_order_shipping(sid) or {}).get("postcode")
+        res = routing.route_order(lines, postcode=pc, sku_supplier=_api_sole_feed_supplier)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't route for split: {e}")
+    if not res.get("split"):
+        return {"ok": False, "result": "this order routes to a single supplier — no split needed",
+                "summary": routing.summary(res)}
+    try:
+        msg = op._process_split(o, res)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Split failed: {e}")
+    return {"ok": True, "result": msg, "summary": routing.summary(res)}
+
+
+def _part_out(p: dict) -> dict:
+    items = p.get("items") or ""
+    summary = "; ".join(ln.split("|")[0].strip() for ln in items.splitlines() if ln.strip())
+    return {"item_id": p.get("item_id"), "name": p.get("name"),
+            "supplier": (p.get("supplier") or "") or None, "items": summary[:160]}
+
+
+@app.get("/orders/{item_id}/siblings", dependencies=[Depends(require_key)])
+def order_siblings(item_id: str):
+    """The split-part siblings of an order (31824-1, -2, …) for the Merge panel. Empty if not split."""
+    import order_processing as op
+    try:
+        rows = ds.fetch_new_orders()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read orders: {e}")
+    o = next((r for r in rows if str(r.get("item_id")) == str(item_id)), None)
+    if not o:
+        return {"siblings": []}
+    sibs = op._split_parts(o, rows)
+    return {"siblings": [_part_out(p) for p in sibs]}
+
+
+class MergeIn(BaseModel):
+    part_item_ids: list[str]
+    target_supplier: str
+
+
+@app.post("/orders/merge", dependencies=[Depends(require_key)])
+def merge_parts(body: MergeIn):
+    """Merge selected split parts into one part fulfilled by target_supplier (reuses
+    order_processing._merge_parts: combines lines, regenerates the PO, archives absorbed parts)."""
+    import order_processing as op
+    if not body.part_item_ids or len(body.part_item_ids) < 2:
+        raise HTTPException(status_code=400, detail="Pick at least two parts to merge")
+    try:
+        rows = ds.fetch_new_orders()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read orders: {e}")
+    by_id = {str(r.get("item_id")): r for r in rows}
+    selected = [by_id[i] for i in body.part_item_ids if i in by_id]
+    if len(selected) < 2:
+        raise HTTPException(status_code=404, detail="Couldn't find the selected parts")
+    all_sibs = op._split_parts(selected[0], rows)
+    try:
+        msg = op._merge_parts(selected, body.target_supplier, all_sibs)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Merge failed: {e}")
+    return {"ok": True, "result": msg}
 
 
 @app.post("/orders/{item_id}/process", dependencies=[Depends(require_key)])
