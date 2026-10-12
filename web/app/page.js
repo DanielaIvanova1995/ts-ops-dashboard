@@ -28,6 +28,23 @@ const IconX = (p) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
     strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M18 6 6 18M6 6l12 12" /></svg>
 );
+const IconWarn = (p) => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+    <path d="M12 9v4" /><path d="M12 17h.01" /></svg>
+);
+
+/* Warn only if Monday's "£ to us" matches NEITHER the Shopify gross total NOR the ex-VAT subtotal
+   (so a gross-vs-ex-VAT basis difference never false-alarms). Returns the Shopify total to show. */
+function totalWarn(sell, t) {
+  const s = num(sell);
+  if (s === null || !t) return null;
+  const cand = [t.total, t.subtotal].filter((x) => x !== null && x !== undefined);
+  if (!cand.length) return null;
+  const ok = cand.some((c) => Math.abs(s - c) <= Math.max(0.5, Math.abs(c) * 0.005));
+  return ok ? null : (t.total ?? t.subtotal);
+}
 
 function stageClass(stage) {
   if (!stage) return "grey";
@@ -57,6 +74,7 @@ export default function Board() {
   const [orders, setOrders] = useState([]);
   const [meta, setMeta] = useState({ suppliers: [], stages: [] });
   const [counts, setCounts] = useState({});
+  const [totals, setTotals] = useState({}); // {item_id: {total, subtotal}} live Shopify totals
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState(null);
@@ -104,8 +122,9 @@ export default function Board() {
       setOrders(data.orders || []);
       if (mRes.ok) setMeta(await mRes.json());
       setUpdatedAt(new Date()); setStatus("ok");
-      // update-count bubbles (one extra call, non-fatal)
+      // update-count bubbles + live Shopify totals (extra calls, non-fatal, keep board fast)
       apiFetch("/updates-counts").then((r) => r.ok && r.json()).then((d) => d && setCounts(d.counts || {})).catch(() => {});
+      apiFetch("/order-totals").then((r) => r.ok && r.json()).then((d) => d && setTotals(d.totals || {})).catch(() => {});
     } catch (e) {
       if (String(e.message) !== "unauthorised") { setError(String(e.message || e)); setStatus("error"); }
     }
@@ -261,7 +280,21 @@ export default function Board() {
                           {stgList.map((s) => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </td>
-                      <td className="num">{money(o.sell)}</td>
+                      <td className="num">
+                        {(() => {
+                          const w = totalWarn(o.sell, totals[o.item_id]);
+                          return (
+                            <span className="sell-cell">
+                              {money(o.sell)}
+                              {w !== null && (
+                                <span className="warn-ico" title={`Monday £ to us ${money(o.sell)} ≠ Shopify total ${money(w)}`}>
+                                  <IconWarn />
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="num">{money(o.cost_supplier)}</td>
                       <td className="mid">
                         {o.po_url
@@ -301,6 +334,7 @@ function OrderDrawer({ order, detail, err, onClose }) {
   const ship = sx?.shipping?.lines || [];
   const bill = sx?.billing?.lines || [];
   const addrDiffer = ship.length && bill.length && ship.join("|") !== bill.join("|");
+  const sellWarn = sx?.totals ? totalWarn(order.sell, { total: sx.totals.total, subtotal: sx.totals.subtotal }) : null;
   return (
     <>
       <div className="overlay" onClick={onClose} />
@@ -364,7 +398,13 @@ function OrderDrawer({ order, detail, err, onClose }) {
                   <div className="kv"><span>Delivery</span><b>{money(sx.totals.shipping, cur)}</b></div>
                   <div className="kv"><span>VAT</span><b>{money(sx.totals.tax, cur)}</b></div>
                   <div className="kv big"><span>Total</span><b>{money(sx.totals.total, cur)}</b></div>
+                  <div className={`kv${sellWarn !== null ? " warnrow" : ""}`}>
+                    <span>£ to us (Monday)</span><b>{money(order.sell, cur)}</b>
+                  </div>
                 </div>
+              )}
+              {sellWarn !== null && (
+                <div className="warn-note"><IconWarn /> Monday’s “£ to us” doesn’t match the Shopify total — the order may have been edited, or the Monday value is stale. Worth checking before processing.</div>
               )}
             </section>
 

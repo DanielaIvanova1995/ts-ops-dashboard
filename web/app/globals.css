@@ -92,6 +92,17 @@ tbody tr:hover { background: #FCFAF8; }
 
 th.mid, td.mid { text-align: center; width: 64px; }
 
+/* £ to us mismatch warning */
+.sell-cell { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.warn-ico { color: var(--amber); display: inline-flex; align-items: center; cursor: help; }
+.kv.warnrow > b { color: var(--amber); }
+.warn-note {
+  display: flex; align-items: flex-start; gap: 7px; margin-top: 9px; padding: 8px 10px;
+  background: var(--amber-bg); color: #7A3E06; border: 1px solid #F2E2C2; border-radius: 8px;
+  font-size: 12px; line-height: 1.45;
+}
+.warn-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--amber); }
+
 /* Order no as a quiet link */
 .linkish { appearance: none; background: none; border: none; font: inherit; font-weight: 700; color: var(--brand-dark); cursor: pointer; padding: 0; }
 .linkish:hover { text-decoration: underline; }

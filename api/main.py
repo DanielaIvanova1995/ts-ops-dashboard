@@ -254,3 +254,54 @@ def updates_counts():
     groups = (boards[0].get("groups") if boards else []) or []
     items = ((groups[0].get("items_page") or {}).get("items") if groups else []) or []
     return {"counts": {it["id"]: len(it.get("updates") or []) for it in items}}
+
+
+@app.get("/order-totals", dependencies=[Depends(require_key)])
+def order_totals():
+    """Live Shopify total + subtotal per order in the NEW ORDERS group, keyed by Monday item_id —
+    so the board can warn when Monday's '£ to us' doesn't match the live Shopify total. One Monday
+    call (item_id -> shopify_id) + ONE batched Shopify call (all orders via `nodes`), so it stays
+    fast regardless of order count."""
+    col = ds.OP_COLS["shopify_id"]
+    mq = ("query($b:[ID!],$g:[String!]){boards(ids:$b){groups(ids:$g){"
+          "items_page(limit:200){items{ id column_values(ids:[\"%s\"]){ text } }}}}}" % col)
+    try:
+        md = ds._monday_gql(mq, {"b": [str(ds.ORDERS_BOARD_ID)], "g": [ds.ORDERS_NEW_GROUP]},
+                            ds.get_token())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read orders: {e}")
+    boards = md.get("boards") or []
+    groups = (boards[0].get("groups") if boards else []) or []
+    items = ((groups[0].get("items_page") or {}).get("items") if groups else []) or []
+    item_to_sid = {}
+    for it in items:
+        cvs = it.get("column_values") or []
+        sid = (cvs[0].get("text") if cvs else "") or ""
+        sid = sid.strip()
+        if sid:
+            item_to_sid[it["id"]] = sid
+    if not item_to_sid:
+        return {"totals": {}}
+    gids = [f"gid://shopify/Order/{sid}" for sid in set(item_to_sid.values())]
+    store = ds.get_secret("SHOPIFY_STORE")
+    token = ds.shopify_products_token()
+    sq = ("query($ids:[ID!]!){ nodes(ids:$ids){ ... on Order { id "
+          "totalPriceSet{shopMoney{amount}} subtotalPriceSet{shopMoney{amount}} } } }")
+    try:
+        r = requests.post(f"https://{store}/admin/api/{_SHOPIFY_API}/graphql.json",
+                          json={"query": sq, "variables": {"ids": gids}},
+                          headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                          timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read Shopify totals: {e}")
+    sid_tot = {}
+    for n in ((payload.get("data") or {}).get("nodes") or []):
+        if not n:
+            continue
+        sid = str(n.get("id") or "").rsplit("/", 1)[-1]
+        if sid:
+            sid_tot[sid] = {"total": _sm(n, "totalPriceSet"), "subtotal": _sm(n, "subtotalPriceSet")}
+    out = {iid: sid_tot[sid] for iid, sid in item_to_sid.items() if sid in sid_tot}
+    return {"totals": out}
