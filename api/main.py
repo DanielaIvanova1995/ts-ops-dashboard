@@ -545,6 +545,71 @@ def split_order(item_id: str):
     return {"ok": True, "result": msg, "summary": routing.summary(res)}
 
 
+@app.get("/orders/{item_id}/split-lines", dependencies=[Depends(require_key)])
+def split_lines(item_id: str):
+    """The order's lines with a SUGGESTED supplier per line (from routing) — pre-fills the manual
+    split picker. The user can reassign, then POST /split-manual."""
+    o = _fetch_one_order(item_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    sid = (o.get("shopify_id") or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="No Shopify ID — can't read lines")
+    try:
+        lines = ds.fetch_order_lines_with_vendor(sid)
+        pc = (ds.fetch_order_shipping(sid) or {}).get("postcode")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read order lines: {e}")
+    out = []
+    for ln in lines:
+        try:
+            r = routing.route_line(ln, area_pc=pc, sku_supplier=_api_sole_feed_supplier)
+        except Exception:  # noqa: BLE001
+            r = {}
+        out.append({"sku": ln.get("sku"), "title": ln.get("title"), "qty": ln.get("qty"),
+                    "line_subtotal": ln.get("line_subtotal"), "supplier": (r.get("supplier") or "")})
+    return {"lines": out}
+
+
+class SplitManualIn(BaseModel):
+    lines: list[dict]   # [{sku, title, qty, line_subtotal, supplier}] — supplier chosen per line
+
+
+@app.post("/orders/{item_id}/split-manual", dependencies=[Depends(require_key)])
+def split_manual_do(item_id: str, body: SplitManualIn):
+    """Create a split from the user's manual line→supplier assignment (reuses _process_split):
+    groups the lines by chosen supplier and makes a Monday part per supplier with its own PO."""
+    import order_processing as op
+    o = _fetch_one_order(item_id)
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    routed = []
+    for L in (body.lines or []):
+        sup = (L.get("supplier") or "").strip()
+        if not sup:
+            raise HTTPException(status_code=400, detail="Every line needs a supplier assigned")
+        qty = L.get("qty")
+        try:
+            qty = float(qty)
+        except (TypeError, ValueError):
+            qty = qty
+        routed.append({"sku": L.get("sku"), "title": L.get("title"), "qty": qty,
+                       "line_subtotal": L.get("line_subtotal"), "supplier": sup, "route": sup,
+                       "quote": False, "portal": sup in routing.PORTAL,
+                       "branch": None, "branch_email": None})
+    groups = {}
+    for l in routed:
+        groups.setdefault(l["route"], []).append(l)
+    if len(groups) < 2:
+        return {"ok": False, "result": "assign lines to at least TWO different suppliers to split"}
+    res = {"split": True, "groups": groups, "lines": routed, "overall_supplier": None}
+    try:
+        msg = op._process_split(o, res)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Split failed: {e}")
+    return {"ok": True, "result": msg}
+
+
 def _part_out(p: dict) -> dict:
     items = p.get("items") or ""
     summary = "; ".join(ln.split("|")[0].strip() for ln in items.splitlines() if ln.strip())

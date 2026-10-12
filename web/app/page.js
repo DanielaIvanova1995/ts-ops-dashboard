@@ -414,7 +414,7 @@ export default function Board() {
       {drawer && (
         <OrderDrawer
           order={drawer} detail={detail} err={detailErr} onClose={() => setDrawer(null)}
-          onProcess={processOne} apiFetch={apiFetch} flash={flash} reload={load}
+          onProcess={processOne} apiFetch={apiFetch} flash={flash} reload={load} suppliers={meta.suppliers || []}
         />
       )}
       {toast && <div className={`toast ${toast.kind === "err" ? "err" : ""}`}>{toast.msg}</div>}
@@ -422,14 +422,12 @@ export default function Board() {
   );
 }
 
-function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, reload }) {
+function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, reload, suppliers }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
   const [editorOpen, setEditorOpen] = useState(false);  // the big PO editor modal
-  // Split
-  const [splitBusy, setSplitBusy] = useState(false);
-  const [splitMsg, setSplitMsg] = useState(null);
+  const [splitOpen, setSplitOpen] = useState(false);    // the manual split picker modal
   // Merge
   const [siblings, setSiblings] = useState([]);
   const [mergeSel, setMergeSel] = useState(() => new Set());
@@ -457,19 +455,6 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
     } finally { setBusy(false); }
   }
 
-
-  async function doSplit() {
-    setSplitBusy(true); setSplitMsg(null);
-    try {
-      const res = await apiFetch(`/orders/${order.item_id}/split`, { method: "POST" });
-      if (!res.ok) throw new Error(`split ${res.status}`);
-      const d = await res.json();
-      setSplitMsg({ kind: d.ok ? "ok" : "warn", text: d.result || d.summary || "—" });
-      if (d.ok) { flash("Split created"); reload && reload(); }
-    } catch (e) {
-      if (String(e.message) !== "unauthorised") setSplitMsg({ kind: "warn", text: String(e.message || e) });
-    } finally { setSplitBusy(false); }
-  }
 
   async function doMerge() {
     const ids = [...mergeSel];
@@ -519,8 +504,7 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
 
         {/* Split */}
         <div className="tool">
-          <button className="btn" onClick={doSplit} disabled={splitBusy}>{splitBusy ? "Splitting…" : "Split order (2+ suppliers)"}</button>
-          {splitMsg && <div className={`route-msg ${splitMsg.kind}`}>{splitMsg.text}</div>}
+          <button className="btn" onClick={() => setSplitOpen(true)}>Split order…</button>
         </div>
 
         {/* Merge — only when this order has split parts */}
@@ -639,6 +623,117 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
         <PoEditor order={order} apiFetch={apiFetch} flash={flash} reload={reload}
           onClose={() => setEditorOpen(false)} />
       )}
+      {splitOpen && (
+        <SplitEditor order={order} apiFetch={apiFetch} flash={flash} reload={reload}
+          suppliers={suppliers} onClose={() => setSplitOpen(false)} onDone={onClose} />
+      )}
+    </>
+  );
+}
+
+function SplitEditor({ order, apiFetch, flash, reload, suppliers, onClose, onDone }) {
+  const [lines, setLines] = useState([]);
+  const [sel, setSel] = useState(() => new Set());
+  const [bulk, setBulk] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await apiFetch(`/orders/${order.item_id}/split-lines`);
+        if (!res.ok) throw new Error(`lines ${res.status}`);
+        const d = await res.json();
+        if (live) setLines((d.lines || []).map((l) => ({ ...l, supplier: l.supplier || "" })));
+      } catch (e) {
+        if (String(e.message) !== "unauthorised") setMsg({ kind: "warn", text: String(e.message || e) });
+      } finally { if (live) setLoading(false); }
+    })();
+    return () => { live = false; };
+  }, [apiFetch, order.item_id]);
+
+  // supplier options = live labels + any already-suggested supplier not in that list
+  const opts = Array.from(new Set([...(suppliers || []), ...lines.map((l) => l.supplier).filter(Boolean)])).sort();
+  const groups = Array.from(new Set(lines.map((l) => l.supplier).filter(Boolean)));
+
+  function toggle(i) { setSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; }); }
+  function toggleAll() { setSel((s) => (s.size === lines.length ? new Set() : new Set(lines.map((_, i) => i)))); }
+  function setLineSup(i, v) { setLines((ls) => ls.map((l, j) => (j === i ? { ...l, supplier: v } : l))); }
+  function assignBulk() {
+    if (!bulk) { setMsg({ kind: "warn", text: "Pick a supplier to assign." }); return; }
+    setLines((ls) => ls.map((l, i) => (sel.has(i) ? { ...l, supplier: bulk } : l)));
+    setSel(new Set());
+  }
+
+  async function doSplit() {
+    if (groups.length < 2) { setMsg({ kind: "warn", text: "Assign lines to at least two different suppliers to split." }); return; }
+    if (lines.some((l) => !l.supplier)) { setMsg({ kind: "warn", text: "Every line needs a supplier." }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/split-manual`, { method: "POST", body: JSON.stringify({ lines }) });
+      if (!res.ok) throw new Error(`split ${res.status}`);
+      const d = await res.json();
+      if (d.ok) { flash("Split created"); reload && reload(); setMsg({ kind: "ok", text: d.result || "Split created." }); setTimeout(() => { onClose(); onDone && onDone(); }, 1100); }
+      else setMsg({ kind: "warn", text: d.result || "Couldn’t split." });
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setBusy(false); }
+  }
+
+  const allSel = lines.length > 0 && sel.size === lines.length;
+  return (
+    <>
+      <div className="overlay" onClick={onClose} style={{ zIndex: 60 }} />
+      <div className="po-modal">
+        <div className="po-head">
+          <div className="dh-ono">Split order · #{order.order_no}</div>
+          <button className="icon-btn" onClick={onClose} title="Close"><IconX /></button>
+        </div>
+        {loading ? <div className="state"><span className="spinner" />Reading the lines…</div> : (
+          <div style={{ padding: "12px 18px", overflowY: "auto" }}>
+            <div className="split-bulk">
+              <span className="sub">Tick lines, choose a supplier, assign them all at once:</span>
+              <select className="filter" value={bulk} onChange={(e) => setBulk(e.target.value)}>
+                <option value="">— supplier —</option>
+                {opts.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <button className="btn" onClick={assignBulk} disabled={!sel.size}>Assign to selected ({sel.size})</button>
+            </div>
+            <table className="editgrid">
+              <thead><tr>
+                <th className="chk"><input type="checkbox" checked={allSel} onChange={toggleAll} /></th>
+                <th>Item</th><th className="qty">Qty</th><th style={{ width: 200 }}>Supplier</th>
+              </tr></thead>
+              <tbody>
+                {lines.map((l, i) => (
+                  <tr key={i} className={sel.has(i) ? "sel" : ""}>
+                    <td className="chk"><input type="checkbox" checked={sel.has(i)} onChange={() => toggle(i)} /></td>
+                    <td>{l.title}{l.sku ? <div className="sub">{l.sku}</div> : null}</td>
+                    <td className="qty">{l.qty}</td>
+                    <td>
+                      <select className="filter" style={{ width: "100%" }} value={l.supplier} onChange={(e) => setLineSup(i, e.target.value)}>
+                        <option value="">— choose —</option>
+                        {opts.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="sub" style={{ marginTop: 8 }}>
+              {groups.length >= 2 ? `Will create ${groups.length} parts: ${groups.join(", ")}` : "Assign 2+ suppliers to split."}
+            </div>
+            {msg && <div className={`route-msg ${msg.kind}`} style={{ marginTop: 8 }}>{msg.text}</div>}
+          </div>
+        )}
+        <div className="po-foot">
+          <button className="btn primary" onClick={doSplit} disabled={busy || loading}>{busy ? "Splitting…" : "Create split"}</button>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
     </>
   );
 }

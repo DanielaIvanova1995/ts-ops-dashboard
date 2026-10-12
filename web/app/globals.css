@@ -169,6 +169,9 @@ tbody tr.sel:hover { background: #FEEFE4; }
 .po-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .po-summary { background: #FBFBFC; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .po-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
+.split-bulk { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; padding: 9px 11px; background: #FBFBFC; border: 1px solid var(--line); border-radius: 8px; }
+.split-bulk .filter { min-width: 150px; }
+.editgrid td.chk, .editgrid th.chk { width: 30px; text-align: center; }
 @media (max-width: 760px) { .po-body { grid-template-columns: 1fr; } .po-row2 { grid-template-columns: 1fr; } }
 
 /* Icon buttons (PO paperclip / file / close) */
