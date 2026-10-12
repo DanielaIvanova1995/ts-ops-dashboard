@@ -42,7 +42,8 @@ function totalWarn(sell, t) {
   const s = num(sell);
   const c = t ? num(t.total) : null;
   if (s === null || c === null) return null;
-  return Math.abs(s - c) <= 0.05 ? null : c; // 5p leeway for rounding; anything more is a real mismatch
+  // Exact to the penny — no tolerance. (Round only to avoid float noise like 202.1299…)
+  return Math.round(s * 100) === Math.round(c * 100) ? null : c;
 }
 
 function stageClass(stage) {
