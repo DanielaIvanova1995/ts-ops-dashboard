@@ -65,6 +65,30 @@ def health():
     return {"ok": True, "service": "tradehub-api"}
 
 
+@app.get("/diag")
+def diag():
+    """Yes/no status of the backend's integrations — no secrets returned. Open (booleans only) so it
+    can be checked quickly. Confirms whether Supabase + QuickBooks are usable from THIS service."""
+    out = {"supabase_configured": False, "supabase_read_ok": None, "qbo_connected": None}
+    try:
+        import supabase_db as sdb
+        out["supabase_configured"] = bool(sdb.configured())
+        if out["supabase_configured"]:
+            try:
+                sdb.config_get("invoice_import")   # trivial read → proves it actually connects
+                out["supabase_read_ok"] = True
+            except Exception as e:  # noqa: BLE001
+                out["supabase_read_ok"] = False
+                out["supabase_error"] = str(e)[:140]
+    except Exception as e:  # noqa: BLE001
+        out["supabase_error"] = str(e)[:140]
+    try:
+        out["qbo_connected"] = bool(ds.qbo_is_connected())
+    except Exception as e:  # noqa: BLE001
+        out["qbo_error"] = str(e)[:140]
+    return out
+
+
 def _order_out(o: dict) -> dict:
     """Trim a Monday order row to the fields the board needs (UI-friendly, stable shape)."""
     assets = o.get("po_assets") or []
