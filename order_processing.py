@@ -294,15 +294,21 @@ def _pricing_table(stamp):
     Supplier names are canonicalised (see _canon_sup) so 'LPD Doors' in the feed matches 'LPD'
     on the order. `stamp` (the price files' newest mtime) is part of the cache key, so the table
     is rebuilt whenever a price file changes rather than living for the whole session."""
+    import sys
     try:
         d = json.load(open("pricing_lookup.json", encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return {}
+    # sys.intern the canonical supplier names: the feed has ~68k offers but only ~100 distinct
+    # suppliers, so interning collapses 68k duplicate strings to one shared object each — a free
+    # memory saving with IDENTICAL contents. (Interning never changes equality or lookups.)
     out = {}
+    _cs = _canon_sup
     for it in d.get("items", []):
         sku = re.sub(r"[^a-z0-9]", "", (it.get("sku") or "").lower())
         if sku:
-            out[sku] = {_canon_sup(o.get("s")): o.get("c") for o in (it.get("offers") or [])}
+            out[sku] = {sys.intern(_cs(o.get("s"))): o.get("c") for o in (it.get("offers") or [])}
+    del d  # free the full 14 MB parse before building the (small) overrides, lowering the peak
     # Durable code-side overrides (in the repo, so a feed rebuild can't wipe them) — e.g. UPB's
     # Hardie prices keyed by OUR Shopify SKUs, which UPB's own 'any colour' pricelist SKUs don't
     # match. Fills/overrides the supplier's cost for those SKUs.
@@ -312,7 +318,7 @@ def _pricing_table(stamp):
             if sup in ("_patterns", "_titles", "_persqm", "_persection", "_delivery") \
                     or not isinstance(skus, dict):  # see _line_cost
                 continue
-            sn = _canon_sup(sup)
+            sn = sys.intern(_cs(sup))
             for sk, cost in skus.items():
                 if isinstance(cost, (int, float)):
                     out.setdefault(re.sub(r"[^a-z0-9]", "", (sk or "").lower()), {})[sn] = cost
