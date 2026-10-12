@@ -10,6 +10,7 @@ Deploy:        a SEPARATE Render service, rootDir = repo root,
 """
 from __future__ import annotations
 
+import hmac
 import os
 import sys
 from pathlib import Path
@@ -17,8 +18,9 @@ from pathlib import Path
 # Make the repo root importable so we reuse the existing TradeHub modules as-is.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, HTTPException            # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware    # noqa: E402
+from fastapi import Depends, FastAPI, Header, HTTPException   # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware            # noqa: E402
+from pydantic import BaseModel                                # noqa: E402
 
 import data_sources as ds                             # noqa: E402  (reused — Monday/Shopify calls)
 import order_routing as routing                       # noqa: E402  (reused — routing rules)
@@ -34,10 +36,24 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+# ---- Shared access-code lock ---------------------------------------------------------------------
+# Set TRADEHUB_ACCESS_KEY on the host to a shared code. The front-end sends it as the
+# X-TradeHub-Key header on every request; the API rejects anything else. `/health` and `/` stay open
+# (the host's health check needs /health). If the env var is UNSET the API stays open — so it MUST be
+# set on the deployed service. Interim gate until per-person Supabase logins land.
+_ACCESS_KEY = (os.environ.get("TRADEHUB_ACCESS_KEY") or "").strip()
+
+
+def require_key(x_tradehub_key: str | None = Header(default=None)):
+    if not _ACCESS_KEY:
+        return  # no code configured → open (set TRADEHUB_ACCESS_KEY on the host to lock it)
+    if not x_tradehub_key or not hmac.compare_digest(x_tradehub_key, _ACCESS_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing access code")
+
 
 @app.get("/")
 def root():
-    return {"service": "tradehub-api", "status": "ok", "docs": "/docs"}
+    return {"service": "tradehub-api", "status": "ok", "locked": bool(_ACCESS_KEY), "docs": "/docs"}
 
 
 @app.get("/health")
@@ -62,7 +78,7 @@ def _order_out(o: dict) -> dict:
     }
 
 
-@app.get("/orders")
+@app.get("/orders", dependencies=[Depends(require_key)])
 def orders():
     """The live NEW ORDERS group from Monday — reuses data_sources.fetch_new_orders().
 
@@ -74,3 +90,43 @@ def orders():
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the orders board: {e}")
     return {"count": len(rows), "orders": [_order_out(o) for o in rows]}
+
+
+@app.get("/meta", dependencies=[Depends(require_key)])
+def meta():
+    """Dropdown options for the board: the live Monday Supplier labels + the Stage options.
+    Mirrors how the Streamlit board builds its selectors so writes always match a real label."""
+    try:
+        suppliers = [s for s in ds.op_board_supplier_labels() if s]
+    except Exception:  # noqa: BLE001
+        suppliers = sorted(set(routing.CANON.values()))
+    return {"suppliers": suppliers, "stages": list(ds.OP_STAGES)}
+
+
+class SupplierIn(BaseModel):
+    supplier: str = ""   # "" clears the Monday dropdown
+
+
+class StageIn(BaseModel):
+    stage: str = ""      # "" clears the status
+
+
+@app.post("/orders/{item_id}/supplier", dependencies=[Depends(require_key)])
+def set_supplier(item_id: str, body: SupplierIn):
+    """Set (or clear) the Supplier on the Monday order — reuses data_sources.op_set_supplier.
+    Monday stays the source of truth; this is the same write the Streamlit board does."""
+    try:
+        ds.op_set_supplier(item_id, (body.supplier or "").strip())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't set supplier: {e}")
+    return {"ok": True, "item_id": item_id, "supplier": (body.supplier or "").strip() or None}
+
+
+@app.post("/orders/{item_id}/stage", dependencies=[Depends(require_key)])
+def set_stage(item_id: str, body: StageIn):
+    """Set (or clear) the Stage/status on the Monday order — reuses data_sources.op_set_status."""
+    try:
+        ds.op_set_status(item_id, (body.stage or "").strip())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't set stage: {e}")
+    return {"ok": True, "item_id": item_id, "stage": (body.stage or "").strip() or None}

@@ -1,49 +1,136 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const KEY_STORE = "th_access_key";
 
-// Stage → pill colour. Mirrors how the current board reads at a glance.
-function stagePill(stage) {
-  if (!stage) return { cls: "dash", label: "—" };
+function stageClass(stage) {
+  if (!stage) return "grey";
   const s = stage.toLowerCase();
-  if (s.includes("send po") || s.includes("po sent")) return { cls: "green", label: stage };
-  if (s.includes("place order")) return { cls: "blue", label: stage };
-  if (s.includes("quote")) return { cls: "amber", label: stage };
-  if (s.includes("portal")) return { cls: "amber", label: stage };
-  return { cls: "grey", label: stage };
+  if (s.includes("send po") || s.includes("po sent")) return "green";
+  if (s.includes("place order")) return "blue";
+  if (s.includes("quote") || s.includes("portal")) return "amber";
+  return "grey";
 }
 
 function money(v) {
   if (v === null || v === undefined || v === "") return "—";
   const n = Number(v);
-  return Number.isFinite(n) ? "£" + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(v);
+  return Number.isFinite(n)
+    ? "£" + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : String(v);
 }
 
 export default function Board() {
+  const [accessKey, setAccessKey] = useState(null);
+  const [needKey, setNeedKey] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+
   const [orders, setOrders] = useState([]);
-  const [status, setStatus] = useState("loading"); // loading | ok | error
+  const [meta, setMeta] = useState({ suppliers: [], stages: [] });
+  const [status, setStatus] = useState("idle"); // idle | loading | ok | error
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [toast, setToast] = useState(null); // {msg, kind}
+
+  // Read a stored code on first load.
+  useEffect(() => {
+    let k = null;
+    try { k = localStorage.getItem(KEY_STORE); } catch {}
+    if (k) setAccessKey(k);
+    else setNeedKey(true);
+  }, []);
+
+  const flash = useCallback((msg, kind = "ok") => {
+    setToast({ msg, kind });
+    setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  const apiFetch = useCallback(async (path, opts = {}) => {
+    const res = await fetch(`${API}${path}`, {
+      ...opts,
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-TradeHub-Key": accessKey || "", ...(opts.headers || {}) },
+    });
+    if (res.status === 401) {
+      try { localStorage.removeItem(KEY_STORE); } catch {}
+      setAccessKey(null);
+      setNeedKey(true);
+      setError("Wrong access code — try again.");
+      throw new Error("unauthorised");
+    }
+    return res;
+  }, [accessKey]);
 
   const load = useCallback(async () => {
-    setStatus("loading");
-    setError("");
+    if (!accessKey) return;
+    setStatus("loading"); setError("");
     try {
-      const res = await fetch(`${API}/orders`, { cache: "no-store" });
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data = await res.json();
+      const [oRes, mRes] = await Promise.all([apiFetch("/orders"), apiFetch("/meta")]);
+      if (!oRes.ok) throw new Error(`API ${oRes.status}`);
+      const data = await oRes.json();
       setOrders(data.orders || []);
+      if (mRes.ok) setMeta(await mRes.json());
       setUpdatedAt(new Date());
       setStatus("ok");
     } catch (e) {
-      setError(String(e.message || e));
-      setStatus("error");
+      if (String(e.message) !== "unauthorised") { setError(String(e.message || e)); setStatus("error"); }
     }
-  }, []);
+  }, [accessKey, apiFetch]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (accessKey) load(); }, [accessKey, load]);
+
+  function submitKey(e) {
+    e.preventDefault();
+    const k = keyInput.trim();
+    if (!k) return;
+    try { localStorage.setItem(KEY_STORE, k); } catch {}
+    setAccessKey(k); setNeedKey(false); setKeyInput(""); setError("");
+  }
+  function signOut() {
+    try { localStorage.removeItem(KEY_STORE); } catch {}
+    setAccessKey(null); setOrders([]); setNeedKey(true); setStatus("idle");
+  }
+
+  // Optimistic field update: change locally now, save to Monday, revert on failure.
+  const saveField = useCallback(async (item_id, field, value) => {
+    const prev = orders.find((o) => o.item_id === item_id)?.[field] ?? null;
+    const next = value || null;
+    setOrders((os) => os.map((o) => (o.item_id === item_id ? { ...o, [field]: next } : o)));
+    try {
+      const res = await apiFetch(`/orders/${item_id}/${field}`, {
+        method: "POST",
+        body: JSON.stringify({ [field]: value }),
+      });
+      if (!res.ok) throw new Error(`save ${res.status}`);
+      flash(`${field === "supplier" ? "Supplier" : "Stage"} saved`, "ok");
+    } catch (e) {
+      setOrders((os) => os.map((o) => (o.item_id === item_id ? { ...o, [field]: prev } : o)));
+      if (String(e.message) !== "unauthorised") flash(`Couldn't save — ${String(e.message || e)}`, "err");
+    }
+  }, [orders, apiFetch, flash]);
+
+  // Ensure the current value is always a selectable option (even if not in the live label list).
+  const supplierOpts = useMemo(() => meta.suppliers || [], [meta]);
+  const stageOpts = useMemo(() => meta.stages || [], [meta]);
+
+  if (needKey) {
+    return (
+      <div className="wrap">
+        <div className="login">
+          <div className="wordmark">Trade<b>Hub</b><span className="sec">Order Processing</span></div>
+          <p className="sub">Enter the shared access code to continue.</p>
+          <form onSubmit={submitKey} className="loginform">
+            <input className="input" type="password" value={keyInput} autoFocus
+              onChange={(e) => setKeyInput(e.target.value)} placeholder="Access code" />
+            <button className="btn primary" type="submit">Enter</button>
+          </form>
+          {error && <p className="state err">{error}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="wrap">
@@ -54,6 +141,7 @@ export default function Board() {
             {status === "ok" ? <><b>{orders.length}</b> orders</> : status === "loading" ? "Loading…" : ""}
             {updatedAt && status === "ok" ? ` · ${updatedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""}
           </span>
+          <button className="btn" onClick={signOut} title="Clear the access code on this device">Sign out</button>
           <button className="btn primary" onClick={load} disabled={status === "loading"}>
             {status === "loading" ? "Refreshing…" : "Refresh"}
           </button>
@@ -67,31 +155,39 @@ export default function Board() {
         {status === "error" && (
           <div className="state err">
             Couldn’t reach the API ({error}).<br />
-            <span className="sub">Check the API service is running and NEXT_PUBLIC_API_URL points to it.</span>
+            <span className="sub">Check the API service is running and the access code is correct.</span>
           </div>
         )}
         {(status === "ok" || orders.length > 0) && (
           <table>
             <thead>
               <tr>
-                <th>Order</th>
-                <th>Customer</th>
-                <th>Supplier</th>
-                <th>Stage</th>
-                <th className="num">£ to us</th>
-                <th className="num">£ supplier</th>
-                <th>PO</th>
+                <th>Order</th><th>Customer</th><th>Supplier</th><th>Stage</th>
+                <th className="num">£ to us</th><th className="num">£ supplier</th><th>PO</th>
               </tr>
             </thead>
             <tbody>
               {orders.map((o) => {
-                const sp = stagePill(o.stage);
+                const supList = o.supplier && !supplierOpts.includes(o.supplier) ? [o.supplier, ...supplierOpts] : supplierOpts;
+                const stgList = o.stage && !stageOpts.includes(o.stage) ? [o.stage, ...stageOpts] : stageOpts;
                 return (
                   <tr key={o.item_id}>
                     <td className="ono">{o.order_no}</td>
                     <td className="cust">{o.customer || "—"}</td>
-                    <td>{o.supplier || <span className="sub">— unrouted —</span>}</td>
-                    <td><span className={`pill ${sp.cls}`}>{sp.label}</span></td>
+                    <td>
+                      <select className="cell-select" value={o.supplier || ""}
+                        onChange={(e) => saveField(o.item_id, "supplier", e.target.value)}>
+                        <option value="">— unrouted —</option>
+                        {supList.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <select className={`cell-select ${stageClass(o.stage)}`} value={o.stage || ""}
+                        onChange={(e) => saveField(o.item_id, "stage", e.target.value)}>
+                        <option value="">—</option>
+                        {stgList.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
                     <td className="num">{money(o.sell)}</td>
                     <td className="num">{money(o.cost_supplier)}</td>
                     <td>{o.has_po ? <span className="pill green">attached</span> : <span className="pill dash">none</span>}</td>
@@ -105,6 +201,8 @@ export default function Board() {
           </table>
         )}
       </div>
+
+      {toast && <div className={`toast ${toast.kind === "err" ? "err" : ""}`}>{toast.msg}</div>}
     </div>
   );
 }
