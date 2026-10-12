@@ -35,15 +35,14 @@ const IconWarn = (p) => (
     <path d="M12 9v4" /><path d="M12 17h.01" /></svg>
 );
 
-/* Warn only if Monday's "£ to us" matches NEITHER the Shopify gross total NOR the ex-VAT subtotal
-   (so a gross-vs-ex-VAT basis difference never false-alarms). Returns the Shopify total to show. */
+/* "£ to us" is the GROSS (inc-VAT) order value, so compare it directly to the Shopify gross total
+   (totalPriceSet, inc VAT + delivery). Warn when they differ beyond a penny tolerance — i.e. the
+   order was edited after it came in, or the Monday value is stale. Returns the Shopify total. */
 function totalWarn(sell, t) {
   const s = num(sell);
-  if (s === null || !t) return null;
-  const cand = [t.total, t.subtotal].filter((x) => x !== null && x !== undefined);
-  if (!cand.length) return null;
-  const ok = cand.some((c) => Math.abs(s - c) <= Math.max(0.5, Math.abs(c) * 0.005));
-  return ok ? null : (t.total ?? t.subtotal);
+  const c = t ? num(t.total) : null;
+  if (s === null || c === null) return null;
+  return Math.abs(s - c) <= Math.max(0.5, Math.abs(c) * 0.005) ? null : c;
 }
 
 function stageClass(stage) {
