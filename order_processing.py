@@ -26,6 +26,8 @@ import order_routing
 DANIELA = "daniela@tradesuperstoreonline.co.uk"
 FROM_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 PLACE_ORDER = "Place Order"      # only orders at this stage are unprocessed / safe to process
+_PROCESS_CHUNK = 8               # "Process all/selected" runs this many per rerun, then continues,
+                                 # so a big group can never stall the Render connection in one go.
 # Correct PO email per supplier (set on Monday after the supplier). Filled from the supplier
 # rulebook's po_email. EXCLUDES suppliers whose email is resolved elsewhere: Eurocell / Travis
 # Perkins / UPB (nearest branch or depot), GAP (Monday auto-fills from the GAP tag), and portal-only
@@ -2014,9 +2016,9 @@ def render():
             st.session_state.pop(k, None)
         st.rerun()
     load_fc = tc[1].button(
-        ":material/call_split: Refresh Fulfil #",
-        help="Re-reads how many separate Shopify fulfilments each order has. Fills automatically; "
-             "use this to refresh after splitting.")
+        ":material/call_split: Load Fulfil #",
+        help="Reads how many separate Shopify fulfilments each order has (2+ = split). This is a "
+             "Shopify call PER ORDER, so it's loaded only when you click here — keeps the page fast.")
     do_all = tc[3].button("Process all", type="primary", use_container_width=True)
     do_sel = tc[4].button("Process selected", type="primary", use_container_width=True)
 
@@ -2025,7 +2027,10 @@ def render():
 
     _suggestion_box()
 
-    if load_fc or "_op_fcounts" not in st.session_state:      # auto-fill on first load / Refresh
+    # Fulfilment counts are a Shopify call PER ORDER — loading them for the whole group on every
+    # page render was the main thing making this page crawl. Load them ONLY when the user clicks
+    # "Load Fulfil #" (or after a split, where it's refreshed). Blank until then — the page is fast.
+    if load_fc:
         with st.spinner("Reading Shopify fulfilments…"):
             fc = {}
             for o in orders:
@@ -2037,6 +2042,7 @@ def render():
                 except Exception:  # noqa: BLE001
                     fc[o["item_id"]] = None
             st.session_state["_op_fcounts"] = fc
+    st.session_state.setdefault("_op_fcounts", {})            # blank column until explicitly loaded
 
     # Dropdown option sets must include every value currently present, or the grid errors.
     sup_opts = list(dict.fromkeys([s for s in sup_labels if s]
@@ -2135,52 +2141,61 @@ def render():
     # Which rows are ticked — drives both "Process selected" and the expand-detail panels below.
     ticked = [i for i in range(len(orders)) if bool(edited.iloc[i]["Select"])]
 
-    # ---- Process = one click: run non-splits straight away; pause only to confirm splits ----
+    # ---- Process in SAFE CHUNKS: a click builds a queue of Place-Order item_ids, then each
+    #      rerun drains up to _PROCESS_CHUNK of them, commits those to Monday, and reruns to
+    #      continue until the queue is empty. Keeps every run short (~8 orders) so a big group
+    #      can never stall the Render connection, and partial progress is saved as it goes.
+    #      Splits are handled inside _process_one (no confirm) exactly as before. ----
     if do_all or do_sel:
         tgt = list(range(len(orders))) if do_all else ticked
         if not tgt:
             st.warning("No orders ticked — use the ✓ column to pick which to process.")
         else:
-            by_id = {o["item_id"]: o for o in orders}
-            rts = st.session_state.setdefault("_op_routes", {})
-            with st.spinner("Routing & processing…"):
-                for i in tgt:                                  # route Place Order orders only
-                    o = orders[i]
-                    if (o.get("stage") or "").strip() != PLACE_ORDER:
-                        continue
-                    iid, sid = o["item_id"], (o.get("shopify_id") or "").strip()
-                    if rts.get(iid) is None and sid:
-                        try:
-                            lines = data_sources.fetch_order_lines_with_vendor(sid)
-                            try:
-                                pc = (data_sources.fetch_order_shipping(sid) or {}).get("postcode")
-                            except Exception:  # noqa: BLE001
-                                pc = None
-                            rts[iid] = order_routing.route_order(lines, postcode=pc, sku_supplier=_sole_feed_supplier)
-                        except Exception as e:  # noqa: BLE001
-                            rts[iid] = {"error": str(e)[:100], "lines": []}
-                run_ids, results = [], []
-                for i in tgt:
-                    o = orders[i]
-                    iid = o["item_id"]
-                    if (o.get("stage") or "").strip() != PLACE_ORDER:
-                        results.append({"Order": o.get("order_no") or o.get("name"),
-                                        "Supplier": o.get("supplier") or "",
-                                        "Result": f"already {(o.get('stage') or '—')} — skipped"})
-                    else:
-                        run_ids.append(iid)          # splits included — no confirm, straight through
-                prog = st.progress(0.0, text="Processing…") if run_ids else None
-                for n, iid in enumerate(run_ids):
-                    results.append(_process_one(by_id[iid]))
-                    if prog:
-                        prog.progress((n + 1) / len(run_ids), text=f"Processed {n + 1}/{len(run_ids)}")
-                if prog:
-                    prog.empty()
-            st.session_state["_op_results"] = results
-            # No TradeHub approval step: everything writes straight to Monday, then the board
-            # auto-refreshes so the new Supplier / Stage / PO populate onto the table at once.
-            for k in ("_op_orders", "_op_detail", "_op_fcounts", "_op_routes", "_op_ship",
-                      "_op_split_pending"):
+            queue, skipped = [], []
+            for i in tgt:                                  # only orders at Place Order run
+                o = orders[i]
+                if (o.get("stage") or "").strip() != PLACE_ORDER:
+                    skipped.append({"Order": o.get("order_no") or o.get("name"),
+                                    "Supplier": o.get("supplier") or "",
+                                    "Result": f"already {(o.get('stage') or '—')} — skipped"})
+                else:
+                    queue.append(o["item_id"])
+            st.session_state["_op_results"] = skipped
+            if queue:
+                st.session_state["_op_queue"] = queue
+                st.session_state["_op_queue_total"] = len(queue)
+            st.rerun()
+
+    # Drain the queue a chunk at a time (runs on every rerun while anything is left to process).
+    _queue = st.session_state.get("_op_queue")
+    if _queue:
+        by_id = {o["item_id"]: o for o in orders}
+        total = st.session_state.get("_op_queue_total", len(_queue))
+        done = total - len(_queue)
+        batch = _queue[:_PROCESS_CHUNK]
+        results = st.session_state.setdefault("_op_results", [])
+        prog = st.progress(done / total if total else 0.0, text=f"Processing… {done}/{total}")
+        for n, iid in enumerate(batch):
+            o = by_id.get(iid)
+            if o is None:                              # order left the board mid-run — skip safely
+                results.append({"Order": iid, "Supplier": "", "Result": "not found — skipped"})
+            else:
+                try:
+                    results.append(_process_one(o))
+                except Exception as e:                 # noqa: BLE001 — one bad order never stops the batch
+                    results.append({"Order": o.get("order_no") or o.get("name"),
+                                    "Supplier": o.get("supplier") or "",
+                                    "Result": "error: " + str(e)[:60]})
+            prog.progress((done + n + 1) / total if total else 1.0,
+                          text=f"Processing… {done + n + 1}/{total}")
+        prog.empty()
+        st.session_state["_op_queue"] = _queue[_PROCESS_CHUNK:]
+        if st.session_state["_op_queue"]:
+            st.rerun()                                 # more to do — next chunk on the next run
+        else:
+            # All done — refresh the board from Monday so the new Supplier / Stage / PO show.
+            for k in ("_op_queue", "_op_queue_total", "_op_orders", "_op_detail", "_op_fcounts",
+                      "_op_routes", "_op_ship", "_op_split_pending"):
                 st.session_state.pop(k, None)
             st.rerun()
 

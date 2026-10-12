@@ -358,10 +358,10 @@ def route_line(line, area_pc=None, sku_supplier=None):
     # Cedral (fibre-cement cladding) → quote from AJW Distribution until we get their pricelist
     # (Daniela, 2026-08-24). Tag/name check overrides whatever vendor it sits under.
     if "cedral" in tags or "cedral" in blob:
-        # Cedral now comes from AJW Distribution, NOT Southern Sheeting (Daniela 2026-10-07).
-        # Stage = Needs Review (no AJW pricelist yet, so Natasha reviews) + email Kevin Addison.
-        # The Cedral products sit under the "SS" (Southern Sheeting) Shopify vendor, so this rule
-        # MUST stay ABOVE the vendor→CANON lookup below or they'd route to Southern Sheeting.
+        # Cedral comes from AJW Distribution (Daniela 2026-10-07). Stage = Needs Review (no AJW
+        # pricelist yet, so Natasha reviews) + email Kevin Addison. Cedral products now carry the
+        # "Cedral" Shopify vendor (were "SS"/"TP") — this rule matches the brand in the title/vendor
+        # and stays ABOVE the vendor→CANON lookup either way, so routing is unaffected by the change.
         return out("AJW", "AJW", "Cedral → AJW Distribution (Kevin Addison) — review",
                    "high", branch_email="kevin.addison@ajwdistribution.co.uk")
     # Shopify VENDOR is the authoritative router for everything else — check it FIRST, so a
