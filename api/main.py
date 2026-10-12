@@ -163,9 +163,10 @@ def _shopify_order_detail(shopify_id: str) -> dict:
     store = ds.get_secret("SHOPIFY_STORE")
     token = ds.shopify_products_token()
     gid = f"gid://shopify/Order/{str(shopify_id).strip()}"
+    # NB: no `customer { … }` — that needs the read_customers scope the API token doesn't have, and
+    # it would fail the whole query. Name/phone come from the order's own addresses (order scope).
     query = (
         "query($id: ID!) { order(id: $id) { name createdAt updatedAt displayFinancialStatus "
-        "customer { firstName lastName email phone } "
         "shippingAddress { name company address1 address2 city province zip country phone } "
         "billingAddress { name company address1 address2 city province zip country phone } "
         "totalPriceSet { shopMoney { amount currencyCode } } "
@@ -210,8 +211,9 @@ def order_detail(item_id: str, shopify_id: str | None = None):
     if shopify_id:
         try:
             o = _shopify_order_detail(shopify_id)
-            cust = o.get("customer") or {}
-            name = " ".join(x for x in [cust.get("firstName"), cust.get("lastName")] if x)
+            sa, ba = o.get("shippingAddress") or {}, o.get("billingAddress") or {}
+            # Name/phone from the order's own addresses (no read_customers scope needed).
+            name = sa.get("name") or ba.get("name") or ""
             items = []
             for e in ((o.get("lineItems") or {}).get("edges") or []):
                 n = e.get("node") or {}
@@ -222,11 +224,10 @@ def order_detail(item_id: str, shopify_id: str | None = None):
                               "sku": (n.get("sku") or "").strip() or None, "qty": n.get("quantity"),
                               "unit": _sm(n, "originalUnitPriceSet"),
                               "line_total": _sm(n, "discountedTotalSet")})
-            sa, ba = o.get("shippingAddress") or {}, o.get("billingAddress") or {}
             out["shopify"] = {
                 "order_name": o.get("name"), "created_at": o.get("createdAt"),
                 "updated_at": o.get("updatedAt"), "financial_status": o.get("displayFinancialStatus"),
-                "customer": {"name": name, "email": cust.get("email"), "phone": cust.get("phone")},
+                "customer": {"name": name, "email": None, "phone": sa.get("phone") or ba.get("phone")},
                 "shipping": {"lines": _addr_lines(sa), "phone": sa.get("phone")},
                 "billing": {"lines": _addr_lines(ba), "phone": ba.get("phone")},
                 "totals": {"total": _sm(o, "totalPriceSet"), "subtotal": _sm(o, "subtotalPriceSet"),

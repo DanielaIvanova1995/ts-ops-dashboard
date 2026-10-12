@@ -417,7 +417,7 @@ function OrderDrawer({ order, detail, err, onClose }) {
 
             {/* Updates thread */}
             <section>
-              <h4>Updates {detail.updates?.length ? <span className="pill grey">{detail.updates.length}</span> : null}</h4>
+              <h4>Monday Updates {detail.updates?.length ? <span className="pill grey">{detail.updates.length}</span> : null}</h4>
               {detail.updates?.length ? (
                 <div className="thread">
                   {detail.updates.map((u) => (
