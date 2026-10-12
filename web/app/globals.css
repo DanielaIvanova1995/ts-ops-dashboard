@@ -147,6 +147,30 @@ tbody tr.sel:hover { background: #FEEFE4; }
 .merge-ctl { display: flex; gap: 8px; align-items: center; }
 .merge-ctl .filter { flex: 1; }
 
+/* Big PO editor modal */
+.po-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 61;
+  width: 920px; max-width: 94vw; max-height: 92vh; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--brand);
+  border-radius: var(--radius); box-shadow: 0 24px 70px rgba(0,0,0,.28);
+}
+.po-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.po-body { padding: 14px 18px; overflow-y: auto; display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; }
+.po-lines { min-width: 0; }
+.editgrid { width: 100%; border-collapse: collapse; }
+.editgrid th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 4px 6px; }
+.editgrid td { padding: 3px 4px; vertical-align: top; }
+.editgrid th.qty, .editgrid td.qty { width: 56px; }
+.editgrid th.cost, .editgrid td.cost { width: 120px; }
+.editgrid input { width: 100%; font: inherit; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; outline: none; }
+.editgrid input:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(242,106,33,.13); }
+.po-lines > .btn { margin-top: 8px; }
+.po-fields { display: flex; flex-direction: column; gap: 10px; }
+.po-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.po-summary { background: #FBFBFC; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.po-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .po-body { grid-template-columns: 1fr; } .po-row2 { grid-template-columns: 1fr; } }
+
 /* Icon buttons (PO paperclip / file / close) */
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 26px;

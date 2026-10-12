@@ -426,13 +426,7 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  // Adjust
-  const [adjOpen, setAdjOpen] = useState(false);
-  const [addr, setAddr] = useState("");
-  const [deliv, setDeliv] = useState("");
-  const [note, setNote] = useState("");
-  const [adjBusy, setAdjBusy] = useState(false);
-  const [adjMsg, setAdjMsg] = useState(null);
+  const [editorOpen, setEditorOpen] = useState(false);  // the big PO editor modal
   // Split
   const [splitBusy, setSplitBusy] = useState(false);
   const [splitMsg, setSplitMsg] = useState(null);
@@ -442,12 +436,6 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
   const [mergeTarget, setMergeTarget] = useState("");
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeMsg, setMergeMsg] = useState(null);
-
-  // Prefill the Adjust address from the Shopify shipping address once the detail loads.
-  useEffect(() => {
-    const lines = detail?.shopify?.shipping?.lines;
-    if (lines && lines.length) setAddr((a) => (a ? a : lines.join("\n")));
-  }, [detail]);
 
   // Load split-part siblings (for Merge) when the drawer opens.
   useEffect(() => {
@@ -469,22 +457,6 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
     } finally { setBusy(false); }
   }
 
-  async function doGen() {
-    setAdjBusy(true); setAdjMsg(null);
-    try {
-      const res = await apiFetch(`/orders/${order.item_id}/po`, {
-        method: "POST",
-        body: JSON.stringify({ address: addr || null, delivery: deliv === "" ? null : Number(deliv), notes: note || null }),
-      });
-      if (!res.ok) throw new Error(`po ${res.status}`);
-      const d = await res.json();
-      if (d.blocked) setAdjMsg({ kind: "warn", text: "Can’t generate — " + (d.errors || []).join("; ") });
-      else if (d.ok) { setAdjMsg({ kind: "ok", text: `${d.kind === "po" ? "PO" : "Packing slip"} attached${d.total ? ` · £${Number(d.total).toFixed(2)}` : ""}` }); flash("PO attached"); reload && reload(); }
-      else setAdjMsg({ kind: "warn", text: d.detail || "Didn’t attach." });
-    } catch (e) {
-      if (String(e.message) !== "unauthorised") setAdjMsg({ kind: "warn", text: String(e.message || e) });
-    } finally { setAdjBusy(false); }
-  }
 
   async function doSplit() {
     setSplitBusy(true); setSplitMsg(null);
@@ -540,23 +512,9 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
         </div>
         {msg && <div className={`route-msg ${msg.kind}`}>{msg.text}</div>}
 
-        {/* Adjust & generate */}
+        {/* Edit / adjust the PO in a big editor */}
         <div className="tool">
-          <button className="tool-toggle" onClick={() => setAdjOpen((v) => !v)}>
-            {adjOpen ? "▾" : "▸"} Adjust &amp; generate PO
-          </button>
-          {adjOpen && (
-            <div className="tool-body">
-              <label className="fld"><span>Delivery address (Shopify)</span>
-                <textarea rows={5} value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="Delivery address" /></label>
-              <label className="fld"><span>Delivery £ ex VAT — leave blank for auto</span>
-                <input type="number" step="0.01" value={deliv} onChange={(e) => setDeliv(e.target.value)} placeholder="auto" /></label>
-              <label className="fld"><span>Note on the PO (optional)</span>
-                <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
-              <button className="btn primary" onClick={doGen} disabled={adjBusy}>{adjBusy ? "Generating…" : "Generate PO with these"}</button>
-              {adjMsg && <div className={`route-msg ${adjMsg.kind}`}>{adjMsg.text}</div>}
-            </div>
-          )}
+          <button className="btn" onClick={() => setEditorOpen(true)}>Edit / adjust PO…</button>
         </div>
 
         {/* Split */}
@@ -677,6 +635,133 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
           </div>
         )}
       </aside>
+      {editorOpen && (
+        <PoEditor order={order} apiFetch={apiFetch} flash={flash} reload={reload}
+          onClose={() => setEditorOpen(false)} />
+      )}
+    </>
+  );
+}
+
+function PoEditor({ order, apiFetch, flash, reload, onClose }) {
+  const [address, setAddress] = useState("");
+  const [delivery, setDelivery] = useState("");
+  const [note, setNote] = useState("");
+  const [lines, setLines] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const body = useCallback(() => ({
+    address: address || null,
+    delivery: delivery === "" ? null : Number(delivery),
+    notes: note || null,
+    items: lines.map((l) => ({ sku: l.sku, item: l.item, qty: l.qty, cost: l.cost })),
+  }), [address, delivery, note, lines]);
+
+  const runPreview = useCallback(async (seed) => {
+    const b = seed ? {} : body();           // seed=true → ask the server for the current lines
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/po-preview`, { method: "POST", body: JSON.stringify(b) });
+      if (!res.ok) throw new Error(`preview ${res.status}`);
+      const d = await res.json();
+      setPreview(d);
+      if (seed) {
+        setLines((d.editable || []).map((e) => ({ sku: e.sku || "", item: e.item || "", qty: e.qty || "1", cost: e.cost ?? "" })));
+        setAddress((d.dl || []).join("\n"));
+        setDelivery(d.delivery != null ? String(d.delivery) : "");
+      }
+      return d;
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setMsg({ kind: "warn", text: String(e.message || e) });
+      return null;
+    }
+  }, [apiFetch, order.item_id, body]);
+
+  useEffect(() => { (async () => { setLoading(true); await runPreview(true); setLoading(false); })(); }, []); // eslint-disable-line
+
+  function setLine(i, k, v) { setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l))); }
+  function addLine() { setLines((ls) => [...ls, { sku: "", item: "", qty: "1", cost: "" }]); }
+  function removeLine(i) { setLines((ls) => ls.filter((_, j) => j !== i)); }
+
+  async function doPreview() { setBusy(true); setMsg(null); await runPreview(false); setBusy(false); }
+
+  async function doGenerate() {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/po`, { method: "POST", body: JSON.stringify(body()) });
+      if (!res.ok) throw new Error(`po ${res.status}`);
+      const d = await res.json();
+      if (d.blocked) setMsg({ kind: "warn", text: "Can’t generate — " + (d.errors || []).join("; ") });
+      else if (d.ok) {
+        setMsg({ kind: "ok", text: `${d.kind === "po" ? "PO" : "Packing slip"} attached${d.total ? ` · £${Number(d.total).toFixed(2)}` : ""}` });
+        flash("PO attached"); reload && reload();
+      } else setMsg({ kind: "warn", text: d.detail || "Didn’t attach." });
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setBusy(false); }
+  }
+
+  const errs = preview?.errors || [];
+  return (
+    <>
+      <div className="overlay" onClick={onClose} style={{ zIndex: 60 }} />
+      <div className="po-modal">
+        <div className="po-head">
+          <div className="dh-ono">Edit PO · #{order.order_no}</div>
+          <button className="icon-btn" onClick={onClose} title="Close"><IconX /></button>
+        </div>
+        {loading ? <div className="state"><span className="spinner" />Loading the order…</div> : (
+          <div className="po-body">
+            <div className="po-lines">
+              <table className="editgrid">
+                <thead><tr><th>SKU</th><th>Description</th><th className="qty">Qty</th><th className="cost">Cost £ (ex VAT)</th><th></th></tr></thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={i}>
+                      <td><input value={l.sku} onChange={(e) => setLine(i, "sku", e.target.value)} /></td>
+                      <td><input value={l.item} onChange={(e) => setLine(i, "item", e.target.value)} /></td>
+                      <td className="qty"><input value={l.qty} onChange={(e) => setLine(i, "qty", e.target.value)} /></td>
+                      <td className="cost"><input type="number" step="0.01" value={l.cost} placeholder="unpriced" onChange={(e) => setLine(i, "cost", e.target.value)} /></td>
+                      <td><button className="icon-btn muted" onClick={() => removeLine(i)} title="Remove line"><IconX /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button className="btn" onClick={addLine}>+ Add line</button>
+            </div>
+
+            <div className="po-fields">
+              <label className="fld"><span>Delivery address</span>
+                <textarea rows={5} value={address} onChange={(e) => setAddress(e.target.value)} /></label>
+              <div className="po-row2">
+                <label className="fld"><span>Delivery £ (ex VAT) — blank = auto</span>
+                  <input type="number" step="0.01" value={delivery} placeholder="auto" onChange={(e) => setDelivery(e.target.value)} /></label>
+                <label className="fld"><span>Note on the PO (optional)</span>
+                  <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
+              </div>
+
+              {preview && (
+                <div className="po-summary">
+                  <div className="kv"><span>Document</span><b>{preview.kind === "po" ? "Purchase Order (priced)" : "Packing slip (no prices)"}</b></div>
+                  {preview.goods != null && <div className="kv"><span>Goods (ex VAT)</span><b>£{Number(preview.goods).toFixed(2)}</b></div>}
+                  {preview.delivery != null && <div className="kv"><span>Delivery (ex VAT)</span><b>£{Number(preview.delivery).toFixed(2)}</b></div>}
+                  {preview.total != null && <div className="kv big"><span>Total (inc VAT)</span><b>£{Number(preview.total).toFixed(2)}</b></div>}
+                  {preview.unpriced?.length ? <div className="warn-note"><IconWarn /> Unpriced (will be a packing slip until priced): {preview.unpriced.join(", ")}</div> : null}
+                  {errs.length ? <div className="warn-note"><IconWarn /> {errs.join("; ")}</div> : null}
+                </div>
+              )}
+              {msg && <div className={`route-msg ${msg.kind}`}>{msg.text}</div>}
+            </div>
+          </div>
+        )}
+        <div className="po-foot">
+          <button className="btn" onClick={doPreview} disabled={busy || loading}>{busy ? "…" : "Preview"}</button>
+          <button className="btn primary" onClick={doGenerate} disabled={busy || loading}>{busy ? "Working…" : "Generate & attach PO"}</button>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
     </>
   );
 }

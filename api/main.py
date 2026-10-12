@@ -388,7 +388,7 @@ def _fetch_one_order(item_id: str) -> dict | None:
 
 def _doc_kwargs(ov) -> dict:
     """Turn Adjust-panel overrides into _build_doc kwargs (address_override / delivery_override /
-    notes_extra). Address may be a newline string or a list; blank fields are ignored."""
+    notes_extra / items_override). Address may be a newline string or a list; blank fields ignored."""
     if not ov:
         return {}
     kw = {}
@@ -407,7 +407,35 @@ def _doc_kwargs(ov) -> dict:
         notes = [notes.strip()] if notes.strip() else None
     if notes:
         kw["notes_extra"] = list(notes)
+    items = ov.get("items")
+    if items:
+        rows = []
+        for r in items:
+            desc = (r.get("item") or "").strip()
+            sku = (r.get("sku") or "").strip()
+            if not (desc or sku):
+                continue
+            c = r.get("cost")
+            try:
+                cost = float(c) if c not in (None, "") else None
+            except (TypeError, ValueError):
+                cost = None
+            rows.append({"SKU": sku, "Item": desc, "Qty": str(r.get("qty") or "1"), "Cost": cost})
+        if rows:
+            kw["items_override"] = rows
     return kw
+
+
+def _editable_lines(op, o) -> list:
+    """Current order lines as editable rows [{sku, item, qty, cost}] to pre-fill the PO editor —
+    parsed from Monday with the routed supplier's own cost (None if unpriced)."""
+    sup = o.get("supplier") or ""
+    out = []
+    for it in op._parse_monday_items(o.get("items")):
+        out.append({"sku": it.get("SKU") or "", "item": it.get("Item") or "",
+                    "qty": it.get("Qty") or "1",
+                    "cost": op._line_cost(it.get("SKU"), sup, it.get("Item"))})
+    return out
 
 
 def _deliv_of(doc) -> float | None:
@@ -440,9 +468,10 @@ def _attach_doc(op, order_docs, item_id: str, o: dict, overrides=None) -> dict:
 
 
 class PoIn(BaseModel):
-    address: str | None = None     # newline-separated delivery address override
-    delivery: float | None = None  # delivery £ (ex VAT) override
-    notes: str | None = None       # an extra note line for the PO
+    address: str | None = None      # newline-separated delivery address override
+    delivery: float | None = None   # delivery £ (ex VAT) override
+    notes: str | None = None        # an extra note line for the PO
+    items: list[dict] | None = None  # edited line rows [{sku, item, qty, cost}] — overrides the lines
 
 
 @app.post("/orders/{item_id}/po", dependencies=[Depends(require_key)])
@@ -478,11 +507,14 @@ def preview_po(item_id: str, body: PoIn | None = None):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't build preview: {e}")
     errs = order_docs.validate_doc(doc, kind)
+    # Editable rows to pre-fill the editor: echo the user's edits if they sent any, else the current
+    # Monday lines with the routed supplier's own cost.
+    editable = (body.items if (body and body.items) else _editable_lines(op, o))
     return {
         "kind": kind, "supplier": doc.get("supplier") or None, "dl": doc.get("dl") or [],
         "lines": doc.get("lines") or [], "unpriced": doc.get("unpriced") or [],
         "goods": doc.get("goods"), "delivery": _deliv_of(doc), "total": doc.get("total"),
-        "errors": errs,
+        "errors": errs, "editable": editable,
     }
 
 
