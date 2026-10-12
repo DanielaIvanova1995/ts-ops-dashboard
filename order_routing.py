@@ -16,11 +16,11 @@ CANON = {
     "southernsheeting": "Southern Sheeting", "ss": "Southern Sheeting",
     "travisperkins": "Travis Perkins", "tp": "Travis Perkins", "gap": "GAP",
     "huwsgray": "Huws Gray", "edmundson": "Edmundson", "mercado": "Mercardo",
-    "hurlinghambaths": "Hurlingham Baths",
+    "hurlinghambaths": "Carron", "hurlingham": "Carron",   # Hurlingham (Baths) = Carron (Daniela 2026-10-12)
     "nationalskirting": "National Skirting", "molan": "Molan", "storm": "Storm",
     "pjh": "PJH", "nuie": "Nuie", "roxor": "Nuie", "decor8": "Decor8", "paintersworld": "Decor8",
     "rexel": "Rexel", "toolbank": "Toolbank", "lpd": "LPD", "lpddoors": "LPD",
-    "jbkind": "JB Kind", "deanta": "Deanta", "carron": "Carron", "hurlingham": "Hurlingham",
+    "jbkind": "JB Kind", "deanta": "Deanta", "carron": "Carron",
     "chasehardware": "Chase Hardware", "chhardware": "Chase Hardware",
     "wallsandfloors": "Walls and Floors",
     "splendour": "Walls and Floors", "velux": "Velux", "dolle": "Dolle", "mbdecor": "MB Decor",

@@ -105,13 +105,38 @@ def orders():
 
 @app.get("/meta", dependencies=[Depends(require_key)])
 def meta():
-    """Dropdown options for the board: the live Monday Supplier labels + the Stage options.
-    Mirrors how the Streamlit board builds its selectors so writes always match a real label."""
+    """CLEAN supplier options for the dropdowns: the real suppliers we actually deal with (routing
+    targets + the PO-email and head-office-phone maps), using Monday's exact label spelling where it
+    matches so writes still land on a real option. Drops the junk/legacy labels on the raw Monday
+    dropdown (fraud, dani, 252.07, typos, dupes, …). Plus the Stage options."""
+    import order_processing as op
+    real = (set(routing.CANON.values())
+            | set(op.SUPPLIER_PO_EMAIL.keys())
+            | set(op.SUPPLIER_HEAD_OFFICE_PHONE.keys()))
     try:
-        suppliers = [s for s in ds.op_board_supplier_labels() if s]
+        live = [s for s in ds.op_board_supplier_labels() if s]
     except Exception:  # noqa: BLE001
-        suppliers = sorted(set(routing.CANON.values()))
-    return {"suppliers": suppliers, "stages": list(ds.OP_STAGES)}
+        live = []
+    canon_val, live_by_canon, code_name = {}, {}, {}
+    for v in routing.CANON.values():
+        canon_val.setdefault(_canon(v), v)              # the INTENDED label (e.g. Ctie, LPD, Carron)
+    for lbl in live:
+        live_by_canon.setdefault(_canon(lbl), []).append(lbl)   # every Monday spelling per supplier
+    for n in real:
+        code_name.setdefault(_canon(n), n)
+    suppliers = set()
+    for k in {_canon(n) for n in real}:
+        mondays = live_by_canon.get(k, [])
+        intended = canon_val.get(k)
+        if intended and intended in mondays:
+            suppliers.add(intended)         # our intended label AND it's a real Monday option → ideal
+        elif intended and not mondays:
+            suppliers.add(intended)         # not on Monday yet → use our label
+        elif mondays:
+            suppliers.add(mondays[0])       # a real Monday option (writes land)
+        else:
+            suppliers.add(code_name[k])     # from the PO/phone map, not on Monday
+    return {"suppliers": sorted(suppliers, key=str.lower), "stages": list(ds.OP_STAGES)}
 
 
 class SupplierIn(BaseModel):

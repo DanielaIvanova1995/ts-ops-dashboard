@@ -486,26 +486,18 @@ function OrderDrawer({ order, detail, err, onClose, onProcess, apiFetch, flash, 
       <aside className="drawer">
         <div className="drawer-head">
           <div><span className="dh-ono">#{order.order_no}</span>{sx?.financial_status ? <span className="pill grey" style={{ marginLeft: 8 }}>{sx.financial_status}</span> : null}</div>
-          <button className="icon-btn" onClick={onClose} title="Close"><IconX /></button>
+          <div className="dh-actions">
+            {order.shopify_url && <a className="icon-btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer" title="Open in Shopify"><IconExternal /></a>}
+            <button className="icon-btn" onClick={onClose} title="Close"><IconX /></button>
+          </div>
         </div>
 
-        <div className="drawer-actions">
-          <button className="btn primary" onClick={doProcess} disabled={busy}>
-            {busy ? "Processing…" : (order.supplier ? "Generate PO" : "Process order")}
-          </button>
-          {order.shopify_url && <a className="btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer">Shopify</a>}
+        <div className="drawer-actions3">
+          <button className="btn primary" onClick={doProcess} disabled={busy}>{busy ? "Working…" : "Generate PO"}</button>
+          <button className="btn" onClick={() => setEditorOpen(true)}>Edit PO</button>
+          <button className="btn" onClick={() => setSplitOpen(true)}>Split order</button>
         </div>
         {msg && <div className={`route-msg ${msg.kind}`}>{msg.text}</div>}
-
-        {/* Edit / adjust the PO in a big editor */}
-        <div className="tool">
-          <button className="btn" onClick={() => setEditorOpen(true)}>Edit / adjust PO…</button>
-        </div>
-
-        {/* Split */}
-        <div className="tool">
-          <button className="btn" onClick={() => setSplitOpen(true)}>Split order…</button>
-        </div>
 
         {/* Merge — only when this order has split parts */}
         {siblings.length > 1 && (
