@@ -103,9 +103,19 @@ th.mid, td.mid { text-align: center; width: 64px; }
 }
 .warn-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--amber); }
 
-/* Order no as a quiet link */
+/* Order no as a quiet link + Shopify external link */
+.ono-wrap { display: inline-flex; align-items: center; gap: 6px; }
 .linkish { appearance: none; background: none; border: none; font: inherit; font-weight: 700; color: var(--brand-dark); cursor: pointer; padding: 0; }
 .linkish:hover { text-decoration: underline; }
+.ext { color: #9AA0AB; display: inline-flex; align-items: center; }
+.ext:hover { color: var(--brand-dark); }
+
+/* Drawer action bar */
+.drawer-actions { display: flex; gap: 8px; padding: 12px 16px 2px; }
+.drawer-actions .btn { text-decoration: none; }
+.route-msg { margin: 10px 16px 0; padding: 8px 11px; border-radius: 8px; font-size: 12.5px; }
+.route-msg.ok { background: var(--green-bg); color: var(--green); border: 1px solid #CDEBD6; }
+.route-msg.warn { background: var(--amber-bg); color: #7A3E06; border: 1px solid #F2E2C2; }
 
 /* Icon buttons (PO paperclip / file / close) */
 .icon-btn {

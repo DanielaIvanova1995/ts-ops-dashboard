@@ -34,6 +34,12 @@ const IconWarn = (p) => (
     <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
     <path d="M12 9v4" /><path d="M12 17h.01" /></svg>
 );
+const IconExternal = (p) => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M15 3h6v6" /><path d="M10 14 21 3" />
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+);
 
 /* "£ to us" is the GROSS (inc-VAT) order value, so compare it directly to the Shopify gross total
    (totalPriceSet, inc VAT + delivery). Warn when they differ beyond a penny tolerance — i.e. the
@@ -55,6 +61,9 @@ function stageClass(stage) {
   return "grey";
 }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+/* A split part (31824-1, 31824-2…) is only PART of the order, so its "£ to us" will never equal the
+   whole Shopify total — never warn on those. */
+function isSplit(ono) { return /-\d+$/.test(String(ono || "").trim()); }
 function money(v, cur = "£") {
   const n = num(v);
   return n === null ? "—" : cur + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -266,7 +275,12 @@ export default function Board() {
                   const n = counts[o.item_id] || 0;
                   return (
                     <tr key={o.item_id}>
-                      <td className="ono"><button className="linkish" onClick={() => openDetail(o)}>{o.order_no}</button></td>
+                      <td className="ono">
+                        <span className="ono-wrap">
+                          <button className="linkish" onClick={() => openDetail(o)}>{o.order_no}</button>
+                          {o.shopify_url && <a className="ext" href={o.shopify_url} target="_blank" rel="noopener noreferrer" title="Open in Shopify"><IconExternal /></a>}
+                        </span>
+                      </td>
                       <td className="cust">{o.customer || "—"}</td>
                       <td>
                         <select className="cell-select" value={o.supplier || ""} onChange={(e) => saveField(o.item_id, "supplier", e.target.value)}>
@@ -282,7 +296,7 @@ export default function Board() {
                       </td>
                       <td className="num">
                         {(() => {
-                          const w = totalWarn(o.sell, totals[o.item_id]);
+                          const w = isSplit(o.order_no) ? null : totalWarn(o.sell, totals[o.item_id]);
                           return (
                             <span className="sell-cell">
                               {money(o.sell)}
@@ -322,19 +336,50 @@ export default function Board() {
         )}
       </div>
 
-      {drawer && <OrderDrawer order={drawer} detail={detail} err={detailErr} onClose={() => setDrawer(null)} />}
+      {drawer && (
+        <OrderDrawer
+          order={drawer} detail={detail} err={detailErr} onClose={() => setDrawer(null)}
+          apiFetch={apiFetch} flash={flash}
+          onRouted={(id, sup, stg) => setOrders((os) => os.map((o) => (o.item_id === id ? { ...o, supplier: sup ?? o.supplier, stage: stg ?? o.stage } : o)))}
+        />
+      )}
       {toast && <div className={`toast ${toast.kind === "err" ? "err" : ""}`}>{toast.msg}</div>}
     </div>
   );
 }
 
-function OrderDrawer({ order, detail, err, onClose }) {
+function OrderDrawer({ order, detail, err, onClose, apiFetch, flash, onRouted }) {
+  const [routing, setRouting] = useState(false);
+  const [routeMsg, setRouteMsg] = useState(null);
+
+  async function doRoute() {
+    setRouting(true); setRouteMsg(null);
+    try {
+      const res = await apiFetch(`/orders/${order.item_id}/route`, {
+        method: "POST", body: JSON.stringify({ shopify_id: order.shopify_id || "", apply: true }),
+      });
+      if (!res.ok) throw new Error(`route ${res.status}`);
+      const d = await res.json();
+      const s = d.suggestion || {};
+      if (d.applied) {
+        onRouted(order.item_id, s.supplier, s.applied_stage || s.stage);
+        setRouteMsg({ kind: "ok", text: `Routed to ${s.supplier}${s.branch ? ` (${s.branch})` : ""} · stage: ${s.applied_stage || s.stage}` });
+        flash(`Routed → ${s.supplier}`);
+      } else {
+        setRouteMsg({ kind: "warn", text: d.note || s.summary || "Couldn’t route automatically." });
+        flash(d.note || "Not routed", "err");
+      }
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setRouteMsg({ kind: "warn", text: String(e.message || e) });
+    } finally { setRouting(false); }
+  }
+
   const sx = detail?.shopify;
   const cur = sx?.totals?.currency === "GBP" ? "£" : "£";
   const ship = sx?.shipping?.lines || [];
   const bill = sx?.billing?.lines || [];
   const addrDiffer = ship.length && bill.length && ship.join("|") !== bill.join("|");
-  const sellWarn = sx?.totals ? totalWarn(order.sell, { total: sx.totals.total, subtotal: sx.totals.subtotal }) : null;
+  const sellWarn = (sx?.totals && !isSplit(order.order_no)) ? totalWarn(order.sell, { total: sx.totals.total, subtotal: sx.totals.subtotal }) : null;
   return (
     <>
       <div className="overlay" onClick={onClose} />
@@ -343,6 +388,12 @@ function OrderDrawer({ order, detail, err, onClose }) {
           <div><span className="dh-ono">#{order.order_no}</span>{sx?.financial_status ? <span className="pill grey" style={{ marginLeft: 8 }}>{sx.financial_status}</span> : null}</div>
           <button className="icon-btn" onClick={onClose} title="Close"><IconX /></button>
         </div>
+
+        <div className="drawer-actions">
+          <button className="btn primary" onClick={doRoute} disabled={routing}>{routing ? "Routing…" : "Route order"}</button>
+          {order.shopify_url && <a className="btn" href={order.shopify_url} target="_blank" rel="noopener noreferrer">Open in Shopify</a>}
+        </div>
+        {routeMsg && <div className={`route-msg ${routeMsg.kind}`}>{routeMsg.text}</div>}
 
         {!detail && !err && <div className="state"><span className="spinner" />Loading order…</div>}
         {err && <div className="state err">Couldn’t load detail ({err}).</div>}

@@ -44,6 +44,7 @@ app.add_middleware(
 # (the host's health check needs /health). If the env var is UNSET the API stays open — so it MUST be
 # set on the deployed service. Interim gate until per-person Supabase logins land.
 _ACCESS_KEY = (os.environ.get("TRADEHUB_ACCESS_KEY") or "").strip()
+_SHOP_STORE = (ds.get_secret("SHOPIFY_STORE") or "").strip()  # e.g. xxx.myshopify.com — for admin links
 
 
 def require_key(x_tradehub_key: str | None = Header(default=None)):
@@ -68,16 +69,20 @@ def _order_out(o: dict) -> dict:
     """Trim a Monday order row to the fields the board needs (UI-friendly, stable shape)."""
     assets = o.get("po_assets") or []
     po = assets[0] if assets else {}
+    sid = (o.get("shopify_id") or "").strip()
     return {
         "item_id": o.get("item_id"),
-        "order_no": o.get("order_no") or o.get("name"),
+        # Use the Monday ITEM NAME so the order number matches Monday EXACTLY — including the split
+        # suffix (31824-1, 31824-2). The order_no column holds only the base number, so name wins.
+        "order_no": o.get("name") or o.get("order_no"),
         "customer": o.get("customer") or "",
         "supplier": (o.get("supplier") or "") or None,
         "stage": (o.get("stage") or "") or None,
         "branch_email": (o.get("branch_email") or "") or None,
         "sell": o.get("sell") or None,
         "cost_supplier": o.get("cost_supplier") or None,
-        "shopify_id": (o.get("shopify_id") or "").strip() or None,
+        "shopify_id": sid or None,
+        "shopify_url": f"https://{_SHOP_STORE}/admin/orders/{sid}" if (_SHOP_STORE and sid) else None,
         "has_po": bool(assets),
         "po_url": (po.get("public_url") or po.get("url")) if po else None,
         "po_name": po.get("name") if po else None,
@@ -255,6 +260,104 @@ def updates_counts():
     groups = (boards[0].get("groups") if boards else []) or []
     items = ((groups[0].get("items_page") or {}).get("items") if groups else []) or []
     return {"counts": {it["id"]: len(it.get("updates") or []) for it in items}}
+
+
+import functools   # noqa: E402
+import re as _re    # noqa: E402
+
+
+def _canon(s):
+    """Canonical supplier key via the routing CANON map (mirrors order_processing._canon_sup)."""
+    n = _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    lbl = routing.CANON.get(n)
+    return _re.sub(r"[^a-z0-9]", "", lbl.lower()) if lbl else n
+
+
+@functools.lru_cache(maxsize=1)
+def _feed_table():
+    """{normalised SKU: {supplier_canon: cost}} from the pricing feed — Streamlit-free, loaded once."""
+    import json
+    try:
+        path = Path(__file__).resolve().parent.parent / "pricing_lookup.json"
+        d = json.load(open(path, encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for it in d.get("items", []):
+        sku = _re.sub(r"[^a-z0-9]", "", (it.get("sku") or "").lower())
+        if sku:
+            out[sku] = {_canon(o.get("s")): o.get("c") for o in (it.get("offers") or [])}
+    return out
+
+
+def _api_sole_feed_supplier(sku):
+    """If the feed prices this SKU from exactly ONE supplier, return it — mirrors
+    order_processing._sole_feed_supplier (same colour-suffix tolerance + NBP exclusion)."""
+    key = _re.sub(r"[^a-z0-9]", "", (sku or "").lower())
+    if len(key) < 5:
+        return None
+    pr = _feed_table()
+    offers = pr.get(key)
+    if not offers:
+        offers = {}
+        for k, v in pr.items():
+            if len(k) >= 5 and (k.startswith(key) or key.startswith(k)):
+                offers.update(v)
+    excl = {_re.sub(r"[^a-z0-9]", "", s.lower()) for s in routing.EXCLUDED_SUPPLIERS}
+    sups = {s for s, c in (offers or {}).items() if isinstance(c, (int, float)) and s not in excl}
+    return routing.CANON.get(next(iter(sups))) if len(sups) == 1 else None
+
+
+class RouteIn(BaseModel):
+    shopify_id: str = ""
+    apply: bool = False   # True = also write the suggested supplier/branch/stage to Monday
+
+
+@app.post("/orders/{item_id}/route", dependencies=[Depends(require_key)])
+def route(item_id: str, body: RouteIn):
+    """Route an order with the SAME rules as the live app (order_routing.route_order + the feed
+    sole-supplier resolver). Returns the suggestion; with apply=true it writes supplier/branch/stage
+    to Monday. NEVER auto-advances to SEND PO here (no PO attached yet) — holds at Needs Review."""
+    sid = (body.shopify_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="shopify_id is required to route")
+    try:
+        lines = ds.fetch_order_lines_with_vendor(sid)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read order lines: {e}")
+    try:
+        pc = (ds.fetch_order_shipping(sid) or {}).get("postcode")
+    except Exception:  # noqa: BLE001
+        pc = None
+    res = routing.route_order(lines, postcode=pc, sku_supplier=_api_sole_feed_supplier)
+    suggestion = {
+        "split": bool(res.get("split")), "supplier": res.get("overall_supplier"),
+        "branch": res.get("branch"), "branch_email": res.get("branch_email"),
+        "branch_phone": res.get("branch_phone"), "stage": res.get("stage"),
+        "route": res.get("route"), "summary": routing.summary(res),
+        "needs_branch": bool(res.get("needs_branch")), "conf": res.get("conf"),
+    }
+    applied, note = False, None
+    if body.apply:
+        if res.get("split"):
+            note = "This order splits across suppliers — not auto-applied; handle the split separately."
+        elif res.get("route") == "PICK" or not res.get("overall_supplier"):
+            note = "Couldn't identify a single supplier — assign it manually."
+        else:
+            stage = res.get("stage") or "Needs Review"
+            if stage == "SEND PO":            # never auto-send from here — no PO attached yet
+                stage = "Needs Review"
+            try:
+                ds.op_set_supplier(item_id, res["overall_supplier"])
+                if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
+                    ds.op_set_branch(item_id, branch=res.get("branch"),
+                                     email=res.get("branch_email"), phone=res.get("branch_phone"))
+                ds.op_set_status(item_id, stage)
+                applied = True
+                suggestion["applied_stage"] = stage
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=502, detail=f"Routed, but couldn't write to Monday: {e}")
+    return {"ok": True, "suggestion": suggestion, "applied": applied, "note": note}
 
 
 @app.get("/order-totals", dependencies=[Depends(require_key)])
