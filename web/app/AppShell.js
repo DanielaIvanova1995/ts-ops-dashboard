@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import BrandMark from "./BrandMark";
+import BrandMarkIcon from "./BrandMarkIcon";
 
 const Ico = {
   home: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" /><path d="M9.5 21v-6h5v6" /></svg>),
@@ -50,7 +50,7 @@ export default function AppShell({ children }) {
       <aside className="sidebar">
         <div className="side-head">
           <Link href="/" className="side-logo" title="TradeHub home">
-            <BrandMark size={28} />
+            <BrandMarkIcon size={28} />
             {!collapsed && <span className="side-brand">TRADE<b>HUB</b></span>}
           </Link>
           <button className="side-toggle" onClick={toggle} title={collapsed ? "Expand menu" : "Collapse menu"} aria-label="Toggle menu">

@@ -284,7 +284,7 @@ export default function Quotes() {
   if (needKey) {
     return (
       <div className="wrap"><div className="login">
-        <div className="wordmark">Trade<b>Hub</b><span className="sec">Quotes</span></div>
+        <img src="/tradehub-logo.png" alt="TradeHub" className="login-logo" /><div className="wordmark">Trade<b>Hub</b><span className="sec">Quotes</span></div>
         <p className="sub">Enter the shared access code to continue.</p>
         <form onSubmit={submitKey} className="loginform">
           <input className="input" type="password" value={keyInput} autoFocus onChange={(e) => setKeyInput(e.target.value)} placeholder="Access code" />

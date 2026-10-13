@@ -316,7 +316,7 @@ export default function Recon() {
     return (
       <div className="wrap">
         <div className="login">
-          <div className="wordmark">Trade<b>Hub</b><span className="sec">Statements</span></div>
+          <img src="/tradehub-logo.png" alt="TradeHub" className="login-logo" /><div className="wordmark">Trade<b>Hub</b><span className="sec">Statements</span></div>
           <p className="sub">Enter the shared access code to continue.</p>
           <form onSubmit={submitKey} className="loginform">
             <input className="input" type="password" value={keyInput} autoFocus onChange={(e) => setKeyInput(e.target.value)} placeholder="Access code" />
@@ -332,7 +332,7 @@ export default function Recon() {
     return (
       <div className="wrap">
         <div className="login">
-          <div className="wordmark">Trade<b>Hub</b><span className="sec">Statements</span></div>
+          <img src="/tradehub-logo.png" alt="TradeHub" className="login-logo" /><div className="wordmark">Trade<b>Hub</b><span className="sec">Statements</span></div>
           <p className="sub">🔒 This section is passcode-protected. Enter the Statements passcode.</p>
           <form onSubmit={submitPin} className="loginform">
             <input className="input" type="password" value={pinInput} autoFocus onChange={(e) => setPinInput(e.target.value)} placeholder="Statements passcode" />
