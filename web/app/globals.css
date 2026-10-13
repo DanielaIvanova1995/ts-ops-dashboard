@@ -146,6 +146,12 @@ tbody tr:hover { background: #FCFAF8; }
 .saved-list { display: flex; flex-direction: column; gap: 6px; }
 .saved-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; }
 .saved-right { display: flex; align-items: center; gap: 8px; }
+.inv-list { display: flex; flex-direction: column; gap: 10px; }
+.inv-card { padding: 0; }
+.inv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; flex-wrap: wrap; }
+.inv-right { display: flex; align-items: center; gap: 10px; }
+.inv-body { padding: 0 14px 14px; border-top: 1px solid var(--line); }
+.inv-body table.mini { margin-top: 10px; }
 .paypanel { border-top: 1px solid var(--line); padding: 12px 14px; }
 .pay-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .mred { color: #B91C1C; font-weight: 700; }

@@ -989,6 +989,122 @@ def recon_remittance(body: RemitIn):
             "draft_link": draft_link, "to_email": (body.to_email or "").strip()}
 
 
+# ---- Invoice checker (Phase A: list Needs-Review invoices → 3-way check → verdict) --------------
+_NEEDS_REVIEW_LABEL = 3   # Subitems board "Payment Status" = Needs Review
+
+
+@functools.lru_cache(maxsize=1)
+def _inv_idx(stamp):
+    import json
+    import invoice_core as core
+    try:
+        lookup = json.load(open(Path(__file__).resolve().parent.parent / "pricing_lookup.json", encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        lookup = {"items": []}
+    pidx = core.pricelist_index(lookup)
+    tidx = core.supplier_title_index(lookup)
+    cidx = core.supplier_code_index(pidx)
+    return pidx, tidx, cidx
+
+
+def _inv_indexes():
+    try:
+        stamp = os.path.getmtime(str(Path(__file__).resolve().parent.parent / "pricing_lookup.json"))
+    except OSError:
+        stamp = 0.0
+    return _inv_idx(stamp)
+
+
+@app.get("/invoices", dependencies=[Depends(require_key)])
+def invoices():
+    """Invoices sitting in 'Needs Review' on the Monday invoices board (reuses
+    fetch_invoices_by_status), excluded suppliers removed, with a same-£ possible-duplicate flag."""
+    import invoice_core as core
+    try:
+        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    invs = [i for i in (data.get("invoices") or []) if not core.is_excluded_supplier(i.get("supplier"))]
+    amt_dups = core.amount_dup_ids(invs)
+    out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
+            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
+            "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
+            "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
+    return {"count": len(out), "invoices": out}
+
+
+@app.post("/invoices/{sub_id}/check", dependencies=[Depends(require_key)])
+def invoice_check(sub_id: str):
+    """Run the SAME 3-way check the live app/runner uses (invoice_core.check_invoice): invoice PDF vs
+    the supplier's pricelist cost vs the order's SKUs/quantities. Read-only — returns the verdict,
+    line-by-line issues, margin and the suggested action. Parse is cached (Supabase) to avoid re-
+    reading the PDF with Claude each time."""
+    import invoice_core as core
+    try:
+        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    inv = next((i for i in (data.get("invoices") or []) if str(i.get("sub_id")) == str(sub_id)), None)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found in Needs Review")
+    if not inv.get("asset_id"):
+        return {"ok": False, "detail": "no PDF attached to this invoice"}
+    parsed = None
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            parsed = supabase_db.invoice_parse_get(f"sub:{sub_id}")
+    except Exception:  # noqa: BLE001
+        parsed = None
+    if not parsed:
+        try:
+            url = ds.monday_asset_url(inv["asset_id"])
+            parsed = ds.read_invoice_pdf(url) if url else {"error": "no download link"}
+        except Exception as e:  # noqa: BLE001
+            parsed = {"error": str(e)}
+        if parsed and not parsed.get("error"):
+            try:
+                import supabase_db
+                if supabase_db.configured():
+                    supabase_db.invoice_parse_set(f"sub:{sub_id}", parsed)
+            except Exception:  # noqa: BLE001
+                pass
+    if not parsed or parsed.get("error"):
+        return {"ok": False, "detail": "couldn't read the invoice PDF: " + str((parsed or {}).get("error") or "")[:140]}
+    sup = inv.get("supplier")
+    sid = inv.get("shopify_order_id")
+    try:
+        lines = ds.fetch_order_line_items(sid) if sid else None
+    except Exception:  # noqa: BLE001
+        lines = None
+    order = core.order_candidates(lines, inv.get("order_items"))
+    ship, sup_n = None, core.norm_code(sup)
+    if (core.is_carron(sup_n) or core.is_ctie(sup_n)) and sid:
+        try:
+            ship = ds.fetch_order_shipping(sid)
+        except Exception:  # noqa: BLE001
+            ship = None
+    pidx, tidx, cidx = _inv_indexes()
+    res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship)
+    matched = res["n_issues"] == 0
+    is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+    label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"), sup)
+
+    def _line_out(l):
+        o = {k: v for k, v in l.items() if k != "issues" and not k.startswith("_")}
+        o["issues"] = [list(x) for x in (l.get("issues") or [])]
+        return o
+
+    return {"ok": True, "matched": matched, "n_issues": res.get("n_issues"),
+            "incomplete": res.get("incomplete"), "missing": res.get("missing") or [],
+            "lines": [_line_out(l) for l in (res.get("lines") or [])],
+            "verdict": core.verdict(res), "margin": inv.get("order_margin_live"),
+            "supplier": sup, "invoice_no": inv.get("invoice_no"), "order_no": inv.get("order_no"),
+            "total": parsed.get("total"),
+            "suggested_action": action, "suggested_label": label,
+            "discrepancy_reason": (None if matched else core.discrepancy_reason(res))}
+
+
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
 
 

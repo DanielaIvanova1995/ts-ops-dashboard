@@ -7,14 +7,16 @@ import { usePathname } from "next/navigation";
 const Ico = {
   orders: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M3 7l9-4 9 4-9 4-9-4z" /><path d="M3 7v10l9 4 9-4V7" /><path d="M12 11v10" /></svg>),
   statements: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" /><path d="M14 2v5h5" /><path d="M8 13h8M8 17h5" /></svg>),
+  invoices: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z" /><path d="M8 7h8M8 11h8M8 15h5" /></svg>),
   dot: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...p}><circle cx="12" cy="12" r="3" /></svg>),
 };
 
 const NAV = [
   { href: "/", label: "Orders", icon: "orders" },
   { href: "/recon", label: "Statements", icon: "statements" },
+  { href: "/invoices", label: "Invoices", icon: "invoices" },
 ];
-const SOON = ["Invoices", "Quotes", "Triage"];
+const SOON = ["Quotes", "Triage"];
 
 export default function AppShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
