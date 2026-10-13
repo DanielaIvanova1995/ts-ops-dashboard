@@ -42,6 +42,7 @@ export default function Invoices() {
   const [disc, setDisc] = useState([]);
   const [discStatus, setDiscStatus] = useState("idle");
   const [unflagging, setUnflagging] = useState({}); // sub_id -> bool
+  const [discCopied, setDiscCopied] = useState({}); // sub_id -> bool
 
   useEffect(() => {
     try {
@@ -90,6 +91,24 @@ export default function Invoices() {
     } catch (e) { if (String(e.message) !== "unauthorised") setDiscStatus("error"); }
   }, [accessKey, jsonFetch]);
   useEffect(() => { if (accessKey && tab === "disc") loadDisc(); }, [accessKey, tab, loadDisc]);
+
+  function discEmailText(iv) {
+    const L = [];
+    L.push("Hi,", "");
+    L.push(`Re invoice ${iv.invoice_no}${iv.order_no ? ` (our order ${iv.order_no})` : ""}${iv.supplier ? ` — ${iv.supplier}` : ""}`.trim(), "");
+    L.push("While checking this invoice against our order we've found a discrepancy:", "");
+    L.push(iv.reason ? iv.reason : "(details to follow)", "");
+    L.push("Please could you review and send a corrected invoice or credit note as appropriate.",
+      "Happy to go through it if that's easier.", "", "Many thanks,", "Trade Superstore Online");
+    return L.join("\n");
+  }
+  async function copyDiscEmail(iv) {
+    try {
+      await navigator.clipboard.writeText(discEmailText(iv));
+      setDiscCopied((s) => ({ ...s, [iv.sub_id]: true }));
+      setTimeout(() => setDiscCopied((s) => ({ ...s, [iv.sub_id]: false })), 2000);
+    } catch { window.prompt("Copy the query email:", discEmailText(iv)); }
+  }
 
   async function doUnflag(iv) {
     if (!window.confirm(`Move invoice ${iv.invoice_no} back to Needs Review? The discrepancy is treated as resolved.`)) return;
@@ -360,6 +379,7 @@ export default function Invoices() {
                   </div>
                   <div className="inv-right">
                     {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer">Order ↗</a>}
+                    <button className="btn" onClick={() => copyDiscEmail(iv)} title="Copy a query email to the supplier">{discCopied[iv.sub_id] ? "Copied ✓" : "Copy query email"}</button>
                     <button className="btn" onClick={() => doUnflag(iv)} disabled={unflagging[iv.sub_id]} title="Move back to Needs Review">{unflagging[iv.sub_id] ? "…" : "Move back to review"}</button>
                   </div>
                 </div>

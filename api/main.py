@@ -2285,6 +2285,23 @@ def quote_molan(body: MolanQuoteIn):
             "discount": disc}
 
 
+@app.get("/quotes/search", dependencies=[Depends(require_key)])
+def quote_search(q: str, limit: int = 12):
+    """Search Shopify variants by text — for manually adding an extra product line to a quote.
+    Returns [{variant_id, title, sku, price, available, vendor}]."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"results": []}
+    try:
+        cands = ds._variant_search_flex(q, ds.shopify_products_token(), first=min(limit, 25))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Shopify search failed: {e}")
+    out = [{"variant_id": c.get("variant_id"), "title": c.get("title"), "sku": c.get("sku"),
+            "price": c.get("price"), "available": c.get("available"), "vendor": c.get("vendor")}
+           for c in (cands or [])][:limit]
+    return {"results": out}
+
+
 class EzglazeQuoteIn(BaseModel):
     width: float                        # roof width (m)
     slope: float                        # slope length, eaves→ridge (m)

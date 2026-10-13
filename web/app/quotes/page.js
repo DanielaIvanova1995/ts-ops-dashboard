@@ -113,6 +113,12 @@ export default function Quotes() {
   const [drafting, setDrafting] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // extra products added by hand
+  const [extras, setExtras] = useState([]);      // [{variant_id,title,sku,qty,unit_sell}]
+  const [psearch, setPsearch] = useState("");
+  const [presults, setPresults] = useState(null); // null | [results]
+  const [psearching, setPsearching] = useState(false);
+
   const cfg = RANGES[range];
 
   useEffect(() => {
@@ -133,11 +139,30 @@ export default function Quotes() {
 
   function pickRange(r) {
     setRange(r); setRes(null); setErr(""); setDraft(null); setCopied(false);
+    setExtras([]); setPresults(null); setPsearch("");
     if (RANGES[r].kind === "clad") setF((s) => ({ ...s, system: RANGES[r].defaultSystem }));
   }
 
+  async function searchProducts() {
+    if (psearch.trim().length < 2) { setPresults([]); return; }
+    setPsearching(true);
+    try {
+      const r = await jsonFetch(`/quotes/search?q=${encodeURIComponent(psearch.trim())}`);
+      const d = await r.json();
+      setPresults(d.results || []);
+    } catch (e) { if (String(e.message) !== "unauthorised") setPresults([]); }
+    finally { setPsearching(false); }
+  }
+  function addExtra(p) {
+    if (!p.variant_id) return;
+    setExtras((x) => [...x, { variant_id: p.variant_id, title: p.title, sku: p.sku, qty: 1, unit_sell: p.price }]);
+    setPresults(null); setPsearch("");
+  }
+  function setExtraQty(i, q) { setExtras((x) => x.map((e, j) => (j === i ? { ...e, qty: Math.max(1, Number(q) || 1) } : e))); }
+  function removeExtra(i) { setExtras((x) => x.filter((_, j) => j !== i)); }
+
   async function build() {
-    setErr(""); setRes(null); setDraft(null); setCopied(false);
+    setErr(""); setRes(null); setDraft(null); setCopied(false); setExtras([]); setPresults(null);
     let body;
     if (cfg.kind === "roof") {
       if (!f.width || !f.rake) { setErr("Enter the roof span (width) and slope length."); return; }
@@ -169,7 +194,12 @@ export default function Quotes() {
   }
 
   // Lines that matched a product with a variant id — the only ones a draft order can carry.
-  const draftableLines = (res?.lines || []).filter((l) => l.matched && l.matched.variant_id && l.unit_sell != null);
+  // Take-off lines plus any hand-added extras (normalised to the same {matched, qty} shape).
+  const extrasSell = extras.reduce((s, e) => s + (Number(e.unit_sell) || 0) * e.qty, 0);
+  const draftableLines = [
+    ...(res?.lines || []).filter((l) => l.matched && l.matched.variant_id && l.unit_sell != null),
+    ...extras.filter((e) => e.variant_id && e.unit_sell != null).map((e) => ({ matched: { variant_id: e.variant_id }, qty: e.qty })),
+  ];
 
   async function buildDraft() {
     if (!draftableLines.length) { setDraft({ error: "No matched, priced lines to put on a draft." }); return; }
@@ -196,9 +226,11 @@ export default function Quotes() {
     L.push(hi, "");
     L.push(`Thank you for your enquiry — please find your quote for ${res.product} below.`, "");
     priced.forEach((l) => L.push(`• ${l.qty} × ${l.description} — ${money(l.line_sell)}`));
-    if (t.sell) {
-      const vat = t.sell * 0.2;
-      L.push("", `Subtotal (ex VAT): ${money(t.sell)}`, `VAT (20%): ${money(vat)}`, `Total (inc VAT): ${money(t.sell + vat)}`);
+    extras.forEach((e) => L.push(`• ${e.qty} × ${e.title}${e.sku ? ` (${e.sku})` : ""} — ${money((Number(e.unit_sell) || 0) * e.qty)}`));
+    const grand = (t.sell || 0) + extrasSell;
+    if (grand) {
+      const vat = grand * 0.2;
+      L.push("", `Subtotal (ex VAT): ${money(grand)}`, `VAT (20%): ${money(vat)}`, `Total (inc VAT): ${money(grand + vat)}`);
     }
     if (unpriced.length) {
       L.push("", "Also required (not included above — we can source or advise):");
@@ -373,10 +405,53 @@ export default function Quotes() {
             </table>
           </div>
 
+          <div className="card" style={{ padding: "10px 14px", marginBottom: 10 }}>
+            <div className="tool-label">Add another product</div>
+            {extras.length > 0 && (
+              <table className="mini" style={{ marginBottom: 8 }}>
+                <thead><tr><th>Added product</th><th className="num">Qty</th><th className="num">Unit</th><th className="num">Line</th><th></th></tr></thead>
+                <tbody>
+                  {extras.map((e, i) => (
+                    <tr key={i}>
+                      <td>{e.title}{e.sku ? <span className="sub"> ({e.sku})</span> : null}</td>
+                      <td className="num"><input className="numin" type="number" min="1" value={e.qty} onChange={(ev) => setExtraQty(i, ev.target.value)} style={{ width: 56 }} /></td>
+                      <td className="num">{e.unit_sell != null ? money(e.unit_sell) : "—"}</td>
+                      <td className="num">{e.unit_sell != null ? money(e.unit_sell * e.qty) : "—"}</td>
+                      <td className="num"><button className="btn ghost" onClick={() => removeExtra(i)}>✕</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="q-opts" style={{ marginTop: 0 }}>
+              <input className="search" style={{ maxWidth: 320 }} value={psearch} placeholder="Search a product to add (e.g. breather membrane)"
+                onChange={(e) => setPsearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchProducts(); }} />
+              <button className="btn" onClick={searchProducts} disabled={psearching || psearch.trim().length < 2}>{psearching ? "Searching…" : "Search"}</button>
+            </div>
+            {presults && presults.length === 0 && <div className="sub" style={{ marginTop: 8 }}>No products matched “{psearch}”.</div>}
+            {presults && presults.length > 0 && (
+              <table className="mini" style={{ marginTop: 8 }}>
+                <thead><tr><th>Product</th><th>SKU</th><th className="num">Price</th><th></th></tr></thead>
+                <tbody>
+                  {presults.map((p, i) => (
+                    <tr key={i}>
+                      <td>{p.title}{p.vendor ? <span className="sub"> · {p.vendor}</span> : null}</td>
+                      <td className="sub">{p.sku || "—"}</td>
+                      <td className="num">{p.price != null ? money(p.price) : "—"}</td>
+                      <td className="num"><button className="btn ghost" onClick={() => addExtra(p)} disabled={!p.variant_id}>Add</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
           <div className="q-cards">
             <div className="card q-tot">
               <div className="tool-label">Totals (ex VAT)</div>
-              <div className="kv"><span>Sell</span><b>{money(t.sell)}</b></div>
+              <div className="kv"><span>Sell{extras.length ? " (take-off)" : ""}</span><b>{money(t.sell)}</b></div>
+              {extras.length ? <div className="kv"><span>Extras</span><b>{money(extrasSell)}</b></div> : null}
+              {extras.length ? <div className="kv"><span>Sell incl. extras</span><b>{money((t.sell || 0) + extrasSell)}</b></div> : null}
               <div className="kv"><span>Cost ({cfg.supplier})</span><b>{money(t.cost)}</b></div>
               <div className="kv big"><span>Margin (after 1.8% fee)</span><b className={t.margin_net == null ? "" : t.margin_net < 8 ? "mred" : t.margin_net < 15 ? "mamber" : "mgreen"}>{t.margin_net == null ? "—" : `${t.margin_net}%`}</b></div>
             </div>
