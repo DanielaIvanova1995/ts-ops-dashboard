@@ -106,7 +106,6 @@ export default function Quotes() {
             <li><b>Height &amp; width.</b> Give the cladding <b>height</b> and total <b>run width</b> so trims size correctly. Without them we assume 2.4&nbsp;m and work width out from the area (flagged to confirm).</li>
             <li><b>Corners.</b> Count <b>external</b> and <b>internal</b> corners (we assume 4 external if not given). Corners drive the corner‑profile quantity (corner × height).</li>
             <li><b>Openings.</b> Note how many windows/doors. Cedral has <b>no single window surround</b> — send the opening sizes and we add the right reveal/sill trims.</li>
-            <li><b>All‑AJW basket.</b> Boards, trims &amp; fixings are priced from <b>AJW</b>. <b>Battens &amp; membrane aren't AJW</b> — they're flagged "source separately", never cross‑priced.</li>
             <li><b>Delivery &amp; access.</b> AJW carriage is by postcode zone (free over the zone threshold — see the Pricing → Delivery tab). It's a rigid vehicle needing a forklift; flag mechanical offload (+£75).</li>
             <li><b>Margin.</b> Check the margin after fees and the discount band below — never quote below an 8% margin.</li>
           </ol>
