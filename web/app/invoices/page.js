@@ -281,6 +281,24 @@ export default function Invoices() {
   function toggleSel(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   function toggleAll() { setSel((s) => (s.size === list.length ? new Set() : new Set(list.map((x) => x.sub_id)))); }
 
+  const [fixingMargins, setFixingMargins] = useState(false);
+  async function fixMargins() {
+    const ids = [...sel];
+    if (!ids.length) return;
+    if (!window.confirm(`Fix the order margin for ${ids.length} selected invoice(s)? This adds any invoice totals missing from the order on Monday (fixes a wrong 98%-type margin). It won't double-count.`)) return;
+    setFixingMargins(true);
+    try {
+      const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setNotice({ kind: "ok", text: d.filled ? `Fixed margins on ${d.orders} order(s) — added ${d.filled} missing total(s). Refreshing…` : `Checked ${d.orders} order(s) — margins already up to date.` });
+        setSel(new Set());
+        load();
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t fix margins." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setFixingMargins(false); }
+  }
+
   async function checkApproveSelected() {
     const ids = [...sel];
     if (!ids.length) return;
@@ -424,6 +442,7 @@ export default function Invoices() {
           <span style={{ flex: 1 }} />
           <span className="inv-set"><span className="sub">Approve</span><input type="number" className="numin" value={floor} onChange={(e) => setFloorP(Number(e.target.value))} title="Auto-approve floor margin %" /><span className="sub">–</span><input type="number" className="numin" value={ceil} onChange={(e) => setCeilP(Number(e.target.value))} title="Flag-above margin %" /><span className="sub">%</span></span>
           {shown.length > 0 && <button className="btn" onClick={toggleAllShown}>{allShownSelected ? "Clear" : "Select all"}</button>}
+          {sel.size > 0 && <button className="btn" onClick={fixMargins} disabled={fixingMargins} title="Add any invoice totals missing from the order on Monday so the margin is right">{fixingMargins ? "Fixing…" : `Fix margins (${sel.size})`}</button>}
           {sel.size > 0 && <button className="btn primary" onClick={checkApproveSelected} disabled={proc?.running}>{proc?.running ? `Working ${proc.done}/${proc.total}…` : `Check & approve (${sel.size})`}</button>}
         </div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}

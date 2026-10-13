@@ -1727,6 +1727,42 @@ def invoice_unflag(sub_id: str):
     return {"ok": True}
 
 
+class FixMarginsIn(BaseModel):
+    sub_ids: list[str]
+
+
+@app.post("/invoices/fix-margins", dependencies=[Depends(require_key)])
+def invoice_fix_margins(body: FixMarginsIn):
+    """Fix the order margin for the selected invoices: add any invoice totals that never made it into
+    the order's INV columns on Monday (the cause of a bogus 98%-type margin). Duplicate-safe and
+    deduped by order. Returns how many orders were touched and how many totals were filled in."""
+    ids = {str(s) for s in (body.sub_ids or []) if s}
+    if not ids:
+        return {"ok": False, "detail": "No invoices selected."}
+    try:
+        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    sel = [i for i in (data.get("invoices") or []) if str(i.get("sub_id")) in ids]
+    done, filled = set(), 0
+    for i in sel:
+        oid = i.get("order_item_id")
+        ono = (i.get("order_no") or "").strip()
+        okey = oid or ono
+        if not okey or okey in done:
+            continue
+        done.add(okey)
+        try:
+            if not oid and ono:
+                o = ds.find_order_item_by_number(ono)
+                oid = o.get("id") if o else None
+            if oid:
+                filled += ds.reconcile_order_inv_slots(oid)
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "orders": len(done), "filled": filled}
+
+
 @app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
 def invoice_import_issues(limit: int = 100):
     """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and
