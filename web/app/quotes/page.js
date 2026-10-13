@@ -14,51 +14,54 @@ const HARDIE_COLOURS = ["Anthracite Grey", "Arctic White", "Boothbay Blue", "Che
   "Light Mist", "Midnight Black", "Monterey Taupe", "Mountain Sage", "Pearl Grey", "Rich Espresso",
   "Sail Cloth", "Soft Green", "Timber Bark", "Traditional Red", "Woodland Cream"];
 
-// Per-range config: label, endpoint, supplier (whose cost we use), colour palette, system options,
-// and the "how to quote" guide bullets for a new starter.
+const POLY_SHEETS = ["10mm Twinwall", "16mm Multiwall", "25mm Multiwall", "32mm Multiwall", "35mm Multiwall"];
+const POLY_COLOURS = ["Clear", "Opal", "Bronze", "Heatguard Opal", "Bronze on Opal"];
+const POLY_WIDTHS = [{ v: 700, l: "700 mm" }, { v: 1050, l: "1050 mm" }, { v: 1200, l: "1200 mm" }, { v: 2100, l: "2100 mm" }];
+const POLY_SYSTEMS = ["Self-Supported (16/35mm)", "Artisan"];
+const POLY_BAR_COLOURS = ["White", "Brown", "Anthracite Grey"];
+
+// Per-range config: label, endpoint, supplier (whose cost we use), and the "how to quote" guide.
 const RANGES = {
   cedral: {
-    label: "Cedral",
-    endpoint: "/quotes/cedral",
-    supplier: "AJW",
-    colours: CEDRAL_COLOURS,
-    defaultSystem: "Lap",
-    systems: [
-      { value: "Lap", label: "Cedral Lap (weatherboard)" },
-      { value: "Click", label: "Cedral Click (flush T&G)" },
-    ],
-    colourHint: "e.g. Slate Grey",
+    label: "Cedral", endpoint: "/quotes/cedral", supplier: "AJW", kind: "clad",
+    colours: CEDRAL_COLOURS, defaultSystem: "Lap", colourHint: "e.g. Slate Grey",
+    systems: [{ value: "Lap", label: "Cedral Lap (weatherboard)" }, { value: "Click", label: "Cedral Click (flush T&G)" }],
     guide: [
       ["Area to clad.", "Get the total wall area across all elevations (m²), and the area of windows & doors to deduct (openings). Net = gross − openings."],
       ["Lap or Click?", "Cedral Lap is the overlapped weatherboard look; Click is flush tongue-&-groove. Different coverage and trims — always confirm."],
       ["Colour.", "Confirm the exact Cedral colour (21 options). We never default it — if it's not stated or isn't a real Cedral colour, ask."],
-      ["Height & width.", "Give the cladding height and total run width so trims size correctly. Without them we assume 2.4 m and work width out from the area (flagged to confirm)."],
+      ["Height & width.", "Give the cladding height and total run width so trims size correctly. Without them we assume 2.4 m and work width out from the area (flagged)."],
       ["Corners.", "Count external and internal corners (we assume 4 external if not given). Corners drive the corner-profile quantity (corner × height)."],
       ["Openings.", "Note how many windows/doors. Cedral has no single window surround — send the opening sizes and we add the right reveal/sill trims."],
-      ["Delivery & access.", "AJW carriage is by postcode zone (free over the zone threshold — see the Pricing → Delivery tab). It's a rigid vehicle needing a forklift; flag mechanical offload (+£75)."],
+      ["Delivery & access.", "AJW carriage is by postcode zone (free over the zone threshold — see Pricing → Delivery). Rigid vehicle needing a forklift; flag mechanical offload (+£75)."],
       ["Margin.", "Check the margin after fees and the discount band below — never quote below an 8% margin."],
     ],
   },
   hardie: {
-    label: "James Hardie",
-    endpoint: "/quotes/hardie",
-    supplier: "UPB",
-    colours: HARDIE_COLOURS,
-    defaultSystem: "Lap",
-    systems: [
-      { value: "Lap", label: "HardiePlank (lap weatherboard)" },
-      { value: "VL", label: "VL Plank (interlocking 'Click')" },
-    ],
-    colourHint: "e.g. Anthracite Grey",
+    label: "James Hardie", endpoint: "/quotes/hardie", supplier: "UPB", kind: "clad",
+    colours: HARDIE_COLOURS, defaultSystem: "Lap", colourHint: "e.g. Anthracite Grey",
+    systems: [{ value: "Lap", label: "HardiePlank (lap weatherboard)" }, { value: "VL", label: "VL Plank (interlocking 'Click')" }],
     guide: [
       ["Area to clad.", "Get the total wall area across all elevations (m²), and the area of windows & doors to deduct (openings). Net = gross − openings."],
-      ["HardiePlank or VL?", "HardiePlank is the overlapped weatherboard (0.54 m²/board). VL Plank is the interlocking board some call 'Click' (0.72 m²/board) with its OWN trim set — 2-part corner, J profile, starter. Always confirm which."],
+      ["HardiePlank or VL?", "HardiePlank is the overlapped weatherboard (0.54 m²/board). VL Plank is the interlocking board some call 'Click' (0.72 m²/board) with its OWN trim set. Always confirm which."],
       ["Colour.", "Confirm the exact James Hardie colour (21 options). We never default it — if it's not stated or isn't a real Hardie colour, ask (never assume a grey)."],
-      ["Height & width.", "Give the cladding height and total run width so trims size correctly. Without them we assume 2.4 m and work width out from the area (flagged to confirm)."],
+      ["Height & width.", "Give the cladding height and total run width so trims size correctly. Without them we assume 2.4 m and work width out from the area (flagged)."],
       ["Corners.", "Count external and internal corners (we assume 4 external if not given). Corners × height sizes the corner trims (3 m lengths, rounded up)."],
       ["Openings.", "Note how many windows/doors — each gets a HardieTrim NT3 (lap) or reveal/head trims (VL). Send sizes to tighten it."],
       ["Extras.", "Battens (not a Hardie item — flagged), EPDM joint tape over battens, and touch-up paint + edge sealer for cut edges. Tick what the job needs."],
       ["Margin.", "Hardie cost comes from UPB only. Check the margin after fees and the discount band below — never quote below an 8% margin."],
+    ],
+  },
+  molan: {
+    label: "Molan (poly roof)", endpoint: "/quotes/molan", supplier: "Molan", kind: "roof",
+    guide: [
+      ["Roof size.", "Get the front span (width, m) along the house and the slope/rafter length (rake, m) from wall to eaves. Sheets run down the slope."],
+      ["Sheet.", "Pick the thickness/wall (10mm Twinwall up to 35mm Multiwall) and the tint (Clear, Opal, Bronze, Heatguard). Thicker = warmer/stronger."],
+      ["Sheet width.", "700/1050/1200/2100 mm. We work out how many sheets cover the span, and how many intermediate + end bars sit between them."],
+      ["Bar system.", "Self-Supported (16/35mm) or Artisan (adds an eaves beam). Bars come in 2/3/4/6 m — we pick the shortest that covers the slope."],
+      ["Over 6 m slopes.", "A slope longer than 6 m needs the sheets/bars joined (extra H-section) — flagged so you add it."],
+      ["Accessories.", "Anti-dust tape seals the sheet tops and vented foil tape the bottoms — leave ticked unless the customer has them."],
+      ["Brand lock.", "All polycarbonate is quoted as Molan only. Margin after fees + discount band below — never below 8%."],
     ],
   },
 };
@@ -75,13 +78,25 @@ export default function Quotes() {
   const [keyInput, setKeyInput] = useState("");
 
   const [range, setRange] = useState("cedral");
-  const [f, setF] = useState({ system: "Lap", colour: "", gross_area_m2: "", openings_m2: "",
-    wall_height_m: "", total_width_m: "", external_corners: "", internal_corners: "", num_windows: "",
-    wants_trims: true, wants_battens: false, wants_screws: true, wants_epdm: false, wants_paint: false });
+  const [f, setF] = useState({
+    // cladding
+    system: "Lap", colour: "", gross_area_m2: "", openings_m2: "", wall_height_m: "", total_width_m: "",
+    external_corners: "", internal_corners: "", num_windows: "",
+    wants_trims: true, wants_battens: false, wants_screws: true, wants_epdm: false, wants_paint: false,
+    // roof (molan)
+    width: "", rake: "", sheet_width_mm: 1050, sheet_type: "25mm Multiwall", molan_colour: "Clear",
+    poly_system: "Self-Supported (16/35mm)", bar_colour: "White", include_acc: true,
+  });
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
   const [err, setErr] = useState("");
   const [showGuide, setShowGuide] = useState(true);
+
+  // customer details + draft/email state
+  const [cust, setCust] = useState({ name: "", email: "", postcode: "" });
+  const [draft, setDraft] = useState(null);      // { name, admin_url, total, tax } | { error }
+  const [drafting, setDrafting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const cfg = RANGES[range];
 
@@ -102,24 +117,30 @@ export default function Quotes() {
   const num = (v) => (v === "" || v == null ? null : Number(v));
 
   function pickRange(r) {
-    setRange(r);
-    setRes(null); setErr("");
-    setF((s) => ({ ...s, system: RANGES[r].defaultSystem }));
+    setRange(r); setRes(null); setErr(""); setDraft(null); setCopied(false);
+    if (RANGES[r].kind === "clad") setF((s) => ({ ...s, system: RANGES[r].defaultSystem }));
   }
 
   async function build() {
-    if (!f.gross_area_m2) { setErr("Enter the gross wall area (m²)."); return; }
-    setBusy(true); setErr(""); setRes(null);
-    try {
-      const body = {
-        system: f.system, colour: f.colour,
+    setErr(""); setRes(null); setDraft(null); setCopied(false);
+    let body;
+    if (cfg.kind === "roof") {
+      if (!f.width || !f.rake) { setErr("Enter the roof span (width) and slope length."); return; }
+      body = { width: Number(f.width), rake: Number(f.rake), sheet_width_mm: Number(f.sheet_width_mm),
+        sheet_type: f.sheet_type, colour: f.molan_colour, system: f.poly_system,
+        bar_colour: f.bar_colour, include_acc: f.include_acc };
+    } else {
+      if (!f.gross_area_m2) { setErr("Enter the gross wall area (m²)."); return; }
+      body = { system: f.system, colour: f.colour,
         gross_area_m2: Number(f.gross_area_m2), openings_m2: Number(f.openings_m2 || 0),
         wall_height_m: num(f.wall_height_m), total_width_m: num(f.total_width_m),
         external_corners: num(f.external_corners), internal_corners: Number(f.internal_corners || 0),
         num_windows: num(f.num_windows),
         wants_trims: f.wants_trims, wants_battens: f.wants_battens, wants_screws: f.wants_screws,
-        ...(range === "hardie" ? { wants_epdm: f.wants_epdm, wants_paint: f.wants_paint } : {}),
-      };
+        ...(range === "hardie" ? { wants_epdm: f.wants_epdm, wants_paint: f.wants_paint } : {}) };
+    }
+    setBusy(true);
+    try {
       const r = await jsonFetch(cfg.endpoint, { method: "POST", body: JSON.stringify(body) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.detail || `API ${r.status}`);
@@ -127,6 +148,55 @@ export default function Quotes() {
       setRes(d);
     } catch (e) { if (String(e.message) !== "unauthorised") setErr(String(e.message || e)); }
     finally { setBusy(false); }
+  }
+
+  // Lines that matched a product with a variant id — the only ones a draft order can carry.
+  const draftableLines = (res?.lines || []).filter((l) => l.matched && l.matched.variant_id && l.unit_sell != null);
+
+  async function buildDraft() {
+    if (!draftableLines.length) { setDraft({ error: "No matched, priced lines to put on a draft." }); return; }
+    if (!window.confirm(`Create a Shopify DRAFT order with ${draftableLines.length} line(s)? It takes no payment — you can edit it in Shopify before sending.`)) return;
+    setDrafting(true); setDraft(null);
+    try {
+      const items = draftableLines.map((l) => ({ variant_id: l.matched.variant_id, qty: l.qty }));
+      const r = await jsonFetch("/quotes/draft", { method: "POST", body: JSON.stringify({
+        items, customer_email: cust.email || null, customer_name: cust.name || null,
+        postcode: cust.postcode || null, note: `TradeHub quote — ${res.product}` }) });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.detail || `API ${r.status}`);
+      setDraft(d);
+    } catch (e) { if (String(e.message) !== "unauthorised") setDraft({ error: String(e.message || e) }); }
+    finally { setDrafting(false); }
+  }
+
+  function emailText() {
+    const t = res.totals;
+    const hi = cust.name ? `Hi ${cust.name.split(" ")[0]},` : "Hi there,";
+    const priced = (res.lines || []).filter((l) => l.unit_sell != null);
+    const unpriced = (res.lines || []).filter((l) => l.unit_sell == null);
+    const L = [];
+    L.push(hi, "");
+    L.push(`Thank you for your enquiry — please find your quote for ${res.product} below.`, "");
+    priced.forEach((l) => L.push(`• ${l.qty} × ${l.description} — ${money(l.line_sell)}`));
+    if (t.sell) {
+      const vat = t.sell * 0.2;
+      L.push("", `Subtotal (ex VAT): ${money(t.sell)}`, `VAT (20%): ${money(vat)}`, `Total (inc VAT): ${money(t.sell + vat)}`);
+    }
+    if (unpriced.length) {
+      L.push("", "Also required (not included above — we can source or advise):");
+      unpriced.forEach((l) => L.push(`• ${l.qty} × ${l.description}`));
+    }
+    L.push("", "Prices are ex VAT unless stated. Delivery is quoted by postcode — send me yours and I'll confirm the carriage.",
+      "This quote is valid for 30 days. Any questions, just reply and I'll be happy to help.",
+      "", "Kind regards,", "Trade Superstore Online");
+    return L.join("\n");
+  }
+
+  async function copyEmail() {
+    try {
+      await navigator.clipboard.writeText(emailText());
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    } catch { setCopied(false); window.prompt("Copy the quote email:", emailText()); }
   }
 
   function submitKey(e) {
@@ -174,50 +244,81 @@ export default function Quotes() {
         )}
       </div>
 
-      <div className="card q-form">
-        <div className="q-section">The wall</div>
-        <div className="q-grid">
-          <label className="fld"><span>System</span>
-            <select className="filter" value={f.system} onChange={(e) => set("system", e.target.value)}>
-              {cfg.systems.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </label>
-          <label className="fld"><span>Colour</span>
-            <input className="search" list="qcol" value={f.colour} onChange={(e) => set("colour", e.target.value)} placeholder={cfg.colourHint} />
-            <datalist id="qcol">{cfg.colours.map((c) => <option key={c} value={c} />)}</datalist>
-          </label>
-          <label className="fld"><span>Gross wall area (m²) *</span><input className="search" type="number" inputMode="decimal" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} placeholder="all elevations" /></label>
-          <label className="fld"><span>Openings (m²)</span><input className="search" type="number" inputMode="decimal" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows + doors to deduct" /></label>
-          <label className="fld"><span>Wall height (m)</span><input className="search" type="number" inputMode="decimal" value={f.wall_height_m} onChange={(e) => set("wall_height_m", e.target.value)} placeholder="optional — assumes 2.4" /></label>
-          <label className="fld"><span>Total run width (m)</span><input className="search" type="number" inputMode="decimal" value={f.total_width_m} onChange={(e) => set("total_width_m", e.target.value)} placeholder="optional" /></label>
+      {cfg.kind === "roof" ? (
+        <div className="card q-form">
+          <div className="q-section">The roof</div>
+          <div className="q-grid">
+            <label className="fld"><span>Span / width (m) *</span><input className="search" type="number" inputMode="decimal" value={f.width} onChange={(e) => set("width", e.target.value)} placeholder="front edge" /></label>
+            <label className="fld"><span>Slope length (m) *</span><input className="search" type="number" inputMode="decimal" value={f.rake} onChange={(e) => set("rake", e.target.value)} placeholder="wall to eaves" /></label>
+            <label className="fld"><span>Sheet type</span>
+              <select className="filter" value={f.sheet_type} onChange={(e) => set("sheet_type", e.target.value)}>{POLY_SHEETS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+            <label className="fld"><span>Tint / colour</span>
+              <select className="filter" value={f.molan_colour} onChange={(e) => set("molan_colour", e.target.value)}>{POLY_COLOURS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+            <label className="fld"><span>Sheet width</span>
+              <select className="filter" value={f.sheet_width_mm} onChange={(e) => set("sheet_width_mm", Number(e.target.value))}>{POLY_WIDTHS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}</select>
+            </label>
+            <label className="fld"><span>Bar system</span>
+              <select className="filter" value={f.poly_system} onChange={(e) => set("poly_system", e.target.value)}>{POLY_SYSTEMS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+            <label className="fld"><span>Bar colour</span>
+              <select className="filter" value={f.bar_colour} onChange={(e) => set("bar_colour", e.target.value)}>{POLY_BAR_COLOURS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+          </div>
+          <div className="q-opts">
+            <label className="switch"><input type="checkbox" checked={f.include_acc} onChange={(e) => set("include_acc", e.target.checked)} /><span>Anti-dust &amp; vented foil tape</span></label>
+            <span style={{ flex: 1 }} />
+            <button className="btn primary" onClick={build} disabled={busy}>{busy ? "Building…" : "Build quote"}</button>
+          </div>
+          {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
         </div>
+      ) : (
+        <div className="card q-form">
+          <div className="q-section">The wall</div>
+          <div className="q-grid">
+            <label className="fld"><span>System</span>
+              <select className="filter" value={f.system} onChange={(e) => set("system", e.target.value)}>
+                {cfg.systems.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </label>
+            <label className="fld"><span>Colour</span>
+              <input className="search" list="qcol" value={f.colour} onChange={(e) => set("colour", e.target.value)} placeholder={cfg.colourHint} />
+              <datalist id="qcol">{cfg.colours.map((c) => <option key={c} value={c} />)}</datalist>
+            </label>
+            <label className="fld"><span>Gross wall area (m²) *</span><input className="search" type="number" inputMode="decimal" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} placeholder="all elevations" /></label>
+            <label className="fld"><span>Openings (m²)</span><input className="search" type="number" inputMode="decimal" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows + doors to deduct" /></label>
+            <label className="fld"><span>Wall height (m)</span><input className="search" type="number" inputMode="decimal" value={f.wall_height_m} onChange={(e) => set("wall_height_m", e.target.value)} placeholder="optional — assumes 2.4" /></label>
+            <label className="fld"><span>Total run width (m)</span><input className="search" type="number" inputMode="decimal" value={f.total_width_m} onChange={(e) => set("total_width_m", e.target.value)} placeholder="optional" /></label>
+          </div>
 
-        <div className="q-section">Corners &amp; openings</div>
-        <div className="q-grid">
-          <label className="fld"><span>External corners</span><input className="search" type="number" inputMode="numeric" value={f.external_corners} onChange={(e) => set("external_corners", e.target.value)} placeholder="assumes 4" /></label>
-          <label className="fld"><span>Internal corners</span><input className="search" type="number" inputMode="numeric" value={f.internal_corners} onChange={(e) => set("internal_corners", e.target.value)} placeholder="0" /></label>
-          <label className="fld"><span>Windows / doors</span><input className="search" type="number" inputMode="numeric" value={f.num_windows} onChange={(e) => set("num_windows", e.target.value)} placeholder="count (optional)" /></label>
-        </div>
+          <div className="q-section">Corners &amp; openings</div>
+          <div className="q-grid">
+            <label className="fld"><span>External corners</span><input className="search" type="number" inputMode="numeric" value={f.external_corners} onChange={(e) => set("external_corners", e.target.value)} placeholder="assumes 4" /></label>
+            <label className="fld"><span>Internal corners</span><input className="search" type="number" inputMode="numeric" value={f.internal_corners} onChange={(e) => set("internal_corners", e.target.value)} placeholder="0" /></label>
+            <label className="fld"><span>Windows / doors</span><input className="search" type="number" inputMode="numeric" value={f.num_windows} onChange={(e) => set("num_windows", e.target.value)} placeholder="count (optional)" /></label>
+          </div>
 
-        <div className="q-section">Include in the quote</div>
-        <div className="q-opts">
-          <label className="switch"><input type="checkbox" checked={f.wants_trims} onChange={(e) => set("wants_trims", e.target.checked)} /><span>Trims (corners &amp; start profile)</span></label>
-          <label className="switch"><input type="checkbox" checked={f.wants_screws} onChange={(e) => set("wants_screws", e.target.checked)} /><span>Fixings</span></label>
-          <label className="switch"><input type="checkbox" checked={f.wants_battens} onChange={(e) => set("wants_battens", e.target.checked)} /><span>Battens <span className="sub">(not {cfg.supplier} — flagged)</span></span></label>
-          {range === "hardie" && <>
-            <label className="switch"><input type="checkbox" checked={f.wants_epdm} onChange={(e) => set("wants_epdm", e.target.checked)} /><span>EPDM joint tape</span></label>
-            <label className="switch"><input type="checkbox" checked={f.wants_paint} onChange={(e) => set("wants_paint", e.target.checked)} /><span>Touch-up paint + edge sealer</span></label>
-          </>}
-          <span style={{ flex: 1 }} />
-          <button className="btn primary" onClick={build} disabled={busy}>{busy ? "Building…" : "Build quote"}</button>
+          <div className="q-section">Include in the quote</div>
+          <div className="q-opts">
+            <label className="switch"><input type="checkbox" checked={f.wants_trims} onChange={(e) => set("wants_trims", e.target.checked)} /><span>Trims (corners &amp; start profile)</span></label>
+            <label className="switch"><input type="checkbox" checked={f.wants_screws} onChange={(e) => set("wants_screws", e.target.checked)} /><span>Fixings</span></label>
+            <label className="switch"><input type="checkbox" checked={f.wants_battens} onChange={(e) => set("wants_battens", e.target.checked)} /><span>Battens <span className="sub">(not {cfg.supplier} — flagged)</span></span></label>
+            {range === "hardie" && <>
+              <label className="switch"><input type="checkbox" checked={f.wants_epdm} onChange={(e) => set("wants_epdm", e.target.checked)} /><span>EPDM joint tape</span></label>
+              <label className="switch"><input type="checkbox" checked={f.wants_paint} onChange={(e) => set("wants_paint", e.target.checked)} /><span>Touch-up paint + edge sealer</span></label>
+            </>}
+            <span style={{ flex: 1 }} />
+            <button className="btn primary" onClick={build} disabled={busy}>{busy ? "Building…" : "Build quote"}</button>
+          </div>
+          {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
         </div>
-        {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
-      </div>
+      )}
 
       {res && (
         <>
           <div className="card" style={{ padding: "6px 12px 12px", marginBottom: 10 }}>
-            <div className="tool-label">{res.product}{res.colour ? ` · ${res.colour}` : ""} — {t.n_priced}/{t.n_total} lines priced</div>
+            <div className="tool-label">{res.product}{res.colour && cfg.kind !== "roof" ? ` · ${res.colour}` : ""} — {t.n_priced}/{t.n_total} lines priced</div>
             <table className="mini">
               <thead><tr><th>Item</th><th className="num">Qty</th><th>Matched product</th><th className="num">Unit</th><th className="num">Line</th><th className="num">Cost ({cfg.supplier})</th></tr></thead>
               <tbody>
@@ -260,6 +361,27 @@ export default function Quotes() {
               <ul className="disc-list">{res.caveats.map((c, i) => <li key={i}>{c}</li>)}</ul>
             </div>
           ) : null}
+
+          <div className="card q-actions" style={{ padding: "12px 14px", marginTop: 10 }}>
+            <div className="tool-label">Turn this into a quote</div>
+            <div className="q-grid" style={{ marginBottom: 10 }}>
+              <label className="fld"><span>Customer name</span><input className="search" value={cust.name} onChange={(e) => setCust((s) => ({ ...s, name: e.target.value }))} placeholder="for the draft & email" /></label>
+              <label className="fld"><span>Customer email</span><input className="search" value={cust.email} onChange={(e) => setCust((s) => ({ ...s, email: e.target.value }))} placeholder="optional" /></label>
+              <label className="fld"><span>Delivery postcode</span><input className="search" value={cust.postcode} onChange={(e) => setCust((s) => ({ ...s, postcode: e.target.value }))} placeholder="for VAT region" /></label>
+            </div>
+            <div className="q-opts">
+              <button className="btn primary" onClick={buildDraft} disabled={drafting || !draftableLines.length}>{drafting ? "Creating…" : `Build Shopify draft (${draftableLines.length})`}</button>
+              <button className="btn" onClick={copyEmail}>{copied ? "Copied ✓" : "Copy email for Outlook"}</button>
+              <span className="sub">Draft adds 20% VAT and takes no payment — edit it in Shopify before sending.</span>
+            </div>
+            {draft && !draft.error && (
+              <div className="route-msg ok" style={{ marginTop: 10 }}>
+                Draft {draft.name} created — total {money(draft.total)} inc VAT.{" "}
+                {draft.admin_url && <a href={draft.admin_url} target="_blank" rel="noreferrer">Open in Shopify ↗</a>}
+              </div>
+            )}
+            {draft && draft.error && <div className="route-msg warn" style={{ marginTop: 10 }}>{draft.error}</div>}
+          </div>
         </>
       )}
     </div>

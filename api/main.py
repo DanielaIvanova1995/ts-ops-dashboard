@@ -2084,7 +2084,7 @@ def quote_cedral(body: CedralQuoteIn):
         priced = price is not None and ajw_supplied
         lines.append({
             "description": l["description"], "qty": qty, "search": l["search"],
-            "matched": ({"sku": m.get("sku"), "title": m.get("title"),
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"), "variant_id": m.get("variant_id"),
                          "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
             "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
             "unit_cost": round(ajw_cost, 2) if ajw_supplied else None,
@@ -2173,7 +2173,7 @@ def quote_hardie(body: HardieQuoteIn):
         priced = price is not None and upb_supplied
         lines.append({
             "description": l["description"], "qty": qty, "search": l["search"],
-            "matched": ({"sku": m.get("sku"), "title": m.get("title"),
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"), "variant_id": m.get("variant_id"),
                          "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
             "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
             "unit_cost": round(upb_cost, 2) if upb_supplied else None,
@@ -2194,3 +2194,124 @@ def quote_hardie(body: HardieQuoteIn):
                        "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
                        "n_priced": n_priced, "n_total": len(lines)},
             "discount": disc}
+
+
+class MolanQuoteIn(BaseModel):
+    width: float                        # front span (m)
+    rake: float                         # slope / rafter length (m)
+    sheet_width_mm: int = 1050
+    sheet_type: str = "25mm Multiwall"  # a quote_core.POLY_SHEETS key
+    colour: str = "Clear"
+    system: str = "Self-Supported (16/35mm)"  # a quote_core.POLY_SYSTEMS key
+    bar_colour: str = "White"
+    include_acc: bool = True
+
+
+@app.post("/quotes/molan", dependencies=[Depends(require_key)])
+def quote_molan(body: MolanQuoteIn):
+    """Molan polycarbonate roof take-off → matched Shopify variants → priced quote. Polycarbonate is
+    brand-locked to Molan (sheets, bars, wallplate/eaves, tapes) — never cross-priced. Returns priced
+    lines, totals, caveats and the discount."""
+    import quote_core as qc
+    import order_processing as op
+    if body.sheet_type not in qc.POLY_SHEETS:
+        return {"ok": False, "detail": f"Unknown sheet type '{body.sheet_type}'."}
+    if body.system not in qc.POLY_SYSTEMS:
+        return {"ok": False, "detail": f"Unknown bar system '{body.system}'."}
+    inp = {"width": body.width, "rake": body.rake, "sheet_width_mm": body.sheet_width_mm,
+           "sheet_type": body.sheet_type, "colour": body.colour, "system": body.system,
+           "bar_colour": body.bar_colour, "include_acc": body.include_acc}
+    raw, meta = qc.poly_takeoff(inp)
+    if not raw:
+        return {"ok": False, "detail": "Nothing to build — check the roof width and slope length."}
+    cav = []
+    if meta.get("note"):
+        cav.append(meta["note"])
+    cav.append(f"{meta['sheets']} sheet(s) across the {body.width:.1f} m span and {meta['bars']} "
+               f"bar(s) at {meta['barlen']} m. Confirm the exact span/slope and we'll tighten it.")
+    cav.append("Polycarbonate is quoted in Molan products only. Bar/tape quantities are estimates "
+               "sized from the span — send the exact roof sizes to firm them up.")
+    try:
+        tok = ds.shopify_products_token()
+    except Exception:  # noqa: BLE001
+        tok = None
+    lines, sell, cost, n_priced = [], 0.0, 0.0, 0
+    for l in raw:
+        m = None
+        try:
+            m = ds.match_quote_variant(None, l["search"], token=tok, brand="Molan")
+        except Exception:  # noqa: BLE001
+            m = None
+        price = m.get("price") if m else None
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        mo_cost = None
+        if m and m.get("sku"):
+            try:
+                mo_cost = op._line_cost(m["sku"], "Molan", m.get("title"))
+            except Exception:  # noqa: BLE001
+                mo_cost = None
+        mo_supplied = isinstance(mo_cost, (int, float))
+        qty = l["qty"]
+        priced = price is not None and mo_supplied
+        lines.append({
+            "description": l["item"], "qty": qty, "search": l["search"],
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"), "variant_id": m.get("variant_id"),
+                         "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
+            "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
+            "unit_cost": round(mo_cost, 2) if mo_supplied else None,
+            "line_cost": round(mo_cost * qty, 2) if mo_supplied else None,
+            "ajw_supplied": mo_supplied,   # (front-end flag name) — "has a confirmed supplier cost"
+            "note": ("no Molan cost on file — check the price list" if (m and not mo_supplied)
+                     else ("couldn't match a Molan product — check wording" if not m else "")),
+        })
+        if priced:
+            sell += price * qty
+            cost += mo_cost * qty
+            n_priced += 1
+    margin = (sell - cost) / sell if sell > 0 else None
+    disc = qc.discount_floor(sell, margin) if margin is not None else None
+    return {"ok": True, "product": f"{body.sheet_type} {body.colour} polycarbonate roof",
+            "colour": body.colour, "lines": lines, "caveats": cav,
+            "totals": {"sell": round(sell, 2), "cost": round(cost, 2), "margin": margin,
+                       "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
+                       "n_priced": n_priced, "n_total": len(lines)},
+            "discount": disc}
+
+
+class QuoteDraftItem(BaseModel):
+    variant_id: str
+    qty: int = 1
+
+
+class QuoteDraftIn(BaseModel):
+    items: list[QuoteDraftItem]
+    customer_email: str | None = None
+    customer_name: str | None = None
+    postcode: str | None = None
+    note: str | None = None
+
+
+@app.post("/quotes/draft", dependencies=[Depends(require_key)])
+def quote_draft(body: QuoteDraftIn):
+    """Create a Shopify DRAFT order from the matched quote lines (human-gated: the user clicks Build
+    draft). Shopify prices it and ADDS 20% VAT (store is ex-VAT). Returns the draft name + invoice URL
+    so it can be opened/finished in Shopify. Not an order and takes no payment."""
+    line_items = [{"variantId": it.variant_id, "quantity": int(it.qty)}
+                  for it in body.items if it.variant_id and int(it.qty) > 0]
+    if not line_items:
+        return {"ok": False, "detail": "No matched lines to put on a draft order."}
+    try:
+        d = ds.create_draft_order(
+            line_items,
+            email=(body.customer_email or None),
+            name=(body.customer_name or None),
+            postcode=(body.postcode or None),
+            note=(body.note or "TradeHub quote"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't create the draft order: {e}")
+    return {"ok": True, "name": d.get("name"), "invoice_url": d.get("invoiceUrl"),
+            "admin_url": d.get("admin_url"), "total": d.get("total"), "tax": d.get("tax"),
+            "id": d.get("id")}

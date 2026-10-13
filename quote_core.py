@@ -288,6 +288,70 @@ def hardie_takeoff(clad):
     return raw, cav
 
 
+# ---- Molan polycarbonate roof ----------------------------------------------------------------
+# Brand-locked: polycarbonate is ALWAYS quoted as Molan products only (see QUOTE_BRAND_LOCKS).
+POLY_SHEETS = {
+    "10mm Twinwall": "Twinwall", "16mm Multiwall": "Multiwall", "25mm Multiwall": "Multiwall",
+    "32mm Multiwall": "Multiwall", "35mm Multiwall": "Multiwall",
+}
+POLY_COLOURS = ["Clear", "Opal", "Bronze", "Heatguard Opal", "Bronze on Opal"]
+POLY_WIDTHS = {"700 mm": 700, "1050 mm": 1050, "1200 mm": 1200, "2100 mm": 2100}
+POLY_SYSTEMS = {
+    "Self-Supported (16/35mm)": {"end": "Self Supported End Bar",
+                                 "inter": "Self Supported Intermediate Bar",
+                                 "wallplate": "Wallplate Assembly", "eaves": None},
+    "Artisan": {"end": "Artisan Edge Bar + End Cap", "inter": "Artisan Intermediate Bar + End Cap",
+                "wallplate": "Artisan Full Wallplate", "eaves": "Artisan Eaves Beam"},
+}
+POLY_BAR_LENGTHS = [2, 3, 4, 6]
+
+
+def poly_takeoff(inp):
+    """Polycarbonate roof dimensions + sheet/system choice -> Molan take-off lines. Each line carries
+    a 'search' string matched against Molan products only. inp keys: width (m, front span), rake (m,
+    slope length), sheet_width_mm, sheet_type (a POLY_SHEETS key), colour, system (a POLY_SYSTEMS
+    key), bar_colour, include_acc (bool). Returns (lines, meta). Lifted verbatim from app.py."""
+    width, rake = inp["width"], inp["rake"]
+    sw_m = inp["sheet_width_mm"] / 1000.0
+    sheets = math.ceil(width / sw_m) if (width and sw_m) else 0
+    barlen = next((b for b in POLY_BAR_LENGTHS if b >= rake), 6) if rake else 0
+    inter = max(0, sheets - 1)
+    ends = 2 if sheets else 0
+    sysd = POLY_SYSTEMS[inp["system"]]
+    bc = inp["bar_colour"]
+    kind = POLY_SHEETS[inp["sheet_type"]]
+    thick = inp["sheet_type"].split("mm")[0] + "mm"
+    colour = inp["colour"]
+    pieces = lambda run, plen: math.ceil(run / plen) if run > 0 else 0  # noqa: E731
+    lines = [
+        ("sheet", f"{thick} {colour} {kind} sheet — {inp['sheet_width_mm']}mm × {rake:.1f}m",
+         sheets, "sheet", f"{thick} {colour} {kind} Polycarbonate Sheet"),
+        ("inter", f"{inp['system']} intermediate bar {bc} — {barlen}m", inter, "bar",
+         f"{sysd['inter']} {bc} {barlen}m"),
+        ("end", f"{inp['system']} end/edge bar {bc} — {barlen}m", ends, "bar",
+         f"{sysd['end']} {bc} {barlen}m"),
+        ("wallplate", f"Wallplate {bc} (top, along {width:.1f}m)", pieces(width, 4), "length",
+         f"{sysd['wallplate']} {bc} 4m"),
+    ]
+    if sysd["eaves"]:
+        lines.append(("eaves", f"Eaves beam {bc} (front, along {width:.1f}m)", pieces(width, 4),
+                      "length", f"{sysd['eaves']} {bc} 4m"))
+    if inp["include_acc"]:
+        lines += [
+            ("antidust", "Anti-dust tape (seals sheet tops)", max(1, pieces(width, 33)), "roll",
+             "Anti Dust Tape"),
+            ("foil", "Vented foil tape (sheet bottoms)", max(1, pieces(width, 33)), "roll",
+             "Aluminium Foil Blanking Tape"),
+        ]
+    out = [{"key": k, "item": it, "qty": q, "unit": u, "search": s}
+           for k, it, q, u, s in lines if q > 0]
+    note = ""
+    if rake > 6:
+        note = (f"Slope is {rake:.1f}m — longer than a 6m bar/sheet, so bars and sheets will "
+                "need joining (extra H-section/joints not yet added).")
+    return out, {"sheets": sheets, "bars": inter + ends, "barlen": barlen, "note": note}
+
+
 # ---- Discount Desk ---------------------------------------------------------------------------
 SHOPIFY_FEE = 0.018
 ABANDONED_CART_PCT = 0.04   # every customer already gets 4% off via the abandoned-cart email
