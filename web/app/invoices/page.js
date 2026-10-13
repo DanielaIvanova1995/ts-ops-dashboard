@@ -26,6 +26,21 @@ export default function Invoices() {
   const [err, setErr] = useState("");
   const [checks, setChecks] = useState({});     // sub_id -> result
   const [checking, setChecking] = useState({}); // sub_id -> bool
+  const [sel, setSel] = useState(() => new Set());
+  const [approving, setApproving] = useState({}); // sub_id -> working|done|err
+  const [proc, setProc] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [floor, setFloor] = useState(10);
+  const [ceil, setCeil] = useState(35);
+
+  useEffect(() => {
+    try {
+      const f = localStorage.getItem("th_inv_floor"); const c = localStorage.getItem("th_inv_ceil");
+      if (f) setFloor(Number(f)); if (c) setCeil(Number(c));
+    } catch {}
+  }, []);
+  function setFloorP(v) { setFloor(v); try { localStorage.setItem("th_inv_floor", String(v)); } catch {} }
+  function setCeilP(v) { setCeil(v); try { localStorage.setItem("th_inv_ceil", String(v)); } catch {} }
 
   useEffect(() => {
     let k = null;
@@ -61,15 +76,69 @@ export default function Invoices() {
     setAccessKey(k); setNeedKey(false); setKeyInput("");
   }
 
-  async function doCheck(sub_id) {
+  const doCheck = useCallback(async (sub_id) => {
     setChecking((c) => ({ ...c, [sub_id]: true }));
     try {
-      const res = await jsonFetch(`/invoices/${sub_id}/check`, { method: "POST" });
+      const res = await jsonFetch(`/invoices/${sub_id}/check?lo=${floor}&hi=${ceil}`, { method: "POST" });
       if (!res.ok) throw new Error(`API ${res.status}`);
-      setChecks((c) => ({ ...c, [sub_id]: await res.json() }));
+      const d = await res.json();
+      setChecks((c) => ({ ...c, [sub_id]: d }));
+      return d;
     } catch (e) {
-      if (String(e.message) !== "unauthorised") setChecks((c) => ({ ...c, [sub_id]: { ok: false, detail: String(e.message || e) } }));
+      if (String(e.message) === "unauthorised") return null;
+      const d = { ok: false, detail: String(e.message || e) };
+      setChecks((c) => ({ ...c, [sub_id]: d }));
+      return d;
     } finally { setChecking((c) => ({ ...c, [sub_id]: false })); }
+  }, [jsonFetch, floor, ceil]);
+
+  async function doApprove(iv) {
+    const sub_id = iv.sub_id;
+    if (!window.confirm(`Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`)) return;
+    setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    try {
+      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
+      const d = await res.json();
+      if (res.ok && d.ok) {
+        setApproving((a) => ({ ...a, [sub_id]: "done" }));
+        setNotice({ kind: "ok", text: `${iv.invoice_no}: ${d.detail}` });
+        setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 900);
+      } else { setApproving((a) => ({ ...a, [sub_id]: "err" })); setNotice({ kind: "warn", text: `${iv.invoice_no}: ${d.detail || "couldn’t approve"}` }); }
+    } catch (e) { setApproving((a) => ({ ...a, [sub_id]: "err" })); if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
+  function toggleSel(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  function toggleAll() { setSel((s) => (s.size === list.length ? new Set() : new Set(list.map((x) => x.sub_id)))); }
+
+  async function checkApproveSelected() {
+    const ids = [...sel];
+    if (!ids.length) return;
+    const results = [];
+    setProc({ running: true, done: 0, total: ids.length, results: [] });
+    for (const sub_id of ids) {
+      const iv = list.find((x) => x.sub_id === sub_id);
+      let text = "—", kind = "warn";
+      if (iv) {
+        try {
+          const d = checks[sub_id] || await doCheck(sub_id);
+          if (d && d.ok) {
+            if (!d.matched) text = "discrepancy — left for review";
+            else if (d.suggested_action === "push") {
+              const ar = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
+              const ad = await ar.json();
+              if (ar.ok && ad.ok) { text = `approved — ${ad.detail}`; kind = "ok"; setApproving((a) => ({ ...a, [sub_id]: "done" })); }
+              else text = `couldn’t approve: ${ad.detail || ""}`;
+            } else text = `matches but ${d.suggested_action} — not auto-approved (margin)`;
+          } else text = (d && d.detail) || "check failed";
+        } catch (e) { if (String(e.message) === "unauthorised") break; text = "error"; }
+      }
+      results.push({ inv: iv ? iv.invoice_no : sub_id, text, kind });
+      setProc({ running: true, done: results.length, total: ids.length, results: [...results] });
+    }
+    setProc((p) => ({ ...(p || {}), running: false }));
+    setSel(new Set());
+    const approved = results.filter((r) => r.kind === "ok").map((r) => r.inv);
+    if (approved.length) setList((l) => l.filter((x) => !approved.includes(x.invoice_no)));
   }
 
   if (needKey) {
@@ -97,6 +166,26 @@ export default function Invoices() {
         </div>
       </div>
 
+      <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+        <div className="inv-controls">
+          <span className="inv-set"><span className="sub">Approve floor %</span><input type="number" className="numin" value={floor} onChange={(e) => setFloorP(Number(e.target.value))} /></span>
+          <span className="inv-set"><span className="sub">Flag above %</span><input type="number" className="numin" value={ceil} onChange={(e) => setCeilP(Number(e.target.value))} /></span>
+          <span style={{ flex: 1 }} />
+          {list.length > 0 && <button className="btn" onClick={toggleAll}>{sel.size === list.length ? "Clear all" : "Select all"}</button>}
+          {sel.size > 0 && <button className="btn primary" onClick={checkApproveSelected} disabled={proc?.running}>{proc?.running ? `Working ${proc.done}/${proc.total}…` : `Check & approve selected (${sel.size})`}</button>}
+        </div>
+        <div className="sub" style={{ marginTop: 6 }}>Auto-approve pushes to QuickBooks only invoices that <b>fully match</b> and whose order margin is <b>in band</b> (floor–flag). Anything else is left for you to review.</div>
+        {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}
+      </div>
+
+      {proc && (
+        <div className="proc-panel">
+          <div className="proc-head">{proc.running ? <><span className="spinner" />Working {proc.done} of {proc.total}…</> : <>Done {proc.results.length}. <button className="linkish" onClick={() => setProc(null)}>dismiss</button></>}</div>
+          {proc.total > 0 && <div className="proc-bar"><span style={{ width: `${Math.round((proc.done / proc.total) * 100)}%` }} /></div>}
+          <div className="proc-results">{proc.results.map((x, i) => <div key={i} className={`proc-row ${x.kind}`}><b>{x.inv}</b> {x.text}</div>)}</div>
+        </div>
+      )}
+
       {status === "error" && <div className="card"><div className="state err">Couldn’t load invoices ({err}).</div></div>}
       {status === "ok" && list.length === 0 && <div className="card"><div className="state">No invoices in Needs Review. 🎉</div></div>}
 
@@ -108,7 +197,8 @@ export default function Invoices() {
           return (
             <div className="card inv-card" key={iv.sub_id}>
               <div className="inv-head">
-                <div>
+                <label className="inv-chk"><input type="checkbox" checked={sel.has(iv.sub_id)} onChange={() => toggleSel(iv.sub_id)} /></label>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <span className="ono">{iv.invoice_no}</span>
                   <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
                   {iv.possible_dup ? <span className="pill red" style={{ marginLeft: 8 }}>possible duplicate of {iv.possible_dup}</span> : null}
@@ -118,6 +208,9 @@ export default function Invoices() {
                   {al && <span className={`pill ${al.cls}`}>{al.text}</span>}
                   {!iv.has_pdf ? <span className="sub">no PDF</span> :
                     <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
+                  {r && r.ok && r.matched && (approving[iv.sub_id] === "done"
+                    ? <span className="pill green">approved ✓</span>
+                    : <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>)}
                 </div>
               </div>
 

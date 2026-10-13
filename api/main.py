@@ -1034,7 +1034,7 @@ def invoices():
 
 
 @app.post("/invoices/{sub_id}/check", dependencies=[Depends(require_key)])
-def invoice_check(sub_id: str):
+def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None):
     """Run the SAME 3-way check the live app/runner uses (invoice_core.check_invoice): invoice PDF vs
     the supplier's pricelist cost vs the order's SKUs/quantities. Read-only — returns the verdict,
     line-by-line issues, margin and the suggested action. Parse is cached (Supabase) to avoid re-
@@ -1088,7 +1088,9 @@ def invoice_check(sub_id: str):
     res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship)
     matched = res["n_issues"] == 0
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
-    label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"), sup)
+    _lo = lo if lo is not None else core.MARGIN_PUSH_MIN
+    _hi = hi if hi is not None else core.MARGIN_PUSH_MAX
+    label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"), sup, _lo, _hi)
 
     def _line_out(l):
         o = {k: v for k, v in l.items() if k != "issues" and not k.startswith("_")}
