@@ -831,7 +831,72 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
                statement_date=stmt.get("statement_date"), balance=stmt.get("balance"),
                filename=file.filename)
+    # Persist the latest reconciliation for this supplier (one per vendor; Supabase + Monday blob).
+    try:
+        snap = dict(rec)
+        snap["vid"] = vid
+        snap["saved_at"] = _dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        ds.recon_save(f"v{vid}", snap)
+    except Exception:  # noqa: BLE001
+        pass
     return rec
+
+
+@app.get("/recon/saved", dependencies=[Depends(require_key)])
+def recon_saved():
+    """The latest saved reconciliation per supplier — with a LIVE re-check against QuickBooks: any
+    statement whose ready-to-pay bills are now all paid is auto-removed (and dropped from the store).
+    Returns light summaries; open one with /recon/open."""
+    try:
+        allsnaps = ds.recon_load_all() or {}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't load saved reconciliations: {e}")
+    out = []
+    for key, snap in allsnaps.items():
+        vid = str(snap.get("vid") or "")
+        pay_lines = snap.get("pay_lines") or []
+        to_pay = snap.get("to_pay") or 0
+        n_out = snap.get("n_pay") or 0
+        try:
+            if vid and pay_lines:
+                bills = ds.qbo_vendor_bills(vid)
+                open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
+                outstanding = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
+                to_pay = round(sum(float(pl.get("amt") or 0) for pl in outstanding), 2)
+                n_out = len(outstanding)
+                if not outstanding:                      # all paid → auto-remove
+                    try:
+                        ds.recon_delete(key, vid=vid)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    continue
+        except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
+            pass
+        if not pay_lines and (snap.get("n_pay") or 0) == 0:   # nothing ever to pay → done
+            try:
+                ds.recon_delete(key, vid=vid)
+            except Exception:  # noqa: BLE001
+                pass
+            continue
+        out.append({"key": key, "vid": vid,
+                    "supplier": snap.get("vendor_name") or snap.get("supplier"),
+                    "statement_date": snap.get("statement_date"), "saved_at": snap.get("saved_at"),
+                    "to_pay": to_pay, "n_pay": n_out, "n_missing": snap.get("n_missing") or 0})
+    out.sort(key=lambda s: str(s.get("saved_at") or ""), reverse=True)
+    return {"saved": out}
+
+
+@app.get("/recon/open", dependencies=[Depends(require_key)])
+def recon_open(key: str):
+    """Return a saved reconciliation's full snapshot (rows etc.) so it can be reopened without
+    re-uploading the statement."""
+    try:
+        snap = (ds.recon_load_all() or {}).get(key)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't load the reconciliation: {e}")
+    if not snap:
+        raise HTTPException(status_code=404, detail="Saved reconciliation not found")
+    return snap
 
 
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"

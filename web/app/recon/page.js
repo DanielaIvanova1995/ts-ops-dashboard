@@ -28,6 +28,7 @@ export default function Recon() {
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState(null);
   const [approving, setApproving] = useState({});
+  const [saved, setSaved] = useState([]);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -50,6 +51,23 @@ export default function Recon() {
     jsonFetch("/recon/status").then((r) => r.ok && r.json()).then((d) => d && setQb(d)).catch(() => {});
   }, [accessKey, jsonFetch]);
 
+  const loadSaved = useCallback(() => {
+    if (!accessKey) return;
+    jsonFetch("/recon/saved").then((r) => r.ok && r.json()).then((d) => d && setSaved(d.saved || [])).catch(() => {});
+  }, [accessKey, jsonFetch]);
+  useEffect(() => { loadSaved(); }, [loadSaved]);
+
+  async function openSaved(key) {
+    try {
+      const res = await jsonFetch(`/recon/open?key=${encodeURIComponent(key)}`);
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      setResult(await res.json());
+      try { window.scrollTo(0, 0); } catch {}
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) });
+    }
+  }
+
   function submitKey(e) {
     e.preventDefault();
     const k = keyInput.trim(); if (!k) return;
@@ -70,7 +88,7 @@ export default function Recon() {
       if (!res.ok) throw new Error(`API ${res.status}`);
       const d = await res.json();
       if (d.ok === false && d.need_vendor) { setNotice({ kind: "warn", text: d.detail || "No QuickBooks vendor match." }); }
-      else { setResult(d); }
+      else { setResult(d); loadSaved(); }
     } catch (e) {
       setNotice({ kind: "warn", text: "Couldn’t reconcile — " + String(e.message || e) });
     } finally { setBusy(false); }
@@ -88,6 +106,7 @@ export default function Recon() {
         setApproving((a) => ({ ...a, [inv]: "done" }));
         setResult((prev) => prev ? { ...prev, rows: prev.rows.map((x) => x.invoice === inv ? { ...x, status: "ready" } : x) } : prev);
         setNotice({ kind: "ok", text: `${inv}: ${d.detail}` });
+        loadSaved();
       } else {
         setApproving((a) => ({ ...a, [inv]: "err" }));
         setNotice({ kind: "warn", text: `${inv}: ${d.detail || "couldn’t approve"}` });
@@ -133,6 +152,24 @@ export default function Recon() {
         <div className="sub" style={{ marginTop: 8 }}>Drop a supplier statement (PDF or CSV). It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 10 }}>{notice.text}</div>}
       </div>
+
+      {saved.length > 0 && (
+        <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+          <div className="tool-label" style={{ marginBottom: 8 }}>Saved statements — still to pay</div>
+          <div className="saved-list">
+            {saved.map((s) => (
+              <div key={s.key} className="saved-row">
+                <div><b>{s.supplier}</b> <span className="sub">{s.statement_date ? `· ${s.statement_date} ` : ""}{s.saved_at ? `· saved ${s.saved_at}` : ""}</span></div>
+                <div className="saved-right">
+                  <span className="chip amber"><b>{s.n_pay}</b> ready · {money(s.to_pay)}</span>
+                  {s.n_missing ? <span className="chip red">{s.n_missing} not in QB</span> : null}
+                  <button className="btn" onClick={() => openSaved(s.key)}>Open</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {r && (
         <div className="card">
