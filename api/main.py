@@ -79,7 +79,7 @@ def health():
 
 
 @app.get("/diag")
-def diag():
+def diag(sweep: int = 0):
     """Yes/no status of the backend's integrations — no secrets returned. Open (booleans only) so it
     can be checked quickly. Confirms whether Supabase + QuickBooks are usable from THIS service."""
     out = {"supabase_configured": False, "supabase_read_ok": None, "qbo_connected": None}
@@ -113,6 +113,28 @@ def diag():
         out["bank_accounts_fn"] = len(ds.qbo_bank_accounts())   # exactly what the pay dropdown calls
     except Exception as e:  # noqa: BLE001
         out["bank_accounts_fn_error"] = str(e)[:160]
+    if sweep:   # ?sweep=1 → DRY-run the 'clear ones already on Monday' matcher (diagnostic)
+        try:
+            import supabase_db as sdb
+            frows = sdb.invoice_import_recent(limit=500, status="failed") or []
+            nrm = lambda s: _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+            invs = [(r.get("invoice_no") or "").strip() for r in frows if (r.get("invoice_no") or "").strip()]
+            uniq = list(dict.fromkeys(invs))
+            on_m = set()
+            q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
+                 'columns:[{column_id:"name",column_values:$vals}]){items{name}}}')
+            tok = ds.get_token()
+            for i in range(0, len(uniq), 50):
+                data = ds._monday_gql(q, {"b": str(ds.SUBITEMS_BOARD_ID), "vals": uniq[i:i + 50]}, tok)
+                for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
+                    on_m.add(nrm(it.get("name")))
+            matched = [v for v in uniq if nrm(v) in on_m]
+            out["import_sweep"] = {"failed": len(frows), "distinct_invoices": len(uniq),
+                                   "would_clear": len(matched),
+                                   "sample_match": matched[:10],
+                                   "sample_no_match": [v for v in uniq if nrm(v) not in on_m][:15]}
+        except Exception as e:  # noqa: BLE001
+            out["import_sweep_error"] = str(e)[:200]
     # Background schedulers live in the always-on app host (a separate service), but they write their
     # config + last-run to the SAME Supabase — so surface them here to diagnose "auto isn't running".
     try:
