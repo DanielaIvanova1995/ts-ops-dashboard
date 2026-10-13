@@ -283,8 +283,10 @@ export default function Quotes() {
               </select>
             </label>
             <label className="fld"><span>Colour</span>
-              <input className="search" list="qcol" value={f.colour} onChange={(e) => set("colour", e.target.value)} placeholder={cfg.colourHint} />
-              <datalist id="qcol">{cfg.colours.map((c) => <option key={c} value={c} />)}</datalist>
+              <select className="filter" value={f.colour} onChange={(e) => set("colour", e.target.value)}>
+                <option value="">— choose a colour —</option>
+                {cfg.colours.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
             </label>
             <label className="fld"><span>Gross wall area (m²) *</span><input className="search" type="number" inputMode="decimal" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} placeholder="all elevations" /></label>
             <label className="fld"><span>Openings (m²)</span><input className="search" type="number" inputMode="decimal" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows + doors to deduct" /></label>
