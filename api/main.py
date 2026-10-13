@@ -1800,57 +1800,104 @@ def pricing_prices(supplier: str, q: str = "", limit: int = 500, sort: str = "sk
             "pricelist_date": _pl_date_for(supplier)}
 
 
+_DELIV_CATEGORY = {
+    "upb": "Cladding & roofline", "ajw": "Cladding & roofline", "southern sheeting": "Cladding & roofline",
+    "nbp": "Building plastics", "eurocell": "Building plastics",
+    "travis perkins": "Builders' merchants", "markovitz": "Builders' merchants", "gap": "Builders' merchants",
+    "pjh": "Bathrooms & plumbing", "carron": "Bathrooms & plumbing",
+    "molan": "Polycarbonate & roofing",
+    "decor8": "Paint & decorating",
+    "chase hardware": "Ironmongery & hardware", "ctie": "Ironmongery & hardware", "bricklink": "Ironmongery & hardware",
+    "jb kind": "Internal doors", "lpd": "Internal doors", "deanta": "Internal doors",
+    "dolle": "Stairs & loft ladders",
+}
+
+
+def _cat_for(name):
+    return _DELIV_CATEGORY.get((name or "").lower().split(" (")[0].strip(), "Other")
+
+
+def _door_detail(base, step, cap, max_doors, extra_rows):
+    """Per-door band table [[label, '£x.xx'], ...] for a door supplier (base + step/door, capped)."""
+    rows = []
+    for d in range(1, max_doors + 1):
+        amt = min(base + (d - 1) * step, cap)
+        label = f"{d} door{'s' if d > 1 else ''}"
+        if amt >= cap:
+            rows.append([f"{d}+ doors (cap)", f"£{cap:,.2f}"])
+            break
+        rows.append([label, f"£{amt:,.2f}"])
+    return {"title": "Per door (ex VAT) — before any area surcharge",
+            "headers": ["Doors", "We pay"], "rows": rows + extra_rows}
+
+
 def _delivery_catalog():
-    """Per-supplier delivery: what AJW/suppliers charge US (ex VAT) and what we charge the CUSTOMER.
-    Flat rules come from delivery_rules.FLAT; AJW from ajw_delivery (incl. customer); the postcode/
-    per-door suppliers are summarised. Customer delivery for non-AJW is set in Shopify shipping."""
+    """Per-supplier delivery: what the supplier charges US (ex VAT) and what we charge the CUSTOMER,
+    grouped by category. Door suppliers + AJW carry an expandable `detail` table. Flat rules come
+    from delivery_rules.FLAT; AJW from ajw_delivery. Customer delivery for non-AJW is Shopify shipping."""
     import delivery_rules as dr
     rows = []
     for key, (flat, free) in dr.FLAT.items():
         rows.append({"supplier": _DELIV_NAMES.get(key, key.title()), "basis": "Flat rate",
                      "we_pay": f"£{flat:,.2f}",
                      "free_over": (f"free over £{free:,.0f}" if free else "no free threshold"),
-                     "customer": "Set in Shopify shipping", "notes": "", "zones": None})
+                     "customer": "Set in Shopify shipping", "notes": "", "detail": None})
     try:
         import ajw_delivery
         data = ajw_delivery._data()
         zr = []
         for z, info in (data.get("zones") or {}).items():
             if info.get("ajw_rate") is None:
-                zr.append({"zone": z, "we_pay": "Quote per order", "free_over": "—",
-                           "customer": "Quote required", "customer_free": "—"})
+                zr.append([z, "Quote per order", "—", "Quote required", "—"])
             else:
-                zr.append({"zone": z, "we_pay": f"£{info['ajw_rate']:,.2f}",
-                           "free_over": f"£{info['ajw_free']:,.0f}",
-                           "customer": f"£{info['cust_rate']:,.2f}",
-                           "customer_free": f"£{info['cust_free']:,.0f}"})
+                zr.append([z, f"£{info['ajw_rate']:,.2f}", f"£{info['ajw_free']:,.0f}",
+                           f"£{info['cust_rate']:,.2f}", f"£{info['cust_free']:,.0f}"])
         rows.append({"supplier": "AJW (Cedral)", "basis": "Postcode zone", "we_pay": "£40–£115 by zone",
                      "free_over": "free over each zone's ex-VAT cost threshold",
                      "customer": "£39.99–£114.99 by zone (free over the zone threshold)",
                      "notes": "Scotland/NI/islands quoted per order; +£75 mechanical offload per drop",
-                     "zones": zr})
+                     "detail": {"title": "By postcode zone (ex VAT)",
+                                "headers": ["Zone", "We pay", "Free over (our cost)", "Customer", "Customer free over"],
+                                "rows": zr}})
     except Exception:  # noqa: BLE001
         pass
     rows += [
         {"supplier": "Carron", "basis": "Postcode zone", "we_pay": "£25–£85 by zone",
          "free_over": "Zone 1 free over £250", "customer": "Set in Shopify shipping",
-         "notes": "Ireland quoted", "zones": None},
+         "notes": "Ireland quoted", "detail": None},
         {"supplier": "Ctie", "basis": "Postcode zone", "we_pay": "£7 UK mainland / £13 NI (BT)",
          "free_over": "UK free over £100 / NI free over £250", "customer": "Set in Shopify shipping",
-         "notes": "", "zones": None},
+         "notes": "", "detail": None},
         {"supplier": "Southern Sheeting", "basis": "Postcode zone", "we_pay": "by postcode colour zone",
-         "free_over": "by zone", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
-        {"supplier": "JB Kind", "basis": "Per door + area", "we_pay": "by door count + area surcharge",
-         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
-        {"supplier": "LPD", "basis": "Per door + area", "we_pay": "by door count + area surcharge",
-         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
-        {"supplier": "Deanta", "basis": "Per door + area", "we_pay": "by door count + area surcharge",
-         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "hardware-only cheap/FOC",
-         "zones": None},
+         "free_over": "by zone", "customer": "Set in Shopify shipping", "notes": "", "detail": None},
         {"supplier": "Dolle", "basis": "Per product", "we_pay": "highest per-product band on the order",
-         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
+         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "detail": None},
     ]
-    rows.sort(key=lambda r: r["supplier"].lower())
+    # Internal doors — per-door tables (same expandable treatment as AJW's zones).
+    jb = {"title": "Per door (ex VAT)", "headers": ["Doors", "We pay"],
+          "rows": [["1 door", "£42.00"], ["2 doors", "£47.00"], ["3 doors", "£52.00"],
+                   ["4 doors", "£57.00"], ["5+ doors", "£62.00"], ["Ironmongery only", "£15.00"]]}
+    lpd = _door_detail(dr.LPD_DOOR_BASE, dr.LPD_DOOR_STEP, dr.LPD_DOOR_CAP, 9,
+                       [["Hardware only", "£15.00 (≤10 packs) / £20.00 (>10)"]])
+    deanta = _door_detail(dr.DEANTA_DOOR_BASE, dr.DEANTA_DOOR_STEP, dr.DEANTA_DOOR_CAP, 7,
+                          [["Hardware only", "£8.00 (<£100) / free ≥£100 or shipped with doors"],
+                           ["Next-day / express", "+£50.00"]])
+    rows += [
+        {"supplier": "JB Kind", "basis": "Per door", "we_pay": "£42–£62 by door count",
+         "free_over": "—", "customer": "Set in Shopify shipping",
+         "notes": "Some Scottish & island postcodes excluded / POA.", "detail": jb},
+        {"supplier": "LPD", "basis": "Per door", "we_pay": "£40–£80 by door count",
+         "free_over": "—", "customer": "Set in Shopify shipping",
+         "notes": "+ area surcharge: London congestion +£15; Scottish Highlands & islands £20–£95; some areas POA.",
+         "detail": lpd},
+        {"supplier": "Deanta", "basis": "Per door", "we_pay": "£40–£70 by door count",
+         "free_over": "—", "customer": "Set in Shopify shipping",
+         "notes": "+ area surcharge £20–£150 (Scottish Highlands & islands); HS / IV40+ POA. Next-day +£50.",
+         "detail": deanta},
+    ]
+    for r in rows:
+        r["category"] = _cat_for(r["supplier"])
+    rows.sort(key=lambda r: (r["category"], r["supplier"].lower()))
     return rows
 
 

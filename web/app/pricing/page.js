@@ -162,33 +162,35 @@ export default function Pricing() {
             <table className="mini">
               <thead><tr><th>Supplier</th><th>Basis</th><th>We pay</th><th>Free over</th><th>Customer</th><th></th></tr></thead>
               <tbody>
-                {deliv.map((r, i) => (
+                {deliv.map((r, i) => {
+                  const newCat = i === 0 || deliv[i - 1].category !== r.category;
+                  return (
                   <Fragment key={i}>
+                    {newCat && <tr className="cat-row"><td colSpan={6}>{r.category}</td></tr>}
                     <tr>
                       <td><b>{r.supplier}</b>{r.notes ? <div className="sub">{r.notes}</div> : null}</td>
                       <td className="sub">{r.basis}</td>
                       <td>{r.we_pay}</td>
                       <td className="sub">{r.free_over}</td>
                       <td>{r.customer}</td>
-                      <td>{r.zones ? <button className="btn ghost" onClick={() => setExpanded(expanded === i ? null : i)}>{expanded === i ? "Hide zones" : "Zones"}</button> : null}</td>
+                      <td>{r.detail ? <button className="btn ghost" onClick={() => setExpanded(expanded === i ? null : i)}>{expanded === i ? "Hide" : "Breakdown"}</button> : null}</td>
                     </tr>
-                    {r.zones && expanded === i && (
+                    {r.detail && expanded === i && (
                       <tr><td colSpan={6} style={{ paddingLeft: 18 }}>
+                        {r.detail.title ? <div className="sub" style={{ margin: "2px 0 4px" }}>{r.detail.title}</div> : null}
                         <table className="mini">
-                          <thead><tr><th>Zone</th><th>We pay</th><th>Free over (our cost)</th><th>Customer</th><th>Customer free over</th></tr></thead>
+                          <thead><tr>{r.detail.headers.map((h, k) => <th key={k} className={k > 0 ? "" : ""}>{h}</th>)}</tr></thead>
                           <tbody>
-                            {r.zones.map((z, j) => (
-                              <tr key={j}>
-                                <td>{z.zone}</td><td>{z.we_pay}</td><td className="sub">{z.free_over}</td>
-                                <td>{z.customer}</td><td className="sub">{z.customer_free}</td>
-                              </tr>
+                            {r.detail.rows.map((row, j) => (
+                              <tr key={j}>{row.map((cell, k) => <td key={k} className={k === 0 ? "" : "sub"}>{cell}</td>)}</tr>
                             ))}
                           </tbody>
                         </table>
                       </td></tr>
                     )}
                   </Fragment>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
