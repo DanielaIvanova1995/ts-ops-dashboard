@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const KEY_STORE = "th_access_key";
@@ -274,11 +273,7 @@ export default function Board() {
   return (
     <div className="wrap">
       <div className="topbar">
-        <div className="wordmark">Trade<b>Hub</b><span className="sec">Order Processing</span></div>
-        <nav className="nav">
-          <Link className="navlink active" href="/">Orders</Link>
-          <Link className="navlink" href="/recon">Statements</Link>
-        </nav>
+        <div className="pagetitle">Order Processing</div>
         <div className="right">
           <span className="count">
             {status === "ok" ? <><b>{orders.length}</b> orders</> : status === "loading" ? "Loading…" : ""}

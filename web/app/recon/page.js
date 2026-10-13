@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const KEY_STORE = "th_access_key";
@@ -96,11 +95,7 @@ export default function Recon() {
   return (
     <div className="wrap">
       <div className="topbar">
-        <div className="wordmark">Trade<b>Hub</b><span className="sec">Statements</span></div>
-        <nav className="nav">
-          <Link className="navlink" href="/">Orders</Link>
-          <Link className="navlink active" href="/recon">Statements</Link>
-        </nav>
+        <div className="pagetitle">Statements</div>
         <div className="right">
           <span className="count">{qb ? (qb.qbo_connected ? <>QuickBooks: <b>{qb.company || "connected"}</b></> : "QuickBooks not connected") : ""}</span>
         </div>

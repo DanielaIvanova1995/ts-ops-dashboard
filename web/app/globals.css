@@ -28,6 +28,40 @@ body {
 
 .wrap { max-width: 1340px; margin: 0 auto; padding: 14px 16px 48px; }
 
+/* App shell: collapsible left sidebar + main content */
+.shell { display: flex; min-height: 100vh; align-items: stretch; }
+.shell.preload * { transition: none !important; }
+.sidebar {
+  flex: 0 0 212px; width: 212px; background: var(--card); border-right: 1px solid var(--line);
+  padding: 12px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  transition: flex-basis .14s ease, width .14s ease;
+}
+.shell.collapsed .sidebar { flex-basis: 58px; width: 58px; }
+.side-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 14px; min-height: 34px; }
+.side-brand { font-size: 18px; font-weight: 800; letter-spacing: -.2px; }
+.side-brand b { color: var(--brand); }
+.side-toggle { appearance: none; border: 1px solid var(--line); background: #fff; color: var(--muted); width: 28px; height: 28px; border-radius: 7px; cursor: pointer; font-size: 14px; line-height: 1; }
+.side-toggle:hover { background: #F5F6F8; color: var(--ink); }
+.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-item { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 8px; text-decoration: none; color: var(--ink); font-weight: 600; font-size: 14px; white-space: nowrap; }
+.side-item:hover { background: #F5F6F8; }
+.side-item.active { background: rgba(242,106,33,.10); color: var(--brand-dark); }
+.side-item.soon { color: #B6BBC4; cursor: default; }
+.side-item.soon:hover { background: transparent; }
+.side-ico { display: inline-flex; width: 18px; flex: 0 0 18px; justify-content: center; }
+.side-sep { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #AEB4BE; font-weight: 700; padding: 14px 10px 4px; }
+.shell.collapsed .side-item { justify-content: center; padding: 9px 0; gap: 0; }
+.main { flex: 1; min-width: 0; }
+
+/* Page title in each screen's top bar (brand now lives in the sidebar) */
+.pagetitle { font-size: 16px; font-weight: 800; color: var(--ink); }
+
+@media (max-width: 640px) {
+  .sidebar { flex-basis: 58px; width: 58px; }
+  .sidebar .side-brand, .sidebar .side-label, .sidebar .side-sep { display: none; }
+  .side-item { justify-content: center; padding: 9px 0; gap: 0; }
+}
+
 /* Top bar — compact */
 .topbar {
   display: flex; align-items: center; gap: 12px;
