@@ -501,7 +501,17 @@ def route(item_id: str, body: RouteIn):
         sup = res.get("overall_supplier")
         in_house = (not sup) and route_ in ("SAMPLES", "CLEARANCE")
         if res.get("split"):
-            note = "This order splits across suppliers — not auto-applied; handle the split separately."
+            # Multi-supplier order → TradeHub splits it automatically (a part per supplier, each with
+            # its own priced PO). Never emails a supplier (splits are excluded from PO auto-send).
+            try:
+                import order_processing as op
+                o = _fetch_one_order(item_id)
+                msg = op._process_split(o, res) if o else "couldn't load the order to split"
+                applied = bool(o)
+                suggestion["applied_stage"] = "Split"
+                note = ("Multi-supplier order — TradeHub split it automatically: " + msg) if o else msg
+            except Exception as e:  # noqa: BLE001
+                note = "Multi-supplier order — auto-split failed: " + str(e)[:150]
         elif route_ == "WDL":
             try:
                 ds.move_order_to_group(item_id, ds.WDL_GROUP)
@@ -695,6 +705,45 @@ def preview_po(item_id: str, body: PoIn | None = None):
         "goods": doc.get("goods"), "delivery": _deliv_of(doc), "total": doc.get("total"),
         "errors": errs, "editable": editable,
     }
+
+
+@app.post("/orders/auto-split", dependencies=[Depends(require_key)])
+def orders_auto_split():
+    """Scan the NEW ORDERS group and AUTO-SPLIT every order that routes to 2+ suppliers (a part per
+    supplier, each with its own priced PO). Skips orders that are already split parts (name '...-N')
+    and single-supplier orders. Never emails a supplier. Returns a per-order summary."""
+    import re as _re
+    import order_processing as op
+    try:
+        rows = ds.fetch_new_orders()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the orders board: {e}")
+    done, single, errors = [], 0, []
+    for row in rows:
+        item_id = row.get("item_id")
+        name = str(row.get("name") or row.get("order_no") or "").strip()
+        if not item_id or _re.search(r"-\d+$", name):   # skip existing split parts
+            continue
+        sid = (row.get("shopify_id") or "").strip()
+        if not sid:
+            continue
+        try:
+            lines = ds.fetch_order_lines_with_vendor(sid)
+            pc = (ds.fetch_order_shipping(sid) or {}).get("postcode")
+            res = routing.route_order(lines, postcode=pc, sku_supplier=_api_sole_feed_supplier)
+        except Exception as e:  # noqa: BLE001
+            errors.append({"order": name, "error": str(e)[:120]})
+            continue
+        if not res.get("split"):
+            single += 1
+            continue
+        try:
+            o = _fetch_one_order(item_id)
+            msg = op._process_split(o, res) if o else "couldn't load the order"
+            done.append({"order": name, "result": msg})
+        except Exception as e:  # noqa: BLE001
+            errors.append({"order": name, "error": str(e)[:120]})
+    return {"ok": True, "split": len(done), "single": single, "errors": errors, "done": done}
 
 
 @app.post("/orders/{item_id}/split", dependencies=[Depends(require_key)])

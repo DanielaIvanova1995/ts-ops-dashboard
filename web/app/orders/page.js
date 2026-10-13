@@ -205,6 +205,27 @@ export default function Board() {
     load();
   }, [orders, selected, processOne, flash, load]);
 
+  const [autoSplitting, setAutoSplitting] = useState(false);
+  const autoSplitAll = useCallback(async () => {
+    if (!window.confirm("Scan all NEW orders and automatically split any that go to 2+ suppliers? Each part gets its own priced PO. No supplier is emailed.")) return;
+    setAutoSplitting(true);
+    setProc({ running: true, done: 0, total: 0, results: [] });
+    try {
+      const res = await apiFetch("/orders/auto-split", { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.ok) throw new Error(d.detail || `API ${res.status}`);
+      const results = [
+        ...(d.done || []).map((x) => ({ order: x.order, text: x.result, kind: "ok" })),
+        ...(d.errors || []).map((x) => ({ order: x.order, text: x.error, kind: "warn" })),
+      ];
+      setProc({ running: false, done: results.length, total: results.length, results });
+      flash(d.split ? `Auto-split ${d.split} order(s)` : "No multi-supplier orders to split");
+      load();
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") { setProc(null); flash(String(e.message || e), "warn"); }
+    } finally { setAutoSplitting(false); }
+  }, [apiFetch, flash, load]);
+
   const openDetail = useCallback(async (o) => {
     setDrawer(o); setDetail(null); setDetailErr("");
     try {
@@ -294,6 +315,9 @@ export default function Board() {
           <option value="All">All suppliers</option>
           {suppliersPresent.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
+        <button className="btn" onClick={autoSplitAll} disabled={autoSplitting || proc?.running} title="Automatically split every NEW order that routes to 2+ suppliers">
+          {autoSplitting ? "Splitting…" : "Auto-split multi-supplier"}
+        </button>
         {selected.size > 0 && (
           <button className="btn primary" onClick={processSelected} disabled={proc?.running}>
             {proc?.running ? `Processing ${proc.done}/${proc.total}…` : `Process selected (${selected.size})`}
