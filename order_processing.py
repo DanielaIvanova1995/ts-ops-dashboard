@@ -715,46 +715,55 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
                    and (_cs.startswith("deanta") or _cs.startswith("lpd")))
     _exp_note = "\nEXPRESS / NEXT-DAY DELIVERY REQUIRED — not standard" if _express_po else ""
 
-    items = items_override if items_override is not None else _parse_monday_items(o.get("items"))
-    # Ensure the customer's chosen VARIANT (colour/size) is on every PO line. Monday's order text can
-    # predate this / omit it, so pull the folded product+variant title from Shopify and match by SKU.
-    # (Skipped when the processor hand-edited the lines in Adjust — respect their wording.)
-    if sid and items_override is None:
-        _sl_cache = _sess().setdefault("_op_shoplines", {})
-        if sid not in _sl_cache:
-            try:
-                _sl_cache[sid] = data_sources.fetch_order_line_items(sid)
-            except Exception:  # noqa: BLE001
-                _sl_cache[sid] = []
-        # Group by SKU — a SKU can repeat across DIFFERENT products (e.g. VL7 is used for both the
-        # VL Coloured Fixing Screws and the Plank Fixing Screws on order 31768). Keyed by SKU alone,
-        # the later line overwrites the earlier one, so the first line got the WRONG product name and
-        # lost its variant. Keep every line and match each Monday line to the best same-SKU Shopify
-        # line by title, consuming it so two lines sharing a SKU each keep their own name + variant.
-        _by_sku = {}
-        for sl in (_sl_cache[sid] or []):
-            k = re.sub(r"[^a-z0-9]", "", (sl.get("sku") or "").lower())
-            if k:
-                _by_sku.setdefault(k, []).append(sl)
+    # Build the PO lines from the LIVE Shopify order — the single source of truth for WHICH lines,
+    # WHICH variant and HOW MANY. The Monday 'order items' text is only a summary and has merged two
+    # lines that shared a SKU into one (order 30247: 2.5L & 5L of Sadolin, both SKU 402726, collapsed
+    # to '2x 5L' — over-ordering the dearer 5L and losing money). Shopify keeps every line separate,
+    # with its own variant and quantity, so a shared SKU can NEVER merge two different sizes again.
+    # A hand-edit in Adjust (items_override) still wins; Monday text is only a fallback if Shopify
+    # can't be read.
+    # PO lines come ONLY from the live Shopify order — the single source of truth for which lines,
+    # which variant and how many. Monday's 'order items' text is a lossy summary (it merged 30247's
+    # 2.5L & 5L — both SKU 402726 — into '2x 5L' and lost money), so it is NEVER used to build a PO.
+    # A hand-edit in Adjust (items_override) still wins. If Shopify can't be read we REFUSE to build
+    # (raise) rather than fall back to the summary — the processor retries instead of sending a wrong PO.
+    items = items_override
+    if items is None:
+        # A split PART (order no like '31146-2') holds a per-supplier SUBSET that only the part
+        # records — Shopify only knows the whole order. That subset was built line-by-line from
+        # Shopify at split time (NOT the lossy original summary), so it's used as-is here. A WHOLE
+        # order is always rebuilt from the live Shopify lines (the 30247 fix).
+        is_split_part = bool(re.search(r"-\d+$", str(o.get("order_no") or o.get("name") or "")))
+        if is_split_part:
+            items = _parse_monday_items(o.get("items"))
+        else:
+            if not sid:
+                raise RuntimeError("No Shopify order id on this order — can't build the PO from the "
+                                   "live Shopify lines.")
+            _sl_cache = _sess().setdefault("_op_shoplines", {})
+            if sid not in _sl_cache:
+                _sl_cache[sid] = data_sources.fetch_order_line_items(sid)   # raises if unreadable
+            shop_lines = _sl_cache[sid] or []
+            if not shop_lines:
+                raise RuntimeError("Shopify returned no lines for this order — refusing to build a "
+                                   "PO from Monday's summary.")
+            items = [{"Item": (l.get("base_title") or l.get("title") or "").strip(),
+                      "Variant": (l.get("variant") or "").strip(),
+                      "SKU": (l.get("sku") or "").strip(),
+                      "Qty": str(l.get("qty") or 1)} for l in shop_lines]
 
-        def _words(s):
-            return set(re.findall(r"[a-z0-9]+", (s or "").lower()))
+    # Safety net: if two lines share one Shopify SKU but are different variants/sizes (the 30247
+    # trap — 2.5L & 5L both 402726), pricing can't tell them apart by SKU, so warn to check each.
+    _sku_vars = {}
+    for _it in items:
+        _k = re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower())
+        if _k:
+            _sku_vars.setdefault(_k, set()).add(
+                ((_it.get("Variant") or "") + "|" + (_it.get("Item") or "")).strip().lower())
+    if any(len(v) > 1 for v in _sku_vars.values()):
+        notes += ["⚠️ Two lines share the same Shopify SKU but are different sizes/variants — "
+                  "CHECK each line's size, quantity and price before sending this PO."]
 
-        _used = set()
-        for _it in items:
-            cands = [sl for sl in _by_sku.get(re.sub(r"[^a-z0-9]", "", (_it.get("SKU") or "").lower()),
-                                               []) if id(sl) not in _used]
-            if not cands:
-                continue
-            if len(cands) == 1:
-                sl = cands[0]
-            else:                                 # shared SKU → pick the best title match for THIS line
-                _mw = _words(_it.get("Item"))
-                sl = max(cands, key=lambda s: len(_mw & _words(
-                    (s.get("base_title") or s.get("title") or "") + " " + (s.get("variant") or ""))))
-            _used.add(id(sl))
-            _it["Item"] = (sl.get("base_title") or sl.get("title") or "").strip()
-            _it["Variant"] = (sl.get("variant") or "").strip()
     is_portal = supplier in order_routing.PORTAL
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
@@ -1118,8 +1127,14 @@ def _process_split(o, res):
         temp = {"item_id": pid, "order_no": f"{order_no}-{idx}", "name": f"{order_no}-{idx}",
                 "supplier": gsup or "", "shopify_id": sid, "customer": o.get("customer"),
                 "address": o.get("address"), "phone": o.get("phone"), "items": items_text}
+        # A split part's PO must list ONLY this supplier's lines — pass them as the override (built
+        # from the live Shopify lines in glines), so _build_doc doesn't pull the whole order.
+        _part_items = [{"Item": (l.get("title") or "").strip(), "Variant": "",
+                        "SKU": (l.get("sku") or "").strip(),
+                        "Qty": str(l.get("qty") if l.get("qty") is not None else 1)}
+                       for l in glines]
         try:
-            kind, doc = _build_doc(temp)
+            kind, doc = _build_doc(temp, items_override=_part_items)
             pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
                 doc, date_str=date_str)
             nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{order_no}-{idx}_" \
@@ -1306,7 +1321,9 @@ def _merge_parts(selected, target_supplier, all_siblings):
     survivor = {**survivor, "items": items_text, "supplier": target_supplier,
                 "branch": branch, "branch_email": bemail, "sell": sell}
     try:
-        kind, doc = _build_doc(survivor)
+        # The merged PO must list exactly the merged parts' lines (each built from Shopify at split
+        # time) — pass them explicitly so _build_doc never re-pulls the whole Shopify order.
+        kind, doc = _build_doc(survivor, items_override=_parse_monday_items(items_text))
         pdf = (order_docs.build_po_pdf if kind == "po" else order_docs.build_slip_pdf)(
             doc, date_str=datetime.date.today().strftime("%d %B %Y"))
         nm = f"{'PO' if kind == 'po' else 'PackingSlip'}_{doc['order']}_" \

@@ -544,13 +544,18 @@ def _doc_kwargs(ov) -> dict:
 
 def _editable_lines(op, o) -> list:
     """Current order lines as editable rows [{sku, item, qty, cost}] to pre-fill the PO editor —
-    parsed from Monday with the routed supplier's own cost (None if unpriced)."""
+    built ONLY from the live Shopify order (never Monday's summary), with the routed supplier's own
+    cost (None if unpriced). One row per Shopify line, so two sizes sharing a SKU stay separate."""
     sup = o.get("supplier") or ""
+    sid = (o.get("shopify_id") or "").strip()
     out = []
-    for it in op._parse_monday_items(o.get("items")):
-        out.append({"sku": it.get("SKU") or "", "item": it.get("Item") or "",
-                    "qty": it.get("Qty") or "1",
-                    "cost": op._line_cost(it.get("SKU"), sup, it.get("Item"))})
+    if not sid:
+        return out
+    for l in (ds.fetch_order_line_items(sid) or []):
+        item = (l.get("base_title") or l.get("title") or "").strip()
+        sku = (l.get("sku") or "").strip()
+        out.append({"sku": sku, "item": item, "qty": str(l.get("qty") or 1),
+                    "cost": op._line_cost(sku, sup, item, l.get("variant"))})
     return out
 
 
