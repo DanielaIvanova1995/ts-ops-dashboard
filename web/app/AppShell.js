@@ -75,7 +75,16 @@ export default function AppShell({ children }) {
           ))}
         </nav>
       </aside>
-      <main className="main">{children}</main>
+      <main className="main">
+        {children}
+        <footer className="app-footer">
+          <span>Trade Superstore Online</span>
+          <span className="dot">·</span>
+          <a href="tel:03330909217">0333 090 9217</a>
+          <span className="dot">·</span>
+          <a href="https://www.tradesuperstoreonline.co.uk" target="_blank" rel="noreferrer">tradesuperstoreonline.co.uk</a>
+        </footer>
+      </main>
     </div>
   );
 }

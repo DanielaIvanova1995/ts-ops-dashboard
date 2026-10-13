@@ -437,6 +437,10 @@ table.mini td { padding: 5px 6px; border-bottom: 1px solid #F0F1F4; vertical-ali
 }
 .login .wordmark { font-size: 24px; margin-bottom: 4px; }
 .login-logo { width: 72px; height: 72px; border-radius: 16px; object-fit: cover; display: block; margin: 0 auto 14px; box-shadow: 0 6px 20px rgba(242,106,33,.22); }
+.app-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 28px auto 10px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+.app-footer a { color: var(--muted); text-decoration: none; }
+.app-footer a:hover { color: var(--brand); text-decoration: underline; }
+.app-footer .dot { opacity: .5; }
 .login .sub { margin: 0 0 16px; }
 .loginform { display: flex; gap: 8px; }
 .input { flex: 1; font: inherit; padding: 9px 11px; border: 1px solid #C3C9D4; border-radius: 7px; outline: none; }
