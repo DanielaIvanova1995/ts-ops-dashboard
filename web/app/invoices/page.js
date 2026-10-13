@@ -38,6 +38,10 @@ export default function Invoices() {
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState("");
   const [onlyDup, setOnlyDup] = useState(false);
+  const [tab, setTab] = useState("review");       // "review" | "disc"
+  const [disc, setDisc] = useState([]);
+  const [discStatus, setDiscStatus] = useState("idle");
+  const [unflagging, setUnflagging] = useState({}); // sub_id -> bool
 
   useEffect(() => {
     try {
@@ -74,6 +78,32 @@ export default function Invoices() {
     } catch (e) { if (String(e.message) !== "unauthorised") { setErr(String(e.message || e)); setStatus("error"); } }
   }, [accessKey, jsonFetch]);
   useEffect(() => { if (accessKey) load(); }, [accessKey, load]);
+
+  const loadDisc = useCallback(async () => {
+    if (!accessKey) return;
+    setDiscStatus("loading");
+    try {
+      const res = await jsonFetch("/invoices/discrepancies");
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const d = await res.json();
+      setDisc(d.invoices || []); setDiscStatus("ok");
+    } catch (e) { if (String(e.message) !== "unauthorised") setDiscStatus("error"); }
+  }, [accessKey, jsonFetch]);
+  useEffect(() => { if (accessKey && tab === "disc") loadDisc(); }, [accessKey, tab, loadDisc]);
+
+  async function doUnflag(iv) {
+    if (!window.confirm(`Move invoice ${iv.invoice_no} back to Needs Review? The discrepancy is treated as resolved.`)) return;
+    setUnflagging((u) => ({ ...u, [iv.sub_id]: true }));
+    try {
+      const res = await jsonFetch(`/invoices/${iv.sub_id}/unflag`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setDisc((l) => l.filter((x) => x.sub_id !== iv.sub_id));
+        setNotice({ kind: "ok", text: `${iv.invoice_no} moved back to Needs Review.` });
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t move it back." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setUnflagging((u) => ({ ...u, [iv.sub_id]: false })); }
+  }
 
   const [issues, setIssues] = useState([]);
   const [showIssues, setShowIssues] = useState(false);
@@ -299,10 +329,54 @@ export default function Invoices() {
       <div className="topbar">
         <div className="pagetitle">Invoice Checker</div>
         <div className="right">
-          <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} to review</> : status === "loading" ? "Loading…" : ""}</span>
-          <button className="btn primary" onClick={load} disabled={status === "loading"}>{status === "loading" ? "Refreshing…" : "Refresh"}</button>
+          <div className="seg">
+            <button className={`seg-btn ${tab === "review" ? "on" : ""}`} onClick={() => setTab("review")}>To review{status === "ok" ? ` (${list.length})` : ""}</button>
+            <button className={`seg-btn ${tab === "disc" ? "on" : ""}`} onClick={() => setTab("disc")}>Discrepancies{discStatus === "ok" ? ` (${disc.length})` : ""}</button>
+          </div>
+          {tab === "review"
+            ? <>
+                <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} to review</> : status === "loading" ? "Loading…" : ""}</span>
+                <button className="btn primary" onClick={load} disabled={status === "loading"}>{status === "loading" ? "Refreshing…" : "Refresh"}</button>
+              </>
+            : <button className="btn primary" onClick={loadDisc} disabled={discStatus === "loading"}>{discStatus === "loading" ? "Refreshing…" : "Refresh"}</button>}
         </div>
       </div>
+
+      {notice && tab === "disc" && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 8 }}>{notice.text}</div>}
+
+      {tab === "disc" && (
+        <>
+          {discStatus === "error" && <div className="card"><div className="state err">Couldn’t load discrepancies.</div></div>}
+          {discStatus === "ok" && disc.length === 0 && <div className="card"><div className="state">No invoices flagged as discrepancies. 🎉</div></div>}
+          <div className="inv-list">
+            {disc.map((iv) => (
+              <div className="card inv-card" key={iv.sub_id}>
+                <div className="inv-head">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span className="ono">{iv.invoice_no}</span>
+                    <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
+                    {iv.margin != null ? <span className="pill grey" style={{ marginLeft: 8 }}>margin {iv.margin}%</span> : null}
+                    {iv.flagged_on ? <span className="sub" style={{ marginLeft: 8 }}>flagged {iv.flagged_on}</span> : null}
+                  </div>
+                  <div className="inv-right">
+                    {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer">Order ↗</a>}
+                    <button className="btn" onClick={() => doUnflag(iv)} disabled={unflagging[iv.sub_id]} title="Move back to Needs Review">{unflagging[iv.sub_id] ? "…" : "Move back to review"}</button>
+                  </div>
+                </div>
+                <div className="inv-body">
+                  <div className="warn-note col">
+                    <div className="warn-head"><IconWarn /> Why it was queried</div>
+                    <div className="sub" style={{ whiteSpace: "pre-wrap" }}>{iv.reason || "No reason recorded."}</div>
+                  </div>
+                  {iv.sent ? <div className="sub" style={{ marginTop: 6 }}>Chaser: {iv.sent}</div> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {tab === "review" && (<>
 
       <div className="card" style={{ padding: "8px 12px", marginBottom: 8 }}>
         <div className="inv-controls">
@@ -334,6 +408,7 @@ export default function Invoices() {
             <span className="sub">invoices in Outlook that never became a Monday subitem (mostly no matching order)</span>
             <span style={{ flex: 1 }} />
             <button className="btn ghost" onClick={clearOnMonday} disabled={clearing}>{clearing ? "…" : "Clear ones already on Monday"}</button>
+            {showIssues && issues.length > 0 && <button className="btn" onClick={toggleAllIssues}>{issueSel.size >= issues.length ? "Clear all" : "Select all"}</button>}
             {issueSel.size > 0 && <button className="btn" onClick={() => clearIds([...issueSel])} disabled={clearing}>{clearing ? "…" : `Clear selected (${issueSel.size})`}</button>}
             <button className="btn" onClick={() => setShowIssues((s) => !s)}>{showIssues ? "Hide" : "Show"}</button>
           </div>
@@ -466,6 +541,7 @@ export default function Invoices() {
           );
         })}
       </div>
+      </>)}
     </div>
   );
 }

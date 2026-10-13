@@ -1221,6 +1221,7 @@ def recon_remittance(body: RemitIn):
 
 # ---- Invoice checker (Phase A: list Needs-Review invoices → 3-way check → verdict) --------------
 _NEEDS_REVIEW_LABEL = 3   # Subitems board "Payment Status" = Needs Review
+_DISCREPANCY_LABEL = 4    # Subitems board "Payment Status" = Discrepancy (flagged/queried)
 
 
 @functools.lru_cache(maxsize=1)
@@ -1260,6 +1261,27 @@ def invoices():
             "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
+    return {"count": len(out), "invoices": out}
+
+
+@app.get("/invoices/discrepancies", dependencies=[Depends(require_key)])
+def invoice_discrepancies():
+    """Invoices flagged 'Discrepancy' on the Monday invoices board — the ones that didn't match and
+    were queried. Shows the reason that was written back to Monday (text_mm3gh2za) so the whole
+    queried pile is visible in one place. Read-only."""
+    try:
+        data = ds.fetch_invoices_by_status([_DISCREPANCY_LABEL], limit=500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    invs = data.get("invoices") or []
+    out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
+            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
+            "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
+            "reason": (i.get("query_note") or "").strip(),
+            "sent": (i.get("action_note") or "").strip(),
+            "flagged_on": i.get("date"), "order_url": i.get("order_url")} for i in invs]
+    # Most recently flagged first (status change date).
+    out.sort(key=lambda r: r.get("flagged_on") or "", reverse=True)
     return {"count": len(out), "invoices": out}
 
 
@@ -1668,6 +1690,17 @@ def invoice_flag(sub_id: str, body: FlagIn):
             ds.set_subitem_text(sub_id, "text_mm3gh2za", body.reason.strip()[:1500])
         except Exception:  # noqa: BLE001
             pass
+    return {"ok": True}
+
+
+@app.post("/invoices/{sub_id}/unflag", dependencies=[Depends(require_key)])
+def invoice_unflag(sub_id: str):
+    """Move a flagged invoice back from 'Discrepancy' to 'Needs Review' (query resolved), so it
+    returns to the main checker queue."""
+    try:
+        ds.set_invoice_status(sub_id, "Needs Review")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't move back to review on Monday: {e}")
     return {"ok": True}
 
 
