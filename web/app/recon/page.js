@@ -11,12 +11,23 @@ function money(v) {
 }
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
+// Overdue = invoice date is 2+ calendar months before this month (Daniela's pay-by-end-of-next-month
+// rule). Computed live from the date so it's right even for older saved statements without the flag.
+function isOverdue(dateStr) {
+  const d = new Date(String(dateStr || "").slice(0, 10));
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth()) >= 2;
+}
+
 function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
-  const lines = (r.pay_lines || []).slice().sort((a, b) => {
-    if (!!b.overdue !== !!a.overdue) return b.overdue ? 1 : -1;   // overdue first
-    return String(a.inv_date || "").localeCompare(String(b.inv_date || ""));  // then oldest
-  });
-  const overdueCount = lines.filter((l) => l.overdue).length;
+  const lines = (r.pay_lines || [])
+    .map((l) => ({ ...l, _od: l.overdue || isOverdue(l.inv_date) }))
+    .sort((a, b) => {
+      if (a._od !== b._od) return a._od ? -1 : 1;                 // overdue first
+      return String(a.inv_date || "").localeCompare(String(b.inv_date || ""));  // then oldest
+    });
+  const overdueCount = lines.filter((l) => l._od).length;
   const [sel, setSel] = useState(() => new Set(lines.map((l) => l.bill_id)));
   const [ref, setRef] = useState("");
   const [banks, setBanks] = useState([]);
@@ -83,9 +94,9 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
         <thead><tr><th></th><th>Invoice</th><th>Inv date</th><th>Due</th><th className="num">Amount</th></tr></thead>
         <tbody>
           {lines.map((l) => (
-            <tr key={l.bill_id} className={l.overdue ? "od" : ""}>
+            <tr key={l.bill_id} className={l._od ? "od" : ""}>
               <td><input type="checkbox" checked={sel.has(l.bill_id)} onChange={() => toggle(l.bill_id)} /></td>
-              <td>{l.inv}{l.overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
+              <td>{l.inv}{l._od ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
               <td className="sub">{l.inv_date || "—"}</td>
               <td className="sub">{l.due_date || "—"}</td>
               <td className="num">{money(l.amt)}</td>
@@ -310,9 +321,10 @@ export default function Recon() {
                 const st = approving[row.invoice];
                 const canApprove = row.status === "missing" && !!row.monday_status && st !== "done";
                 const mClass = row.margin == null ? "" : row.margin < 8 ? "mred" : row.margin < 15 ? "mamber" : "mgreen";
+                const overdue = row.overdue || isOverdue(row.inv_date);
                 return (
-                  <tr key={i} className={row.overdue ? "od" : ""}>
-                    <td className="ono">{row.invoice}{row.overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
+                  <tr key={i} className={overdue ? "od" : ""}>
+                    <td className="ono">{row.invoice}{overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
                     <td>{row.order_no || row.order || "—"}{row.is_split ? <span className="pill grey" style={{ marginLeft: 6 }}>split</span> : null}</td>
                     <td className="sub">{row.inv_date || "—"}</td>
                     <td className="num">{money(row.amount)}</td>

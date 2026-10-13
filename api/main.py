@@ -953,7 +953,15 @@ def recon_open(key: str):
         except Exception:  # noqa: BLE001
             pass
         rows = rebuilt
+    # Recompute overdue live from the invoice date — a stored flag goes stale as months pass, and
+    # older snapshots never had it, which is why the overdue tag was missing on reopen.
+    import recon_core
+    for r in rows:
+        r["overdue"] = recon_core.is_overdue(r.get("inv_date"))
+    for pl in pay_lines:
+        pl["overdue"] = recon_core.is_overdue(pl.get("inv_date"))
     snap["rows"] = rows
+    snap["pay_lines"] = pay_lines
     return snap
 
 
