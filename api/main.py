@@ -1002,6 +1002,40 @@ def recon_pay(body: PayIn):
              for l in (body.lines or []) if l.get("bill_id")]
     if not lines:
         return {"ok": False, "detail": "no bills selected to pay"}
+    # Re-check every bill against LIVE QuickBooks before paying. A reopened/old statement can carry
+    # bills that are already paid or whose balance has changed — QuickBooks rejects a BillPayment
+    # that links a closed bill or over-pays one, which would fail the WHOLE payment. So drop bills
+    # that no longer exist or are already paid, and clamp each amount to its current open balance.
+    try:
+        live = {str(b["id"]): b for b in (ds.qbo_vendor_bills(body.vendor_id) or [])}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": f"Couldn't re-check QuickBooks bills: {str(e)[:180]}"}
+    clean, skipped_paid, missing = [], 0, 0
+    for l in lines:
+        b = live.get(l["bill_id"])
+        if not b:
+            missing += 1
+            continue
+        if b.get("paid"):
+            skipped_paid += 1
+            continue
+        bal = b.get("balance")
+        # Pay the lesser of what the statement said and the bill's current open balance.
+        if isinstance(bal, (int, float)) and bal > 0:
+            amt = round(min(l["amount"], float(bal)), 2)
+        else:
+            amt = round(l["amount"], 2)
+        if amt > 0:
+            clean.append({"bill_id": l["bill_id"], "amount": amt})
+    if not clean:
+        note = []
+        if skipped_paid:
+            note.append(f"{skipped_paid} already paid in QuickBooks")
+        if missing:
+            note.append(f"{missing} no longer in QuickBooks")
+        return {"ok": False, "detail": "Nothing to pay — " + (", ".join(note) or "no open bills") +
+                ". Reopen the statement to refresh it."}
+    lines = clean
     ref = (body.ref or "").strip() or "REM"
     total = round(sum(l["amount"] for l in lines), 2)
     try:
@@ -1383,3 +1417,79 @@ def order_totals():
             sid_tot[sid] = {"total": _sm(n, "totalPriceSet"), "subtotal": _sm(n, "subtotalPriceSet")}
     out = {iid: sid_tot[sid] for iid, sid in item_to_sid.items() if sid in sid_tot}
     return {"totals": out}
+
+
+# ---- Triage: native email triage (hello@ inbox) — same engine as the Streamlit app ------------
+class TriageRunIn(BaseModel):
+    dry_run: bool = True
+    since_days: int | None = None
+    max_total: int | None = 40
+
+
+class TriageCfgIn(BaseModel):
+    auto_enabled: bool = False
+    interval_min: int = 10
+    max_total: int = 40
+    since_days: int | None = None
+
+
+@app.post("/triage/run", dependencies=[Depends(require_key)])
+def triage_run(body: TriageRunIn):
+    """Classify + file new hello@ inbox mail into the Outlook folders (reuses email_triage.run_triage,
+    the verbatim copy of the old Make scenario). dry_run=True previews without moving anything."""
+    import email_triage
+    try:
+        res = email_triage.run_triage(dry_run=bool(body.dry_run),
+                                      since_days=body.since_days,
+                                      max_total=int(body.max_total or 40))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Triage failed: {e}")
+    return res
+
+
+@app.get("/triage/status", dependencies=[Depends(require_key)])
+def triage_status():
+    """Automatic-triage settings + the last scheduled/manual run summary (from Supabase config)."""
+    try:
+        import supabase_db
+        cfg = supabase_db.config_get("email_triage") or {}
+        status = supabase_db.config_get("email_triage_status") or {}
+    except Exception:  # noqa: BLE001
+        cfg, status = {}, {}
+    return {"config": {"auto_enabled": bool(cfg.get("auto_enabled")),
+                       "interval_min": int(cfg.get("interval_min") or 10),
+                       "max_total": int(cfg.get("max_total") or 40),
+                       "since_days": cfg.get("since_days")},
+            "status": status}
+
+
+@app.post("/triage/config", dependencies=[Depends(require_key)])
+def triage_config(body: TriageCfgIn):
+    """Turn automatic triage on/off and set the interval. The always-on worker (in the app host)
+    reads this same config, so saving here controls the hands-off schedule."""
+    try:
+        import supabase_db
+        cfg = supabase_db.config_get("email_triage") or {}
+        cfg.update(auto_enabled=bool(body.auto_enabled), interval_min=int(body.interval_min),
+                   max_total=int(body.max_total or 40))
+        if body.since_days is not None:
+            cfg["since_days"] = int(body.since_days)
+        ok = supabase_db.config_set("email_triage", cfg)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
+    if not ok:
+        raise HTTPException(status_code=502, detail="Couldn't save (Supabase not configured).")
+    return {"ok": True, "config": cfg}
+
+
+@app.get("/triage/history", dependencies=[Depends(require_key)])
+def triage_history(limit: int = 100, only_failed: bool = False):
+    """Recent triage outcomes for the history view (newest first). only_failed → just the ones that
+    didn't get filed."""
+    try:
+        import supabase_db
+        rows = supabase_db.email_triage_recent(limit=int(limit),
+                                               status="failed" if only_failed else None) or []
+    except Exception:  # noqa: BLE001
+        rows = []
+    return {"rows": rows}
