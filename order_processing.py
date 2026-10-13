@@ -342,8 +342,7 @@ def _pricing_table(stamp):
     try:
         ov = json.load(open("price_overrides.json", encoding="utf-8"))
         for sup, skus in ov.items():
-            if sup in ("_patterns", "_titles", "_persqm", "_persection", "_delivery") \
-                    or not isinstance(skus, dict):  # see _line_cost
+            if sup.startswith("_") or not isinstance(skus, dict):   # skip special _-blocks; see _line_cost
                 continue
             sn = sys.intern(_cs(sup))
             for sk, cost in skus.items():

@@ -4091,6 +4091,116 @@
     "prefix": "jhedge",
     "cost": 17.88
    }
+  ],
+  "AJW": [
+   {
+    "prefix": "EC1CLRIV",
+    "cost": 88.33
+   },
+   {
+    "prefix": "EC1CLSCR",
+    "cost": 88.33
+   },
+   {
+    "prefix": "EC1EC",
+    "cost": 27.37
+   },
+   {
+    "prefix": "EC1IC",
+    "cost": 21.09
+   },
+   {
+    "prefix": "EC1LP",
+    "cost": 20.77
+   },
+   {
+    "prefix": "EC1SCREW",
+    "cost": 19.23
+   },
+   {
+    "prefix": "EC1SP",
+    "cost": 30.06
+   },
+   {
+    "prefix": "EC1VSP",
+    "cost": 12.27
+   },
+   {
+    "prefix": "EC1WB",
+    "cost": 22.77
+   },
+   {
+    "prefix": "EC1WBSM",
+    "cost": 22.77
+   },
+   {
+    "prefix": "EW1CP15",
+    "cost": 15.72
+   },
+   {
+    "prefix": "EW1ECASY31",
+    "cost": 23.93
+   },
+   {
+    "prefix": "EW1ECSY31",
+    "cost": 27.37
+   },
+   {
+    "prefix": "EW1EP26",
+    "cost": 18.42
+   },
+   {
+    "prefix": "EW1EP65",
+    "cost": 18.42
+   },
+   {
+    "prefix": "EW1IC25",
+    "cost": 21.09
+   },
+   {
+    "prefix": "EW1IM100",
+    "cost": 17.62
+   },
+   {
+    "prefix": "EW1IM40",
+    "cost": 9.32
+   },
+   {
+    "prefix": "EW1IM40-BK",
+    "cost": 9.32
+   },
+   {
+    "prefix": "EW1IM50",
+    "cost": 9.32
+   },
+   {
+    "prefix": "EW1IM50-BK",
+    "cost": 9.32
+   },
+   {
+    "prefix": "EW1IM70",
+    "cost": 12.26
+   },
+   {
+    "prefix": "EW1NAIL",
+    "cost": 20.7
+   },
+   {
+    "prefix": "EW1SP30",
+    "cost": 16.52
+   },
+   {
+    "prefix": "EW1TP",
+    "cost": 20.36
+   },
+   {
+    "prefix": "EW1WB",
+    "cost": 13.77
+   },
+   {
+    "prefix": "EW5PEFOIL",
+    "cost": 5.42
+   }
   ]
  },
  "Squaredeal": {
