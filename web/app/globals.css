@@ -235,6 +235,12 @@ tbody tr.sel:hover { background: #FEEFE4; }
   font-size: 12px; line-height: 1.45;
 }
 .warn-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--amber); }
+.warn-note.col { flex-direction: column; align-items: stretch; gap: 4px; }
+.warn-note .warn-head { display: flex; align-items: center; gap: 7px; font-weight: 700; }
+.warn-note .warn-head svg { margin-top: 0; }
+.disc-list { margin: 2px 0 0; padding-left: 20px; }
+.disc-list li { margin: 2px 0; }
+.disc-list b { color: #6a3705; }
 
 /* Order no as a quiet link + Shopify external link */
 .ono-wrap { display: inline-flex; align-items: center; gap: 6px; }

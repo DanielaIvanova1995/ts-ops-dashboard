@@ -347,7 +347,21 @@ export default function Invoices() {
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
               {r && r.ok && (
                 <div className="inv-body">
-                  {r.discrepancy_reason ? <div className="warn-note" style={{ marginBottom: 8 }}><IconWarn /> {r.discrepancy_reason}</div> : null}
+                  {(() => {
+                    const probs = [];
+                    (r.lines || []).forEach((l) => (l.issues || []).filter((x) => x[0] !== "name")
+                      .forEach((x) => probs.push({ sku: l.sku || l.desc || "line", msg: x[1] })));
+                    (r.missing || []).forEach((m) => probs.push({ sku: null, msg: `On the order but not invoiced: ${m}` }));
+                    if (!probs.length) return null;
+                    return (
+                      <div className="warn-note col" style={{ marginBottom: 8 }}>
+                        <div className="warn-head"><IconWarn /> What doesn’t match ({probs.length})</div>
+                        <ul className="disc-list">
+                          {probs.map((p, i) => <li key={i}>{p.sku ? <><b>{p.sku}</b> — </> : null}{p.msg}</li>)}
+                        </ul>
+                      </div>
+                    );
+                  })()}
                   <table className="mini">
                     <thead><tr><th>SKU</th><th>Description</th><th className="num">Qty</th><th className="num">Unit</th><th>Check</th></tr></thead>
                     <tbody>
@@ -366,7 +380,6 @@ export default function Invoices() {
                       })}
                     </tbody>
                   </table>
-                  {r.missing?.length ? <div className="sub" style={{ marginTop: 8 }}>On the order but not invoiced: {r.missing.join(", ")}</div> : null}
                   <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist — use Approve → QB to push the bill to QuickBooks." : `${r.n_issues} issue(s) found — resolve on Monday, then re-check.`}</div>
                 </div>
               )}
