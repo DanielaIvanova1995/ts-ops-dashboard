@@ -70,6 +70,14 @@ export default function Invoices() {
   }, [accessKey, jsonFetch]);
   useEffect(() => { if (accessKey) load(); }, [accessKey, load]);
 
+  const [issues, setIssues] = useState([]);
+  const [showIssues, setShowIssues] = useState(false);
+  useEffect(() => {
+    if (!accessKey) return;
+    jsonFetch("/invoices/import-issues?limit=200").then((r) => r.ok && r.json())
+      .then((d) => d && setIssues(d.rows || [])).catch(() => {});
+  }, [accessKey, jsonFetch]);
+
   function submitKey(e) {
     e.preventDefault();
     const k = keyInput.trim(); if (!k) return;
@@ -191,6 +199,33 @@ export default function Invoices() {
         <div className="sub" style={{ marginTop: 6 }}>Auto-approve pushes to QuickBooks only invoices that <b>fully match</b> and whose order margin is <b>in band</b> (floor–flag). Anything else is left for you to review.</div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}
       </div>
+
+      {issues.length > 0 && (
+        <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+          <div className="inv-controls">
+            <span className="pill red">{issues.length} didn’t import</span>
+            <span className="sub">invoices in Outlook that never became a Monday subitem (mostly no matching order)</span>
+            <span style={{ flex: 1 }} />
+            <button className="btn" onClick={() => setShowIssues((s) => !s)}>{showIssues ? "Hide" : "Show"}</button>
+          </div>
+          {showIssues && (
+            <table className="mini" style={{ marginTop: 8 }}>
+              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Why it didn’t import</th></tr></thead>
+              <tbody>
+                {issues.map((r, i) => (
+                  <tr key={i}>
+                    <td className="ono">{r.invoice_no || "—"}</td>
+                    <td className="sub">{r.supplier || "—"}</td>
+                    <td className="sub">{r.order_no || "—"}</td>
+                    <td className="num">{r.total != null ? money(r.total) : "—"}</td>
+                    <td className="sub">{r.detail || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {proc && (
         <div className="proc-panel">

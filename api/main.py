@@ -1570,6 +1570,21 @@ def triage_config(body: TriageCfgIn):
     return {"ok": True, "config": cfg}
 
 
+@app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
+def invoice_import_issues(limit: int = 100):
+    """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and
+    unreadable ones — so they can be seen and chased instead of silently left."""
+    try:
+        import supabase_db
+        rows = supabase_db.invoice_import_recent(limit=int(limit), status="failed") or []
+    except Exception:  # noqa: BLE001
+        rows = []
+    out = [{"invoice_no": r.get("invoice_no"), "supplier": r.get("supplier"),
+            "order_no": r.get("order_no"), "total": r.get("total"),
+            "detail": r.get("detail"), "at": r.get("at")} for r in rows]
+    return {"rows": out}
+
+
 @app.get("/triage/history", dependencies=[Depends(require_key)])
 def triage_history(limit: int = 100, only_failed: bool = False):
     """Recent triage outcomes for the history view (newest first). only_failed → just the ones that
