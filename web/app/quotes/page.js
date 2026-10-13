@@ -25,6 +25,7 @@ const EZGLAZE_COLOURS = ["Clear", "Breeze Blue", "Solar Ice", "Beehive Clear"];
 const RANGES = {
   cedral: {
     label: "Cedral", endpoint: "/quotes/cedral", supplier: "AJW", kind: "clad",
+    installGuide: { url: "https://www.cedral.world/siteassets/documents/uk/cedral-fixing-guide-UK", label: "Cedral UK fixing guide" },
     colours: CEDRAL_COLOURS, defaultSystem: "Lap", colourHint: "e.g. Slate Grey",
     systems: [{ value: "Lap", label: "Cedral Lap (weatherboard)" }, { value: "Click", label: "Cedral Click (flush T&G)" }],
     guide: [
@@ -40,6 +41,7 @@ const RANGES = {
   },
   hardie: {
     label: "James Hardie", endpoint: "/quotes/hardie", supplier: "UPB", kind: "clad",
+    installGuide: { url: "https://www.jameshardie.eu/GB-en/products/fixings", label: "James Hardie fitting & fixings (official)" },
     colours: HARDIE_COLOURS, defaultSystem: "Lap", colourHint: "e.g. Anthracite Grey",
     systems: [{ value: "Lap", label: "HardiePlank (lap weatherboard)" }, { value: "VL", label: "VL Plank (interlocking 'Click')" }],
     guide: [
@@ -288,9 +290,16 @@ export default function Quotes() {
           <span>📋 How to quote {cfg.label} — what to ask &amp; check</span><span>{showGuide ? "▾" : "▸"}</span>
         </button>
         {showGuide && (
-          <ol className="q-guide-list">
-            {cfg.guide.map(([h, b], i) => <li key={i}><b>{h}</b> {b}</li>)}
-          </ol>
+          <>
+            <ol className="q-guide-list">
+              {cfg.guide.map(([h, b], i) => <li key={i}><b>{h}</b> {b}</li>)}
+            </ol>
+            {cfg.installGuide && (
+              <div className="sub" style={{ padding: "0 16px 12px" }}>
+                📄 <a href={cfg.installGuide.url} target="_blank" rel="noreferrer">Official install guide — {cfg.installGuide.label} ↗</a>
+              </div>
+            )}
+          </>
         )}
       </div>
 
