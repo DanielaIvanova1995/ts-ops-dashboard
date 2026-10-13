@@ -1823,7 +1823,8 @@ _FEED_PATH = Path(__file__).resolve().parent.parent / "pricing_lookup.json"
 _OV_PATH = Path(__file__).resolve().parent.parent / "price_overrides.json"
 _DELIV_NAMES = {"upb": "UPB", "nbp": "NBP", "eurocell": "Eurocell", "travisperkins": "Travis Perkins",
                 "gap": "GAP", "pjh": "PJH", "molan": "Molan", "decor8": "Decor8",
-                "chasehardware": "Chase Hardware", "bricklink": "Bricklink", "markovitz": "Markovitz"}
+                "chasehardware": "Chase Hardware", "bricklink": "Bricklink", "markovitz": "Markovitz",
+                "storm": "Storm"}
 
 
 def _load_json(path):
@@ -1946,7 +1947,7 @@ _DELIV_CATEGORY = {
     "travis perkins": _UMBRELLA_BUILDING, "markovitz": _UMBRELLA_BUILDING, "gap": _UMBRELLA_BUILDING,
     "bricklink": _UMBRELLA_BUILDING,
     "pjh": "Bathrooms & plumbing", "carron": "Bathrooms & plumbing",
-    "molan": "Polycarbonate & roofing",
+    "molan": "Polycarbonate & roofing", "storm": "Polycarbonate & roofing",
     "decor8": "Paint & decorating",
     "chase hardware": "Ironmongery & hardware",
     "ctie": "Electricals",
@@ -2012,6 +2013,13 @@ def _delivery_catalog():
          "notes": "", "detail": None},
         {"supplier": "Southern Sheeting", "basis": "Postcode zone", "we_pay": "by postcode colour zone",
          "free_over": "by zone", "customer": "Set in Shopify shipping", "notes": "", "detail": None},
+        {"supplier": "Storm", "basis": "Per product type", "we_pay": "£21+VAT poly / £80 decking / £80 cladding",
+         "free_over": "no free threshold", "customer": "Set in Shopify shipping",
+         "notes": "Polycarbonate sheeting carriage doubles to Scotland.",
+         "detail": {"title": "Per product type (ex VAT)", "headers": ["Product", "We pay"],
+                    "rows": [["Polycarbonate sheeting", "£21.00 + VAT"],
+                             ["Polycarbonate sheeting — Scotland", "£42.00 + VAT (double)"],
+                             ["Decking", "£80.00"], ["Cladding", "£80.00"]]}},
         {"supplier": "Dolle", "basis": "Per product", "we_pay": "highest per-product band on the order",
          "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "detail": None},
     ]

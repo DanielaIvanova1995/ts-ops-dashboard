@@ -2256,7 +2256,7 @@ def _recode_sku(supplier, sku_raw, desc=""):
 # Suppliers whose TRUE cost is the Shopify cost-per-item (not the feed) — the invoice checker prices
 # their lines against that. CTie prices per "Box of N" and Vista's box costs live on Shopify too
 # (Daniela 2026-09-06). Order-processing keeps its own matching set for PO pricing.
-SHOPIFY_COST_SUPPLIERS = {"ctie", "vista", "chasehardware"}
+SHOPIFY_COST_SUPPLIERS = {"ctie", "vista", "chasehardware", "storm"}
 _SHOP_COST_CACHE: dict = {}
 
 
