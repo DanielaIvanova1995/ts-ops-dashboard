@@ -51,7 +51,7 @@ export default function AppShell({ children }) {
         <div className="side-head">
           <Link href="/" className="side-logo" title="TradeHub home">
             <BrandMark size={28} />
-            {!collapsed && <span className="side-brand">Trade<b>Hub</b></span>}
+            {!collapsed && <span className="side-brand">TRADE<b>HUB</b></span>}
           </Link>
           <button className="side-toggle" onClick={toggle} title={collapsed ? "Expand menu" : "Collapse menu"} aria-label="Toggle menu">
             {collapsed ? "»" : "«"}

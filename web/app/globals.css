@@ -92,9 +92,9 @@ a.home-tile:hover { border-color: var(--brand); box-shadow: 0 8px 22px rgba(28,3
   background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--brand);
   border-radius: var(--radius); padding: 9px 14px; margin-bottom: 10px;
 }
-.wordmark { font-size: 18px; font-weight: 800; letter-spacing: -.2px; }
+.wordmark { font-size: 18px; font-weight: 800; letter-spacing: -.2px; text-transform: uppercase; }
 .wordmark b { color: var(--brand); }
-.wordmark .sec { color: var(--muted); font-weight: 600; margin-left: 8px; font-size: 13px; }
+.wordmark .sec { color: var(--muted); font-weight: 600; margin-left: 8px; font-size: 13px; text-transform: none; }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .count { color: var(--muted); font-size: 12px; }
 .count b { color: var(--ink); }

@@ -13,17 +13,18 @@ const Ico = {
   invoices: (p) => (<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z" /><path d="M8 7h8M8 11h8M8 15h5" /></svg>),
   quotes: (p) => (<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill="currentColor" stroke="none" /></svg>),
   triage: (p) => (<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>),
+  pricing: (p) => (<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.6" /><path d="M11 9l4 4M9 11l4 4" /></svg>),
 };
 
 const LIVE = [
-  { href: "/orders", icon: "orders", title: "Order Processing", sub: "Route orders, raise & send POs, split & merge" },
+  { href: "/orders", icon: "orders", title: "Order Processing", sub: "Route, raise & send POs, auto-split multi-supplier orders" },
+  { href: "/quotes", icon: "quotes", title: "Quotes", sub: "Price Cedral, Hardie, Molan, Storm & EZ Glaze → draft & email" },
+  { href: "/invoices", icon: "invoices", title: "Invoice Checker", sub: "3-way check, fix margins, approve to QuickBooks" },
   { href: "/recon", icon: "statements", title: "Statements", sub: "Reconcile supplier statements, pay & remit" },
-  { href: "/invoices", icon: "invoices", title: "Invoice Checker", sub: "3-way check invoices, approve to QuickBooks" },
+  { href: "/pricing", icon: "pricing", title: "Pricing", sub: "Supplier pricelists & delivery charges" },
+  { href: "/triage", icon: "triage", title: "Triage", sub: "Sort the inbox into action folders" },
 ];
-const SOON = [
-  { icon: "quotes", title: "Quotes", sub: "Build & price customer quotes" },
-  { icon: "triage", title: "Triage", sub: "Sort the inbox into action folders" },
-];
+const SOON = [];
 
 export default function Home() {
   const [greeting, setGreeting] = useState("Welcome back");
@@ -36,7 +37,7 @@ export default function Home() {
     <div className="wrap home">
       <div className="home-brand">
         <BrandMark size={48} />
-        <span className="bn">Trade<b>Hub</b><span className="bs">Trade Superstore Online · operations</span></span>
+        <span className="bn">TRADE<b>HUB</b><span className="bs">Trade Superstore Online · operations</span></span>
       </div>
       <div className="home-head">
         <h1>{greeting}</h1>
