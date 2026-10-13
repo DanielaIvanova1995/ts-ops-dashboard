@@ -90,6 +90,12 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   return (
     <div className="paypanel">
       <div className="tool-label">Pay these — tick invoices, mark paid in QuickBooks, draft the remittance{overdueCount ? <span className="pill red" style={{ marginLeft: 8 }}>{overdueCount} overdue</span> : null}</div>
+      <div className="sel-ctl">
+        <button type="button" className="btn ghost" onClick={() => setSel(new Set(lines.map((l) => l.bill_id)))}>Select all ({lines.length})</button>
+        <button type="button" className="btn ghost" onClick={() => setSel(new Set(lines.filter((l) => l._od).map((l) => l.bill_id)))} disabled={!overdueCount}>Select overdue{overdueCount ? ` (${overdueCount})` : ""}</button>
+        <button type="button" className="btn ghost" onClick={() => setSel(new Set())} disabled={!sel.size}>Clear</button>
+        <span className="sub" style={{ marginLeft: "auto" }}>{selLines.length} of {lines.length} selected</span>
+      </div>
       <table className="mini">
         <thead><tr><th></th><th>Invoice</th><th>Inv date</th><th>Due</th><th className="num">Amount</th></tr></thead>
         <tbody>

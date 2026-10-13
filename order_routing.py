@@ -423,7 +423,7 @@ def _stage_for(supplier, route, quote, portal):
 # area nuance); mixed (split) orders; and anything needing a quote, a portal or a branch decision.
 # Flip AUTO_SEND_PO to False to turn the whole thing off (everything reverts to Needs Review).
 AUTO_SEND_PO = True
-PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics", "travisperkins", "wallsandfloors", "ajw"}
+PO_AUTOSEND_EXCLUDE_SUPPLIERS = {"upb", "nationalplastics", "travisperkins", "wallsandfloors", "ajw", "carron"}
 PO_AUTOSEND_EXCLUDE_WORDS = ("hardie", "freefoam", "fortex", "zest", "cedral")
 
 

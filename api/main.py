@@ -388,19 +388,27 @@ def route(item_id: str, body: RouteIn):
     }
     applied, note = False, None
     if body.apply:
+        route_ = res.get("route")
+        sup = res.get("overall_supplier")
+        in_house = (not sup) and route_ in ("SAMPLES", "CLEARANCE")
         if res.get("split"):
             note = "This order splits across suppliers — not auto-applied; handle the split separately."
-        elif res.get("route") == "PICK" or not res.get("overall_supplier"):
+        elif route_ == "PICK" or (not sup and not in_house):
             note = "Couldn't identify a single supplier — assign it manually."
         else:
             stage = res.get("stage") or "Needs Review"
             if stage == "SEND PO":            # never auto-send from here — no PO attached yet
                 stage = "Needs Review"
             try:
-                ds.op_set_supplier(item_id, res["overall_supplier"])
-                if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
-                    ds.op_set_branch(item_id, branch=res.get("branch"),
-                                     email=res.get("branch_email"), phone=res.get("branch_phone"))
+                if sup:
+                    ds.op_set_supplier(item_id, sup)
+                    if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
+                        ds.op_set_branch(item_id, branch=res.get("branch"),
+                                         email=res.get("branch_email"), phone=res.get("branch_phone"))
+                else:                         # SAMPLES / CLEARANCE — in-house, post from Head Office
+                    import order_processing as op
+                    ds.op_set_branch(item_id, branch=route_)
+                    op._mark_del_method(item_id, route_)   # Del Method → "To Post"
                 ds.op_set_status(item_id, stage)
                 applied = True
                 suggestion["applied_stage"] = stage
@@ -1261,7 +1269,8 @@ def process_order(item_id: str):
         return {"ok": False, "order": tag, "result": "splits across suppliers — handle manually",
                 "summary": routing.summary(res)}
     sup, route_ = res.get("overall_supplier"), res.get("route")
-    if route_ == "PICK" or not sup:
+    in_house = (not sup) and route_ in ("SAMPLES", "CLEARANCE")   # samples/clearance: post in-house, no PO
+    if route_ == "PICK" or (not sup and not in_house):
         return {"ok": False, "order": tag, "result": "couldn't identify a supplier — assign manually"}
     # Routing sets stage = "SEND PO" only for clear, high-confidence, non-excluded matches (its
     # _po_autosend_ok + AUTO_SEND_PO kill switch). We hold those at Needs Review until the PO is
@@ -1270,16 +1279,19 @@ def process_order(item_id: str):
     intended = res.get("stage") or "Needs Review"
     init_stage = "Needs Review" if intended == "SEND PO" else intended
     try:
-        ds.op_set_supplier(item_id, sup)
-        o["supplier"] = sup
-        if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
-            ds.op_set_branch(item_id, branch=res.get("branch"), email=res.get("branch_email"),
-                             phone=res.get("branch_phone"))
-            o["branch"] = res.get("branch") or o.get("branch")
-            o["branch_email"] = res.get("branch_email") or o.get("branch_email")
-        op._fix_po_email(item_id, sup, o)                       # correct PO email (Molan/Vista/…)
-        op._fix_lpd_home_email(item_id, sup, sid, o, lines=res.get("lines"))  # LPD Home → lpdhome
-        op._mark_del_method(item_id, sup)                       # samples → "To Post"
+        if sup:
+            ds.op_set_supplier(item_id, sup)
+            o["supplier"] = sup
+            if res.get("branch") or res.get("branch_email") or res.get("branch_phone"):
+                ds.op_set_branch(item_id, branch=res.get("branch"), email=res.get("branch_email"),
+                                 phone=res.get("branch_phone"))
+                o["branch"] = res.get("branch") or o.get("branch")
+                o["branch_email"] = res.get("branch_email") or o.get("branch_email")
+            op._fix_po_email(item_id, sup, o)                   # correct PO email (Molan/Vista/…)
+            op._fix_lpd_home_email(item_id, sup, sid, o, lines=res.get("lines"))  # LPD Home → lpdhome
+        else:                                                   # SAMPLES / CLEARANCE — in-house, no supplier/PO
+            ds.op_set_branch(item_id, branch=route_)
+        op._mark_del_method(item_id, sup or route_)             # samples → "To Post" on Del Method
         ds.op_set_status(item_id, init_stage)
         o["stage"] = init_stage
     except Exception as e:  # noqa: BLE001
@@ -1287,6 +1299,9 @@ def process_order(item_id: str):
     try:
         doc_res = _attach_doc(op, order_docs, item_id, o)
     except Exception as e:  # noqa: BLE001
+        if in_house:                                            # a slip hiccup must not block a sample
+            return {"ok": True, "order": tag, "supplier": None, "route": route_, "stage": init_stage,
+                    "result": f"→ {route_} · {init_stage} · Del Method “To Post” (slip skipped)"}
         raise HTTPException(status_code=502, detail=f"Supplier set, but PO failed: {e}")
     # Safe to SEND PO? Two guards (same as _process_one): PO verified-attached AND a branch email is
     # confirmed on Monday (read back) so the automation can't fire to nowhere.
@@ -1303,17 +1318,19 @@ def process_order(item_id: str):
                 o["stage"] = "SEND PO"
             except Exception:  # noqa: BLE001
                 pass
+    who = sup or route_
     doc_res.update(order=tag, supplier=sup, stage=final_stage, route=route_)
-    kind_up = (doc_res.get("kind") or "po").upper()
+    kind_up = (doc_res.get("kind") or ("slip" if in_house else "po")).upper()
+    extra = " · Del Method “To Post”" if in_house else ""
     if doc_res.get("blocked"):
         doc_res["result"] = "supplier set — PO BLOCKED: " + "; ".join(doc_res.get("errors") or [])
     elif doc_res.get("ok"):
         tail = (" · → SEND PO (auto)" if auto_sent
                 else " · held at Needs Review (not auto-sent)" if intended == "SEND PO"
                 else f" · {final_stage}")
-        doc_res["result"] = f"→ {sup} · {kind_up} attached{tail}"
+        doc_res["result"] = f"→ {who} · {kind_up} attached{tail}{extra}"
     else:
-        doc_res["result"] = f"→ {sup} · PO didn't attach"
+        doc_res["result"] = f"→ {who} · {'slip' if in_house else 'PO'} didn't attach{extra}"
     return doc_res
 
 
