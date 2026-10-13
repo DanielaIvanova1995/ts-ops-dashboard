@@ -143,6 +143,9 @@ tbody tr:hover { background: #FCFAF8; }
 .chip.green { background: var(--green-bg); color: var(--green); }
 .chip.red { background: #FEE2E2; color: #B91C1C; }
 .chip.grey { background: var(--muted-bg); color: var(--muted); }
+.mred { color: #B91C1C; font-weight: 700; }
+.mamber { color: var(--amber); font-weight: 700; }
+.mgreen { color: var(--green); }
 
 th.mid, td.mid { text-align: center; width: 64px; }
 th.chk, td.chk { width: 34px; text-align: center; }

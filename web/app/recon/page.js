@@ -27,6 +27,7 @@ export default function Recon() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [approving, setApproving] = useState({});
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -73,6 +74,28 @@ export default function Recon() {
     } catch (e) {
       setNotice({ kind: "warn", text: "Couldn’t reconcile — " + String(e.message || e) });
     } finally { setBusy(false); }
+  }
+
+  async function doApprove(row) {
+    const inv = row.invoice;
+    if (!window.confirm(`Create a QuickBooks bill for invoice ${inv}? This posts it to QuickBooks.`)) return;
+    setApproving((a) => ({ ...a, [inv]: "working" }));
+    try {
+      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: inv, inv_date: row.inv_date || null }) });
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const d = await res.json();
+      if (d.ok) {
+        setApproving((a) => ({ ...a, [inv]: "done" }));
+        setResult((prev) => prev ? { ...prev, rows: prev.rows.map((x) => x.invoice === inv ? { ...x, status: "ready" } : x) } : prev);
+        setNotice({ kind: "ok", text: `${inv}: ${d.detail}` });
+      } else {
+        setApproving((a) => ({ ...a, [inv]: "err" }));
+        setNotice({ kind: "warn", text: `${inv}: ${d.detail || "couldn’t approve"}` });
+      }
+    } catch (e) {
+      setApproving((a) => ({ ...a, [inv]: "err" }));
+      if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) });
+    }
   }
 
   if (needKey) {
@@ -125,26 +148,42 @@ export default function Recon() {
               <span className="chip grey">Statement {money(r.stmt_total)}</span>
             </div>
           </div>
+          <div style={{ overflowX: "auto" }}>
           <table>
-            <thead><tr><th>Invoice</th><th>Order</th><th>Inv date</th><th className="num">Amount</th><th className="num">Unpaid</th><th>Due</th><th>vs QuickBooks</th></tr></thead>
+            <thead><tr>
+              <th>Invoice</th><th>Order</th><th>Inv date</th><th className="num">Amount</th>
+              <th className="num">Unpaid</th><th>Due</th><th className="num">Margin</th>
+              <th>Monday stage</th><th>vs QuickBooks</th><th></th>
+            </tr></thead>
             <tbody>
               {(r.rows || []).map((row, i) => {
                 const p = statusPill(row.status);
+                const st = approving[row.invoice];
+                const canApprove = row.status === "missing" && !!row.monday_status && st !== "done";
+                const mClass = row.margin == null ? "" : row.margin < 8 ? "mred" : row.margin < 15 ? "mamber" : "mgreen";
                 return (
                   <tr key={i}>
                     <td className="ono">{row.invoice}{row.overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
-                    <td>{row.order || "—"}</td>
+                    <td>{row.order_no || row.order || "—"}{row.is_split ? <span className="pill grey" style={{ marginLeft: 6 }}>split</span> : null}</td>
                     <td className="sub">{row.inv_date || "—"}</td>
                     <td className="num">{money(row.amount)}</td>
                     <td className="num">{money(row.unpaid)}</td>
                     <td className="sub">{row.due_date || "—"}</td>
+                    <td className={`num ${mClass}`}>{row.margin == null ? "—" : `${row.margin}%`}</td>
+                    <td className="sub">{row.monday_status || "—"}</td>
                     <td><span className={`pill ${p.cls}`}>{p.label}</span>{row.paid_ref ? <span className="sub"> {row.paid_ref}</span> : null}</td>
+                    <td>
+                      {st === "done" ? <span className="pill green">approved ✓</span>
+                        : canApprove ? <button className="btn" onClick={() => doApprove(row)} disabled={st === "working"}>{st === "working" ? "…" : "Approve → QB"}</button>
+                          : null}
+                    </td>
                   </tr>
                 );
               })}
-              {(!r.rows || !r.rows.length) && <tr><td colSpan={7}><div className="state">No invoice lines found on the statement.</div></td></tr>}
+              {(!r.rows || !r.rows.length) && <tr><td colSpan={10}><div className="state">No invoice lines found on the statement.</div></td></tr>}
             </tbody>
           </table>
+          </div>
           {r.credits?.length ? (
             <div className="totals" style={{ display: "block" }}>
               <b>Credit notes:</b> {r.credits.map((c, i) => <span key={i} className="sub"> {c.ref || "credit"} {money(c.amount)}{i < r.credits.length - 1 ? " ·" : ""}</span>)}

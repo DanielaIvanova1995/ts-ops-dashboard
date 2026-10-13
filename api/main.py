@@ -726,6 +726,51 @@ def recon_status():
     return {"qbo_connected": connected, "company": company}
 
 
+def _enrich_num(v):
+    if v in (None, ""):
+        return None
+    t = _re.sub(r"[^0-9.\-]", "", str(v))
+    try:
+        return float(t) if t not in ("", "-", ".", "-.") else None
+    except ValueError:
+        return None
+
+
+def _statement_monday_enrich(invoice_numbers: list) -> dict:
+    """For each statement invoice number, look up its subitem on the Monday invoices board (one
+    batched query) → {invoice_no: {monday_status, order_no (incl. -1/-2 split suffix), is_split,
+    margin}}. order_no comes from the PARENT order item name; margin from the parent's sell/cost."""
+    nums = [str(n).strip() for n in (invoice_numbers or []) if str(n).strip()]
+    if not nums:
+        return {}
+    q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
+         'columns:[{column_id:"name",column_values:$vals}]){items{id name '
+         'column_values(ids:["status7__1"]){id text} '
+         'parent_item{name column_values(ids:["text_mkv6z0nt","numbers48","numbers6"]){id text}}}}}')
+    out = {}
+    tok = ds.get_token()
+    for i in range(0, len(nums), 50):
+        chunk = nums[i:i + 50]
+        try:
+            data = ds._monday_gql(q, {"b": str(ds.SUBITEMS_BOARD_ID), "vals": chunk}, tok)
+        except Exception:  # noqa: BLE001
+            continue
+        for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
+            cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+            parent = it.get("parent_item") or {}
+            pcv = {c["id"]: (c.get("text") or "") for c in (parent.get("column_values") or [])}
+            sell, cost = _enrich_num(pcv.get("numbers48")), _enrich_num(pcv.get("numbers6"))
+            margin = round((sell - cost) / sell * 100, 1) if (sell and cost is not None and sell > 0) else None
+            pname = (parent.get("name") or "").strip()
+            out[str(it.get("name") or "").strip()] = {
+                "monday_status": cvs.get("status7__1") or "",
+                "order_no": pname or (pcv.get("text_mkv6z0nt") or ""),
+                "is_split": bool(_re.search(r"-\d+$", pname)),
+                "margin": margin,
+            }
+    return out
+
+
 @app.post("/recon", dependencies=[Depends(require_key)])
 async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     """Upload a supplier statement (PDF, or text/CSV) → parse it (reuses read_statement_pdf) → match
@@ -773,10 +818,83 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks bills: {e}")
     rec = recon_core.reconcile(stmt, bills, paymap, sup)
+    # Enrich each row with Monday: stage, the parent order no (with any -1/-2 split), and margin.
+    try:
+        enrich = _statement_monday_enrich([r.get("invoice") for r in (rec.get("rows") or [])])
+        for r in (rec.get("rows") or []):
+            e = enrich.get(str(r.get("invoice") or "").strip())
+            if e:
+                r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
+                         is_split=e.get("is_split"), margin=e.get("margin"))
+    except Exception:  # noqa: BLE001
+        pass
     rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
                statement_date=stmt.get("statement_date"), balance=stmt.get("balance"),
                filename=file.filename)
     return rec
+
+
+_APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
+
+
+class ApproveIn(BaseModel):
+    invoice_no: str
+    inv_date: str | None = None   # statement line date, used as a fallback if Monday has none
+
+
+@app.post("/recon/approve", dependencies=[Depends(require_key)])
+def recon_approve(body: ApproveIn):
+    """Approve an invoice → create its bill in QuickBooks and mark the Monday subitem 'Approved (To
+    QB by TradeHub)'. Mirrors the live app's _approve_to_quickbooks. FINANCIAL WRITE — the front-end
+    confirms first. Never double-creates (checks the DocNumber)."""
+    import recon_core
+    name = (body.invoice_no or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="invoice_no required")
+    try:
+        det = (ds.subitems_bill_details([name]) or {}).get(name)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the invoice on Monday: {e}")
+    if not det:
+        return {"ok": False, "detail": "couldn't find this invoice on Monday"}
+    inv_date = (det.get("invoice_date") or body.inv_date or "")[:10]
+    if not inv_date:
+        return {"ok": False, "detail": "no invoice date on Monday or the statement — add one first"}
+    total = det.get("total")
+    if not isinstance(total, (int, float)) or total == 0:
+        return {"ok": False, "detail": "no invoice total on Monday"}
+    supplier = det.get("supplier") or ""
+    try:
+        vinfo = (ds.qbo_vendor_map_load() or {}).get(recon_core.norm_code(supplier))
+        vid = vinfo.get("id") if vinfo else None
+        if not vid:
+            v = ds.qbo_find_vendor(supplier)
+            vid = v.get("id") if v else None
+    except Exception:  # noqa: BLE001
+        vid = None
+    if not vid:
+        return {"ok": False, "detail": f"couldn't match supplier “{supplier}” to a QuickBooks vendor"}
+    # Backfill the invoice date onto Monday if it was only on the statement.
+    if not det.get("invoice_date") and det.get("sub_id"):
+        try:
+            ds.set_subitem_text(det["sub_id"], "date_mm3d1ear", inv_date)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        if ds.qbo_bill_exists(name):
+            created = "already on QuickBooks"
+        else:
+            ds.qbo_create_bill(vid, name, total, txn_date=inv_date, description=name,
+                               private_note=det.get("parent_name"))
+            created = f"bill created in QuickBooks (£{total:,.2f})"
+        if det.get("sub_id"):
+            try:
+                ds.set_invoice_status(det["sub_id"], _APPROVED_QB_LABEL, create_missing=True)
+            except Exception:  # noqa: BLE001
+                pass
+        return {"ok": True, "detail": created}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e)[:160]}
 
 
 @app.post("/orders/{item_id}/process", dependencies=[Depends(require_key)])
