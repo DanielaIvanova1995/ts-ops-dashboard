@@ -1651,6 +1651,26 @@ def invoice_suggest_order(total: float, supplier: str = ""):
     return {"rows": rows}
 
 
+class FlagIn(BaseModel):
+    reason: str = ""
+
+
+@app.post("/invoices/{sub_id}/flag", dependencies=[Depends(require_key)])
+def invoice_flag(sub_id: str, body: FlagIn):
+    """Flag an invoice as a Discrepancy on Monday (Payment Status → 'Discrepancy') and save the
+    reason on the subitem, so it drops out of Needs Review into the discrepancy queue."""
+    try:
+        ds.set_invoice_status(sub_id, "Discrepancy")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't flag on Monday: {e}")
+    if (body.reason or "").strip():
+        try:
+            ds.set_subitem_text(sub_id, "text_mm3gh2za", body.reason.strip()[:1500])
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True}
+
+
 @app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
 def invoice_import_issues(limit: int = 100):
     """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and

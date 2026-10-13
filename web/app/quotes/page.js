@@ -27,6 +27,7 @@ export default function Quotes() {
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
   const [err, setErr] = useState("");
+  const [showGuide, setShowGuide] = useState(true);
 
   useEffect(() => {
     let k = null;
@@ -93,34 +94,60 @@ export default function Quotes() {
         <div className="right"><span className="count">Lap &amp; Click take-off → priced (all-AJW)</span></div>
       </div>
 
-      <div className="card" style={{ padding: "12px 14px", marginBottom: 10 }}>
+      <div className="card q-guide">
+        <button className="q-guide-head" onClick={() => setShowGuide((s) => !s)}>
+          <span>📋 How to quote Cedral — what to ask &amp; check</span><span>{showGuide ? "▾" : "▸"}</span>
+        </button>
+        {showGuide && (
+          <ol className="q-guide-list">
+            <li><b>Area to clad.</b> Get the <b>total</b> wall area across all elevations (m²), and the area of <b>windows &amp; doors</b> to deduct (openings). Net = gross − openings.</li>
+            <li><b>Lap or Click?</b> Cedral <b>Lap</b> is the overlapped weatherboard look; <b>Click</b> is flush tongue‑&‑groove. Different coverage and trims — always confirm.</li>
+            <li><b>Colour.</b> Confirm the exact Cedral colour (21 options). We never default it — if it's not stated or isn't a real Cedral colour, ask.</li>
+            <li><b>Height &amp; width.</b> Give the cladding <b>height</b> and total <b>run width</b> so trims size correctly. Without them we assume 2.4&nbsp;m and work width out from the area (flagged to confirm).</li>
+            <li><b>Corners.</b> Count <b>external</b> and <b>internal</b> corners (we assume 4 external if not given). Corners drive the corner‑profile quantity (corner × height).</li>
+            <li><b>Openings.</b> Note how many windows/doors. Cedral has <b>no single window surround</b> — send the opening sizes and we add the right reveal/sill trims.</li>
+            <li><b>All‑AJW basket.</b> Boards, trims &amp; fixings are priced from <b>AJW</b>. <b>Battens &amp; membrane aren't AJW</b> — they're flagged "source separately", never cross‑priced.</li>
+            <li><b>Delivery &amp; access.</b> AJW carriage is by postcode zone (free over the zone threshold — see the Pricing → Delivery tab). It's a rigid vehicle needing a forklift; flag mechanical offload (+£75).</li>
+            <li><b>Margin.</b> Check the margin after fees and the discount band below — never quote below an 8% margin.</li>
+          </ol>
+        )}
+      </div>
+
+      <div className="card q-form">
+        <div className="q-section">The wall</div>
         <div className="q-grid">
-          <label className="fld">System
+          <label className="fld"><span>System</span>
             <select className="filter" value={f.system} onChange={(e) => set("system", e.target.value)}>
               <option value="Lap">Cedral Lap (weatherboard)</option>
               <option value="Click">Cedral Click (flush T&amp;G)</option>
             </select>
           </label>
-          <label className="fld">Colour
+          <label className="fld"><span>Colour</span>
             <input className="search" list="cedcol" value={f.colour} onChange={(e) => set("colour", e.target.value)} placeholder="e.g. Slate Grey" />
             <datalist id="cedcol">{CEDRAL_COLOURS.map((c) => <option key={c} value={c} />)}</datalist>
           </label>
-          <label className="fld">Gross area (m²)<input className="search" type="number" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} /></label>
-          <label className="fld">Openings (m²)<input className="search" type="number" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows/doors" /></label>
-          <label className="fld">Wall height (m)<input className="search" type="number" value={f.wall_height_m} onChange={(e) => set("wall_height_m", e.target.value)} placeholder="optional" /></label>
-          <label className="fld">Total run width (m)<input className="search" type="number" value={f.total_width_m} onChange={(e) => set("total_width_m", e.target.value)} placeholder="optional" /></label>
-          <label className="fld">External corners<input className="search" type="number" value={f.external_corners} onChange={(e) => set("external_corners", e.target.value)} placeholder="default 4" /></label>
-          <label className="fld">Internal corners<input className="search" type="number" value={f.internal_corners} onChange={(e) => set("internal_corners", e.target.value)} placeholder="0" /></label>
-          <label className="fld">Windows/doors<input className="search" type="number" value={f.num_windows} onChange={(e) => set("num_windows", e.target.value)} placeholder="optional" /></label>
+          <label className="fld"><span>Gross wall area (m²) *</span><input className="search" type="number" inputMode="decimal" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} placeholder="all elevations" /></label>
+          <label className="fld"><span>Openings (m²)</span><input className="search" type="number" inputMode="decimal" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows + doors to deduct" /></label>
+          <label className="fld"><span>Wall height (m)</span><input className="search" type="number" inputMode="decimal" value={f.wall_height_m} onChange={(e) => set("wall_height_m", e.target.value)} placeholder="optional — assumes 2.4" /></label>
+          <label className="fld"><span>Total run width (m)</span><input className="search" type="number" inputMode="decimal" value={f.total_width_m} onChange={(e) => set("total_width_m", e.target.value)} placeholder="optional" /></label>
         </div>
+
+        <div className="q-section">Corners &amp; openings</div>
+        <div className="q-grid">
+          <label className="fld"><span>External corners</span><input className="search" type="number" inputMode="numeric" value={f.external_corners} onChange={(e) => set("external_corners", e.target.value)} placeholder="assumes 4" /></label>
+          <label className="fld"><span>Internal corners</span><input className="search" type="number" inputMode="numeric" value={f.internal_corners} onChange={(e) => set("internal_corners", e.target.value)} placeholder="0" /></label>
+          <label className="fld"><span>Windows / doors</span><input className="search" type="number" inputMode="numeric" value={f.num_windows} onChange={(e) => set("num_windows", e.target.value)} placeholder="count (optional)" /></label>
+        </div>
+
+        <div className="q-section">Include in the quote</div>
         <div className="q-opts">
-          <label className="switch"><input type="checkbox" checked={f.wants_trims} onChange={(e) => set("wants_trims", e.target.checked)} /><span>Trims (corners, start profile)</span></label>
+          <label className="switch"><input type="checkbox" checked={f.wants_trims} onChange={(e) => set("wants_trims", e.target.checked)} /><span>Trims (corners &amp; start profile)</span></label>
           <label className="switch"><input type="checkbox" checked={f.wants_screws} onChange={(e) => set("wants_screws", e.target.checked)} /><span>Fixings</span></label>
-          <label className="switch"><input type="checkbox" checked={f.wants_battens} onChange={(e) => set("wants_battens", e.target.checked)} /><span>Battens (not AJW — flagged)</span></label>
+          <label className="switch"><input type="checkbox" checked={f.wants_battens} onChange={(e) => set("wants_battens", e.target.checked)} /><span>Battens <span className="sub">(not AJW — flagged)</span></span></label>
           <span style={{ flex: 1 }} />
           <button className="btn primary" onClick={build} disabled={busy}>{busy ? "Building…" : "Build quote"}</button>
         </div>
-        {err && <div className="route-msg warn" style={{ marginTop: 8 }}>{err}</div>}
+        {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
       </div>
 
       {res && (

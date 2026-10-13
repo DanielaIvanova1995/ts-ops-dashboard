@@ -127,14 +127,23 @@ th.sortable:hover { color: var(--ink); }
 .seg-btn.on { background: rgba(242,106,33,.10); color: var(--brand-dark); }
 
 /* Quotes (Cedral calculator) */
-.q-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.q-grid .fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
-.q-grid .fld .search, .q-grid .fld .filter { font-weight: 500; }
-.q-opts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.q-form { padding: 14px 16px; margin-bottom: 10px; }
+.q-section { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 8px; }
+.q-section:first-child { margin-top: 2px; }
+.q-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; align-items: end; }
+.q-grid .fld { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.q-grid .fld > span { font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-grid .fld .search, .q-grid .fld .filter { width: 100%; max-width: none; box-sizing: border-box; font-weight: 500; }
+.q-opts { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
 .q-opts .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .q-opts .switch input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }
 .q-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
 .q-tot { padding: 12px 14px; }
+/* Quote guide */
+.q-guide { margin-bottom: 10px; overflow: hidden; }
+.q-guide-head { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; appearance: none; border: 0; background: var(--amber-bg); color: #7A3E06; font: inherit; font-weight: 700; font-size: 13px; padding: 10px 14px; cursor: pointer; text-align: left; }
+.q-guide-list { margin: 0; padding: 10px 16px 12px 32px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.5; }
+.q-guide-list li::marker { color: var(--brand); font-weight: 700; }
 
 /* Triage controls */
 .tri-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

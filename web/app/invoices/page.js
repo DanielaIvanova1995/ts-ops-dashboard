@@ -97,6 +97,7 @@ export default function Invoices() {
   }, [accessKey, jsonFetch]);
   useEffect(() => { loadIssues(); }, [loadIssues]);
   function toggleIssue(id) { setIssueSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  function toggleAllIssues() { setIssueSel((s) => (s.size >= issues.length ? new Set() : new Set(issues.map((r) => r.id).filter(Boolean)))); }
   async function clearOnMonday() {
     if (!window.confirm("Check all of these against Monday and clear any whose invoice is already a subitem there?")) return;
     setClearing(true);
@@ -176,6 +177,36 @@ export default function Invoices() {
         setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: String(e.message || e) } }));
         setNotice({ kind: "warn", text: String(e.message || e) });
       }
+    }
+  }
+
+  async function doFlag(iv) {
+    const sub_id = iv.sub_id;
+    const r = checks[sub_id];
+    let reason = (r && r.discrepancy_reason) || "";
+    if (!reason && r && r.ok) {
+      const probs = [];
+      (r.lines || []).forEach((l) => (l.issues || []).filter((x) => x[0] !== "name").forEach((x) => probs.push(`${l.sku || l.desc || "line"}: ${x[1]}`)));
+      (r.missing || []).forEach((m) => probs.push(`on the order but not invoiced: ${m}`));
+      reason = probs.join("; ");
+    }
+    if (!window.confirm(`Flag invoice ${iv.invoice_no} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue.`)) return;
+    setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    setApproveMsg((m) => ({ ...m, [sub_id]: null }));
+    try {
+      const res = await jsonFetch(`/invoices/${sub_id}/flag`, { method: "POST", body: JSON.stringify({ reason }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setApproving((a) => ({ ...a, [sub_id]: "flagged" }));
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: "Flagged as Discrepancy on Monday." } }));
+        setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 1200);
+      } else {
+        setApproving((a) => ({ ...a, [sub_id]: "err" }));
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: d.detail || "Couldn’t flag." } }));
+      }
+    } catch (e) {
+      setApproving((a) => ({ ...a, [sub_id]: "err" }));
+      if (String(e.message) !== "unauthorised") setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: String(e.message || e) } }));
     }
   }
 
@@ -378,11 +409,16 @@ export default function Invoices() {
                   {!iv.has_pdf
                     ? <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>
                     : <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
-                  {r && r.ok && (approving[iv.sub_id] === "done"
-                    ? <span className="pill green">approved ✓</span>
-                    : r.matched
-                      ? <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>
-                      : <button className="btn" onClick={() => doApprove(iv, true)} disabled={approving[iv.sub_id] === "working"} title="Push to QuickBooks even though it isn't fully matched">{approving[iv.sub_id] === "working" ? "…" : "Push to QB anyway"}</button>)}
+                  {r && r.ok && approving[iv.sub_id] === "done" && <span className="pill green">approved ✓</span>}
+                  {r && r.ok && approving[iv.sub_id] === "flagged" && <span className="pill red">flagged</span>}
+                  {r && r.ok && approving[iv.sub_id] !== "done" && approving[iv.sub_id] !== "flagged" && (
+                    <>
+                      {r.matched
+                        ? <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>
+                        : <button className="btn" onClick={() => doApprove(iv, true)} disabled={approving[iv.sub_id] === "working"} title="Push to QuickBooks even though it isn't fully matched">{approving[iv.sub_id] === "working" ? "…" : "Push to QB anyway"}</button>}
+                      <button className="btn" onClick={() => doFlag(iv)} disabled={approving[iv.sub_id] === "working"} title="Flag as a discrepancy on Monday">Flag</button>
+                    </>
+                  )}
                 </div>
               </div>
 

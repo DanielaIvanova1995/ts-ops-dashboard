@@ -67,9 +67,9 @@ SUPPLIER_RULES = {
     # Huws Gray: no pricelist held (quote-first), so the ORDER margin is the safeguard. Auto-approve a
     # matched invoice when margin is 8%–55%; outside that → Needs Review (Daniela 2026-10-13).
     "huwsgray": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
-                 "flag_below": True, "flag_high": True},
+                 "flag_below": True, "flag_high": True, "delivery_any": True},
     "huws": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
-             "flag_below": True, "flag_high": True},
+             "flag_below": True, "flag_high": True, "delivery_any": True},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",
@@ -555,6 +555,9 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                     if amt > known + tol:
                         dissues.append(("delivery", f"delivery £{amt:,.2f} vs expected "
                                                     f"£{known:,.2f}{zinfo}"))
+                elif SUPPLIER_RULES.get(supplier, {}).get("delivery_any"):
+                    dissues.append(("name", f"delivery £{amt:,.2f} — accepted (no agreed rate; "
+                                            "quote-by-quote)"))
                 elif is_carron(supplier):
                     dissues.append(("delivery", f"delivery £{amt:,.2f} —{zinfo} rate is TBC, "
                                                 "can't check"))
@@ -654,6 +657,9 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                 zinfo = f" ({carron_zone_label(carron_ship)})" if is_carron(supplier) else ""
                 cissues.append(("delivery", f"carriage £{carriage:,.2f} vs expected "
                                             f"£{known:,.2f}{zinfo}"))
+        elif SUPPLIER_RULES.get(supplier, {}).get("delivery_any"):
+            cissues.append(("name", f"carriage £{carriage:,.2f} — accepted (no agreed rate; "
+                                    "quote-by-quote)"))
         elif not is_carron(supplier):
             cissues.append(("delivery", f"carriage £{carriage:,.2f} — no agreed rate on file"))
         lines.append({"sku": "Carriage", "desc": "Carriage (from invoice totals)", "qty": None,
