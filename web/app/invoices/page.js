@@ -28,6 +28,7 @@ export default function Invoices() {
   const [checking, setChecking] = useState({}); // sub_id -> bool
   const [sel, setSel] = useState(() => new Set());
   const [approving, setApproving] = useState({}); // sub_id -> working|done|err
+  const [approveMsg, setApproveMsg] = useState({}); // sub_id -> { kind, text }
   const [proc, setProc] = useState(null);
   const [notice, setNotice] = useState(null);
   const [floor, setFloor] = useState(10);
@@ -96,15 +97,28 @@ export default function Invoices() {
     const sub_id = iv.sub_id;
     if (!window.confirm(`Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    setApproveMsg((m) => ({ ...m, [sub_id]: null }));
     try {
       const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
-      const d = await res.json();
+      const d = await res.json().catch(() => ({ ok: false, detail: `API ${res.status}` }));
       if (res.ok && d.ok) {
         setApproving((a) => ({ ...a, [sub_id]: "done" }));
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "ok", text: d.detail || "approved" } }));
         setNotice({ kind: "ok", text: `${iv.invoice_no}: ${d.detail}` });
-        setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 900);
-      } else { setApproving((a) => ({ ...a, [sub_id]: "err" })); setNotice({ kind: "warn", text: `${iv.invoice_no}: ${d.detail || "couldn’t approve"}` }); }
-    } catch (e) { setApproving((a) => ({ ...a, [sub_id]: "err" })); if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+        setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 1500);
+      } else {
+        setApproving((a) => ({ ...a, [sub_id]: "err" }));
+        const text = d.detail || "couldn’t approve";
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text } }));
+        setNotice({ kind: "warn", text: `${iv.invoice_no}: ${text}` });
+      }
+    } catch (e) {
+      setApproving((a) => ({ ...a, [sub_id]: "err" }));
+      if (String(e.message) !== "unauthorised") {
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: String(e.message || e) } }));
+        setNotice({ kind: "warn", text: String(e.message || e) });
+      }
+    }
   }
 
   function toggleSel(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -214,6 +228,7 @@ export default function Invoices() {
                 </div>
               </div>
 
+              {approveMsg[iv.sub_id] && <div className={`route-msg ${approveMsg[iv.sub_id].kind}`} style={{ margin: "0 14px 12px" }}>{approveMsg[iv.sub_id].text}</div>}
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
               {r && r.ok && (
                 <div className="inv-body">
@@ -237,7 +252,7 @@ export default function Invoices() {
                     </tbody>
                   </table>
                   {r.missing?.length ? <div className="sub" style={{ marginTop: 8 }}>On the order but not invoiced: {r.missing.join(", ")}</div> : null}
-                  <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist." : `${r.n_issues} issue(s) found.`} Approving/pushing to QuickBooks comes in the next build — for now this is the check.</div>
+                  <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist — use Approve → QB to push the bill to QuickBooks." : `${r.n_issues} issue(s) found — resolve on Monday, then re-check.`}</div>
                 </div>
               )}
             </div>
