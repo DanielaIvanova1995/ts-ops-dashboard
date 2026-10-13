@@ -366,6 +366,15 @@ def expected_delivery(supplier, goods=None, ship=None, lines=None):
         return carron_expected(goods, ship)
     if s.startswith("ctie"):
         return ctie_expected(goods, ship)
+    if s == "ajw":
+        # AJW Cedral: flat per-zone carriage by delivery postcode, free over the zone's ex-VAT cost
+        # threshold (our cost = goods). White/unknown postcode → None (can't price → quote).
+        try:
+            import ajw_delivery
+            r = ajw_delivery.tso_carriage((ship or {}).get("postcode") or "", goods or 0)
+            return None if (r.get("quote") or not r.get("known")) else r.get("charge")
+        except Exception:  # noqa: BLE001
+            return None
     if s.startswith("southern"):
         return southern_expected(ship)
     if s.startswith("jbkind"):

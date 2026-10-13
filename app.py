@@ -2377,6 +2377,15 @@ def _expected_delivery(supplier, goods_value, ship=None, lines=None):
         return _carron_expected(goods_value, ship)
     if _is_ctie(supplier):
         return _ctie_expected(goods_value, ship)
+    if _norm_code(supplier) == "ajw":
+        # AJW Cedral carriage: flat per-zone by delivery postcode, free over the zone's ex-VAT cost
+        # threshold (our cost = goods value). White/unknown postcode → can't check.
+        try:
+            import ajw_delivery
+            r = ajw_delivery.tso_carriage((ship or {}).get("postcode") or "", goods_value or 0)
+            return None if (r.get("quote") or not r.get("known")) else r.get("charge")
+        except Exception:  # noqa: BLE001
+            return None
     if _is_jbkind(supplier):
         return _jbkind_expected(lines, ship)
     if _is_lpd(supplier):

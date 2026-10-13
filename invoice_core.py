@@ -426,6 +426,15 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
         return carron_expected(goods_value, ship)
     if is_ctie(supplier):
         return ctie_expected(goods_value, ship)
+    if norm_code(supplier) == "ajw":
+        # AJW Cedral: flat per-zone carriage by delivery postcode, free over the zone's ex-VAT cost
+        # threshold (measured on our cost = the invoice goods value). White/unknown → can't check.
+        try:
+            import ajw_delivery
+            r = ajw_delivery.tso_carriage((ship or {}).get("postcode") or "", goods_value or 0)
+            return None if (r.get("quote") or not r.get("known")) else r.get("charge")
+        except Exception:  # noqa: BLE001
+            return None
     if norm_code(supplier).startswith("dolle"):
         # Dolle carriage = the HIGHEST per-product band among the ORDER's SKUs (a mixed order is
         # charged the single highest shipping rate, not the sum). None if no order SKU is priced.
