@@ -99,6 +99,16 @@ def diag():
         out["qbo_connected"] = bool(ds.qbo_is_connected())
     except Exception as e:  # noqa: BLE001
         out["qbo_error"] = str(e)[:140]
+    # Why is the 'pay from' bank dropdown empty? Show the account-type spread (types only, no names).
+    try:
+        from collections import Counter
+        accs = (ds.qbo_query("select Id, AccountType from Account where Active = true MAXRESULTS 600")
+                .get("Account") or [])
+        out["qbo_accounts"] = {"active_total": len(accs),
+                               "by_type": dict(Counter(a.get("AccountType") for a in accs)),
+                               "bank": sum(1 for a in accs if a.get("AccountType") == "Bank")}
+    except Exception as e:  # noqa: BLE001
+        out["qbo_accounts_error"] = str(e)[:160]
     # Background schedulers live in the always-on app host (a separate service), but they write their
     # config + last-run to the SAME Supabase — so surface them here to diagnose "auto isn't running".
     try:
