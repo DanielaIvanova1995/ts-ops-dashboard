@@ -20,7 +20,7 @@ import requests                                        # noqa: E402 (reused — 
 # Make the repo root importable so we reuse the existing TradeHub modules as-is.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import Depends, FastAPI, Header, HTTPException   # noqa: E402
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware            # noqa: E402
 from pydantic import BaseModel                                # noqa: E402
 
@@ -707,6 +707,76 @@ def merge_parts(body: MergeIn):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Merge failed: {e}")
     return {"ok": True, "result": msg}
+
+
+# ---- Statement reconciliation (Phase A: upload a statement → match against QuickBooks) -----------
+@app.get("/recon/status", dependencies=[Depends(require_key)])
+def recon_status():
+    """Is QuickBooks connected, and which company — shown at the top of the recon screen."""
+    try:
+        connected = bool(ds.qbo_is_connected())
+    except Exception:  # noqa: BLE001
+        connected = False
+    company = None
+    if connected:
+        try:
+            company = ds.qbo_company_name()
+        except Exception:  # noqa: BLE001
+            company = None
+    return {"qbo_connected": connected, "company": company}
+
+
+@app.post("/recon", dependencies=[Depends(require_key)])
+async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
+    """Upload a supplier statement (PDF, or text/CSV) → parse it (reuses read_statement_pdf) → match
+    every invoice line to the vendor's QuickBooks bills (recon_core.reconcile). Read-only: shows
+    outstanding / paid / missing, overdue flags and credit notes. No writes in this phase."""
+    import recon_core
+    by = await file.read()
+    name = (file.filename or "").lower()
+    try:
+        if name.endswith(".pdf"):
+            stmt = ds.read_statement_pdf(pdf_bytes=by)
+        else:
+            stmt = ds.read_statement_pdf(text=by.decode("utf-8", "ignore"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the statement: {e}")
+    sup = (supplier or "").strip() or (stmt.get("supplier") or "")
+    # Resolve the QuickBooks vendor: learned mapping first, then auto-match by name.
+    vid = vname = None
+    try:
+        mp = (ds.qbo_vendor_map_load() or {}).get(recon_core.norm_code(sup))
+    except Exception:  # noqa: BLE001
+        mp = None
+    if mp:
+        vid, vname = mp.get("id"), mp.get("name")
+    if not vid:
+        try:
+            auto = ds.qbo_find_vendor(sup)
+        except Exception:  # noqa: BLE001
+            auto = None
+        if auto:
+            vid, vname = auto.get("id"), auto.get("name")
+    if not vid:
+        return {"ok": False, "need_vendor": True, "supplier": sup,
+                "statement_date": stmt.get("statement_date"), "balance": stmt.get("balance"),
+                "detail": f"No QuickBooks vendor match for “{sup}”. Map it in the live app for now "
+                          "(we'll add vendor-picking here in Phase B)."}
+    if vname:
+        sup = vname                         # the QuickBooks vendor name is the authoritative payee
+    try:
+        bills = ds.qbo_vendor_bills(vid)
+        try:
+            paymap = ds.qbo_vendor_payments(vid)
+        except Exception:  # noqa: BLE001
+            paymap = {}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks bills: {e}")
+    rec = recon_core.reconcile(stmt, bills, paymap, sup)
+    rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
+               statement_date=stmt.get("statement_date"), balance=stmt.get("balance"),
+               filename=file.filename)
+    return rec
 
 
 @app.post("/orders/{item_id}/process", dependencies=[Depends(require_key)])
