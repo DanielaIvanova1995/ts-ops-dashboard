@@ -3282,6 +3282,67 @@ def fetch_message_pdf_attachments(mailbox: str, message_id: str, token: str | No
     return out
 
 
+def search_mail_messages(mailbox: str, query: str, top: int = 25,
+                         token: str | None = None) -> list:
+    """Search a mailbox for messages matching `query` (Graph $search over subject/body/from/
+    attachment names). Returns [{id, subject, from, received, has_attachments}] newest-first-ish.
+    Used to locate an invoice email when its PDF is missing from Monday."""
+    token = token or ms_token()
+    q = (query or "").strip()
+    if not q:
+        return []
+    r = requests.get(
+        f"{GRAPH}/users/{mailbox}/messages",
+        headers={"Authorization": f"Bearer {token}", "ConsistencyLevel": "eventual"},
+        params={"$search": f'"{q}"', "$top": str(int(top)),
+                "$select": "id,subject,from,receivedDateTime,hasAttachments"},
+        timeout=30)
+    r.raise_for_status()
+    out = []
+    for m in r.json().get("value", []):
+        out.append({"id": m.get("id"), "subject": m.get("subject") or "",
+                    "from": (((m.get("from") or {}).get("emailAddress") or {}).get("address") or ""),
+                    "received": m.get("receivedDateTime"),
+                    "has_attachments": bool(m.get("hasAttachments"))})
+    return out
+
+
+def find_invoice_pdf_in_mail(invoice_no: str, supplier: str | None = None,
+                             mailbox: str = INVOICE_IMPORT_MAILBOX,
+                             token: str | None = None) -> dict | None:
+    """Hunt the accounts@ mailbox for an invoice's PDF when it's missing from Monday. Searches on the
+    invoice number (then the supplier as a fallback), and returns the best-matching PDF as
+    {name, bytes, subject, from} — preferring a PDF whose filename contains the invoice number.
+    None if nothing suitable is found. Read-only."""
+    token = token or ms_token()
+    inv_norm = re.sub(r"[^a-z0-9]", "", (invoice_no or "").lower())
+    queries = [q for q in (invoice_no, supplier) if q and str(q).strip()]
+    seen_msgs = set()
+    fallback = None
+    for query in queries:
+        try:
+            msgs = search_mail_messages(mailbox, str(query), top=25, token=token)
+        except Exception:  # noqa: BLE001
+            continue
+        for m in msgs:
+            if not m.get("has_attachments") or m["id"] in seen_msgs:
+                continue
+            seen_msgs.add(m["id"])
+            try:
+                pdfs = fetch_message_pdf_attachments(mailbox, m["id"], token=token, max_items=6)
+            except Exception:  # noqa: BLE001
+                continue
+            for p in pdfs:
+                name_norm = re.sub(r"[^a-z0-9]", "", (p.get("name") or "").lower())
+                hit = {"name": p["name"], "bytes": p["bytes"], "subject": m["subject"],
+                       "from": m["from"]}
+                if inv_norm and inv_norm in name_norm:      # filename carries the invoice no → best
+                    return hit
+                if fallback is None:                        # keep the first PDF as a weaker fallback
+                    fallback = hit
+    return fallback
+
+
 def find_order_item_by_number(order_no: str, token: str | None = None) -> dict | None:
     """Find an order on the Orders board by its order number (column text_mkv6z0nt).
     Returns {id, name} of the first match, or None. Used to attach an imported invoice as a

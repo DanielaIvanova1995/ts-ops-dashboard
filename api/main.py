@@ -1570,6 +1570,35 @@ def triage_config(body: TriageCfgIn):
     return {"ok": True, "config": cfg}
 
 
+class FindPdfIn(BaseModel):
+    invoice_no: str
+    supplier: str = ""
+
+
+@app.post("/invoices/{sub_id}/find-pdf", dependencies=[Depends(require_key)])
+def invoice_find_pdf(sub_id: str, body: FindPdfIn):
+    """For an invoice subitem with NO PDF: hunt the accounts@ mailbox for the invoice's PDF (by
+    invoice number, then supplier) and attach it to the Monday subitem so it can be checked."""
+    inv = (body.invoice_no or "").strip()
+    if not inv:
+        return {"ok": False, "detail": "no invoice number to search for"}
+    try:
+        hit = ds.find_invoice_pdf_in_mail(inv, body.supplier or None)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't search Outlook: {e}")
+    if not hit:
+        return {"ok": True, "found": False,
+                "detail": f"No PDF found in Outlook for invoice {inv}"}
+    try:
+        attached = ds.add_pdf_to_subitem_file(sub_id, hit["bytes"], hit.get("name") or f"{inv}.pdf")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Found a PDF but couldn't attach it: {e}")
+    return {"ok": bool(attached), "found": True, "attached": bool(attached),
+            "filename": hit.get("name"), "from": hit.get("from"), "subject": hit.get("subject"),
+            "detail": (f"Attached “{hit.get('name')}” from {hit.get('from')}" if attached
+                       else "Found a PDF but Monday didn't confirm the attachment — try again")}
+
+
 @app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
 def invoice_import_issues(limit: int = 100):
     """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and

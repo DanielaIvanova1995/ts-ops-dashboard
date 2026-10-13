@@ -29,6 +29,7 @@ export default function Invoices() {
   const [sel, setSel] = useState(() => new Set());
   const [approving, setApproving] = useState({}); // sub_id -> working|done|err
   const [approveMsg, setApproveMsg] = useState({}); // sub_id -> { kind, text }
+  const [findingPdf, setFindingPdf] = useState({}); // sub_id -> bool
   const [proc, setProc] = useState(null);
   const [notice, setNotice] = useState(null);
   const [floor, setFloor] = useState(10);
@@ -127,6 +128,25 @@ export default function Invoices() {
         setNotice({ kind: "warn", text: String(e.message || e) });
       }
     }
+  }
+
+  async function doFindPdf(iv) {
+    const sub_id = iv.sub_id;
+    setFindingPdf((f) => ({ ...f, [sub_id]: true }));
+    setApproveMsg((m) => ({ ...m, [sub_id]: null }));
+    try {
+      const res = await jsonFetch(`/invoices/${sub_id}/find-pdf`, { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no, supplier: iv.supplier || "" }) });
+      const d = await res.json().catch(() => ({ ok: false, detail: `API ${res.status}` }));
+      if (res.ok && d.ok && d.attached) {
+        setList((l) => l.map((x) => x.sub_id === sub_id ? { ...x, has_pdf: true } : x));
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "ok", text: `PDF attached — ${d.detail}. You can Check it now.` } }));
+        doCheck(sub_id);
+      } else {
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: d.detail || "No PDF found in Outlook." } }));
+      }
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: String(e.message || e) } }));
+    } finally { setFindingPdf((f) => ({ ...f, [sub_id]: false })); }
   }
 
   function toggleSel(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -255,8 +275,9 @@ export default function Invoices() {
                 </div>
                 <div className="inv-right">
                   {al && <span className={`pill ${al.cls}`}>{al.text}</span>}
-                  {!iv.has_pdf ? <span className="sub">no PDF</span> :
-                    <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
+                  {!iv.has_pdf
+                    ? <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>
+                    : <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
                   {r && r.ok && r.matched && (approving[iv.sub_id] === "done"
                     ? <span className="pill green">approved ✓</span>
                     : <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>)}
