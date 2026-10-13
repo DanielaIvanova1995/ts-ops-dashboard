@@ -64,6 +64,12 @@ SUPPLIER_RULES = {
               "flag_high": False, "flag_below": True},
     # PJH: approve every matched invoice regardless of how high the margin is (no 35% cap).
     "pjh": {"name": "PJH", "flag_high": False},
+    # Huws Gray: no pricelist held (quote-first), so the ORDER margin is the safeguard. Auto-approve a
+    # matched invoice when margin is 8%–55%; outside that → Needs Review (Daniela 2026-10-13).
+    "huwsgray": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
+                 "flag_below": True, "flag_high": True},
+    "huws": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
+             "flag_below": True, "flag_high": True},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",

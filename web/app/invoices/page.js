@@ -148,9 +148,12 @@ export default function Invoices() {
     } finally { setChecking((c) => ({ ...c, [sub_id]: false })); }
   }, [jsonFetch, floor, ceil]);
 
-  async function doApprove(iv) {
+  async function doApprove(iv, force = false) {
     const sub_id = iv.sub_id;
-    if (!window.confirm(`Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`)) return;
+    const msg = force
+      ? `⚠️ Invoice ${iv.invoice_no} is NOT fully matched (it has discrepancies). Push it to QuickBooks anyway? This creates its bill.`
+      : `Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`;
+    if (!window.confirm(msg)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));
     try {
@@ -375,9 +378,11 @@ export default function Invoices() {
                   {!iv.has_pdf
                     ? <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>
                     : <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
-                  {r && r.ok && r.matched && (approving[iv.sub_id] === "done"
+                  {r && r.ok && (approving[iv.sub_id] === "done"
                     ? <span className="pill green">approved ✓</span>
-                    : <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>)}
+                    : r.matched
+                      ? <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>
+                      : <button className="btn" onClick={() => doApprove(iv, true)} disabled={approving[iv.sub_id] === "working"} title="Push to QuickBooks even though it isn't fully matched">{approving[iv.sub_id] === "working" ? "…" : "Push to QB anyway"}</button>)}
                 </div>
               </div>
 
@@ -418,7 +423,7 @@ export default function Invoices() {
                       })}
                     </tbody>
                   </table>
-                  <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist — use Approve → QB to push the bill to QuickBooks." : `${r.n_issues} issue(s) found — resolve on Monday, then re-check.`}</div>
+                  <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist — use Approve → QB to push the bill to QuickBooks." : `${r.n_issues} issue(s) found — resolve & re-check, or “Push to QB anyway” if you’re happy to approve it.`}</div>
                 </div>
               )}
             </div>
