@@ -194,10 +194,14 @@ tr.od > td:first-child { box-shadow: inset 3px 0 0 #DC2626; }
 .inv-chk input { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
 .inv-list { display: flex; flex-direction: column; gap: 10px; }
 .inv-card { padding: 0; }
-.inv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; flex-wrap: wrap; }
-.inv-right { display: flex; align-items: center; gap: 10px; }
-.inv-body { padding: 0 14px 14px; border-top: 1px solid var(--line); }
-.inv-body table.mini { margin-top: 10px; }
+.inv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; flex-wrap: wrap; }
+.inv-right { display: flex; align-items: center; gap: 8px; }
+.inv-body { padding: 0 12px 10px; border-top: 1px solid var(--line); }
+.inv-body table.mini { margin-top: 6px; }
+.inv-body table.mini td, .inv-body table.mini th { padding: 3px 6px; }
+.inv-list { gap: 7px; }
+.inv-head .ono { font-size: 13px; }
+.inv-head .sub { font-size: 12px; }
 .paypanel { border-top: 1px solid var(--line); padding: 12px 14px; }
 .pay-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .mred { color: #B91C1C; font-weight: 700; }

@@ -34,6 +34,10 @@ export default function Invoices() {
   const [notice, setNotice] = useState(null);
   const [floor, setFloor] = useState(10);
   const [ceil, setCeil] = useState(35);
+  const [supFilter, setSupFilter] = useState("");
+  const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState("");
+  const [onlyDup, setOnlyDup] = useState(false);
 
   useEffect(() => {
     try {
@@ -209,25 +213,52 @@ export default function Invoices() {
     );
   }
 
+  const suppliers = Array.from(new Set(list.map((i) => i.supplier).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const shown = list.filter((iv) => {
+    if (supFilter && (iv.supplier || "") !== supFilter) return false;
+    if (onlyDup && !iv.possible_dup) return false;
+    if (query) {
+      const q = query.toLowerCase();
+      if (!`${iv.invoice_no || ""} ${iv.supplier || ""} ${iv.order_no || ""}`.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  if (sortBy === "supplier") shown.sort((a, b) => (a.supplier || "").localeCompare(b.supplier || "") || (a.invoice_no || "").localeCompare(b.invoice_no || ""));
+  else if (sortBy === "margin") shown.sort((a, b) => (a.margin == null ? 1e9 : a.margin) - (b.margin == null ? 1e9 : b.margin));
+  else if (sortBy === "total") shown.sort((a, b) => (b.total || 0) - (a.total || 0));
+  const allShownSelected = shown.length > 0 && shown.every((x) => sel.has(x.sub_id));
+  function toggleAllShown() { setSel(allShownSelected ? new Set() : new Set(shown.map((x) => x.sub_id))); }
+
   return (
     <div className="wrap">
       <div className="topbar">
         <div className="pagetitle">Invoice Checker</div>
         <div className="right">
-          <span className="count">{status === "ok" ? <><b>{list.length}</b> to review</> : status === "loading" ? "Loading…" : ""}</span>
+          <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} to review</> : status === "loading" ? "Loading…" : ""}</span>
           <button className="btn primary" onClick={load} disabled={status === "loading"}>{status === "loading" ? "Refreshing…" : "Refresh"}</button>
         </div>
       </div>
 
-      <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+      <div className="card" style={{ padding: "8px 12px", marginBottom: 8 }}>
         <div className="inv-controls">
-          <span className="inv-set"><span className="sub">Approve floor %</span><input type="number" className="numin" value={floor} onChange={(e) => setFloorP(Number(e.target.value))} /></span>
-          <span className="inv-set"><span className="sub">Flag above %</span><input type="number" className="numin" value={ceil} onChange={(e) => setCeilP(Number(e.target.value))} /></span>
+          <input className="search" style={{ maxWidth: 240, flex: "none" }} placeholder="Search invoice / order / supplier" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <select className="filter" value={supFilter} onChange={(e) => setSupFilter(e.target.value)}>
+            <option value="">All suppliers ({suppliers.length})</option>
+            {suppliers.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select className="filter" value={sortBy} onChange={(e) => setSortBy(e.target.value)} title="Sort">
+            <option value="">Sort: default</option>
+            <option value="margin">Lowest margin first</option>
+            <option value="supplier">Supplier</option>
+            <option value="total">Highest total first</option>
+          </select>
+          <label className="inv-set" style={{ cursor: "pointer" }} title="Only possible duplicates"><input type="checkbox" checked={onlyDup} onChange={(e) => setOnlyDup(e.target.checked)} /><span className="sub">dups</span></label>
+          {(supFilter || query || sortBy || onlyDup) && <button className="btn ghost" onClick={() => { setSupFilter(""); setQuery(""); setSortBy(""); setOnlyDup(false); }}>Clear</button>}
           <span style={{ flex: 1 }} />
-          {list.length > 0 && <button className="btn" onClick={toggleAll}>{sel.size === list.length ? "Clear all" : "Select all"}</button>}
-          {sel.size > 0 && <button className="btn primary" onClick={checkApproveSelected} disabled={proc?.running}>{proc?.running ? `Working ${proc.done}/${proc.total}…` : `Check & approve selected (${sel.size})`}</button>}
+          <span className="inv-set"><span className="sub">Approve</span><input type="number" className="numin" value={floor} onChange={(e) => setFloorP(Number(e.target.value))} title="Auto-approve floor margin %" /><span className="sub">–</span><input type="number" className="numin" value={ceil} onChange={(e) => setCeilP(Number(e.target.value))} title="Flag-above margin %" /><span className="sub">%</span></span>
+          {shown.length > 0 && <button className="btn" onClick={toggleAllShown}>{allShownSelected ? "Clear" : "Select all"}</button>}
+          {sel.size > 0 && <button className="btn primary" onClick={checkApproveSelected} disabled={proc?.running}>{proc?.running ? `Working ${proc.done}/${proc.total}…` : `Check & approve (${sel.size})`}</button>}
         </div>
-        <div className="sub" style={{ marginTop: 6 }}>Auto-approve pushes to QuickBooks only invoices that <b>fully match</b> and whose order margin is <b>in band</b> (floor–flag). Anything else is left for you to review.</div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}
       </div>
 
@@ -284,9 +315,10 @@ export default function Invoices() {
 
       {status === "error" && <div className="card"><div className="state err">Couldn’t load invoices ({err}).</div></div>}
       {status === "ok" && list.length === 0 && <div className="card"><div className="state">No invoices in Needs Review. 🎉</div></div>}
+      {status === "ok" && list.length > 0 && shown.length === 0 && <div className="card"><div className="state">No invoices match this filter.</div></div>}
 
       <div className="inv-list">
-        {list.map((iv) => {
+        {shown.map((iv) => {
           const r = checks[iv.sub_id];
           const busy = checking[iv.sub_id];
           const al = r && r.ok ? actionLabel(r.suggested_action, r.matched) : null;
