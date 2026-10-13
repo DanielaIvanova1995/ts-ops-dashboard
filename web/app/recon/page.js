@@ -29,6 +29,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     });
   const overdueCount = lines.filter((l) => l._od).length;
   const [sel, setSel] = useState(() => new Set(lines.map((l) => l.bill_id)));
+  const [credSel, setCredSel] = useState(() => new Set((r.credits || []).map((_, i) => i)));
   const [ref, setRef] = useState("");
   const [banks, setBanks] = useState([]);
   const [bank, setBank] = useState("");
@@ -36,7 +37,10 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   const [paying, setPaying] = useState(false);
   const [remitting, setRemitting] = useState(false);
 
-  useEffect(() => { setSel(new Set((r.pay_lines || []).map((l) => l.bill_id))); }, [r]);
+  useEffect(() => {
+    setSel(new Set((r.pay_lines || []).map((l) => l.bill_id)));
+    setCredSel(new Set((r.credits || []).map((_, i) => i)));   // default: all credits selected
+  }, [r]);
   useEffect(() => {
     const sup = (r.vendor_name || r.supplier || "").split(" ")[0] || "REM";
     const d = new Date();
@@ -51,8 +55,10 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   function toggle(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const selLines = lines.filter((l) => sel.has(l.bill_id));
   const invTotal = round2(selLines.reduce((s, l) => s + (Number(l.amt) || 0), 0));
-  const creditTotal = round2((r.credits || []).reduce((s, c) => s + (Number(c.amount) || 0), 0));
+  const selCredits = (r.credits || []).filter((_, i) => credSel.has(i));
+  const creditTotal = round2(selCredits.reduce((s, c) => s + (Number(c.amount) || 0), 0));
   const net = round2(invTotal + creditTotal);
+  function toggleCred(i) { setCredSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; }); }
 
   async function markPaid() {
     if (!bank) { onNotice({ kind: "warn", text: "Choose a bank account to pay from." }); return; }
@@ -67,7 +73,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
         if (d.skipped_paid) skips.push(`${d.skipped_paid} already paid in QuickBooks`);
         if (d.missing) skips.push(`${d.missing} no longer in QuickBooks`);
         const skipMsg = skips.length ? ` Skipped ${skips.join(" and ")}.` : "";
-        const payAmt = Number(d.total != null ? d.total : net) || 0;
+        const payAmt = round2((Number(d.total != null ? d.total : invTotal) || 0) + creditTotal);
         onNotice({ kind: skips.length ? "warn" : "ok", text: `Marked ${d.paid} paid in QuickBooks (ref ${d.ref}).${skipMsg} Pay £${payAmt.toFixed(2)} by bank.` });
         onPaid(selLines.map((l) => l.inv));
       }
@@ -77,10 +83,10 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   }
 
   async function draftRemit() {
-    if (!selLines.length && !(r.credits || []).length) { onNotice({ kind: "warn", text: "Nothing selected for the remittance." }); return; }
+    if (!selLines.length && !selCredits.length) { onNotice({ kind: "warn", text: "Nothing selected for the remittance." }); return; }
     setRemitting(true);
     try {
-      const res = await jsonFetch("/recon/remittance", { method: "POST", body: JSON.stringify({ supplier: r.vendor_name || r.supplier, ref, to_email: remitTo, total: net, inv_lines: selLines, credits: r.credits || [] }) });
+      const res = await jsonFetch("/recon/remittance", { method: "POST", body: JSON.stringify({ supplier: r.vendor_name || r.supplier, ref, to_email: remitTo, total: net, inv_lines: selLines, credits: selCredits }) });
       const d = await res.json();
       if (res.ok && d.ok) {
         try {
@@ -118,7 +124,25 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
           ))}
         </tbody>
       </table>
-      {creditTotal ? <div className="sub" style={{ marginTop: 6 }}>Credit notes net off: {money(creditTotal)}</div> : null}
+      {(r.credits || []).length ? (
+        <div style={{ marginTop: 10 }}>
+          <div className="tool-label">Credit notes — tick the ones to apply</div>
+          <table className="mini">
+            <thead><tr><th></th><th>Credit</th><th>Date</th><th className="num">Amount</th></tr></thead>
+            <tbody>
+              {(r.credits || []).map((c, i) => (
+                <tr key={i}>
+                  <td><input type="checkbox" checked={credSel.has(i)} onChange={() => toggleCred(i)} /></td>
+                  <td>{c.ref || "credit"}</td>
+                  <td className="sub">{c.date || "—"}</td>
+                  <td className="num">{money(c.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {creditTotal ? <div className="sub" style={{ marginTop: 4 }}>Selected credits net off: {money(creditTotal)}</div> : null}
+        </div>
+      ) : null}
       <div className="kv big" style={{ maxWidth: 280 }}><span>Net to pay</span><b>{money(net)}</b></div>
       <div className="pay-ctl">
         <input className="search" style={{ maxWidth: 220, flex: "none" }} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Reference" />
