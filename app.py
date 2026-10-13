@@ -6024,16 +6024,23 @@ def _bg_worker():
                     _run_check("auto")
             except Exception:  # noqa: BLE001
                 next_check = _time.time() + 900
+            # Triage now runs in the always-on API scheduler. Only run it here if the API isn't
+            # holding the lease (fallback if the API is down) — avoids double-filing/double-cost.
+            try:
+                import scheduler as _sched
+                _triage_here = _sched.hold_lease()
+            except Exception:  # noqa: BLE001
+                _triage_here = True
             try:
                 tcfg = supabase_db.config_get("email_triage") or {}
-                if tcfg.get("auto_enabled") and _time.time() >= next_triage:
+                if _triage_here and tcfg.get("auto_enabled") and _time.time() >= next_triage:
                     next_triage = _time.time() + max(300, int(tcfg.get("interval_min") or 10) * 60)
                     _run_triage("auto")
             except Exception:  # noqa: BLE001
                 next_triage = _time.time() + 900
             try:
                 qcfg = supabase_db.config_get("quote_triage") or {}
-                if qcfg.get("auto_enabled") and _time.time() >= next_qtriage:
+                if _triage_here and qcfg.get("auto_enabled") and _time.time() >= next_qtriage:
                     next_qtriage = _time.time() + max(300, int(qcfg.get("interval_min") or 10) * 60)
                     _run_quote_triage("auto")
             except Exception:  # noqa: BLE001

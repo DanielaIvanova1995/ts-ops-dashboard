@@ -38,6 +38,19 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def _start_scheduler():
+    """Run the always-on triage scheduler inside this (always-on) API service, so email + quote
+    triage no longer depend on the Streamlit app being open. A Supabase lease stops it double-running
+    with the Streamlit worker. Disable with RUN_SCHEDULER=0."""
+    try:
+        import scheduler
+        if scheduler.start():
+            print("[scheduler] triage scheduler started")
+    except Exception as e:  # noqa: BLE001
+        print(f"[scheduler] not started: {e}")
+
 # ---- Shared access-code lock ---------------------------------------------------------------------
 # Set TRADEHUB_ACCESS_KEY on the host to a shared code. The front-end sends it as the
 # X-TradeHub-Key header on every request; the API rejects anything else. `/health` and `/` stay open
