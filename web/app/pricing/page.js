@@ -46,16 +46,24 @@ export default function Pricing() {
     jsonFetch("/pricing/suppliers").then((r) => r.ok && r.json()).then((d) => d && setSuppliers(d.suppliers || [])).catch(() => {});
   }, [accessKey, jsonFetch]);
 
-  const loadPrices = useCallback(async (supplier, query) => {
+  const [sortBy, setSortBy] = useState("sku");
+  const [sortDir, setSortDir] = useState("asc");
+  const loadPrices = useCallback(async (supplier, query, sb = "sku", sd = "asc") => {
     if (!supplier) { setRows(null); return; }
     setLoadingPrices(true);
     try {
-      const res = await jsonFetch(`/pricing/prices?supplier=${encodeURIComponent(supplier)}&q=${encodeURIComponent(query || "")}`);
+      const res = await jsonFetch(`/pricing/prices?supplier=${encodeURIComponent(supplier)}&q=${encodeURIComponent(query || "")}&sort=${sb}&dir=${sd}`);
       const d = await res.json();
       setRows(d.rows || []); setMeta({ total: d.total || 0, capped: !!d.capped, updated: d.updated, fee: d.fee_pct, date: d.pricelist_date });
     } catch (e) { if (String(e.message) !== "unauthorised") { setRows([]); setMeta({ total: 0, capped: false }); } }
     finally { setLoadingPrices(false); }
   }, [jsonFetch]);
+  function sortByCol(field) {
+    const dir = sortBy === field && sortDir === "asc" ? "desc" : "asc";
+    setSortBy(field); setSortDir(dir);
+    loadPrices(sup, q, field, dir);
+  }
+  const arrow = (f) => sortBy === f ? (sortDir === "asc" ? " ▲" : " ▼") : "";
 
   useEffect(() => {
     if (!accessKey || tab !== "delivery" || deliv) return;
@@ -100,13 +108,13 @@ export default function Pricing() {
         <>
           <div className="card" style={{ padding: "8px 12px", marginBottom: 8 }}>
             <div className="inv-controls">
-              <select className="filter" value={sup} onChange={(e) => { setSup(e.target.value); loadPrices(e.target.value, q); }}>
+              <select className="filter" value={sup} onChange={(e) => { setSup(e.target.value); loadPrices(e.target.value, q, sortBy, sortDir); }}>
                 <option value="">Choose a supplier…</option>
                 {suppliers.map((s) => <option key={s.supplier} value={s.supplier}>{s.supplier} ({s.count})</option>)}
               </select>
               <input className="search" style={{ maxWidth: 240 }} placeholder="Search SKU or name" value={q}
-                onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") loadPrices(sup, q); }} disabled={!sup} />
-              <button className="btn" onClick={() => loadPrices(sup, q)} disabled={!sup || loadingPrices}>{loadingPrices ? "…" : "Search"}</button>
+                onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") loadPrices(sup, q, sortBy, sortDir); }} disabled={!sup} />
+              <button className="btn" onClick={() => loadPrices(sup, q, sortBy, sortDir)} disabled={!sup || loadingPrices}>{loadingPrices ? "…" : "Search"}</button>
               {rows && meta.date && <span className="pill green">{sup} list: {meta.date}</span>}
               <span style={{ flex: 1 }} />
               {rows && <span className="sub">{meta.total.toLocaleString()} priced SKU{meta.total === 1 ? "" : "s"}{meta.capped ? ` · showing first ${rows.length}` : ""}{meta.updated ? ` · feed refreshed ${meta.updated}` : ""}</span>}
@@ -117,7 +125,14 @@ export default function Pricing() {
           {sup && rows && rows.length > 0 && (
             <div className="card" style={{ padding: "6px 12px 12px" }}>
               <table className="mini">
-                <thead><tr><th>SKU</th><th>Product</th><th className="num">Cost</th><th className="num">Sell</th><th className="num">Margin{meta.fee ? ` (−${meta.fee}%)` : ""}</th><th></th></tr></thead>
+                <thead><tr>
+                  <th className="sortable" onClick={() => sortByCol("sku")}>SKU{arrow("sku")}</th>
+                  <th>Product</th>
+                  <th className="num sortable" onClick={() => sortByCol("cost")}>Cost{arrow("cost")}</th>
+                  <th className="num sortable" onClick={() => sortByCol("sell")}>Sell{arrow("sell")}</th>
+                  <th className="num sortable" onClick={() => sortByCol("margin")}>Margin{meta.fee ? ` (−${meta.fee}%)` : ""}{arrow("margin")}</th>
+                  <th></th>
+                </tr></thead>
                 <tbody>
                   {rows.map((r, i) => {
                     const mClass = r.margin == null ? "" : r.margin < 8 ? "mred" : r.margin < 15 ? "mamber" : "mgreen";

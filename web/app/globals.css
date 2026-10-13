@@ -116,6 +116,9 @@ a.home-tile:hover { border-color: var(--brand); box-shadow: 0 8px 22px rgba(28,3
 /* Pay-list quick-select row */
 .sel-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 2px; }
 
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--ink); }
+
 /* Segmented tab control (Pricing: Pricelists / Delivery) */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
 .seg-btn { appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600; font-size: 12.5px; padding: 6px 12px; cursor: pointer; }

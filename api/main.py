@@ -1730,10 +1730,11 @@ def _pl_date_for(supplier):
 
 
 @app.get("/pricing/prices", dependencies=[Depends(require_key)])
-def pricing_prices(supplier: str, q: str = "", limit: int = 500):
+def pricing_prices(supplier: str, q: str = "", limit: int = 500, sort: str = "sku", dir: str = "asc"):
     """This supplier's priced SKUs: ex-VAT cost (feed + overrides), the Shopify product name (or a
-    'not on Shopify' flag), our sell price, and the net margin after the transaction fee. `updated`
-    is when the price feed was last rebuilt."""
+    'not on Shopify' flag), our sell price, and the net margin after the transaction fee. Sorted
+    across the WHOLE matched set (by sku/cost/sell/margin) before the cap. `updated` is when the
+    price feed was last rebuilt."""
     feed = _load_json(_FEED_PATH)
     updated = feed.get("generated_at")
     items = feed.get("items") or []
@@ -1775,7 +1776,7 @@ def pricing_prices(supplier: str, q: str = "", limit: int = 500):
                 "sell": sell, "margin": margin, "source": "override" if is_override else "feed"}
 
     all_ns = set(sup_cost) | set(ov_cost)
-    rows, total = [], 0
+    allrows = []
     for ns in all_ns:
         is_ov = ns in ov_cost
         cost = ov_cost[ns][1] if is_ov else sup_cost[ns]
@@ -1783,10 +1784,17 @@ def pricing_prices(supplier: str, q: str = "", limit: int = 500):
         row = _row(ns, cost, is_ov, sk_fb)
         if ql and ql not in (row["sku"] or "").lower() and ql not in (row["name"] or "").lower():
             continue
-        total += 1
-        if len(rows) < limit:
-            rows.append(row)
-    rows.sort(key=lambda r: (r["sku"] or "").lower())
+        allrows.append(row)
+    # Sort the WHOLE matched set before capping, so e.g. "lowest margin" shows the true worst.
+    reverse = (dir or "asc").lower() == "desc"
+    if sort in ("cost", "sell", "margin"):
+        INF = float("inf")
+        allrows.sort(key=lambda r: (r.get(sort) if isinstance(r.get(sort), (int, float)) else INF),
+                     reverse=reverse)
+    else:
+        allrows.sort(key=lambda r: (r.get("sku") or "").lower(), reverse=reverse)
+    total = len(allrows)
+    rows = allrows[:limit]
     return {"rows": rows, "total": total, "capped": total > len(rows),
             "updated": updated, "fee_pct": round(_TXN_FEE * 100, 2),
             "pricelist_date": _pl_date_for(supplier)}
