@@ -126,6 +126,10 @@ tbody tr:hover { background: #FCFAF8; }
 .pill.grey { color: var(--muted); background: var(--muted-bg); }
 .pill.dash { color: var(--muted); background: transparent; border: 1px dashed var(--line); }
 
+/* Overdue rows — tint so they stand out in the statement + pay lists */
+tr.od > td { background: #FEF2F2; }
+tr.od > td:first-child { box-shadow: inset 3px 0 0 #DC2626; }
+
 /* Top nav between screens */
 .nav { display: flex; gap: 4px; margin-left: 18px; }
 .navlink { text-decoration: none; font-weight: 600; font-size: 13px; color: var(--muted); padding: 6px 11px; border-radius: 7px; }

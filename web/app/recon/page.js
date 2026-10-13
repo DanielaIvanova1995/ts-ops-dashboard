@@ -12,7 +12,11 @@ function money(v) {
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
-  const lines = (r.pay_lines || []).slice().sort((a, b) => String(a.inv_date || "").localeCompare(String(b.inv_date || "")));
+  const lines = (r.pay_lines || []).slice().sort((a, b) => {
+    if (!!b.overdue !== !!a.overdue) return b.overdue ? 1 : -1;   // overdue first
+    return String(a.inv_date || "").localeCompare(String(b.inv_date || ""));  // then oldest
+  });
+  const overdueCount = lines.filter((l) => l.overdue).length;
   const [sel, setSel] = useState(() => new Set(lines.map((l) => l.bill_id)));
   const [ref, setRef] = useState("");
   const [banks, setBanks] = useState([]);
@@ -74,12 +78,12 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
 
   return (
     <div className="paypanel">
-      <div className="tool-label">Pay these — tick invoices, mark paid in QuickBooks, draft the remittance</div>
+      <div className="tool-label">Pay these — tick invoices, mark paid in QuickBooks, draft the remittance{overdueCount ? <span className="pill red" style={{ marginLeft: 8 }}>{overdueCount} overdue</span> : null}</div>
       <table className="mini">
         <thead><tr><th></th><th>Invoice</th><th>Inv date</th><th>Due</th><th className="num">Amount</th></tr></thead>
         <tbody>
           {lines.map((l) => (
-            <tr key={l.bill_id}>
+            <tr key={l.bill_id} className={l.overdue ? "od" : ""}>
               <td><input type="checkbox" checked={sel.has(l.bill_id)} onChange={() => toggle(l.bill_id)} /></td>
               <td>{l.inv}{l.overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
               <td className="sub">{l.inv_date || "—"}</td>
@@ -291,13 +295,23 @@ export default function Recon() {
               <th>Monday stage</th><th>vs QuickBooks</th><th></th>
             </tr></thead>
             <tbody>
-              {(r.rows || []).map((row, i) => {
+              {(r.rows || []).map((raw, i) => {
+                // Tolerate older saved snapshots whose rows used legacy keys (inv/amt/date).
+                const row = raw.invoice ? raw : {
+                  ...raw,
+                  invoice: raw.invoice || raw.inv || "",
+                  order: raw.order || raw.order_ref || "",
+                  inv_date: raw.inv_date || raw.date || "",
+                  amount: raw.amount != null ? raw.amount : raw.amt,
+                  unpaid: raw.unpaid != null ? raw.unpaid : (raw.balance != null ? raw.balance : raw.amt),
+                  due_date: raw.due_date || raw.stmt_due || "",
+                };
                 const p = statusPill(row.status);
                 const st = approving[row.invoice];
                 const canApprove = row.status === "missing" && !!row.monday_status && st !== "done";
                 const mClass = row.margin == null ? "" : row.margin < 8 ? "mred" : row.margin < 15 ? "mamber" : "mgreen";
                 return (
-                  <tr key={i}>
+                  <tr key={i} className={row.overdue ? "od" : ""}>
                     <td className="ono">{row.invoice}{row.overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
                     <td>{row.order_no || row.order || "—"}{row.is_split ? <span className="pill grey" style={{ marginLeft: 6 }}>split</span> : null}</td>
                     <td className="sub">{row.inv_date || "—"}</td>

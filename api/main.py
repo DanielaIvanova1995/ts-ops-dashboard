@@ -886,16 +886,74 @@ def recon_saved():
     return {"saved": out}
 
 
+def _norm_recon_row(r: dict) -> dict:
+    """Bring a stored reconciliation row up to the current shape. Older snapshots stored rows under
+    legacy keys (inv/amt/date/order_ref), which render as empty in the new table — map them here so
+    reopened statements always show real data."""
+    if not isinstance(r, dict):
+        return {}
+    if r.get("invoice"):
+        return r                                             # already current shape
+    amt = r.get("amount") if r.get("amount") is not None else r.get("amt")
+    unpaid = r.get("unpaid")
+    if unpaid is None:
+        unpaid = r.get("balance") if r.get("balance") is not None else amt
+    return {
+        "invoice": r.get("invoice") or r.get("inv") or "",
+        "order": r.get("order") or r.get("order_ref") or "",
+        "order_no": r.get("order_no"),
+        "inv_date": r.get("inv_date") or r.get("date") or "",
+        "amount": amt,
+        "unpaid": unpaid,
+        "due_date": r.get("due_date") or r.get("stmt_due") or "",
+        "paid_ref": r.get("paid_ref") or "",
+        "status": r.get("status") or "",
+        "overdue": r.get("overdue", False),
+        "monday_status": r.get("monday_status"),
+        "is_split": r.get("is_split"),
+        "margin": r.get("margin"),
+    }
+
+
 @app.get("/recon/open", dependencies=[Depends(require_key)])
 def recon_open(key: str):
     """Return a saved reconciliation's full snapshot (rows etc.) so it can be reopened without
-    re-uploading the statement."""
+    re-uploading the statement. Legacy snapshots are normalised; if their rows are unrecoverable the
+    table is rebuilt from the still-valid pay_lines so a reopened statement never shows empty rows."""
     try:
         snap = (ds.recon_load_all() or {}).get(key)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't load the reconciliation: {e}")
     if not snap:
         raise HTTPException(status_code=404, detail="Saved reconciliation not found")
+    snap = dict(snap)
+    rows = [_norm_recon_row(r) for r in (snap.get("rows") or [])]
+    rows = [r for r in rows if r]
+    pay_lines = snap.get("pay_lines") or []
+    if pay_lines and not any((r.get("invoice") or "").strip() for r in rows):
+        # Rows are old/blank but the pay list is good → rebuild the outstanding rows from it.
+        rebuilt = []
+        for pl in pay_lines:
+            inv = str(pl.get("inv") or "").strip()
+            if not inv:
+                continue
+            rebuilt.append({
+                "invoice": inv, "order": pl.get("order") or "",
+                "inv_date": pl.get("inv_date") or "", "amount": pl.get("amt"),
+                "unpaid": pl.get("amt"), "due_date": pl.get("due_date") or "",
+                "paid_ref": "", "status": "ready", "overdue": pl.get("overdue", False),
+            })
+        try:                                                  # re-enrich with Monday stage/order/margin
+            enrich = _statement_monday_enrich([r["invoice"] for r in rebuilt])
+            for r in rebuilt:
+                e = enrich.get(r["invoice"])
+                if e:
+                    r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
+                             is_split=e.get("is_split"), margin=e.get("margin"))
+        except Exception:  # noqa: BLE001
+            pass
+        rows = rebuilt
+    snap["rows"] = rows
     return snap
 
 
