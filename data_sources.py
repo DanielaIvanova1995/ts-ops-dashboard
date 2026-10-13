@@ -5275,6 +5275,16 @@ def build_remittance_pdf(supplier, ref, date_str, lines, total, memo="", company
 # it (Monday stays the source of truth; TradeHub is the cockpit).
 # ===========================================================================
 ORDERS_NEW_GROUP = "new_group66719"      # "NEW ORDERS TO SEND OUT TO SUPPLIERS (NATASHA)"
+WDL_GROUP = "new_group41404"             # "Windows, Doors & Lanterns (DANIELA)"
+
+
+def move_order_to_group(item_id, group_id, token: str | None = None) -> bool:
+    """Move an order item into another group on the ORDERS board (e.g. doors → Windows, Doors &
+    Lanterns). Returns True on success."""
+    token = token or get_token()
+    q = "mutation($i:ID!,$g:String!){move_item_to_group(item_id:$i, group_id:$g){id}}"
+    p = _monday_gql(q, {"i": str(item_id), "g": str(group_id)}, token)
+    return bool(((p or {}).get("move_item_to_group") or {}).get("id"))
 # Order-board column ids used by the processor.
 OP_COLS = {
     "order_no": "text_mkv6z0nt", "customer": "text2", "address": "customer_address8",

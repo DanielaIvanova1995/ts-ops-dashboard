@@ -413,6 +413,14 @@ def route(item_id: str, body: RouteIn):
         in_house = (not sup) and route_ in ("SAMPLES", "CLEARANCE")
         if res.get("split"):
             note = "This order splits across suppliers — not auto-applied; handle the split separately."
+        elif route_ == "WDL":
+            try:
+                ds.move_order_to_group(item_id, ds.WDL_GROUP)
+                applied = True
+                suggestion["applied_stage"] = "Windows, Doors & Lanterns"
+                note = "Door order — moved to the Windows, Doors & Lanterns group."
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=502, detail=f"Couldn't move to Windows, Doors & Lanterns: {e}")
         elif route_ == "PICK" or (not sup and not in_house):
             note = "Couldn't identify a single supplier — assign it manually."
         else:
@@ -1345,6 +1353,13 @@ def process_order(item_id: str):
         return {"ok": False, "order": tag, "result": "splits across suppliers — handle manually",
                 "summary": routing.summary(res)}
     sup, route_ = res.get("overall_supplier"), res.get("route")
+    if route_ == "WDL":                                          # heritage/bifold/uPVC doors → Daniela's group
+        try:
+            ds.move_order_to_group(item_id, ds.WDL_GROUP)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Couldn't move to Windows, Doors & Lanterns: {e}")
+        return {"ok": True, "order": tag, "route": "WDL",
+                "result": "→ moved to Windows, Doors & Lanterns (door order — no PO)"}
     in_house = (not sup) and route_ in ("SAMPLES", "CLEARANCE")   # samples/clearance: post in-house, no PO
     if route_ == "PICK" or (not sup and not in_house):
         return {"ok": False, "order": tag, "result": "couldn't identify a supplier — assign manually"}

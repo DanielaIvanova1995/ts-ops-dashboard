@@ -45,7 +45,7 @@ PORTAL = {"PJH", "Toolbank", "Velux", "Nuie", "National Skirting", "Rexel", "Tra
           "Walls and Floors"}
 QUOTE_FIRST = {"Huws Gray", "Etills", "Bricklink", "Brickservices", "AJW", "Brundle"}
 NEEDS_BRANCH = {"Travis Perkins", "Eurocell"}    # nearest physical branch — needs the locator
-IN_HOUSE = {"SAMPLES", "CLEARANCE"}
+IN_HOUSE = {"SAMPLES", "CLEARANCE", "WDL"}   # WDL = Windows, Doors & Lanterns (Daniela's group)
 # Suppliers we're NOT buying from right now — never route to them or count their feed prices (kept
 # on file with all their rules; just remove from this set to switch them back on). NBP paused.
 EXCLUDED_SUPPLIERS = {"NBP"}
@@ -324,6 +324,14 @@ def route_line(line, area_pc=None, sku_supplier=None):
         return out("SAMPLES", None, "Sample — fulfil & post in-house", "high")
     if "clearance" in tl or sku.lower().startswith("clear"):
         return out("CLEARANCE", None, "Clearance stock we hold — in-house", "high")
+    # Heritage doors, bifold doors and uPVC external doors are made-to-order and handled in Daniela's
+    # "Windows, Doors & Lanterns" Monday group, NOT bought from a dropship supplier (Daniela
+    # 2026-10-13). Match on the title (these list under the house-brand vendor, so vendor is no help).
+    tln = _norm(title)   # letters+digits only, lowercased: "bi-fold"/"bi fold" -> "bifold"
+    if "door" in tln and ("heritage" in tln or "upvc" in tln):
+        return out("WDL", None, "Heritage/uPVC door — Windows, Doors & Lanterns group", "high")
+    if "bifold" in tln:
+        return out("WDL", None, "Bifold door — Windows, Doors & Lanterns group", "high")
 
     # Freefoam & Fortex → regional stockist by delivery postcode (Daniela 2026-10-02). Always a
     # QUOTE (packing slip, no prices yet). Unmapped area / no postcode → PICK (review).

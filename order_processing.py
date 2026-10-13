@@ -1419,6 +1419,12 @@ def _process_one(o):
                 "Result": _process_split(o, res)}
     sup, route = res.get("overall_supplier"), res.get("route")
     prev_sup = o.get("supplier")
+    if route == "WDL":           # heritage/bifold/uPVC doors → Daniela's Windows, Doors & Lanterns group
+        try:
+            data_sources.move_order_to_group(iid, data_sources.WDL_GROUP)
+            return {"Order": tag, "Supplier": "", "Result": "moved to Windows, Doors & Lanterns"}
+        except Exception as e:   # noqa: BLE001
+            return {"Order": tag, "Supplier": "", "Result": "move to Windows/Doors failed: " + str(e)[:60]}
     if route == "PICK":
         return {"Order": tag, "Supplier": "", "Result": "couldn't identify supplier — pick manually"}
     try:
