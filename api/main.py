@@ -86,6 +86,26 @@ def diag():
         out["qbo_connected"] = bool(ds.qbo_is_connected())
     except Exception as e:  # noqa: BLE001
         out["qbo_error"] = str(e)[:140]
+    # Background schedulers live in the always-on app host (a separate service), but they write their
+    # config + last-run to the SAME Supabase — so surface them here to diagnose "auto isn't running".
+    try:
+        import supabase_db as sdb
+        if out.get("supabase_configured"):
+            jobs = {}
+            for name in ("email_triage", "quote_triage", "invoice_import", "invoice_check"):
+                cfg = sdb.config_get(name) or {}
+                stat = sdb.config_get(name + "_status") or {}
+                jobs[name] = {
+                    "auto_enabled": bool(cfg.get("auto_enabled")),
+                    "interval_min": cfg.get("interval_min"),
+                    "last_run_at": stat.get("at"),
+                    "last_reason": stat.get("reason"),
+                    "last_ok": stat.get("ok"),
+                    "last_error": (str(stat.get("error"))[:140] if stat.get("error") else None),
+                }
+            out["jobs"] = jobs
+    except Exception as e:  # noqa: BLE001
+        out["jobs_error"] = str(e)[:140]
     return out
 
 
