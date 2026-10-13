@@ -352,6 +352,44 @@ def poly_takeoff(inp):
     return out, {"sheets": sheets, "bars": inter + ends, "barlen": barlen, "note": note}
 
 
+# ---- Molan EZ Glaze (corrugated polycarbonate) ------------------------------------------------
+EZGLAZE_COLOURS = {
+    "Clear": ("EZ Glaze Clear", "CLR"),
+    "Breeze Blue": ("EZ Glaze Breeze Blue", "BREEZE"),
+    "Solar Ice": ("EZ Glaze Solar Ice", "SOLARICE"),
+    "Beehive Clear": ("Beehive EZ Glaze", "BEEHIVECLR"),
+}
+EZGLAZE_LENGTHS = [2.5, 3, 3.5, 4, 6, 7]
+
+
+def ezglaze_takeoff(inp):
+    """EZ Glaze corrugated roof → Molan take-off. Sheets are SKU-exact (matched to the nearest EZ
+    Glaze length); accessory quantities are estimates to confirm. inp keys: width (m), slope (m),
+    cover (m, sheet cover width), colour (an EZGLAZE_COLOURS key). Returns (lines, meta). Each line
+    has {key, item, qty, unit, skus, search}. Lifted verbatim from app.py."""
+    width, slope, cover = inp["width"], inp["slope"], inp["cover"]
+    sheets = math.ceil(width / cover) if (width and cover) else 0
+    length = next((L for L in EZGLAZE_LENGTHS if L >= slope), 7) if slope else 0
+    cname, ccode = EZGLAZE_COLOURS[inp["colour"]]
+    # length suffix in the SKU (2.5 is written "25" for most, "2.5" for Breeze)
+    suffixes = (["25", "2.5"] if length == 2.5 else [("%g" % length)])
+    sheet_skus = [f"EZGLAZE{ccode}-{s}" for s in suffixes]
+    lines = [
+        {"key": "sheet", "item": f"{cname} corrugated sheet — {length:g}m",
+         "qty": sheets, "unit": "sheet", "skus": sheet_skus, "search": cname},
+        {"key": "foam", "item": "EZ Glaze foam sealing strip (eaves/ridge)",
+         "qty": max(1, sheets), "unit": "strip", "skus": ["EZGLAZEFOAM"], "search": "EZ Glaze Foam"},
+        {"key": "screws", "item": "EZ Glaze screws & washers (50 pack)",
+         "qty": max(1, math.ceil(sheets / 3)), "unit": "pack", "skus": ["EZGLAZESCREW50"],
+         "search": "EZ Glaze Screw 50"},
+        {"key": "wallconn", "item": f"EZ Glaze 60mm wall connector (2m, along {width:.1f}m)",
+         "qty": max(1, math.ceil(width / 2)) if width else 0, "unit": "length",
+         "skus": ["EZGLAZEW-CONN2M"], "search": "EZ Glaze Wall Connector"},
+    ]
+    out = [l for l in lines if l["qty"] > 0]
+    return out, {"sheets": sheets, "length": length}
+
+
 # ---- Discount Desk ---------------------------------------------------------------------------
 SHOPIFY_FEE = 0.018
 ABANDONED_CART_PCT = 0.04   # every customer already gets 4% off via the abandoned-cart email

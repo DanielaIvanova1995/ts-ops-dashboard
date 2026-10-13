@@ -1260,6 +1260,7 @@ def invoices():
     out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
             "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
+            "order_url": i.get("order_url"),
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
     return {"count": len(out), "invoices": out}
 
@@ -2278,6 +2279,82 @@ def quote_molan(body: MolanQuoteIn):
     disc = qc.discount_floor(sell, margin) if margin is not None else None
     return {"ok": True, "product": f"{body.sheet_type} {body.colour} polycarbonate roof",
             "colour": body.colour, "lines": lines, "caveats": cav,
+            "totals": {"sell": round(sell, 2), "cost": round(cost, 2), "margin": margin,
+                       "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
+                       "n_priced": n_priced, "n_total": len(lines)},
+            "discount": disc}
+
+
+class EzglazeQuoteIn(BaseModel):
+    width: float                        # roof width (m)
+    slope: float                        # slope length, eaves→ridge (m)
+    cover: float = 1.0                  # sheet cover width (m)
+    colour: str = "Clear"               # an EZGLAZE_COLOURS key
+
+
+@app.post("/quotes/ezglaze", dependencies=[Depends(require_key)])
+def quote_ezglaze(body: EzglazeQuoteIn):
+    """Molan EZ Glaze corrugated roof take-off → matched Shopify variants → priced quote. Brand-locked
+    to Molan. Sheets are SKU-exact (matched to the nearest EZ Glaze length); accessory quantities are
+    estimates. Returns priced lines, totals, caveats and the discount."""
+    import quote_core as qc
+    import order_processing as op
+    if body.colour not in qc.EZGLAZE_COLOURS:
+        return {"ok": False, "detail": f"Unknown EZ Glaze colour '{body.colour}'."}
+    raw, meta = qc.ezglaze_takeoff({"width": body.width, "slope": body.slope,
+                                    "cover": body.cover, "colour": body.colour})
+    if not raw:
+        return {"ok": False, "detail": "Nothing to build — check the roof width and slope length."}
+    cav = [f"{meta['sheets']} sheet(s) across the {body.width:.1f} m width, each {meta['length']:g} m "
+           "long (nearest EZ Glaze length). Confirm the exact sizes and we'll tighten it.",
+           "EZ Glaze is quoted in Molan products only. Foam/screw/connector quantities are estimates "
+           "sized from the roof — confirm against the job."]
+    try:
+        tok = ds.shopify_products_token()
+    except Exception:  # noqa: BLE001
+        tok = None
+    lines, sell, cost, n_priced = [], 0.0, 0.0, 0
+    for l in raw:
+        code = (l.get("skus") or [None])[0]
+        m = None
+        try:
+            m = ds.match_quote_variant(code, l["search"], token=tok, brand="Molan")
+        except Exception:  # noqa: BLE001
+            m = None
+        price = m.get("price") if m else None
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        mo_cost = None
+        if m and m.get("sku"):
+            try:
+                mo_cost = op._line_cost(m["sku"], "Molan", m.get("title"))
+            except Exception:  # noqa: BLE001
+                mo_cost = None
+        mo_supplied = isinstance(mo_cost, (int, float))
+        qty = l["qty"]
+        priced = price is not None and mo_supplied
+        lines.append({
+            "description": l["item"], "qty": qty, "search": l["search"],
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"), "variant_id": m.get("variant_id"),
+                         "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
+            "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
+            "unit_cost": round(mo_cost, 2) if mo_supplied else None,
+            "line_cost": round(mo_cost * qty, 2) if mo_supplied else None,
+            "ajw_supplied": mo_supplied,
+            "note": ("no Molan cost on file — check the price list" if (m and not mo_supplied)
+                     else ("couldn't match an EZ Glaze product — check wording" if not m else "")),
+        })
+        if priced:
+            sell += price * qty
+            cost += mo_cost * qty
+            n_priced += 1
+    margin = (sell - cost) / sell if sell > 0 else None
+    disc = qc.discount_floor(sell, margin) if margin is not None else None
+    cname = qc.EZGLAZE_COLOURS[body.colour][0]
+    return {"ok": True, "product": f"{cname} corrugated roof", "colour": body.colour,
+            "lines": lines, "caveats": cav,
             "totals": {"sell": round(sell, 2), "cost": round(cost, 2), "margin": margin,
                        "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
                        "n_priced": n_priced, "n_total": len(lines)},

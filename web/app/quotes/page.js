@@ -19,6 +19,7 @@ const POLY_COLOURS = ["Clear", "Opal", "Bronze", "Heatguard Opal", "Bronze on Op
 const POLY_WIDTHS = [{ v: 700, l: "700 mm" }, { v: 1050, l: "1050 mm" }, { v: 1200, l: "1200 mm" }, { v: 2100, l: "2100 mm" }];
 const POLY_SYSTEMS = ["Self-Supported (16/35mm)", "Artisan"];
 const POLY_BAR_COLOURS = ["White", "Brown", "Anthracite Grey"];
+const EZGLAZE_COLOURS = ["Clear", "Breeze Blue", "Solar Ice", "Beehive Clear"];
 
 // Per-range config: label, endpoint, supplier (whose cost we use), and the "how to quote" guide.
 const RANGES = {
@@ -64,6 +65,18 @@ const RANGES = {
       ["Brand lock.", "All polycarbonate is quoted as Molan only. Margin after fees + discount band below — never below 8%."],
     ],
   },
+  ezglaze: {
+    label: "EZ Glaze", endpoint: "/quotes/ezglaze", supplier: "Molan", kind: "ezglaze",
+    guide: [
+      ["What it is.", "EZ Glaze is Molan's corrugated polycarbonate roofing — lightweight sheets for lean-tos, carports and canopies. Brand-locked to Molan."],
+      ["Roof size.", "Get the roof width (m) across the front and the slope length (m) from eaves to ridge. Sheets run down the slope."],
+      ["Sheet cover.", "The usable cover width per sheet (default 1.0 m) — confirm for the exact profile. We work out how many sheets cover the width."],
+      ["Length.", "We match each sheet to the nearest EZ Glaze stock length (2.5/3/3.5/4/6/7 m) that covers the slope."],
+      ["Colour.", "Clear, Breeze Blue, Solar Ice or Beehive Clear."],
+      ["Accessories.", "Foam sealing strip, screws & washers and the wall connector are sized from the roof — estimates to confirm."],
+      ["Margin.", "Margin after fees + discount band below — never below 8%."],
+    ],
+  },
 };
 
 function money(v) {
@@ -86,6 +99,8 @@ export default function Quotes() {
     // roof (molan)
     width: "", rake: "", sheet_width_mm: 1050, sheet_type: "25mm Multiwall", molan_colour: "Clear",
     poly_system: "Self-Supported (16/35mm)", bar_colour: "White", include_acc: true,
+    // ez glaze
+    ez_cover: 1.0, ez_colour: "Clear",
   });
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -129,6 +144,9 @@ export default function Quotes() {
       body = { width: Number(f.width), rake: Number(f.rake), sheet_width_mm: Number(f.sheet_width_mm),
         sheet_type: f.sheet_type, colour: f.molan_colour, system: f.poly_system,
         bar_colour: f.bar_colour, include_acc: f.include_acc };
+    } else if (cfg.kind === "ezglaze") {
+      if (!f.width || !f.rake) { setErr("Enter the roof width and slope length."); return; }
+      body = { width: Number(f.width), slope: Number(f.rake), cover: Number(f.ez_cover || 1.0), colour: f.ez_colour };
     } else {
       if (!f.gross_area_m2) { setErr("Enter the gross wall area (m²)."); return; }
       body = { system: f.system, colour: f.colour,
@@ -244,7 +262,24 @@ export default function Quotes() {
         )}
       </div>
 
-      {cfg.kind === "roof" ? (
+      {cfg.kind === "ezglaze" ? (
+        <div className="card q-form">
+          <div className="q-section">The roof</div>
+          <div className="q-grid">
+            <label className="fld"><span>Roof width (m) *</span><input className="search" type="number" inputMode="decimal" value={f.width} onChange={(e) => set("width", e.target.value)} placeholder="across the front" /></label>
+            <label className="fld"><span>Slope length (m) *</span><input className="search" type="number" inputMode="decimal" value={f.rake} onChange={(e) => set("rake", e.target.value)} placeholder="eaves → ridge" /></label>
+            <label className="fld"><span>Sheet cover width (m)</span><input className="search" type="number" inputMode="decimal" value={f.ez_cover} onChange={(e) => set("ez_cover", e.target.value)} placeholder="default 1.0" /></label>
+            <label className="fld"><span>Colour</span>
+              <select className="filter" value={f.ez_colour} onChange={(e) => set("ez_colour", e.target.value)}>{EZGLAZE_COLOURS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+          </div>
+          <div className="q-opts">
+            <span style={{ flex: 1 }} />
+            <button className="btn primary" onClick={build} disabled={busy}>{busy ? "Building…" : "Build quote"}</button>
+          </div>
+          {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
+        </div>
+      ) : cfg.kind === "roof" ? (
         <div className="card q-form">
           <div className="q-section">The roof</div>
           <div className="q-grid">
@@ -320,7 +355,7 @@ export default function Quotes() {
       {res && (
         <>
           <div className="card" style={{ padding: "6px 12px 12px", marginBottom: 10 }}>
-            <div className="tool-label">{res.product}{res.colour && cfg.kind !== "roof" ? ` · ${res.colour}` : ""} — {t.n_priced}/{t.n_total} lines priced</div>
+            <div className="tool-label">{res.product}{res.colour && cfg.kind === "clad" ? ` · ${res.colour}` : ""} — {t.n_priced}/{t.n_total} lines priced</div>
             <table className="mini">
               <thead><tr><th>Item</th><th className="num">Qty</th><th>Matched product</th><th className="num">Unit</th><th className="num">Line</th><th className="num">Cost ({cfg.supplier})</th></tr></thead>
               <tbody>

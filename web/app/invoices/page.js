@@ -489,6 +489,7 @@ export default function Invoices() {
                 </div>
                 <div className="inv-right">
                   {al && <span className={`pill ${al.cls}`}>{al.text}</span>}
+                  {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer" title="Open this order in Shopify">Order ↗</a>}
                   {!iv.has_pdf
                     ? <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>
                     : <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
