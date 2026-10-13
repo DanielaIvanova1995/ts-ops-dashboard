@@ -223,7 +223,7 @@ export default function Recon() {
       const d = await res.json();
       if (d.ok) {
         setApproving((a) => ({ ...a, [inv]: "done" }));
-        setResult((prev) => prev ? { ...prev, rows: prev.rows.map((x) => x.invoice === inv ? { ...x, status: "ready" } : x) } : prev);
+        setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => x.invoice === inv ? { ...x, status: "ready" } : x) } : prev);
         setNotice({ kind: "ok", text: `${inv}: ${d.detail}` });
         loadSaved();
       } else {
@@ -357,7 +357,7 @@ export default function Recon() {
             </div>
           ) : null}
           <PayPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice}
-            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: prev.rows.map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
+            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
         </div>
       )}
     </div>
