@@ -129,6 +129,165 @@ def cedral_takeoff(clad):
     return raw, cav
 
 
+# ---- James Hardie ----------------------------------------------------------------------------
+HARDIE_COLOURS = [
+    "Anthracite Grey", "Arctic White", "Boothbay Blue", "Chestnut Brown", "Cobble Stone",
+    "Evening Blue", "Grey Slate", "Heathered Moss", "Iron Grey", "Khaki Brown", "Light Mist",
+    "Midnight Black", "Monterey Taupe", "Mountain Sage", "Pearl Grey", "Rich Espresso",
+    "Sail Cloth", "Soft Green", "Timber Bark", "Traditional Red", "Woodland Cream",
+]
+
+
+def hardie_takeoff(clad):
+    """James Hardie cladding take-off (area-based): boards + starter/top/corner/window trims +
+    battens + EPDM + screws + paint/edge seal. Two systems — LAP HardiePlank (0.54 m²/board) and
+    the interlocking VL Plank (also called 'Click', 0.72 m²/board, its OWN trim set). Sizes every
+    accessory from the counts/dimensions given or from sensible assumptions, each flagged. Returns
+    (raw_lines, caveats) where each line = {description, qty, search}. Lifted verbatim from app.py."""
+    _pl = (clad.get("product") or "").lower()
+    is_vl = any(k in _pl for k in ("vl", "click", "interlock"))
+    product = "Hardie VL Plank" if is_vl else "Hardie Plank"
+    cov = 0.72 if is_vl else 0.54          # VL Plank ~0.72 m²/board; lap HardiePlank 0.54
+    gross = clad.get("gross_area_m2") or 0
+    openings = clad.get("openings_m2") or 0
+    net = max(0.0, gross - openings)
+    if net <= 0:
+        return None, None
+    colour_in = (clad.get("colour") or "").strip()
+    colour, _chow = resolve_clad_colour(colour_in, HARDIE_COLOURS)   # map 'sage green' → the real
+    colour = colour or ""                                            #   Hardie colour, never default
+    cav = []
+
+    boards = math.ceil(net / cov * 1.10)   # +10% waste
+    board_desc = f"{product} cladding board" + (f" — {colour}" if colour else "")
+    raw = [{"description": board_desc, "qty": boards,
+            "search": f"{product} {colour}".strip()}]
+    cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) "
+               f"÷ {cov} m²/board + 10% waste = {boards} boards.")
+    if not colour_in:
+        cav.append("Colour/finish not confirmed — please let us know which colour you'd like.")
+    elif _chow == "fuzzy":
+        cav.append(f"Quoted in James Hardie {colour} as the closest match to '{colour_in}' — "
+                   "please confirm the exact colour.")
+    elif _chow == "unrecognised":
+        cav.append(f"'{colour_in}' isn't a James Hardie colour we recognise — please confirm the "
+                   "exact colour (we have NOT defaulted it to a grey).")
+
+    height = clad.get("wall_height_m") or 0
+    width = clad.get("total_width_m") or 0
+    if not height and width:
+        height = net / width if width else 0
+    if not height:
+        height = 2.4
+        cav.append(f"Assumed a cladding height of {height:.1f} m (not stated) to size the trims — "
+                   "confirm the run height and we'll refine.")
+    if not width:
+        width = net / height
+        cav.append(f"Assumed ~{width:.1f} m total run width (area ÷ height) to size the "
+                   "starter/top trims — confirm the elevation widths and we'll refine.")
+
+    def L3(lm):                            # trims come in 3 m lengths, round up
+        return max(1, math.ceil(lm / 3.0))
+
+    if clad.get("wants_trims") and is_vl:
+        # VL Plank ("Click") interlocking trim pack — its own profiles, NOT the lap trims below.
+        ext = clad.get("external_corners")
+        if ext is None:
+            ext = 4
+            cav.append("Assumed 4 external corners (not confirmed) — tell us the exact number and "
+                       "we'll adjust.")
+        if ext:
+            raw.append({"description": f"Hardie VL Plank 2-part corner profile "
+                                       f"({ext} corners × {height:.1f} m)",
+                        "qty": L3(ext * height),
+                        "search": "Hardie VL Plank 2-part Corner Profile"})
+        intc = clad.get("internal_corners") or 0
+        if intc:
+            raw.append({"description": f"Hardie VL Plank J profile — internal corners / abutments "
+                                       f"({intc} × {height:.1f} m)",
+                        "qty": L3(intc * height),
+                        "search": "Hardie VL Plank J Profile"})
+        raw.append({"description": "Hardie VL Plank starter profile", "qty": L3(width),
+                    "search": "Hardie VL Plank Starter Profile"})
+        nwin = clad.get("num_windows")
+        if nwin is None and openings > 0:
+            nwin = max(1, round(openings / 1.5))
+            cav.append(f"Assumed {nwin} window/opening(s) to trim (from {openings:.1f} m² of "
+                       "openings) — confirm the number/size and we'll refine.")
+        if nwin:
+            raw.append({"description": f"Hardie VL Plank window reveal trim ({nwin} opening(s))",
+                        "qty": L3(nwin * 5.0),
+                        "search": "Hardie VL Plank Window Reveal Trim"})
+            raw.append({"description": f"Hardie VL Plank window head & vertical starter trim "
+                                       f"({nwin} opening(s))",
+                        "qty": L3(nwin * 2.0),
+                        "search": "Hardie VL Plank Window Head Vertical Starter Trim"})
+        cav.append("VL Plank (interlocking 'Click') trim pack — 2-part corner, J profile, starter "
+                   "and window trims, sized from the corners / run width / openings (3 m lengths, "
+                   "rounded up). Send exact elevations to tighten it.")
+    elif clad.get("wants_trims"):
+        ext = clad.get("external_corners")
+        if ext is None:
+            ext = 4
+            cav.append("Assumed 4 external corner trims (not confirmed) — tell us the exact number "
+                       "of external corners and we'll adjust.")
+        if ext:
+            raw.append({"description": f"{product} external corner trim"
+                                       f"{(' — ' + colour) if colour else ''} "
+                                       f"({ext} corners × {height:.1f} m)",
+                        "qty": L3(ext * height),
+                        "search": f"Hardie Plank external corner {colour}".strip()})
+        intc = clad.get("internal_corners") or 0
+        if intc:
+            raw.append({"description": f"{product} internal corner trim"
+                                       f"{(' — ' + colour) if colour else ''} "
+                                       f"({intc} corners × {height:.1f} m)",
+                        "qty": L3(intc * height),
+                        "search": f"Hardie Plank internal corner {colour}".strip()})
+        raw.append({"description": "James Hardie starter strip & ventilation profile",
+                    "qty": L3(width),
+                    "search": "Hardie Plank starter strip ventilation"})
+        raw.append({"description": "James Hardie top ventilation strip", "qty": L3(width),
+                    "search": "Hardie Plank top ventilation strip"})
+        nwin = clad.get("num_windows")
+        if nwin is None and openings > 0:
+            nwin = max(1, round(openings / 1.5))
+            cav.append(f"Assumed {nwin} window/opening(s) to trim (from {openings:.1f} m² of "
+                       "openings) — confirm the number/size and we'll refine.")
+        if nwin:
+            raw.append({"description": f"HardieTrim NT3 window/door trim"
+                                       f"{(' — ' + colour) if colour else ''} ({nwin} opening(s))",
+                        "qty": L3(nwin * 5.0),
+                        "search": f"James Hardie HardieTrim NT3 {colour}".strip()})
+        cav.append("Trim pack sized from the corners, run width and openings above (all 3 m "
+                   "lengths, rounded up). Send exact elevation widths / corner counts to tighten it.")
+
+    batten_lm = net / 0.6
+    if clad.get("wants_battens"):
+        raw.append({"description": "Treated timber battens (25×50, per 3 m length)",
+                    "qty": max(1, math.ceil(batten_lm / 3.0)),
+                    "search": "treated timber batten 25 x 50"})
+    if clad.get("wants_screws"):
+        raw.append({"description": ("James Hardie VL coloured fixing screws (box of 250)" if is_vl
+                                    else "James Hardie cladding screws (box of 250)"),
+                    "qty": max(1, math.ceil(boards * 7 / 250)),
+                    "search": ("Hardie VL Coloured Fixing Screws" if is_vl
+                               else f"James Hardie cladding fixing screws {colour}".strip())})
+    if clad.get("wants_epdm"):
+        raw.append({"description": "EPDM joint tape (20 m roll)",
+                    "qty": max(1, math.ceil(batten_lm / 20)),
+                    "search": "James Hardie EPDM tape 20m"})
+    if clad.get("wants_paint"):
+        raw.append({"description": f"James Hardie touch-up paint"
+                                   f"{(' — ' + colour) if colour else ''}",
+                    "qty": 1, "search": f"James Hardie touch up paint {colour}".strip()})
+        raw.append({"description": "James Hardie edge sealer (cut edges)", "qty": 1,
+                    "search": "James Hardie edge sealer"})
+        cav.append("Included 1 touch-up paint" + (f" in {colour}" if colour else "")
+                   + " and 1 edge sealer for cut edges — tell us if you need more.")
+    return raw, cav
+
+
 # ---- Discount Desk ---------------------------------------------------------------------------
 SHOPIFY_FEE = 0.018
 ABANDONED_CART_PCT = 0.04   # every customer already gets 4% off via the abandoned-cart email

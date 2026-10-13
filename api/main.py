@@ -2105,3 +2105,92 @@ def quote_cedral(body: CedralQuoteIn):
                        "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
                        "n_priced": n_priced, "n_total": len(lines)},
             "discount": disc}
+
+
+class HardieQuoteIn(BaseModel):
+    system: str = "Lap"                 # "Lap" (HardiePlank) or "VL" (VL Plank / 'Click')
+    colour: str = ""
+    gross_area_m2: float
+    openings_m2: float = 0.0
+    wall_height_m: float | None = None
+    total_width_m: float | None = None
+    num_windows: int | None = None
+    external_corners: int | None = None
+    internal_corners: int = 0
+    wants_trims: bool = True
+    wants_battens: bool = False
+    wants_screws: bool = True
+    wants_epdm: bool = False
+    wants_paint: bool = False
+
+
+@app.post("/quotes/hardie", dependencies=[Depends(require_key)])
+def quote_hardie(body: HardieQuoteIn):
+    """James Hardie take-off → matched Shopify variants → priced quote. Hardie boards/trims/fixings
+    are costed ONLY from UPB (our Hardie stockist — a supplier's price is never crossed). Lines that
+    aren't a Hardie/UPB product are flagged, not cross-sourced. Returns priced lines, totals,
+    caveats and the discount."""
+    import quote_core as qc
+    import order_processing as op
+    sys_name = "Hardie VL Plank" if (body.system or "").lower() in ("vl", "click", "interlock") else "Hardie Plank"
+    clad = {"product": sys_name, "colour": body.colour,
+            "gross_area_m2": body.gross_area_m2, "openings_m2": body.openings_m2,
+            "wall_height_m": body.wall_height_m, "total_width_m": body.total_width_m,
+            "num_windows": body.num_windows, "external_corners": body.external_corners,
+            "internal_corners": body.internal_corners, "wants_trims": body.wants_trims,
+            "wants_battens": body.wants_battens, "wants_screws": body.wants_screws,
+            "wants_epdm": body.wants_epdm, "wants_paint": body.wants_paint}
+    raw, cav = qc.hardie_takeoff(clad)
+    if not raw:
+        return {"ok": False, "detail": "Nothing to clad — net area is zero (check the area and openings)."}
+    try:
+        tok = ds.shopify_products_token()
+    except Exception:  # noqa: BLE001
+        tok = None
+    lines, sell, cost, n_priced = [], 0.0, 0.0, 0
+    for l in raw:
+        # Battens are a generic timber item UPB doesn't price as Hardie — don't brand-lock/cost them.
+        is_batten = "batten" in (l.get("search") or "").lower()
+        m = None
+        if not is_batten:
+            try:
+                m = ds.match_quote_variant(None, l["search"], token=tok, brand="Hardie")
+            except Exception:  # noqa: BLE001
+                m = None
+        price = m.get("price") if m else None
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        upb_cost = None
+        if m and m.get("sku"):
+            try:
+                upb_cost = op._line_cost(m["sku"], "UPB", m.get("title"))
+            except Exception:  # noqa: BLE001
+                upb_cost = None
+        upb_supplied = isinstance(upb_cost, (int, float))
+        qty = l["qty"]
+        priced = price is not None and upb_supplied
+        lines.append({
+            "description": l["description"], "qty": qty, "search": l["search"],
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"),
+                         "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
+            "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
+            "unit_cost": round(upb_cost, 2) if upb_supplied else None,
+            "line_cost": round(upb_cost * qty, 2) if upb_supplied else None,
+            "ajw_supplied": upb_supplied,   # (front-end flag name) — "has a confirmed supplier cost"
+            "note": ("not priced from UPB — source separately" if (is_batten or (m and not upb_supplied))
+                     else ("couldn't match a Hardie product — check wording" if not m else "")),
+        })
+        if priced:
+            sell += price * qty
+            cost += upb_cost * qty
+            n_priced += 1
+    margin = (sell - cost) / sell if sell > 0 else None
+    disc = qc.discount_floor(sell, margin) if margin is not None else None
+    return {"ok": True, "product": sys_name, "colour": body.colour,
+            "lines": lines, "caveats": cav,
+            "totals": {"sell": round(sell, 2), "cost": round(cost, 2), "margin": margin,
+                       "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
+                       "n_priced": n_priced, "n_total": len(lines)},
+            "discount": disc}
