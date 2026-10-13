@@ -52,7 +52,7 @@ export default function Pricing() {
     try {
       const res = await jsonFetch(`/pricing/prices?supplier=${encodeURIComponent(supplier)}&q=${encodeURIComponent(query || "")}`);
       const d = await res.json();
-      setRows(d.rows || []); setMeta({ total: d.total || 0, capped: !!d.capped, updated: d.updated, fee: d.fee_pct });
+      setRows(d.rows || []); setMeta({ total: d.total || 0, capped: !!d.capped, updated: d.updated, fee: d.fee_pct, date: d.pricelist_date });
     } catch (e) { if (String(e.message) !== "unauthorised") { setRows([]); setMeta({ total: 0, capped: false }); } }
     finally { setLoadingPrices(false); }
   }, [jsonFetch]);
@@ -107,8 +107,9 @@ export default function Pricing() {
               <input className="search" style={{ maxWidth: 240 }} placeholder="Search SKU or name" value={q}
                 onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") loadPrices(sup, q); }} disabled={!sup} />
               <button className="btn" onClick={() => loadPrices(sup, q)} disabled={!sup || loadingPrices}>{loadingPrices ? "…" : "Search"}</button>
+              {rows && meta.date && <span className="pill green">{sup} list: {meta.date}</span>}
               <span style={{ flex: 1 }} />
-              {rows && <span className="sub">{meta.total.toLocaleString()} priced SKU{meta.total === 1 ? "" : "s"}{meta.capped ? ` · showing first ${rows.length}` : ""}{meta.updated ? ` · prices updated ${meta.updated}` : ""}</span>}
+              {rows && <span className="sub">{meta.total.toLocaleString()} priced SKU{meta.total === 1 ? "" : "s"}{meta.capped ? ` · showing first ${rows.length}` : ""}{meta.updated ? ` · feed refreshed ${meta.updated}` : ""}</span>}
             </div>
           </div>
           {!sup && <div className="card"><div className="state">Pick a supplier to see their cost prices.</div></div>}

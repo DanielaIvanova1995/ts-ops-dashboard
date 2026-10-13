@@ -88,11 +88,24 @@ export default function Invoices() {
       if (String(e.message) !== "unauthorised") setSuggest((s) => ({ ...s, [i]: { loading: false, rows: [] } }));
     }
   }
-  useEffect(() => {
+  const [clearingOld, setClearingOld] = useState(false);
+  const loadIssues = useCallback(() => {
     if (!accessKey) return;
     jsonFetch("/invoices/import-issues?limit=200").then((r) => r.ok && r.json())
       .then((d) => d && setIssues(d.rows || [])).catch(() => {});
   }, [accessKey, jsonFetch]);
+  useEffect(() => { loadIssues(); }, [loadIssues]);
+  async function clearOld() {
+    if (!window.confirm("Clear the failed-import invoices last seen in June 2026 or earlier? They drop off this list and won't be retried.")) return;
+    setClearingOld(true);
+    try {
+      const res = await jsonFetch(`/invoices/import-issues/clear?before=2026-07-01`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setNotice({ kind: "ok", text: `Cleared ${d.cleared} old failed import(s).` }); loadIssues(); }
+      else setNotice({ kind: "warn", text: d.detail || "Couldn’t clear." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setClearingOld(false); }
+  }
 
   function submitKey(e) {
     e.preventDefault();
@@ -268,11 +281,12 @@ export default function Invoices() {
             <span className="pill red">{issues.length} didn’t import</span>
             <span className="sub">invoices in Outlook that never became a Monday subitem (mostly no matching order)</span>
             <span style={{ flex: 1 }} />
+            <button className="btn ghost" onClick={clearOld} disabled={clearingOld}>{clearingOld ? "…" : "Clear June & older"}</button>
             <button className="btn" onClick={() => setShowIssues((s) => !s)}>{showIssues ? "Hide" : "Show"}</button>
           </div>
           {showIssues && (
             <table className="mini" style={{ marginTop: 8 }}>
-              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Why it didn’t import</th><th></th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Last seen</th><th>Why it didn’t import</th><th></th></tr></thead>
               <tbody>
                 {issues.map((r, i) => {
                   const sg = suggest[i];
@@ -283,11 +297,12 @@ export default function Invoices() {
                     <td className="sub">{r.supplier || "—"}</td>
                     <td className="sub">{r.order_no || "—"}</td>
                     <td className="num">{r.total != null ? money(r.total) : "—"}</td>
+                    <td className="sub">{r.at ? String(r.at).slice(0, 10) : "—"}</td>
                     <td className="sub">{r.detail || "—"}</td>
                     <td>{r.total != null && <button className="btn ghost" onClick={() => doSuggest(i, r)} disabled={sg?.loading}>{sg?.loading ? "…" : "Suggest order"}</button>}</td>
                   </tr>
                   {sg && !sg.loading && (
-                    <tr><td colSpan={6} className="sub" style={{ paddingLeft: 18 }}>
+                    <tr><td colSpan={7} className="sub" style={{ paddingLeft: 18 }}>
                       {sg.rows?.length
                         ? <>Possible match{sg.rows.length > 1 ? "es" : ""}: {sg.rows.map((o, j) => (
                             <span key={j} className="pill grey" style={{ marginRight: 6 }}>

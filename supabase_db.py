@@ -271,11 +271,25 @@ def invoice_import_seen(internet_id: str) -> bool:
         return False
     try:
         r = (_client().table("invoice_imports").select("status")
-             .eq("internet_id", internet_id).in_("status", ["imported", "skipped", "ignored"])
+             .eq("internet_id", internet_id)
+             .in_("status", ["imported", "skipped", "ignored", "cleared"])
              .limit(1).execute())
         return bool(r.data)
     except Exception:  # noqa: BLE001
         return False
+
+
+def invoice_import_clear_before(before_iso: str) -> int:
+    """Clear stale FAILED import rows last seen before `before_iso` (ISO date/datetime) — mark them
+    'cleared' so they drop off the 'didn't import' list AND won't be retried. Returns how many."""
+    if not configured() or not before_iso:
+        return 0
+    try:
+        r = (_client().table("invoice_imports").update({"status": "cleared"})
+             .eq("status", "failed").lt("at", before_iso).execute())
+        return len(r.data or [])
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def invoice_import_log(internet_id: str, status: str, **fields) -> bool:

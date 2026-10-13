@@ -1644,6 +1644,20 @@ def invoice_import_issues(limit: int = 100):
     return {"rows": out}
 
 
+@app.post("/invoices/import-issues/clear", dependencies=[Depends(require_key)])
+def invoice_import_issues_clear(before: str):
+    """Clear stale failed-import rows last seen before `before` (YYYY-MM-DD) off the 'didn't import'
+    list (marked 'cleared' — hidden and won't retry). e.g. before=2026-07-01 clears June & older."""
+    if not before:
+        raise HTTPException(status_code=400, detail="before date required (YYYY-MM-DD)")
+    try:
+        import supabase_db
+        n = supabase_db.invoice_import_clear_before(before)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't clear: {e}")
+    return {"ok": True, "cleared": n}
+
+
 @app.get("/triage/history", dependencies=[Depends(require_key)])
 def triage_history(limit: int = 100, only_failed: bool = False):
     """Recent triage outcomes for the history view (newest first). only_failed → just the ones that
@@ -1688,7 +1702,7 @@ def pricing_suppliers():
             # merge an override block onto a feed supplier of the same canonical name where possible
             disp = next((s for s in c if _canon(s) == _canon(sup)), sup)
             c[disp] += len(skus)
-    return {"suppliers": [{"supplier": s, "count": n}
+    return {"suppliers": [{"supplier": s, "count": n, "date": _pl_date_for(s)}
                           for s, n in sorted(c.items(), key=lambda x: (-x[1], x[0].lower()))]}
 
 
@@ -1697,6 +1711,14 @@ _TXN_FEE = 0.018   # Shopify transaction fee used for the net (after-fee) margin
 
 def _norm_sku(s):
     return _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
+def _pl_date_for(supplier):
+    """The supplier's own pricelist date (e.g. 'Oct 2026') from price_overrides '_pricelist_dates'."""
+    for k, v in (_load_json(_OV_PATH).get("_pricelist_dates") or {}).items():
+        if _canon(k) == _canon(supplier):
+            return v
+    return None
 
 
 @app.get("/pricing/prices", dependencies=[Depends(require_key)])
@@ -1758,7 +1780,8 @@ def pricing_prices(supplier: str, q: str = "", limit: int = 500):
             rows.append(row)
     rows.sort(key=lambda r: (r["sku"] or "").lower())
     return {"rows": rows, "total": total, "capped": total > len(rows),
-            "updated": updated, "fee_pct": round(_TXN_FEE * 100, 2)}
+            "updated": updated, "fee_pct": round(_TXN_FEE * 100, 2),
+            "pricelist_date": _pl_date_for(supplier)}
 
 
 def _delivery_catalog():
