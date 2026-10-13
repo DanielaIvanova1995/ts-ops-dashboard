@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const KEY_STORE = "th_access_key";
@@ -73,6 +73,17 @@ export default function Invoices() {
 
   const [issues, setIssues] = useState([]);
   const [showIssues, setShowIssues] = useState(false);
+  const [suggest, setSuggest] = useState({});   // row index -> { loading, rows }
+  async function doSuggest(i, r) {
+    setSuggest((s) => ({ ...s, [i]: { loading: true } }));
+    try {
+      const res = await jsonFetch(`/invoices/suggest-order?total=${encodeURIComponent(r.total)}&supplier=${encodeURIComponent(r.supplier || "")}`);
+      const d = await res.json().catch(() => ({ rows: [] }));
+      setSuggest((s) => ({ ...s, [i]: { loading: false, rows: d.rows || [] } }));
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setSuggest((s) => ({ ...s, [i]: { loading: false, rows: [] } }));
+    }
+  }
   useEffect(() => {
     if (!accessKey) return;
     jsonFetch("/invoices/import-issues?limit=200").then((r) => r.ok && r.json())
@@ -230,17 +241,33 @@ export default function Invoices() {
           </div>
           {showIssues && (
             <table className="mini" style={{ marginTop: 8 }}>
-              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Why it didn’t import</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Why it didn’t import</th><th></th></tr></thead>
               <tbody>
-                {issues.map((r, i) => (
-                  <tr key={i}>
+                {issues.map((r, i) => {
+                  const sg = suggest[i];
+                  return (
+                  <Fragment key={i}>
+                  <tr>
                     <td className="ono">{r.invoice_no || "—"}</td>
                     <td className="sub">{r.supplier || "—"}</td>
                     <td className="sub">{r.order_no || "—"}</td>
                     <td className="num">{r.total != null ? money(r.total) : "—"}</td>
                     <td className="sub">{r.detail || "—"}</td>
+                    <td>{r.total != null && <button className="btn ghost" onClick={() => doSuggest(i, r)} disabled={sg?.loading}>{sg?.loading ? "…" : "Suggest order"}</button>}</td>
                   </tr>
-                ))}
+                  {sg && !sg.loading && (
+                    <tr><td colSpan={6} className="sub" style={{ paddingLeft: 18 }}>
+                      {sg.rows?.length
+                        ? <>Possible match{sg.rows.length > 1 ? "es" : ""}: {sg.rows.map((o, j) => (
+                            <span key={j} className="pill grey" style={{ marginRight: 6 }}>
+                              order {o.order_no} · {o.matched_on === "cost" ? "cost" : "value"} {money(o.matched_on === "cost" ? o.cost : o.value)}{o.supplier_match ? " · supplier ✓" : (o.supplier ? ` · ${o.supplier}` : "")}
+                            </span>))} — assign on Monday, then it imports on the next run.</>
+                        : "No live order matched this amount — the order may not be on the board yet."}
+                    </td></tr>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}

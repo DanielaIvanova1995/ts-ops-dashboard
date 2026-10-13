@@ -3282,6 +3282,54 @@ def fetch_message_pdf_attachments(mailbox: str, message_id: str, token: str | No
     return out
 
 
+def suggest_orders_by_amount(total, supplier: str | None = None, token: str | None = None,
+                             tol: float = 0.02) -> list:
+    """Suggest live orders a (failed-import) invoice might belong to, by matching its amount against
+    the order's cost (£ to supplier, numbers6) or value (£ to us, numbers48). Read-only; returns
+    [{order_no, name, group, supplier, cost, value, matched_on, supplier_match}] best-first. Used as
+    a CONFIRM-FIRST hint — nothing is attached automatically."""
+    try:
+        amt = round(float(total), 2)
+    except (TypeError, ValueError):
+        return []
+    if amt <= 0:
+        return []
+    token = token or get_token()
+    # Try a few string forms of the amount (Monday stores numbers as plain strings).
+    vals = list({f"{amt:.2f}", f"{amt:g}", str(amt), str(int(amt)) if amt == int(amt) else f"{amt:.2f}"})
+    q = ('query($b:ID!,$vals:[String]!,$col:String!){items_page_by_column_values(board_id:$b,'
+         'limit:25,columns:[{column_id:$col,column_values:$vals}]){items{id name group{title} '
+         'column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd","numbers6","numbers48"]){id text}}}}')
+    sup_norm = re.sub(r"[^a-z0-9]", "", (supplier or "").lower())
+    seen, out = set(), []
+    for col, matched_on in (("numbers6", "cost"), ("numbers48", "value")):
+        try:
+            data = _monday_gql(q, {"b": str(ORDERS_BOARD_ID), "vals": vals, "col": col}, token)
+        except Exception:  # noqa: BLE001
+            continue
+        for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
+            if it["id"] in seen:
+                continue
+            cv = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+            def _num(x):
+                try:
+                    return round(float(re.sub(r"[^0-9.\-]", "", x)), 2)
+                except (TypeError, ValueError):
+                    return None
+            cost, value = _num(cv.get("numbers6")), _num(cv.get("numbers48"))
+            if not ((cost is not None and abs(cost - amt) <= tol)
+                    or (value is not None and abs(value - amt) <= tol)):
+                continue
+            seen.add(it["id"])
+            osup = cv.get("dropdown_mkyqdeqd") or ""
+            out.append({"order_no": cv.get("text_mkv6z0nt") or it.get("name"), "name": it.get("name"),
+                        "group": (it.get("group") or {}).get("title"), "supplier": osup, "cost": cost,
+                        "value": value, "matched_on": matched_on,
+                        "supplier_match": bool(sup_norm) and sup_norm in re.sub(r"[^a-z0-9]", "", osup.lower())})
+    out.sort(key=lambda r: (not r["supplier_match"], r["matched_on"] != "cost"))
+    return out[:8]
+
+
 def search_mail_messages(mailbox: str, query: str, top: int = 25,
                          token: str | None = None) -> list:
     """Search a mailbox for messages matching `query` (Graph $search over subject/body/from/

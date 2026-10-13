@@ -1599,6 +1599,17 @@ def invoice_find_pdf(sub_id: str, body: FindPdfIn):
                        else "Found a PDF but Monday didn't confirm the attachment — try again")}
 
 
+@app.get("/invoices/suggest-order", dependencies=[Depends(require_key)])
+def invoice_suggest_order(total: float, supplier: str = ""):
+    """Confirm-first hint for a left-behind invoice: live orders whose cost/value matches the
+    invoice amount (and supplier). Read-only — nothing is attached."""
+    try:
+        rows = ds.suggest_orders_by_amount(total, supplier or None)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't search Monday: {e}")
+    return {"rows": rows}
+
+
 @app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
 def invoice_import_issues(limit: int = 100):
     """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and
