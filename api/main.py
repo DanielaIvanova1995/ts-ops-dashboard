@@ -1655,3 +1655,137 @@ def triage_history(limit: int = 100, only_failed: bool = False):
     except Exception:  # noqa: BLE001
         rows = []
     return {"rows": rows}
+
+
+# ---- Pricing tab: supplier pricelists + delivery charges ---------------------------------------
+_FEED_PATH = Path(__file__).resolve().parent.parent / "pricing_lookup.json"
+_OV_PATH = Path(__file__).resolve().parent.parent / "price_overrides.json"
+_DELIV_NAMES = {"upb": "UPB", "nbp": "NBP", "eurocell": "Eurocell", "travisperkins": "Travis Perkins",
+                "gap": "GAP", "pjh": "PJH", "molan": "Molan", "decor8": "Decor8",
+                "chasehardware": "Chase Hardware", "bricklink": "Bricklink", "markovitz": "Markovitz"}
+
+
+def _load_json(path):
+    import json
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.get("/pricing/suppliers", dependencies=[Depends(require_key)])
+def pricing_suppliers():
+    """Suppliers we hold cost prices for, with how many priced SKUs each has (feed + overrides)."""
+    from collections import Counter
+    c = Counter()
+    for it in (_load_json(_FEED_PATH).get("items") or []):
+        for o in (it.get("offers") or []):
+            if o.get("s"):
+                c[o["s"]] += 1
+    ov = _load_json(_OV_PATH)
+    for sup, skus in ov.items():
+        if not sup.startswith("_") and isinstance(skus, dict):
+            # merge an override block onto a feed supplier of the same canonical name where possible
+            disp = next((s for s in c if _canon(s) == _canon(sup)), sup)
+            c[disp] += len(skus)
+    return {"suppliers": [{"supplier": s, "count": n}
+                          for s, n in sorted(c.items(), key=lambda x: (-x[1], x[0].lower()))]}
+
+
+@app.get("/pricing/prices", dependencies=[Depends(require_key)])
+def pricing_prices(supplier: str, q: str = "", limit: int = 500):
+    """This supplier's priced SKUs (ex-VAT cost) from the feed + durable overrides. Optional search
+    on SKU or name. Capped; `total` says how many matched."""
+    sup_c = _canon(supplier)
+    ql = (q or "").strip().lower()
+    rows, total, seen = [], 0, set()
+    for it in (_load_json(_FEED_PATH).get("items") or []):
+        cost = None
+        for o in (it.get("offers") or []):
+            if _canon(o.get("s")) == sup_c:
+                cost = o.get("c")
+                break
+        if cost is None:
+            continue
+        sku = (it.get("sku") or "").strip()
+        name = (it.get("name") or "").strip()
+        if ql and ql not in sku.lower() and ql not in name.lower():
+            continue
+        total += 1
+        seen.add(_re.sub(r"[^a-z0-9]", "", sku.lower()))
+        if len(rows) < limit:
+            rows.append({"sku": sku, "name": name, "cost": cost, "source": "feed"})
+    for sup, skus in _load_json(_OV_PATH).items():
+        if sup.startswith("_") or not isinstance(skus, dict) or _canon(sup) != sup_c:
+            continue
+        for sk, cst in skus.items():
+            if not isinstance(cst, (int, float)):
+                continue
+            if _re.sub(r"[^a-z0-9]", "", str(sk).lower()) in seen:
+                continue                                  # already shown from the feed
+            if ql and ql not in str(sk).lower():
+                continue
+            total += 1
+            if len(rows) < limit:
+                rows.append({"sku": sk, "name": "", "cost": cst, "source": "override"})
+    rows.sort(key=lambda r: (r["sku"] or "").lower())
+    return {"rows": rows, "total": total, "capped": total > len(rows)}
+
+
+def _delivery_catalog():
+    """Per-supplier delivery: what AJW/suppliers charge US (ex VAT) and what we charge the CUSTOMER.
+    Flat rules come from delivery_rules.FLAT; AJW from ajw_delivery (incl. customer); the postcode/
+    per-door suppliers are summarised. Customer delivery for non-AJW is set in Shopify shipping."""
+    import delivery_rules as dr
+    rows = []
+    for key, (flat, free) in dr.FLAT.items():
+        rows.append({"supplier": _DELIV_NAMES.get(key, key.title()), "basis": "Flat rate",
+                     "we_pay": f"£{flat:,.2f}",
+                     "free_over": (f"free over £{free:,.0f}" if free else "no free threshold"),
+                     "customer": "Set in Shopify shipping", "notes": "", "zones": None})
+    try:
+        import ajw_delivery
+        data = ajw_delivery._data()
+        zr = []
+        for z, info in (data.get("zones") or {}).items():
+            if info.get("ajw_rate") is None:
+                zr.append({"zone": z, "we_pay": "Quote per order", "free_over": "—",
+                           "customer": "Quote required", "customer_free": "—"})
+            else:
+                zr.append({"zone": z, "we_pay": f"£{info['ajw_rate']:,.2f}",
+                           "free_over": f"£{info['ajw_free']:,.0f}",
+                           "customer": f"£{info['cust_rate']:,.2f}",
+                           "customer_free": f"£{info['cust_free']:,.0f}"})
+        rows.append({"supplier": "AJW (Cedral)", "basis": "Postcode zone", "we_pay": "£40–£115 by zone",
+                     "free_over": "free over each zone's ex-VAT cost threshold",
+                     "customer": "£39.99–£114.99 by zone (free over the zone threshold)",
+                     "notes": "Scotland/NI/islands quoted per order; +£75 mechanical offload per drop",
+                     "zones": zr})
+    except Exception:  # noqa: BLE001
+        pass
+    rows += [
+        {"supplier": "Carron", "basis": "Postcode zone", "we_pay": "£25–£85 by zone",
+         "free_over": "Zone 1 free over £250", "customer": "Set in Shopify shipping",
+         "notes": "Ireland quoted", "zones": None},
+        {"supplier": "Ctie", "basis": "Postcode zone", "we_pay": "£7 UK mainland / £13 NI (BT)",
+         "free_over": "UK free over £100 / NI free over £250", "customer": "Set in Shopify shipping",
+         "notes": "", "zones": None},
+        {"supplier": "Southern Sheeting", "basis": "Postcode zone", "we_pay": "by postcode colour zone",
+         "free_over": "by zone", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
+        {"supplier": "JB Kind", "basis": "Per door + area", "we_pay": "by door count + area surcharge",
+         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
+        {"supplier": "LPD", "basis": "Per door + area", "we_pay": "by door count + area surcharge",
+         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
+        {"supplier": "Deanta", "basis": "Per door + area", "we_pay": "by door count + area surcharge",
+         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "hardware-only cheap/FOC",
+         "zones": None},
+        {"supplier": "Dolle", "basis": "Per product", "we_pay": "highest per-product band on the order",
+         "free_over": "—", "customer": "Set in Shopify shipping", "notes": "", "zones": None},
+    ]
+    rows.sort(key=lambda r: r["supplier"].lower())
+    return rows
+
+
+@app.get("/pricing/delivery", dependencies=[Depends(require_key)])
+def pricing_delivery():
+    return {"rows": _delivery_catalog()}
