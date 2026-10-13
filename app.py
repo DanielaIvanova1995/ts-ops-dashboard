@@ -5813,6 +5813,16 @@ def _bg_worker():
         state["running"] = True
         try:
             cfg = supabase_db.config_get("invoice_import") or {}
+            # First, pull back any orders that invoices failed against because the order was archived,
+            # so those invoices re-import on this run (a FAILED log row isn't 'seen', so it retries).
+            try:
+                rr = invoice_import.restore_archived_orders(dry_run=False, limit=15)
+                if rr.get("restored"):
+                    supabase_db.audit("scheduler" if reason == "auto" else "manual",
+                                      "invoice_import", f"restored {rr['restored']} archived order(s) "
+                                      "so their invoices can re-import", "")
+            except Exception:  # noqa: BLE001 — never let restore block the import
+                pass
             res = invoice_import.run_import(
                 folders=None, dry_run=False, since_days=cfg.get("since_days"),
                 max_total=int(cfg.get("max_total") or 25))
