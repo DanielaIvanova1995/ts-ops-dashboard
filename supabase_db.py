@@ -279,6 +279,20 @@ def invoice_import_seen(internet_id: str) -> bool:
         return False
 
 
+def invoice_import_clear(internet_ids: list) -> int:
+    """Clear specific failed-import rows (by internet_id) off the 'didn't import' list — mark them
+    'cleared' so they drop off AND won't be retried. Returns how many were cleared."""
+    ids = [str(i) for i in (internet_ids or []) if i]
+    if not configured() or not ids:
+        return 0
+    try:
+        r = (_client().table("invoice_imports").update({"status": "cleared"})
+             .in_("internet_id", ids).eq("status", "failed").execute())
+        return len(r.data or [])
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def invoice_import_clear_before(before_iso: str) -> int:
     """Clear stale FAILED import rows last seen before `before_iso` (ISO date/datetime) — mark them
     'cleared' so they drop off the 'didn't import' list AND won't be retried. Returns how many."""

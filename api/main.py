@@ -1638,21 +1638,29 @@ def invoice_import_issues(limit: int = 100):
         rows = supabase_db.invoice_import_recent(limit=int(limit), status="failed") or []
     except Exception:  # noqa: BLE001
         rows = []
-    out = [{"invoice_no": r.get("invoice_no"), "supplier": r.get("supplier"),
-            "order_no": r.get("order_no"), "total": r.get("total"),
-            "detail": r.get("detail"), "at": r.get("at")} for r in rows]
+    out = []
+    for r in rows:
+        detail = r.get("detail") or ""
+        m = _re.match(r"^\s*(\d{4}-\d{2}-\d{2})\s*·\s*(.*)$", detail)   # invoice date prefix, if present
+        inv_date = m.group(1) if m else None
+        why = m.group(2) if m else detail
+        out.append({"id": r.get("internet_id"), "invoice_no": r.get("invoice_no"),
+                    "supplier": r.get("supplier"), "order_no": r.get("order_no"),
+                    "total": r.get("total"), "inv_date": inv_date, "detail": why, "at": r.get("at")})
     return {"rows": out}
 
 
+class ClearIn(BaseModel):
+    ids: list[str]
+
+
 @app.post("/invoices/import-issues/clear", dependencies=[Depends(require_key)])
-def invoice_import_issues_clear(before: str):
-    """Clear stale failed-import rows last seen before `before` (YYYY-MM-DD) off the 'didn't import'
-    list (marked 'cleared' — hidden and won't retry). e.g. before=2026-07-01 clears June & older."""
-    if not before:
-        raise HTTPException(status_code=400, detail="before date required (YYYY-MM-DD)")
+def invoice_import_issues_clear(body: ClearIn):
+    """Clear the selected failed-import rows (by id) off the 'didn't import' list — marked 'cleared',
+    so they drop off AND won't be retried."""
     try:
         import supabase_db
-        n = supabase_db.invoice_import_clear_before(before)
+        n = supabase_db.invoice_import_clear(body.ids)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't clear: {e}")
     return {"ok": True, "cleared": n}

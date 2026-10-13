@@ -88,23 +88,30 @@ export default function Invoices() {
       if (String(e.message) !== "unauthorised") setSuggest((s) => ({ ...s, [i]: { loading: false, rows: [] } }));
     }
   }
-  const [clearingOld, setClearingOld] = useState(false);
+  const [issueSel, setIssueSel] = useState(new Set());
+  const [clearing, setClearing] = useState(false);
   const loadIssues = useCallback(() => {
     if (!accessKey) return;
     jsonFetch("/invoices/import-issues?limit=200").then((r) => r.ok && r.json())
       .then((d) => d && setIssues(d.rows || [])).catch(() => {});
   }, [accessKey, jsonFetch]);
   useEffect(() => { loadIssues(); }, [loadIssues]);
-  async function clearOld() {
-    if (!window.confirm("Clear the failed-import invoices last seen in June 2026 or earlier? They drop off this list and won't be retried.")) return;
-    setClearingOld(true);
+  function toggleIssue(id) { setIssueSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  async function clearIds(ids) {
+    const list = (ids || []).filter(Boolean);
+    if (!list.length) return;
+    if (!window.confirm(`Clear ${list.length} failed import(s) off this list? They won't be retried.`)) return;
+    setClearing(true);
     try {
-      const res = await jsonFetch(`/invoices/import-issues/clear?before=2026-07-01`, { method: "POST" });
+      const res = await jsonFetch(`/invoices/import-issues/clear`, { method: "POST", body: JSON.stringify({ ids: list }) });
       const d = await res.json().catch(() => ({}));
-      if (res.ok && d.ok) { setNotice({ kind: "ok", text: `Cleared ${d.cleared} old failed import(s).` }); loadIssues(); }
-      else setNotice({ kind: "warn", text: d.detail || "Couldn’t clear." });
+      if (res.ok && d.ok) {
+        setNotice({ kind: "ok", text: `Cleared ${d.cleared}.` });
+        setIssues((rows) => rows.filter((r) => !list.includes(r.id)));
+        setIssueSel((s) => { const n = new Set(s); list.forEach((x) => n.delete(x)); return n; });
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t clear." });
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
-    finally { setClearingOld(false); }
+    finally { setClearing(false); }
   }
 
   function submitKey(e) {
@@ -281,28 +288,32 @@ export default function Invoices() {
             <span className="pill red">{issues.length} didn’t import</span>
             <span className="sub">invoices in Outlook that never became a Monday subitem (mostly no matching order)</span>
             <span style={{ flex: 1 }} />
-            <button className="btn ghost" onClick={clearOld} disabled={clearingOld}>{clearingOld ? "…" : "Clear June & older"}</button>
+            {issueSel.size > 0 && <button className="btn" onClick={() => clearIds([...issueSel])} disabled={clearing}>{clearing ? "…" : `Clear selected (${issueSel.size})`}</button>}
             <button className="btn" onClick={() => setShowIssues((s) => !s)}>{showIssues ? "Hide" : "Show"}</button>
           </div>
           {showIssues && (
             <table className="mini" style={{ marginTop: 8 }}>
-              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Last seen</th><th>Why it didn’t import</th><th></th></tr></thead>
+              <thead><tr><th></th><th>Invoice</th><th>Supplier</th><th>Order/PO</th><th className="num">Total</th><th>Invoice date</th><th>Why it didn’t import</th><th></th></tr></thead>
               <tbody>
                 {issues.map((r, i) => {
                   const sg = suggest[i];
                   return (
                   <Fragment key={i}>
-                  <tr>
+                  <tr className={issueSel.has(r.id) ? "od" : ""}>
+                    <td><input type="checkbox" checked={issueSel.has(r.id)} onChange={() => toggleIssue(r.id)} /></td>
                     <td className="ono">{r.invoice_no || "—"}</td>
                     <td className="sub">{r.supplier || "—"}</td>
                     <td className="sub">{r.order_no || "—"}</td>
                     <td className="num">{r.total != null ? money(r.total) : "—"}</td>
-                    <td className="sub">{r.at ? String(r.at).slice(0, 10) : "—"}</td>
+                    <td className="sub">{r.inv_date || "—"}</td>
                     <td className="sub">{r.detail || "—"}</td>
-                    <td>{r.total != null && <button className="btn ghost" onClick={() => doSuggest(i, r)} disabled={sg?.loading}>{sg?.loading ? "…" : "Suggest order"}</button>}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {r.total != null && <button className="btn ghost" onClick={() => doSuggest(i, r)} disabled={sg?.loading}>{sg?.loading ? "…" : "Suggest"}</button>}
+                      {" "}<button className="btn ghost" onClick={() => clearIds([r.id])} disabled={clearing}>Clear</button>
+                    </td>
                   </tr>
                   {sg && !sg.loading && (
-                    <tr><td colSpan={7} className="sub" style={{ paddingLeft: 18 }}>
+                    <tr><td colSpan={8} className="sub" style={{ paddingLeft: 18 }}>
                       {sg.rows?.length
                         ? <>Possible match{sg.rows.length > 1 ? "es" : ""}: {sg.rows.map((o, j) => (
                             <span key={j} className="pill grey" style={{ marginRight: 6 }}>

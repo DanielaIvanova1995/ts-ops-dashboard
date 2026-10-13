@@ -422,7 +422,9 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
                                  f"{o2.get('order_no') or o2.get('name')}")
                 break
     if not order:
-        rec.update(status="failed", detail=f"no order on Monday for PO {po!r}")
+        # Prefix the invoice date so the 'didn't import' list can show it (no schema change needed).
+        _dp = f"{inv_date} · " if inv_date else ""
+        rec.update(status="failed", detail=f"{_dp}no order on Monday for PO {po!r}")
         _finish(key, "failed", rec, summary, dry_run)
         return "failed"
     rec["order"] = order.get("name")
