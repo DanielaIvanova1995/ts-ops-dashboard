@@ -52,7 +52,7 @@ export default function Pricing() {
     try {
       const res = await jsonFetch(`/pricing/prices?supplier=${encodeURIComponent(supplier)}&q=${encodeURIComponent(query || "")}`);
       const d = await res.json();
-      setRows(d.rows || []); setMeta({ total: d.total || 0, capped: !!d.capped });
+      setRows(d.rows || []); setMeta({ total: d.total || 0, capped: !!d.capped, updated: d.updated, fee: d.fee_pct });
     } catch (e) { if (String(e.message) !== "unauthorised") { setRows([]); setMeta({ total: 0, capped: false }); } }
     finally { setLoadingPrices(false); }
   }, [jsonFetch]);
@@ -108,7 +108,7 @@ export default function Pricing() {
                 onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") loadPrices(sup, q); }} disabled={!sup} />
               <button className="btn" onClick={() => loadPrices(sup, q)} disabled={!sup || loadingPrices}>{loadingPrices ? "…" : "Search"}</button>
               <span style={{ flex: 1 }} />
-              {rows && <span className="sub">{meta.total.toLocaleString()} priced SKU{meta.total === 1 ? "" : "s"}{meta.capped ? ` · showing first ${rows.length}` : ""}</span>}
+              {rows && <span className="sub">{meta.total.toLocaleString()} priced SKU{meta.total === 1 ? "" : "s"}{meta.capped ? ` · showing first ${rows.length}` : ""}{meta.updated ? ` · prices updated ${meta.updated}` : ""}</span>}
             </div>
           </div>
           {!sup && <div className="card"><div className="state">Pick a supplier to see their cost prices.</div></div>}
@@ -116,16 +116,21 @@ export default function Pricing() {
           {sup && rows && rows.length > 0 && (
             <div className="card" style={{ padding: "6px 12px 12px" }}>
               <table className="mini">
-                <thead><tr><th>SKU</th><th>Name</th><th className="num">Cost (ex VAT)</th><th></th></tr></thead>
+                <thead><tr><th>SKU</th><th>Product</th><th className="num">Cost</th><th className="num">Sell</th><th className="num">Margin{meta.fee ? ` (−${meta.fee}%)` : ""}</th><th></th></tr></thead>
                 <tbody>
-                  {rows.map((r, i) => (
+                  {rows.map((r, i) => {
+                    const mClass = r.margin == null ? "" : r.margin < 8 ? "mred" : r.margin < 15 ? "mamber" : "mgreen";
+                    return (
                     <tr key={i}>
                       <td className="ono">{r.sku || "—"}</td>
-                      <td className="sub">{r.name || "—"}</td>
+                      <td>{r.on_shopify ? r.name : <span className="pill amber">not on Shopify</span>}</td>
                       <td className="num">{money(r.cost)}</td>
+                      <td className="num">{r.sell != null ? money(r.sell) : "—"}</td>
+                      <td className={`num ${mClass}`}>{r.margin == null ? "—" : `${r.margin}%`}</td>
                       <td>{r.source === "override" ? <span className="pill grey">override</span> : null}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

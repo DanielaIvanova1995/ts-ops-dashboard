@@ -1692,44 +1692,73 @@ def pricing_suppliers():
                           for s, n in sorted(c.items(), key=lambda x: (-x[1], x[0].lower()))]}
 
 
+_TXN_FEE = 0.018   # Shopify transaction fee used for the net (after-fee) margin
+
+
+def _norm_sku(s):
+    return _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
 @app.get("/pricing/prices", dependencies=[Depends(require_key)])
 def pricing_prices(supplier: str, q: str = "", limit: int = 500):
-    """This supplier's priced SKUs (ex-VAT cost) from the feed + durable overrides. Optional search
-    on SKU or name. Capped; `total` says how many matched."""
+    """This supplier's priced SKUs: ex-VAT cost (feed + overrides), the Shopify product name (or a
+    'not on Shopify' flag), our sell price, and the net margin after the transaction fee. `updated`
+    is when the price feed was last rebuilt."""
+    feed = _load_json(_FEED_PATH)
+    updated = feed.get("generated_at")
+    items = feed.get("items") or []
     sup_c = _canon(supplier)
     ql = (q or "").strip().lower()
-    rows, total, seen = [], 0, set()
-    for it in (_load_json(_FEED_PATH).get("items") or []):
-        cost = None
+
+    # Index every feed SKU's Shopify name + sell, and this supplier's feed cost.
+    idx, sup_cost = {}, {}
+    for it in items:
+        ns = _norm_sku(it.get("sku"))
+        if not ns:
+            continue
+        idx[ns] = {"sku": (it.get("sku") or "").strip(), "name": (it.get("name") or "").strip(),
+                   "sell": it.get("sell") if isinstance(it.get("sell"), (int, float)) else None}
         for o in (it.get("offers") or []):
-            if _canon(o.get("s")) == sup_c:
-                cost = o.get("c")
+            if _canon(o.get("s")) == sup_c and isinstance(o.get("c"), (int, float)):
+                sup_cost[ns] = o["c"]
                 break
-        if cost is None:
-            continue
-        sku = (it.get("sku") or "").strip()
-        name = (it.get("name") or "").strip()
-        if ql and ql not in sku.lower() and ql not in name.lower():
-            continue
-        total += 1
-        seen.add(_re.sub(r"[^a-z0-9]", "", sku.lower()))
-        if len(rows) < limit:
-            rows.append({"sku": sku, "name": name, "cost": cost, "source": "feed"})
+
+    # Overrides for this supplier WIN on cost (and add SKUs the feed doesn't price from them).
+    ov_cost = {}
     for sup, skus in _load_json(_OV_PATH).items():
         if sup.startswith("_") or not isinstance(skus, dict) or _canon(sup) != sup_c:
             continue
         for sk, cst in skus.items():
-            if not isinstance(cst, (int, float)):
-                continue
-            if _re.sub(r"[^a-z0-9]", "", str(sk).lower()) in seen:
-                continue                                  # already shown from the feed
-            if ql and ql not in str(sk).lower():
-                continue
-            total += 1
-            if len(rows) < limit:
-                rows.append({"sku": sk, "name": "", "cost": cst, "source": "override"})
+            if isinstance(cst, (int, float)):
+                ov_cost[_norm_sku(sk)] = (sk, cst)
+
+    def _row(ns, cost, is_override, sku_fallback=None):
+        info = idx.get(ns) or {}
+        sku = info.get("sku") or sku_fallback or ns
+        name = info.get("name") or ""
+        sell = info.get("sell")
+        on_shopify = bool(name)
+        margin = None
+        if isinstance(sell, (int, float)) and sell > 0 and isinstance(cost, (int, float)):
+            margin = round((sell - cost - sell * _TXN_FEE) / sell * 100, 1)
+        return {"sku": sku, "name": name, "on_shopify": on_shopify, "cost": cost,
+                "sell": sell, "margin": margin, "source": "override" if is_override else "feed"}
+
+    all_ns = set(sup_cost) | set(ov_cost)
+    rows, total = [], 0
+    for ns in all_ns:
+        is_ov = ns in ov_cost
+        cost = ov_cost[ns][1] if is_ov else sup_cost[ns]
+        sk_fb = ov_cost[ns][0] if is_ov else None
+        row = _row(ns, cost, is_ov, sk_fb)
+        if ql and ql not in (row["sku"] or "").lower() and ql not in (row["name"] or "").lower():
+            continue
+        total += 1
+        if len(rows) < limit:
+            rows.append(row)
     rows.sort(key=lambda r: (r["sku"] or "").lower())
-    return {"rows": rows, "total": total, "capped": total > len(rows)}
+    return {"rows": rows, "total": total, "capped": total > len(rows),
+            "updated": updated, "fee_pct": round(_TXN_FEE * 100, 2)}
 
 
 def _delivery_catalog():
