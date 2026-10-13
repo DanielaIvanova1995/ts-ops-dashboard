@@ -109,6 +109,10 @@ def diag():
                                "bank": sum(1 for a in accs if a.get("AccountType") == "Bank")}
     except Exception as e:  # noqa: BLE001
         out["qbo_accounts_error"] = str(e)[:160]
+    try:
+        out["bank_accounts_fn"] = len(ds.qbo_bank_accounts())   # exactly what the pay dropdown calls
+    except Exception as e:  # noqa: BLE001
+        out["bank_accounts_fn_error"] = str(e)[:160]
     # Background schedulers live in the always-on app host (a separate service), but they write their
     # config + last-run to the SAME Supabase — so surface them here to diagnose "auto isn't running".
     try:
