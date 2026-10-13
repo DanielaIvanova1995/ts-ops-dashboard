@@ -1916,14 +1916,17 @@ def pricing_prices(supplier: str, q: str = "", limit: int = 500, sort: str = "sk
             "pricelist_date": _pl_date_for(supplier)}
 
 
+_UMBRELLA_BUILDING = "Building materials"   # cladding/roofline + building plastics + builders' merchants
 _DELIV_CATEGORY = {
-    "upb": "Cladding & roofline", "ajw": "Cladding & roofline", "southern sheeting": "Cladding & roofline",
-    "nbp": "Building plastics", "eurocell": "Building plastics",
-    "travis perkins": "Builders' merchants", "markovitz": "Builders' merchants", "gap": "Builders' merchants",
+    "upb": _UMBRELLA_BUILDING, "ajw": _UMBRELLA_BUILDING, "southern sheeting": _UMBRELLA_BUILDING,
+    "nbp": _UMBRELLA_BUILDING, "eurocell": _UMBRELLA_BUILDING,
+    "travis perkins": _UMBRELLA_BUILDING, "markovitz": _UMBRELLA_BUILDING, "gap": _UMBRELLA_BUILDING,
+    "bricklink": _UMBRELLA_BUILDING,
     "pjh": "Bathrooms & plumbing", "carron": "Bathrooms & plumbing",
     "molan": "Polycarbonate & roofing",
     "decor8": "Paint & decorating",
-    "chase hardware": "Ironmongery & hardware", "ctie": "Ironmongery & hardware", "bricklink": "Ironmongery & hardware",
+    "chase hardware": "Ironmongery & hardware",
+    "ctie": "Electricals",
     "jb kind": "Internal doors", "lpd": "Internal doors", "deanta": "Internal doors",
     "dolle": "Stairs & loft ladders",
 }
