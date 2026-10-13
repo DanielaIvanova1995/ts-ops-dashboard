@@ -363,13 +363,21 @@ export default function Invoices() {
                     <button className="btn" onClick={() => doUnflag(iv)} disabled={unflagging[iv.sub_id]} title="Move back to Needs Review">{unflagging[iv.sub_id] ? "…" : "Move back to review"}</button>
                   </div>
                 </div>
-                <div className="inv-body">
-                  <div className="warn-note col">
-                    <div className="warn-head"><IconWarn /> Why it was queried</div>
-                    <div className="sub" style={{ whiteSpace: "pre-wrap" }}>{iv.reason || "No reason recorded."}</div>
+                {(iv.reason || iv.sent) ? (
+                  <div className="inv-body">
+                    {iv.reason ? (
+                      <div className="warn-note col">
+                        <div className="warn-head"><IconWarn /> Why it was queried</div>
+                        <div className="sub" style={{ whiteSpace: "pre-wrap" }}>{iv.reason}</div>
+                      </div>
+                    ) : null}
+                    {iv.sent ? <div className="sub" style={{ marginTop: iv.reason ? 6 : 0 }}>Chaser sent: {iv.sent}</div> : null}
                   </div>
-                  {iv.sent ? <div className="sub" style={{ marginTop: 6 }}>Chaser: {iv.sent}</div> : null}
-                </div>
+                ) : (
+                  <div className="inv-body">
+                    <div className="sub">Flagged as a discrepancy on Monday, but no reason was saved against it (flagged by hand or before reasons were recorded). Open the order to review, or move it back to the checker.</div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
