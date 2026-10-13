@@ -968,6 +968,27 @@ def recon_open(key: str):
         r["overdue"] = recon_core.is_overdue(r.get("inv_date"))
     for pl in pay_lines:
         pl["overdue"] = recon_core.is_overdue(pl.get("inv_date"))
+    # Reflect LIVE QuickBooks so a reopened statement shows what's actually paid now: mark each row
+    # paid/ready by its current bill status, and keep only still-open bills in the pay list.
+    vid = str(snap.get("vid") or "")
+    supplier = snap.get("vendor_name") or snap.get("supplier") or ""
+    if vid:
+        try:
+            bills = ds.qbo_vendor_bills(vid)
+            open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
+            bmap = {recon_core.norm_inv_no(b.get("doc_no"), supplier): b
+                    for b in bills if b.get("doc_no")}
+            for r in rows:
+                b = bmap.get(recon_core.norm_inv_no(r.get("invoice"), supplier))
+                if b and b.get("paid"):
+                    r["status"] = "paid"
+                elif b and r.get("status") != "paid":
+                    r["status"] = "ready"
+                elif not b:
+                    r["status"] = r.get("status") or "missing"
+            pay_lines = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
+        except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
+            pass
     snap["rows"] = rows
     snap["pay_lines"] = pay_lines
     return snap
@@ -1049,7 +1070,8 @@ def recon_pay(body: PayIn):
             supabase_db.audit("", "bill_payment", f"{len(lines)} invoice(s) £{total:,.2f}", ref)
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "paid": len(lines), "total": total, "ref": ref}
+    return {"ok": True, "paid": len(lines), "total": total, "ref": ref,
+            "skipped_paid": skipped_paid, "missing": missing}
 
 
 class RemitIn(BaseModel):

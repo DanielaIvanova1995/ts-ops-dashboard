@@ -62,7 +62,15 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     try {
       const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt })) }) });
       const d = await res.json();
-      if (res.ok && d.ok) { onNotice({ kind: "ok", text: `Marked ${d.paid} paid in QuickBooks (ref ${d.ref}). Pay £${net.toFixed(2)} by bank.` }); onPaid(selLines.map((l) => l.inv)); }
+      if (res.ok && d.ok) {
+        const skips = [];
+        if (d.skipped_paid) skips.push(`${d.skipped_paid} already paid in QuickBooks`);
+        if (d.missing) skips.push(`${d.missing} no longer in QuickBooks`);
+        const skipMsg = skips.length ? ` Skipped ${skips.join(" and ")}.` : "";
+        const payAmt = Number(d.total != null ? d.total : net) || 0;
+        onNotice({ kind: skips.length ? "warn" : "ok", text: `Marked ${d.paid} paid in QuickBooks (ref ${d.ref}).${skipMsg} Pay £${payAmt.toFixed(2)} by bank.` });
+        onPaid(selLines.map((l) => l.inv));
+      }
       else onNotice({ kind: "warn", text: d.detail || "Couldn’t mark paid." });
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setPaying(false); }
