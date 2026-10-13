@@ -150,7 +150,7 @@ def _sup_match(invoice_supplier: str, monday_supplier: str) -> bool:
     return a in b or b in a
 
 # Bump if _INVOICE_HEADER_SYSTEM changes, so the durable parse cache re-reads once then re-caches.
-HEADER_PARSE_VERSION = 1
+HEADER_PARSE_VERSION = 2   # v2: added customer_name + customer_postcode (name/address matching)
 
 
 def _parse_header_cached(pdf_bytes: bytes) -> dict:
@@ -405,6 +405,26 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
         if order:
             rec["order_no"] = c
             break
+    # Split order: the invoice shows the BASE number (e.g. 32100) but Monday holds the split parts
+    # (32100-1, 32100-2). Find the parts and attach to the one whose SUPPLIER matches the invoice.
+    if not order and po:
+        inv_sup0 = parsed.get("supplier_name")
+        for c in _order_no_candidates(po):
+            try:
+                parts = ds.find_order_items_by_number(c, token=None)
+            except Exception:  # noqa: BLE001
+                parts = []
+            if not parts:
+                continue
+            sm = [p for p in parts if inv_sup0 and _sup_match(inv_sup0, p.get("supplier"))]
+            chosen = sm[0] if len(sm) == 1 else (parts[0] if len(parts) == 1 else None)
+            if chosen:
+                order = {"id": chosen["id"], "name": chosen.get("name")}
+                rec["order_no"] = chosen.get("order_no") or c
+                if "-" in (chosen.get("order_no") or ""):
+                    rec["detail"] = (f"matched split part {chosen.get('order_no')} "
+                                     f"({chosen.get('supplier')})")
+                break
     # Credit notes reference the ORIGINAL invoice number, not our PO — if the PO didn't match an
     # order, find the order that invoice number is logged under and credit it there.
     if not order and doc_type == "credit_note":
@@ -421,6 +441,46 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
                 rec["detail"] = (f"credit note linked via invoice {cand} → order "
                                  f"{o2.get('order_no') or o2.get('name')}")
                 break
+    # Already on Monday? (added manually, or imported under another ref) → skip, don't show as failed.
+    if not order:
+        try:
+            o_exist = ds.find_order_by_subitem_invoice_no(inv_no)
+        except Exception:  # noqa: BLE001
+            o_exist = None
+        if o_exist:
+            rec.update(status="skipped",
+                       detail=f"already on Monday (order {o_exist.get('order_no') or o_exist.get('name')})")
+            summary["skipped"] += 1
+            summary["items"].append(rec)
+            if not dry_run and supabase_db:
+                supabase_db.invoice_import_log(key, "skipped", invoice_no=inv_no,
+                                               order_no=o_exist.get("order_no"), detail=rec["detail"])
+            return "skipped"
+    # No PO match → try the CUSTOMER name + postcode on the invoice (drop-ship delivery address).
+    # Conservative: only auto-attach on a single confident match (postcode + supplier/amount).
+    if not order and not po:
+        cust = (parsed.get("customer_name") or "").strip()
+        cpc = (parsed.get("customer_postcode") or "").strip()
+        if cust:
+            try:
+                cands = ds.find_orders_by_customer(cust, cpc or None)
+            except Exception:  # noqa: BLE001
+                cands = []
+            inv_sup0 = parsed.get("supplier_name")
+            if len(cands) > 1 and inv_sup0:
+                sm2 = [c for c in cands if _sup_match(inv_sup0, c.get("supplier"))]
+                if sm2:
+                    cands = sm2
+            if len(cands) > 1 and isinstance(total, (int, float)):
+                am = [c for c in cands if isinstance(c.get("total"), (int, float))
+                      and abs(c["total"] - total) <= 0.02]
+                if am:
+                    cands = am
+            if len(cands) == 1:
+                order = {"id": cands[0]["id"], "name": cands[0].get("name")}
+                rec["order_no"] = cands[0].get("order_no")
+                rec["detail"] = (f"matched by customer {cust}{(' ' + cpc) if cpc else ''} → order "
+                                 f"{cands[0].get('order_no')}")
     if not order:
         # Prefix the invoice date so the 'didn't import' list can show it (no schema change needed).
         _dp = f"{inv_date} · " if inv_date else ""

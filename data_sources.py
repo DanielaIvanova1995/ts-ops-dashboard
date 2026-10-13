@@ -3126,9 +3126,15 @@ _INVOICE_HEADER_SYSTEM = (
     "\"30807\", \"PO26222\" becomes \"26222\", \"P/O 26226-1\" becomes "
     "\"26226-1\". Do NOT return the supplier's own invoice number, account code, or VAT number as the "
     "po_number. If there is genuinely no such order/customer reference, set po_number to null. "
+    "These are drop-ship invoices, so the invoice usually shows a DELIVERY / 'Deliver to' / 'Ship "
+    "to' / 'Consignee' address that is OUR CUSTOMER (not Trade Superstore Online, and not the "
+    "supplier). Return that delivery recipient's name as customer_name and their postcode as "
+    "customer_postcode. If the only address is Trade Superstore Online's or the supplier's own, set "
+    "both to null. "
     "Schema: {\"document_type\": string, \"supplier_name\": "
     "string|null, \"invoice_number\": string|null, \"invoice_date\": string|null, \"due_date\": "
-    "string|null, \"po_number\": string|null, \"currency\": string|null, \"subtotal\": number|null, "
+    "string|null, \"po_number\": string|null, \"customer_name\": string|null, "
+    "\"customer_postcode\": string|null, \"currency\": string|null, \"subtotal\": number|null, "
     "\"vat_amount\": number|null, \"total\": number|null}"
 )
 
@@ -3432,6 +3438,43 @@ def find_order_items_by_number(order_no: str, token: str | None = None) -> list:
         if ono == base or _re.fullmatch(_re.escape(base) + r"-\d+", ono):
             out.append({"id": it["id"], "name": it.get("name"), "order_no": ono,
                         "supplier": (cv.get("dropdown_mkyqdeqd") or "").strip()})
+    return out
+
+
+def find_orders_by_customer(name, postcode=None, token: str | None = None, limit: int = 25) -> list:
+    """Orders matching a customer NAME (and, if given, POSTCODE) — to attach an invoice that has NO
+    PO number. Loose name match on the Customer Name column; when a postcode is given it must appear
+    in the order's address. Returns [{id, name, order_no, supplier, customer, total, postcode_match}]."""
+    import re as _re
+    nm = (name or "").strip()
+    if not nm:
+        return []
+    token = token or get_token()
+    pc = _re.sub(r"[^a-z0-9]", "", (postcode or "").lower())
+    q = ('query($b:ID!,$v:String!){boards(ids:[$b]){items_page(limit:%d,query_params:{rules:['
+         '{column_id:"text2",compare_value:[$v],operator:contains_text}]}){items{id name '
+         'column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd","text2","customer_address8",'
+         '"numbers48"]){id text}}}}}' % int(limit))
+    try:
+        data = _monday_gql(q, {"b": str(ORDERS_BOARD_ID), "v": nm}, token)
+    except Exception:  # noqa: BLE001
+        return []
+    items = ((((data.get("boards") or [{}])[0]).get("items_page") or {}).get("items") or [])
+    out = []
+    for it in items:
+        cv = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+        addr = _re.sub(r"[^a-z0-9]", "", (cv.get("customer_address8") or "").lower())
+        pcm = bool(pc) and pc in addr
+        if pc and not pcm:                 # a postcode was given → require it to match
+            continue
+        try:
+            tot = float(_re.sub(r"[^0-9.\-]", "", cv.get("numbers48") or ""))
+        except (TypeError, ValueError):
+            tot = None
+        out.append({"id": it["id"], "name": it.get("name"),
+                    "order_no": (cv.get("text_mkv6z0nt") or "").strip(),
+                    "supplier": (cv.get("dropdown_mkyqdeqd") or "").strip(),
+                    "customer": (cv.get("text2") or "").strip(), "total": tot, "postcode_match": pcm})
     return out
 
 
