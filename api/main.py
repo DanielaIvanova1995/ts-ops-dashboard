@@ -117,6 +117,24 @@ def diag():
                     "last_error": (str(stat.get("error"))[:140] if stat.get("error") else None),
                 }
             out["jobs"] = jobs
+            # Invoice-import health: recent outcomes + the top reasons invoices were left unimported.
+            try:
+                from collections import Counter
+                recent = sdb.invoice_import_recent(limit=400) or []
+                by_status = Counter((r.get("status") or "?") for r in recent)
+                fail_reasons = Counter()
+                for r in recent:
+                    if r.get("status") in ("failed", "ignored"):
+                        d = (r.get("detail") or "").strip()
+                        d = _re.sub(r"\b\d{4,}\b", "N", d)[:60]        # collapse ids so reasons group
+                        fail_reasons[d or r.get("status")] += 1
+                out["invoice_import_log"] = {
+                    "sample": len(recent),
+                    "by_status": dict(by_status),
+                    "top_unimported_reasons": fail_reasons.most_common(12),
+                }
+            except Exception as e:  # noqa: BLE001
+                out["invoice_import_log_error"] = str(e)[:140]
     except Exception as e:  # noqa: BLE001
         out["jobs_error"] = str(e)[:140]
     return out
