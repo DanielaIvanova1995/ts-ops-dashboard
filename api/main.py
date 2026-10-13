@@ -67,6 +67,28 @@ def require_key(x_tradehub_key: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="Invalid or missing access code")
 
 
+# Extra passcode on the Statements/reconciliation section (financial data) — set
+# TRADEHUB_STATEMENTS_KEY on the host to Daniela's private PIN. The recon endpoints require it in
+# addition to the shared access key, via the X-TradeHub-Statements-Key header. If UNSET the section
+# stays open (so nothing breaks before it's configured) — set it on the host to activate the lock.
+_STATEMENTS_KEY = (os.environ.get("TRADEHUB_STATEMENTS_KEY") or "").strip()
+
+
+def require_statements_key(x_tradehub_statements_key: str | None = Header(default=None)):
+    """Guard the Statements section. 403 (not 401) on a bad PIN so the front-end can tell this apart
+    from the shared-access-code gate and re-prompt for the statements passcode only."""
+    if not _STATEMENTS_KEY:
+        return  # no statements PIN configured → section open until TRADEHUB_STATEMENTS_KEY is set
+    if not x_tradehub_statements_key or not hmac.compare_digest(x_tradehub_statements_key, _STATEMENTS_KEY):
+        raise HTTPException(status_code=403, detail="Invalid or missing Statements passcode")
+
+
+@app.get("/recon/lock-status")
+def recon_lock_status():
+    """Whether the Statements section has a passcode configured — so the front-end knows to prompt."""
+    return {"locked": bool(_STATEMENTS_KEY)}
+
+
 @app.get("/")
 def root():
     return {"service": "tradehub-api", "status": "ok", "locked": bool(_ACCESS_KEY), "docs": "/docs"}
@@ -818,7 +840,7 @@ def merge_parts(body: MergeIn):
 
 
 # ---- Statement reconciliation (Phase A: upload a statement → match against QuickBooks) -----------
-@app.get("/recon/status", dependencies=[Depends(require_key)])
+@app.get("/recon/status", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_status():
     """Is QuickBooks connected, and which company — shown at the top of the recon screen."""
     try:
@@ -879,7 +901,7 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
     return out
 
 
-@app.post("/recon", dependencies=[Depends(require_key)])
+@app.post("/recon", dependencies=[Depends(require_key), Depends(require_statements_key)])
 async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     """Upload a supplier statement (PDF, or text/CSV) → parse it (reuses read_statement_pdf) → match
     every invoice line to the vendor's QuickBooks bills (recon_core.reconcile). Read-only: shows
@@ -950,7 +972,7 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     return rec
 
 
-@app.get("/recon/saved", dependencies=[Depends(require_key)])
+@app.get("/recon/saved", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_saved():
     """The latest saved reconciliation per supplier — with a LIVE re-check against QuickBooks: any
     statement whose ready-to-pay bills are now all paid is auto-removed (and dropped from the store).
@@ -1023,7 +1045,7 @@ def _norm_recon_row(r: dict) -> dict:
     }
 
 
-@app.get("/recon/open", dependencies=[Depends(require_key)])
+@app.get("/recon/open", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_open(key: str):
     """Return a saved reconciliation's full snapshot (rows etc.) so it can be reopened without
     re-uploading the statement. Legacy snapshots are normalised; if their rows are unrecoverable the
@@ -1098,7 +1120,7 @@ def recon_open(key: str):
 _ACCOUNTS_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 
 
-@app.get("/recon/bank-accounts", dependencies=[Depends(require_key)])
+@app.get("/recon/bank-accounts", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_bank_accounts():
     """QuickBooks bank accounts for the 'pay from' picker."""
     try:
@@ -1114,7 +1136,7 @@ class PayIn(BaseModel):
     lines: list[dict]   # [{bill_id, amount}]
 
 
-@app.post("/recon/pay", dependencies=[Depends(require_key)])
+@app.post("/recon/pay", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_pay(body: PayIn):
     """Record a QuickBooks bill payment that settles the selected bills (marks them paid). FINANCIAL
     WRITE — the front-end confirms first. The money is still moved via the bank separately; this only
@@ -1183,7 +1205,7 @@ class RemitIn(BaseModel):
     credits: list[dict] = []     # credit notes to net off
 
 
-@app.post("/recon/remittance", dependencies=[Depends(require_key)])
+@app.post("/recon/remittance", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_remittance(body: RemitIn):
     """Build the branded remittance-advice PDF and create an Outlook DRAFT to the supplier (never
     auto-sent — a person reviews and sends it). Returns the PDF (base64) to download too."""

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const KEY_STORE = "th_access_key";
+const PIN_STORE = "th_statements_pin";
 
 function money(v) {
   const n = Number(v);
@@ -190,6 +191,11 @@ export default function Recon() {
   const [keyInput, setKeyInput] = useState("");
   const [err, setErr] = useState("");
 
+  const [pin, setPin] = useState("");            // Statements passcode (separate from access code)
+  const [needPin, setNeedPin] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinErr, setPinErr] = useState("");
+
   const [qb, setQb] = useState(null);
   const [supplier, setSupplier] = useState("");
   const [busy, setBusy] = useState(false);
@@ -200,24 +206,37 @@ export default function Recon() {
   const fileRef = useRef(null);
 
   useEffect(() => {
-    let k = null;
+    let k = null, p = "";
     try { k = localStorage.getItem(KEY_STORE); } catch {}
+    try { p = localStorage.getItem(PIN_STORE) || ""; } catch {}
+    if (p) setPin(p);
     if (k) setAccessKey(k); else setNeedKey(true);
   }, []);
 
   const jsonFetch = useCallback(async (path, opts = {}) => {
     const res = await fetch(`${API}${path}`, {
       ...opts, cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-TradeHub-Key": accessKey || "", ...(opts.headers || {}) },
+      headers: { "Content-Type": "application/json", "X-TradeHub-Key": accessKey || "",
+        "X-TradeHub-Statements-Key": pin || "", ...(opts.headers || {}) },
     });
     if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); throw new Error("unauthorised"); }
+    if (res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); throw new Error("locked"); }
     return res;
-  }, [accessKey]);
+  }, [accessKey, pin]);
 
+  // Is the Statements section passcode-protected? If so and we have no PIN yet, prompt for it.
   useEffect(() => {
     if (!accessKey) return;
+    fetch(`${API}/recon/lock-status`, { cache: "no-store" })
+      .then((r) => r.ok && r.json())
+      .then((d) => { if (d && d.locked && !pin) setNeedPin(true); })
+      .catch(() => {});
+  }, [accessKey, pin]);
+
+  useEffect(() => {
+    if (!accessKey || needPin) return;
     jsonFetch("/recon/status").then((r) => r.ok && r.json()).then((d) => d && setQb(d)).catch(() => {});
-  }, [accessKey, jsonFetch]);
+  }, [accessKey, needPin, jsonFetch]);
 
   const loadSaved = useCallback(() => {
     if (!accessKey) return;
@@ -243,6 +262,13 @@ export default function Recon() {
     setAccessKey(k); setNeedKey(false); setKeyInput(""); setErr("");
   }
 
+  function submitPin(e) {
+    e.preventDefault();
+    const p = pinInput.trim(); if (!p) return;
+    try { localStorage.setItem(PIN_STORE, p); } catch {}
+    setPin(p); setNeedPin(false); setPinInput(""); setPinErr("");
+  }
+
   async function reconcile() {
     const f = fileRef.current?.files?.[0];
     if (!f) { setNotice({ kind: "warn", text: "Choose a statement file first." }); return; }
@@ -251,8 +277,9 @@ export default function Recon() {
       const fd = new FormData();
       fd.append("file", f);
       if (supplier.trim()) fd.append("supplier", supplier.trim());
-      const res = await fetch(`${API}/recon`, { method: "POST", cache: "no-store", headers: { "X-TradeHub-Key": accessKey || "" }, body: fd });
+      const res = await fetch(`${API}/recon`, { method: "POST", cache: "no-store", headers: { "X-TradeHub-Key": accessKey || "", "X-TradeHub-Statements-Key": pin || "" }, body: fd });
       if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); return; }
+      if (res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); return; }
       if (!res.ok) throw new Error(`API ${res.status}`);
       const d = await res.json();
       if (d.ok === false && d.need_vendor) { setNotice({ kind: "warn", text: d.detail || "No QuickBooks vendor match." }); }
@@ -296,6 +323,22 @@ export default function Recon() {
             <button className="btn primary" type="submit">Enter</button>
           </form>
           {err && <p className="state err">{err}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (needPin) {
+    return (
+      <div className="wrap">
+        <div className="login">
+          <div className="wordmark">Trade<b>Hub</b><span className="sec">Statements</span></div>
+          <p className="sub">🔒 This section is passcode-protected. Enter the Statements passcode.</p>
+          <form onSubmit={submitPin} className="loginform">
+            <input className="input" type="password" value={pinInput} autoFocus onChange={(e) => setPinInput(e.target.value)} placeholder="Statements passcode" />
+            <button className="btn primary" type="submit">Unlock</button>
+          </form>
+          {pinErr && <p className="state err">{pinErr}</p>}
         </div>
       </div>
     );
