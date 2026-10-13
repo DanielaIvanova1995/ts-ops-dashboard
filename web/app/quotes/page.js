@@ -20,6 +20,10 @@ const POLY_WIDTHS = [{ v: 700, l: "700 mm" }, { v: 1050, l: "1050 mm" }, { v: 12
 const POLY_SYSTEMS = ["Self-Supported (16/35mm)", "Artisan"];
 const POLY_BAR_COLOURS = ["White", "Brown", "Anthracite Grey"];
 const EZGLAZE_COLOURS = ["Clear", "Breeze Blue", "Solar Ice", "Beehive Clear"];
+const STORM_SHEETS = ["10mm Twinwall", "16mm Triplewall", "25mm Multiwall", "35mm Multiwall"];
+const STORM_COLOURS = ["Clear", "Bronze", "Opal"];
+const STORM_WIDTHS = [{ v: 700, l: "700 mm" }, { v: 1050, l: "1050 mm" }, { v: 1400, l: "1400 mm" }, { v: 2100, l: "2100 mm" }];
+const STORM_BAR_COLOURS = ["White", "Brown"];
 
 // Per-range config: label, endpoint, supplier (whose cost we use), and the "how to quote" guide.
 const RANGES = {
@@ -67,6 +71,19 @@ const RANGES = {
       ["Brand lock.", "All polycarbonate is quoted as Molan only. Margin after fees + discount band below — never below 8%."],
     ],
   },
+  storm: {
+    label: "Storm (poly roof)", endpoint: "/quotes/storm", supplier: "Storm", kind: "stormroof",
+    guide: [
+      ["What it is.", "Storm's self-support polycarbonate roof — multiwall sheets on Storm's own Rafter Bar glazing-bar system. Costed from Storm's prices."],
+      ["Roof size.", "Get the span (width, m) along the house and the slope length (m) from wall to eaves. Sheets run down the slope between the bars."],
+      ["Sheet.", "Thickness/wall (10mm Twinwall / 16mm Triplewall / 25mm or 35mm Multiwall) and tint (Clear, Bronze, Opal)."],
+      ["Sheet width.", "700/1050/1400/2100 mm — this sets how many sheets (and bars) cover the span. We match the nearest Storm stock length for the slope."],
+      ["Bars.", "Storm Rafter Bars come in 3 m and 4 m — we pick the shortest that covers the slope, one either side of each sheet, with end caps and edge trim."],
+      ["Finish.", "Lean-to flashing trim at the top wall, sheet closures at the ends, plus tape and fixing buttons. Counts are estimates to confirm."],
+      ["Over 7 m slope.", "Longer than Storm's longest stock sheet — sheets/bars will need joining (flagged)."],
+      ["Margin.", "Margin after fees + discount band below — never below 8%."],
+    ],
+  },
   ezglaze: {
     label: "EZ Glaze", endpoint: "/quotes/ezglaze", supplier: "Molan", kind: "ezglaze",
     guide: [
@@ -103,6 +120,8 @@ export default function Quotes() {
     poly_system: "Self-Supported (16/35mm)", bar_colour: "White", include_acc: true,
     // ez glaze
     ez_cover: 1.0, ez_colour: "Clear",
+    // storm roof
+    st_width_mm: 1050, st_sheet_type: "25mm Multiwall", st_colour: "Clear", st_bar_colour: "White",
   });
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -174,6 +193,10 @@ export default function Quotes() {
     } else if (cfg.kind === "ezglaze") {
       if (!f.width || !f.rake) { setErr("Enter the roof width and slope length."); return; }
       body = { width: Number(f.width), slope: Number(f.rake), cover: Number(f.ez_cover || 1.0), colour: f.ez_colour };
+    } else if (cfg.kind === "stormroof") {
+      if (!f.width || !f.rake) { setErr("Enter the roof span (width) and slope length."); return; }
+      body = { width: Number(f.width), slope: Number(f.rake), sheet_width_mm: Number(f.st_width_mm),
+        sheet_type: f.st_sheet_type, colour: f.st_colour, bar_colour: f.st_bar_colour, include_acc: f.include_acc };
     } else {
       if (!f.gross_area_m2) { setErr("Enter the gross wall area (m²)."); return; }
       body = { system: f.system, colour: f.colour,
@@ -303,7 +326,33 @@ export default function Quotes() {
         )}
       </div>
 
-      {cfg.kind === "ezglaze" ? (
+      {cfg.kind === "stormroof" ? (
+        <div className="card q-form">
+          <div className="q-section">The roof</div>
+          <div className="q-grid">
+            <label className="fld"><span>Span / width (m) *</span><input className="search" type="number" inputMode="decimal" value={f.width} onChange={(e) => set("width", e.target.value)} placeholder="along the house" /></label>
+            <label className="fld"><span>Slope length (m) *</span><input className="search" type="number" inputMode="decimal" value={f.rake} onChange={(e) => set("rake", e.target.value)} placeholder="wall to eaves" /></label>
+            <label className="fld"><span>Sheet type</span>
+              <select className="filter" value={f.st_sheet_type} onChange={(e) => set("st_sheet_type", e.target.value)}>{STORM_SHEETS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+            <label className="fld"><span>Tint / colour</span>
+              <select className="filter" value={f.st_colour} onChange={(e) => set("st_colour", e.target.value)}>{STORM_COLOURS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+            <label className="fld"><span>Sheet width</span>
+              <select className="filter" value={f.st_width_mm} onChange={(e) => set("st_width_mm", Number(e.target.value))}>{STORM_WIDTHS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}</select>
+            </label>
+            <label className="fld"><span>Bar colour</span>
+              <select className="filter" value={f.st_bar_colour} onChange={(e) => set("st_bar_colour", e.target.value)}>{STORM_BAR_COLOURS.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </label>
+          </div>
+          <div className="q-opts">
+            <label className="switch"><input type="checkbox" checked={f.include_acc} onChange={(e) => set("include_acc", e.target.checked)} /><span>Tape &amp; fixing buttons</span></label>
+            <span style={{ flex: 1 }} />
+            <button className="btn primary" onClick={build} disabled={busy}>{busy ? "Building…" : "Build quote"}</button>
+          </div>
+          {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
+        </div>
+      ) : cfg.kind === "ezglaze" ? (
         <div className="card q-form">
           <div className="q-section">The roof</div>
           <div className="q-grid">

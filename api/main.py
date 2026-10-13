@@ -2351,6 +2351,82 @@ def quote_molan(body: MolanQuoteIn):
             "discount": disc}
 
 
+class StormQuoteIn(BaseModel):
+    width: float                        # roof span (m)
+    slope: float                        # slope / rafter length (m)
+    sheet_width_mm: int = 1050
+    sheet_type: str = "25mm Multiwall"  # a quote_core.STORM_SHEETS key
+    colour: str = "Clear"               # a quote_core.STORM_COLOURS key
+    bar_colour: str = "White"
+    include_acc: bool = True
+
+
+@app.post("/quotes/storm", dependencies=[Depends(require_key)])
+def quote_storm(body: StormQuoteIn):
+    """Storm self-support polycarbonate roof take-off → matched Storm Shopify variants → priced quote.
+    Costed from Storm (its costs are on Shopify cost-per-item). Returns priced lines, totals, caveats
+    and the discount."""
+    import quote_core as qc
+    import order_processing as op
+    if body.sheet_type not in qc.STORM_SHEETS:
+        return {"ok": False, "detail": f"Unknown sheet type '{body.sheet_type}'."}
+    if body.colour not in qc.STORM_COLOURS:
+        return {"ok": False, "detail": f"Unknown colour '{body.colour}'."}
+    raw, cav = qc.storm_roof_takeoff({"width": body.width, "slope": body.slope,
+        "sheet_width_mm": body.sheet_width_mm, "sheet_type": body.sheet_type,
+        "colour": body.colour, "bar_colour": body.bar_colour, "include_acc": body.include_acc})
+    if not raw:
+        return {"ok": False, "detail": "Nothing to build — check the roof span and slope length."}
+    try:
+        tok = ds.shopify_products_token()
+    except Exception:  # noqa: BLE001
+        tok = None
+    lines, sell, cost, n_priced = [], 0.0, 0.0, 0
+    for l in raw:
+        m = None
+        try:
+            m = ds.match_quote_variant(l.get("code"), l["search"], token=tok, brand="Storm")
+        except Exception:  # noqa: BLE001
+            m = None
+        price = m.get("price") if m else None
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        st_cost = None
+        if m and m.get("sku"):
+            try:
+                st_cost = op._line_cost(m["sku"], "Storm", m.get("title"))
+            except Exception:  # noqa: BLE001
+                st_cost = None
+        st_supplied = isinstance(st_cost, (int, float))
+        qty = l["qty"]
+        priced = price is not None and st_supplied
+        lines.append({
+            "description": l["description"], "qty": qty, "search": l["search"],
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"), "variant_id": m.get("variant_id"),
+                         "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
+            "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
+            "unit_cost": round(st_cost, 2) if st_supplied else None,
+            "line_cost": round(st_cost * qty, 2) if st_supplied else None,
+            "ajw_supplied": st_supplied,
+            "note": ("no Storm cost on file — check the price list" if (m and not st_supplied)
+                     else ("couldn't match a Storm product — check wording" if not m else "")),
+        })
+        if priced:
+            sell += price * qty
+            cost += st_cost * qty
+            n_priced += 1
+    margin = (sell - cost) / sell if sell > 0 else None
+    disc = qc.discount_floor(sell, margin) if margin is not None else None
+    return {"ok": True, "product": f"Storm {body.sheet_type} {body.colour} self-support roof",
+            "colour": body.colour, "lines": lines, "caveats": cav,
+            "totals": {"sell": round(sell, 2), "cost": round(cost, 2), "margin": margin,
+                       "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
+                       "n_priced": n_priced, "n_total": len(lines)},
+            "discount": disc}
+
+
 @app.get("/quotes/search", dependencies=[Depends(require_key)])
 def quote_search(q: str, limit: int = 12):
     """Search Shopify variants by text — for manually adding an extra product line to a quote.

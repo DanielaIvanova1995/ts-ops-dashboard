@@ -352,6 +352,77 @@ def poly_takeoff(inp):
     return out, {"sheets": sheets, "bars": inter + ends, "barlen": barlen, "note": note}
 
 
+# ---- Storm self-support polycarbonate roof ---------------------------------------------------
+# Storm sells poly sheets cut-to-size (per m²) as exact-size Shopify variants, plus its own
+# self-support "Rafter Bar" glazing-bar system. Costs come from Shopify cost-per-item (Storm is in
+# order_processing.SHOPIFY_COST_SUPPLIERS). SKU format: PC{thick}-{colour}-{w}x{len}mm.
+STORM_SHEETS = {
+    "10mm Twinwall": ("10", "Twinwall"), "16mm Triplewall": ("16", "Triplewall"),
+    "25mm Multiwall": ("25", "Multiwall"), "35mm Multiwall": ("35", "Multiwall"),
+}
+STORM_COLOURS = {"Clear": "C", "Bronze": "B", "Opal": "O"}
+STORM_SHEET_WIDTHS = [700, 1050, 1400, 2100]
+STORM_SHEET_LENGTHS = [2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000]
+STORM_BAR_LENGTHS = [3, 4]            # Rafter Bar comes in 3 m and 4 m
+STORM_BAR_COLOURS = ["White", "Brown"]
+
+
+def storm_roof_takeoff(inp):
+    """Storm self-support polycarbonate roof take-off. Multiwall sheets (matched to the nearest Storm
+    stock size), Rafter Bar glazing bars + end caps + edge trim, lean-to flashing trim, sheet
+    closures, tape and fixing buttons. inp keys: width (m span), slope (m), sheet_width_mm,
+    sheet_type (a STORM_SHEETS key), colour (a STORM_COLOURS key), bar_colour, include_acc.
+    Returns (lines, caveats); each line {description, qty, search, [code]}. Quantities are sized from
+    the span and flagged as estimates — Storm's own layout tightens them."""
+    width, slope = inp["width"], inp["slope"]
+    sw_mm = int(inp["sheet_width_mm"])
+    th, wall = STORM_SHEETS[inp["sheet_type"]]
+    ccode = STORM_COLOURS[inp["colour"]]
+    colour = inp["colour"]
+    barcol = inp["bar_colour"]
+    sheets = math.ceil(width / (sw_mm / 1000.0)) if (width and sw_mm) else 0
+    if sheets <= 0:
+        return None, None
+    sheet_len = next((L for L in STORM_SHEET_LENGTHS if L >= slope * 1000), STORM_SHEET_LENGTHS[-1])
+    barlen = next((b for b in STORM_BAR_LENGTHS if b >= slope), 4) if slope else 4
+    bars = sheets + 1
+    cav = []
+
+    sheet_sku = f"PC{th}-{ccode}-{sw_mm}x{sheet_len}mm"
+    lines = [{"description": f"{inp['sheet_type']} {colour} sheet — {sw_mm}×{sheet_len}mm",
+              "qty": sheets, "code": sheet_sku,
+              "search": f"{inp['sheet_type']} {colour} {sw_mm}x{sheet_len}mm"}]
+    cav.append(f"{sheets} sheet(s) at {sw_mm} mm wide across the {width:.1f} m span, each "
+               f"{sheet_len} mm long (nearest Storm stock length for a {slope:.1f} m slope).")
+    if sheet_len / 1000.0 - slope > 0.3:
+        cav.append(f"The nearest stock length ({sheet_len/1000:.1f} m) is longer than the "
+                   f"{slope:.1f} m slope — trim on site, or ask for a cut-to-size sheet.")
+
+    lines.append({"description": f"Storm rafter bar {barlen} m — {barcol} ({bars} bars)",
+                  "qty": bars, "search": f"Rafter Bar {barlen}m {barcol}"})
+    lines.append({"description": f"Rafter bar end cap — {barcol}", "qty": bars,
+                  "search": f"Rafter Bar End Cap {barcol}"})
+    lines.append({"description": "Rafter bar edge trim (2 outer bars)", "qty": 2,
+                  "search": f"Rafter Bar Edge Trim {barcol}"})
+    lines.append({"description": f"Lean-to flashing trim (top wall, along {width:.1f} m)",
+                  "qty": max(1, math.ceil(width / 3.0)), "search": f"Lean-to Flashing Trim {barcol}"})
+    lines.append({"description": f"Sheet closure {th}mm (eaves & ridge)", "qty": sheets * 2,
+                  "search": f"Sheet Closure {th}mm {barcol}"})
+    if inp.get("include_acc"):
+        lines.append({"description": f"Storm tape pack {th}mm (anti-dust / foil)",
+                      "qty": max(1, sheets), "search": f"Storm Tape Pack {th}mm"})
+        lines.append({"description": "Fixing buttons with spacers (10 pk)",
+                      "qty": max(1, math.ceil(bars / 2)),
+                      "search": f"Fixing Buttons with Spacers {th}mm {barcol}"})
+    cav.append(f"{bars} rafter bars at {barlen} m — one either side of each sheet. Bar, closure, "
+               "tape and fixing counts are estimates from the span; confirm against Storm's layout.")
+    cav.append("Polycarbonate here is quoted as Storm (self-support system) — send the exact roof "
+               "sizes and we'll firm it up.")
+    if slope > 7:
+        cav.append("Slope over 7 m exceeds Storm's longest stock sheet — sheets/bars will need joining.")
+    return lines, cav
+
+
 # ---- Molan EZ Glaze (corrugated polycarbonate) ------------------------------------------------
 EZGLAZE_COLOURS = {
     "Clear": ("EZ Glaze Clear", "CLR"),
