@@ -33,6 +33,8 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   const [ref, setRef] = useState("");
   const [banks, setBanks] = useState([]);
   const [bank, setBank] = useState("");
+  const [bankErr, setBankErr] = useState("");
+  const [bankLoading, setBankLoading] = useState(false);
   const [remitTo, setRemitTo] = useState("");
   const [paying, setPaying] = useState(false);
   const [remitting, setRemitting] = useState(false);
@@ -47,9 +49,21 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     const dd = String(d.getDate()).padStart(2, "0") + String(d.getMonth() + 1).padStart(2, "0") + String(d.getFullYear()).slice(-2);
     setRef(`${sup} B${dd}`);
   }, [r]);
-  useEffect(() => {
-    jsonFetch("/recon/bank-accounts").then((x) => x.ok && x.json()).then((d) => { if (d) { setBanks(d.accounts || []); setBank((d.accounts || [])[0]?.id || ""); } }).catch(() => {});
+  const loadBanks = useCallback(async () => {
+    setBankLoading(true); setBankErr("");
+    try {
+      const res = await jsonFetch("/recon/bank-accounts");
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const d = await res.json();
+      const accts = d.accounts || [];
+      setBanks(accts);
+      setBank((b) => b || accts[0]?.id || "");
+      if (!accts.length) setBankErr("QuickBooks returned no bank accounts.");
+    } catch (e) {
+      if (String(e.message) !== "unauthorised") setBankErr("Couldn’t load bank accounts — " + String(e.message || e));
+    } finally { setBankLoading(false); }
   }, [jsonFetch]);
+  useEffect(() => { loadBanks(); }, [loadBanks]);
 
   if (!lines.length) return null;
   function toggle(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -147,10 +161,13 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
       <div className="pay-ctl">
         <input className="search" style={{ maxWidth: 220, flex: "none" }} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Reference" />
         <select className="filter" value={bank} onChange={(e) => setBank(e.target.value)}>
-          {banks.length ? banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>) : <option value="">(no bank accounts)</option>}
+          {banks.length ? banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)
+            : <option value="">{bankLoading ? "loading banks…" : "(no bank accounts)"}</option>}
         </select>
+        {!banks.length && <button className="btn ghost" onClick={loadBanks} disabled={bankLoading}>{bankLoading ? "…" : "Reload banks"}</button>}
         <button className="btn primary" onClick={markPaid} disabled={paying}>{paying ? "…" : `Mark ${selLines.length} paid in QuickBooks`}</button>
       </div>
+      {bankErr ? <div className="route-msg warn" style={{ marginTop: 6 }}>{bankErr} <button className="linkish" onClick={loadBanks}>retry</button></div> : null}
       <div className="pay-ctl">
         <input className="search" style={{ maxWidth: 300, flex: "none" }} value={remitTo} onChange={(e) => setRemitTo(e.target.value)} placeholder="Supplier accounts email (for the remittance)" />
         <button className="btn" onClick={draftRemit} disabled={remitting}>{remitting ? "…" : "Draft remittance"}</button>
