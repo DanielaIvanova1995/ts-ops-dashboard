@@ -97,6 +97,17 @@ export default function Invoices() {
   }, [accessKey, jsonFetch]);
   useEffect(() => { loadIssues(); }, [loadIssues]);
   function toggleIssue(id) { setIssueSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  async function clearOnMonday() {
+    if (!window.confirm("Check all of these against Monday and clear any whose invoice is already a subitem there?")) return;
+    setClearing(true);
+    try {
+      const res = await jsonFetch(`/invoices/import-issues/clear-on-monday`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setNotice({ kind: "ok", text: `Checked ${d.checked}, cleared ${d.cleared} already on Monday.` }); loadIssues(); }
+      else setNotice({ kind: "warn", text: d.detail || "Couldn’t sweep." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setClearing(false); }
+  }
   async function clearIds(ids) {
     const list = (ids || []).filter(Boolean);
     if (!list.length) return;
@@ -288,6 +299,7 @@ export default function Invoices() {
             <span className="pill red">{issues.length} didn’t import</span>
             <span className="sub">invoices in Outlook that never became a Monday subitem (mostly no matching order)</span>
             <span style={{ flex: 1 }} />
+            <button className="btn ghost" onClick={clearOnMonday} disabled={clearing}>{clearing ? "…" : "Clear ones already on Monday"}</button>
             {issueSel.size > 0 && <button className="btn" onClick={() => clearIds([...issueSel])} disabled={clearing}>{clearing ? "…" : `Clear selected (${issueSel.size})`}</button>}
             <button className="btn" onClick={() => setShowIssues((s) => !s)}>{showIssues ? "Hide" : "Show"}</button>
           </div>

@@ -1654,6 +1654,47 @@ class ClearIn(BaseModel):
     ids: list[str]
 
 
+@app.post("/invoices/import-issues/clear-on-monday", dependencies=[Depends(require_key)])
+def invoice_import_clear_on_monday():
+    """Sweep the whole 'didn't import' list and clear every invoice whose number is ALREADY a
+    subitem on Monday (batched — one query per 50 invoices, not one per invoice)."""
+    try:
+        import supabase_db
+        rows = supabase_db.invoice_import_recent(limit=500, status="failed") or []
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the list: {e}")
+    norm = lambda s: _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+    by_norm = {}
+    nums = []
+    for r in rows:
+        inv = (r.get("invoice_no") or "").strip()
+        if not inv or not r.get("internet_id"):
+            continue
+        by_norm.setdefault(norm(inv), []).append(r["internet_id"])
+        nums.append(inv)
+    # Which of these invoice numbers exist as subitems (names) on the invoices subitems board?
+    on_monday = set()
+    q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
+         'columns:[{column_id:"name",column_values:$vals}]){items{name}}}')
+    try:
+        tok = ds.get_token()
+        uniq = list(dict.fromkeys(nums))
+        for i in range(0, len(uniq), 50):
+            chunk = uniq[i:i + 50]
+            data = ds._monday_gql(q, {"b": str(ds.SUBITEMS_BOARD_ID), "vals": chunk}, tok)
+            for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
+                on_monday.add(norm(it.get("name")))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't check Monday: {e}")
+    ids = [iid for n, lst in by_norm.items() if n in on_monday for iid in lst]
+    try:
+        import supabase_db
+        cleared = supabase_db.invoice_import_clear(ids)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't clear: {e}")
+    return {"ok": True, "checked": len(rows), "on_monday": len(on_monday), "cleared": cleared}
+
+
 @app.post("/invoices/import-issues/clear", dependencies=[Depends(require_key)])
 def invoice_import_issues_clear(body: ClearIn):
     """Clear the selected failed-import rows (by id) off the 'didn't import' list — marked 'cleared',
