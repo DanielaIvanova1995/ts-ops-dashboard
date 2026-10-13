@@ -1967,3 +1967,88 @@ def _delivery_catalog():
 @app.get("/pricing/delivery", dependencies=[Depends(require_key)])
 def pricing_delivery():
     return {"rows": _delivery_catalog()}
+
+
+# ---- Quotes: Cedral cladding take-off → priced quote (all-AJW) ---------------------------------
+class CedralQuoteIn(BaseModel):
+    system: str = "Lap"                 # "Lap" or "Click"
+    colour: str = ""
+    gross_area_m2: float
+    openings_m2: float = 0.0
+    wall_height_m: float | None = None
+    total_width_m: float | None = None
+    num_windows: int | None = None
+    external_corners: int | None = None
+    internal_corners: int = 0
+    wants_trims: bool = True
+    wants_battens: bool = False
+    wants_screws: bool = True
+
+
+@app.post("/quotes/cedral", dependencies=[Depends(require_key)])
+def quote_cedral(body: CedralQuoteIn):
+    """Cedral take-off → matched Shopify variants → priced quote. Cedral boards/trims/fixings are
+    costed ONLY from AJW (a supplier's price is never crossed). Lines that aren't a Cedral/AJW
+    product are flagged, not cross-sourced. Returns priced lines, totals, caveats and the discount."""
+    import quote_core as qc
+    import order_processing as op
+    clad = {"product": f"Cedral {body.system}".strip(), "colour": body.colour,
+            "gross_area_m2": body.gross_area_m2, "openings_m2": body.openings_m2,
+            "wall_height_m": body.wall_height_m, "total_width_m": body.total_width_m,
+            "num_windows": body.num_windows, "external_corners": body.external_corners,
+            "internal_corners": body.internal_corners, "wants_trims": body.wants_trims,
+            "wants_battens": body.wants_battens, "wants_screws": body.wants_screws}
+    raw, cav = qc.cedral_takeoff(clad)
+    if not raw:
+        return {"ok": False, "detail": "Nothing to clad — net area is zero (check the area and openings)."}
+    try:
+        tok = ds.shopify_products_token()
+    except Exception:  # noqa: BLE001
+        tok = None
+    lines, sell, cost, n_priced = [], 0.0, 0.0, 0
+    for l in raw:
+        # Battens are a generic timber item AJW doesn't supply — don't brand-lock/price them to AJW.
+        is_batten = "batten" in (l.get("search") or "").lower()
+        m = None
+        if not is_batten:
+            try:
+                m = ds.match_quote_variant(None, l["search"], token=tok, brand="Cedral")
+            except Exception:  # noqa: BLE001
+                m = None
+        price = m.get("price") if m else None
+        try:
+            price = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            price = None
+        ajw_cost = None
+        if m and m.get("sku"):
+            try:
+                ajw_cost = op._line_cost(m["sku"], "AJW", m.get("title"))
+            except Exception:  # noqa: BLE001
+                ajw_cost = None
+        ajw_supplied = isinstance(ajw_cost, (int, float))
+        qty = l["qty"]
+        priced = price is not None and ajw_supplied
+        lines.append({
+            "description": l["description"], "qty": qty, "search": l["search"],
+            "matched": ({"sku": m.get("sku"), "title": m.get("title"),
+                         "vendor": m.get("vendor"), "available": m.get("available")} if m else None),
+            "unit_sell": price, "line_sell": round(price * qty, 2) if price is not None else None,
+            "unit_cost": round(ajw_cost, 2) if ajw_supplied else None,
+            "line_cost": round(ajw_cost * qty, 2) if ajw_supplied else None,
+            "ajw_supplied": ajw_supplied,
+            "note": ("not supplied by AJW — source separately" if (is_batten or (m and not ajw_supplied))
+                     else ("couldn't match a Cedral product — check wording" if not m else "")),
+        })
+        if priced:
+            sell += price * qty
+            cost += ajw_cost * qty
+            n_priced += 1
+    margin = (sell - cost) / sell if sell > 0 else None
+    disc = qc.discount_floor(sell, margin) if margin is not None else None
+    return {"ok": True, "product": clad["product"], "colour": body.colour,
+            "lines": lines, "caveats": cav,
+            "totals": {"sell": round(sell, 2), "cost": round(cost, 2), "margin": margin,
+                       "margin_net": (round((margin - qc.SHOPIFY_FEE) * 100, 1) if margin is not None else None),
+                       "n_priced": n_priced, "n_total": len(lines)},
+            "discount": disc}

@@ -126,6 +126,16 @@ th.sortable:hover { color: var(--ink); }
 .seg-btn + .seg-btn { border-left: 1px solid var(--line); }
 .seg-btn.on { background: rgba(242,106,33,.10); color: var(--brand-dark); }
 
+/* Quotes (Cedral calculator) */
+.q-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.q-grid .fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.q-grid .fld .search, .q-grid .fld .filter { font-weight: 500; }
+.q-opts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.q-opts .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.q-opts .switch input { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }
+.q-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.q-tot { padding: 12px 14px; }
+
 /* Triage controls */
 .tri-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tri-ctl .fld { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
