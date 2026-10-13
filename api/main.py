@@ -899,6 +899,96 @@ def recon_open(key: str):
     return snap
 
 
+# ---- Phase B: pay the bills in QuickBooks + draft the remittance -------------------------------
+_ACCOUNTS_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
+
+
+@app.get("/recon/bank-accounts", dependencies=[Depends(require_key)])
+def recon_bank_accounts():
+    """QuickBooks bank accounts for the 'pay from' picker."""
+    try:
+        return {"accounts": ds.qbo_bank_accounts()}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks bank accounts: {e}")
+
+
+class PayIn(BaseModel):
+    vendor_id: str
+    bank_id: str
+    ref: str = ""
+    lines: list[dict]   # [{bill_id, amount}]
+
+
+@app.post("/recon/pay", dependencies=[Depends(require_key)])
+def recon_pay(body: PayIn):
+    """Record a QuickBooks bill payment that settles the selected bills (marks them paid). FINANCIAL
+    WRITE — the front-end confirms first. The money is still moved via the bank separately; this only
+    records it in QuickBooks. Credit notes can't be applied via the API — handled in QB by hand."""
+    lines = [{"bill_id": str(l.get("bill_id")), "amount": float(l.get("amount") or 0)}
+             for l in (body.lines or []) if l.get("bill_id")]
+    if not lines:
+        return {"ok": False, "detail": "no bills selected to pay"}
+    ref = (body.ref or "").strip() or "REM"
+    total = round(sum(l["amount"] for l in lines), 2)
+    try:
+        ds.qbo_pay_bills(body.vendor_id, body.bank_id, lines, memo=ref, doc_no=ref,
+                         date=_dt.date.today().strftime("%Y-%m-%d"))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e)[:220]}
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.audit("", "bill_payment", f"{len(lines)} invoice(s) £{total:,.2f}", ref)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "paid": len(lines), "total": total, "ref": ref}
+
+
+class RemitIn(BaseModel):
+    supplier: str = ""
+    ref: str = ""
+    to_email: str = ""
+    total: float = 0.0
+    inv_lines: list[dict] = []   # selected pay_lines
+    credits: list[dict] = []     # credit notes to net off
+
+
+@app.post("/recon/remittance", dependencies=[Depends(require_key)])
+def recon_remittance(body: RemitIn):
+    """Build the branded remittance-advice PDF and create an Outlook DRAFT to the supplier (never
+    auto-sent — a person reviews and sends it). Returns the PDF (base64) to download too."""
+    import base64
+    ref = (body.ref or "").strip() or "REM"
+    pdf_lines = [{"bill_no": l.get("bill_no") or l.get("inv"), "bill_date": l.get("inv_date"),
+                  "due_date": l.get("due_date"), "original": l.get("amt"),
+                  "balance": l.get("balance") if l.get("balance") is not None else l.get("amt"),
+                  "payment": l.get("amt")} for l in (body.inv_lines or [])]
+    pdf_lines += [{"bill_no": "CN " + str(c.get("ref") or ""), "bill_date": c.get("date"),
+                   "due_date": None, "original": c.get("amount"), "balance": c.get("amount"),
+                   "payment": c.get("amount")} for c in (body.credits or [])]
+    if not pdf_lines:
+        return {"ok": False, "detail": "nothing selected for the remittance"}
+    try:
+        pdf = ds.build_remittance_pdf(body.supplier, ref, _dt.date.today().strftime("%d/%m/%Y"),
+                                      pdf_lines, round(body.total, 2))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build the remittance PDF: {e}")
+    pdf_name = ("Remittance_Advice_" + _re.sub(r"[^A-Za-z0-9]+", "_", ref).strip("_")
+                + "_from_Trade_Superstore_Online.pdf")
+    cover = (f"Hi,\n\nPlease find attached our remittance advice ({ref}) for a total of "
+             f"£{body.total:,.2f}.\n\nKind regards,\nTrade Superstore Online\nAccounts")
+    draft_link = None
+    if (body.to_email or "").strip():
+        try:
+            draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, body.to_email.strip(),
+                                                  f"Remittance Advice — {ref}", cover,
+                                                  pdf_bytes=pdf, pdf_name=pdf_name)
+        except Exception:  # noqa: BLE001
+            draft_link = None     # still return the PDF so it can be downloaded/sent manually
+    return {"ok": True, "pdf_b64": base64.b64encode(pdf).decode(), "pdf_name": pdf_name,
+            "draft_link": draft_link, "to_email": (body.to_email or "").strip()}
+
+
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
 
 

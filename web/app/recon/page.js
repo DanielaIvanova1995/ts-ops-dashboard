@@ -9,6 +9,104 @@ function money(v) {
   const n = Number(v);
   return Number.isFinite(n) ? "£" + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
 }
+function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
+  const lines = (r.pay_lines || []).slice().sort((a, b) => String(a.inv_date || "").localeCompare(String(b.inv_date || "")));
+  const [sel, setSel] = useState(() => new Set(lines.map((l) => l.bill_id)));
+  const [ref, setRef] = useState("");
+  const [banks, setBanks] = useState([]);
+  const [bank, setBank] = useState("");
+  const [remitTo, setRemitTo] = useState("");
+  const [paying, setPaying] = useState(false);
+  const [remitting, setRemitting] = useState(false);
+
+  useEffect(() => { setSel(new Set((r.pay_lines || []).map((l) => l.bill_id))); }, [r]);
+  useEffect(() => {
+    const sup = (r.vendor_name || r.supplier || "").split(" ")[0] || "REM";
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, "0") + String(d.getMonth() + 1).padStart(2, "0") + String(d.getFullYear()).slice(-2);
+    setRef(`${sup} B${dd}`);
+  }, [r]);
+  useEffect(() => {
+    jsonFetch("/recon/bank-accounts").then((x) => x.ok && x.json()).then((d) => { if (d) { setBanks(d.accounts || []); setBank((d.accounts || [])[0]?.id || ""); } }).catch(() => {});
+  }, [jsonFetch]);
+
+  if (!lines.length) return null;
+  function toggle(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  const selLines = lines.filter((l) => sel.has(l.bill_id));
+  const invTotal = round2(selLines.reduce((s, l) => s + (Number(l.amt) || 0), 0));
+  const creditTotal = round2((r.credits || []).reduce((s, c) => s + (Number(c.amount) || 0), 0));
+  const net = round2(invTotal + creditTotal);
+
+  async function markPaid() {
+    if (!bank) { onNotice({ kind: "warn", text: "Choose a bank account to pay from." }); return; }
+    if (!selLines.length) { onNotice({ kind: "warn", text: "Tick at least one invoice." }); return; }
+    if (!window.confirm(`Record a £${invTotal.toFixed(2)} bill payment in QuickBooks, settling ${selLines.length} invoice(s), ref ${ref}? This marks them PAID in QuickBooks. You still move the money via the bank separately.`)) return;
+    setPaying(true);
+    try {
+      const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt })) }) });
+      const d = await res.json();
+      if (res.ok && d.ok) { onNotice({ kind: "ok", text: `Marked ${d.paid} paid in QuickBooks (ref ${d.ref}). Pay £${net.toFixed(2)} by bank.` }); onPaid(selLines.map((l) => l.inv)); }
+      else onNotice({ kind: "warn", text: d.detail || "Couldn’t mark paid." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setPaying(false); }
+  }
+
+  async function draftRemit() {
+    if (!selLines.length && !(r.credits || []).length) { onNotice({ kind: "warn", text: "Nothing selected for the remittance." }); return; }
+    setRemitting(true);
+    try {
+      const res = await jsonFetch("/recon/remittance", { method: "POST", body: JSON.stringify({ supplier: r.vendor_name || r.supplier, ref, to_email: remitTo, total: net, inv_lines: selLines, credits: r.credits || [] }) });
+      const d = await res.json();
+      if (res.ok && d.ok) {
+        try {
+          const bin = atob(d.pdf_b64); const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" }));
+          const a = document.createElement("a"); a.href = url; a.download = d.pdf_name; a.click(); URL.revokeObjectURL(url);
+        } catch {}
+        onNotice({ kind: "ok", text: d.draft_link ? `Remittance drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t create the Outlook draft — send it manually)" : ""}` });
+      } else onNotice({ kind: "warn", text: d.detail || "Couldn’t build the remittance." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setRemitting(false); }
+  }
+
+  return (
+    <div className="paypanel">
+      <div className="tool-label">Pay these — tick invoices, mark paid in QuickBooks, draft the remittance</div>
+      <table className="mini">
+        <thead><tr><th></th><th>Invoice</th><th>Inv date</th><th>Due</th><th className="num">Amount</th></tr></thead>
+        <tbody>
+          {lines.map((l) => (
+            <tr key={l.bill_id}>
+              <td><input type="checkbox" checked={sel.has(l.bill_id)} onChange={() => toggle(l.bill_id)} /></td>
+              <td>{l.inv}{l.overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
+              <td className="sub">{l.inv_date || "—"}</td>
+              <td className="sub">{l.due_date || "—"}</td>
+              <td className="num">{money(l.amt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {creditTotal ? <div className="sub" style={{ marginTop: 6 }}>Credit notes net off: {money(creditTotal)}</div> : null}
+      <div className="kv big" style={{ maxWidth: 280 }}><span>Net to pay</span><b>{money(net)}</b></div>
+      <div className="pay-ctl">
+        <input className="search" style={{ maxWidth: 220, flex: "none" }} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Reference" />
+        <select className="filter" value={bank} onChange={(e) => setBank(e.target.value)}>
+          {banks.length ? banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>) : <option value="">(no bank accounts)</option>}
+        </select>
+        <button className="btn primary" onClick={markPaid} disabled={paying}>{paying ? "…" : `Mark ${selLines.length} paid in QuickBooks`}</button>
+      </div>
+      <div className="pay-ctl">
+        <input className="search" style={{ maxWidth: 300, flex: "none" }} value={remitTo} onChange={(e) => setRemitTo(e.target.value)} placeholder="Supplier accounts email (for the remittance)" />
+        <button className="btn" onClick={draftRemit} disabled={remitting}>{remitting ? "…" : "Draft remittance"}</button>
+      </div>
+      <div className="sub" style={{ marginTop: 6 }}>Credit notes aren’t written to QuickBooks (no API) — apply them against the bill in QuickBooks by hand. The remittance is drafted in Outlook for you to review & send.</div>
+    </div>
+  );
+}
+
 function statusPill(s) {
   if (s === "paid") return { cls: "green", label: "Paid" };
   if (s === "ready") return { cls: "amber", label: "Ready to pay" };
@@ -226,6 +324,8 @@ export default function Recon() {
               <b>Credit notes:</b> {r.credits.map((c, i) => <span key={i} className="sub"> {c.ref || "credit"} {money(c.amount)}{i < r.credits.length - 1 ? " ·" : ""}</span>)}
             </div>
           ) : null}
+          <PayPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice}
+            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: prev.rows.map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
         </div>
       )}
     </div>
