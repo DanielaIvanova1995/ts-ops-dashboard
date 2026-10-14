@@ -1331,7 +1331,7 @@ def invoices():
     out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
             "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
-            "order_url": i.get("order_url"),
+            "order_url": i.get("order_url"), "order_item_id": i.get("order_item_id"),
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
     return {"count": len(out), "invoices": out}
 
@@ -1820,12 +1820,13 @@ def invoice_fix_margins(body: FixMarginsIn):
 
 
 @app.get("/invoices/{sub_id}/order", dependencies=[Depends(require_key)])
-def invoice_order_view(sub_id: str):
+def invoice_order_view(sub_id: str, order_item_id: str | None = None):
     """The Monday-like order view for an invoice: the parent order (totals, margin, stage, supplier),
     its INV1..INV6 slots (and what's in each), and every sibling invoice on that order — so the whole
-    order can be seen (and amended) from the checker without opening Monday."""
+    order can be seen (and amended) from the checker without opening Monday. Pass order_item_id (the
+    checker list already has it) so the order is read directly rather than via the subitem's parent."""
     try:
-        view = ds.fetch_invoice_order_view(sub_id)
+        view = ds.fetch_invoice_order_view(sub_id, order_item_id=order_item_id)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the order from Monday: {e}")
     if not view:

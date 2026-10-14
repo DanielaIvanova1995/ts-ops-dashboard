@@ -548,7 +548,7 @@ export default function Invoices() {
                 </div>
               </div>
 
-              {orderOpen.has(iv.sub_id) && <OrderPanel sub_id={iv.sub_id} jsonFetch={jsonFetch} onNotice={setNotice} />}
+              {orderOpen.has(iv.sub_id) && <OrderPanel sub_id={iv.sub_id} orderItemId={iv.order_item_id} jsonFetch={jsonFetch} onNotice={setNotice} />}
               {approveMsg[iv.sub_id] && <div className={`route-msg ${approveMsg[iv.sub_id].kind}`} style={{ margin: "0 14px 12px" }}>{approveMsg[iv.sub_id].text}</div>}
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
               {r && r.ok && (
@@ -598,7 +598,7 @@ export default function Invoices() {
   );
 }
 
-function OrderPanel({ sub_id, jsonFetch, onNotice }) {
+function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -609,7 +609,7 @@ function OrderPanel({ sub_id, jsonFetch, onNotice }) {
   const load = useCallback(async () => {
     setLoading(true); setErr("");
     try {
-      const r = await jsonFetch(`/invoices/${sub_id}/order`);
+      const r = await jsonFetch(`/invoices/${sub_id}/order${orderItemId ? `?order_item_id=${encodeURIComponent(orderItemId)}` : ""}`);
       if (!r.ok) throw new Error(`API ${r.status}`);
       const d = await r.json();
       setData(d);
@@ -618,7 +618,7 @@ function OrderPanel({ sub_id, jsonFetch, onNotice }) {
       setNote(cur ? cur.note : "");
     } catch (e) { if (String(e.message) !== "unauthorised") setErr(String(e.message || e)); }
     finally { setLoading(false); }
-  }, [sub_id, jsonFetch]);
+  }, [sub_id, orderItemId, jsonFetch]);
   useEffect(() => { load(); }, [load]);
 
   async function saveInv(i) {

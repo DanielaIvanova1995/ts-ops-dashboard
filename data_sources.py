@@ -4147,28 +4147,49 @@ ORDER_VIEW_COLS = {
 ORDER_EDITABLE_COLS = set(INV_TOTAL_COLS) | {"numbers48", "numbers6"}
 
 
-def fetch_invoice_order_view(sub_id, token: str | None = None) -> dict | None:
-    """For the invoice checker's Monday-like order panel: given an invoice subitem id, return its
-    parent ORDER (key columns + INV1..INV6 slots) and ALL the sibling invoices on that order, so the
-    whole order can be seen and amended without opening Monday. Returns None if not found."""
+def _resolve_parent_order_id(sub_id, token) -> str | None:
+    """The parent ORDER item id for an invoice subitem (via its parent_item). Returns None if it
+    can't be resolved — callers should pass order_item_id directly where they already have it."""
+    q = "query ($sub: [ID!]) { items(ids: $sub) { id parent_item { id } } }"
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"sub": [str(sub_id)]}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    items = ((r.json().get("data") or {}).get("items")) or []
+    parent = (items[0].get("parent_item") if items else None) or None
+    return str(parent.get("id")) if parent and parent.get("id") else None
+
+
+def fetch_invoice_order_view(sub_id, order_item_id=None, token: str | None = None) -> dict | None:
+    """For the invoice checker's Monday-like order panel: the parent ORDER (key columns + INV1..INV6
+    slots) and ALL the sibling invoices on it, so the whole order can be seen and amended without
+    opening Monday. Pass order_item_id when known (reliable — the Orders board is always accessible);
+    otherwise it's resolved from the subitem's parent. Returns None if the order can't be found."""
     import re as _re
     token = token or get_token()
     if not token:
         raise RuntimeError("No MONDAY_API_TOKEN configured")
+    oid = str(order_item_id) if order_item_id else None
+    if not oid:
+        try:
+            oid = _resolve_parent_order_id(sub_id, token)
+        except Exception:  # noqa: BLE001
+            oid = None
+    if not oid:
+        return None
     inv_ids = ", ".join(f'"{c}"' for c in INV_TOTAL_COLS)
     order_ids = ", ".join(f'"{c}"' for c in ORDER_VIEW_COLS)
-    q = ("query ($sub: [ID!]) { items(ids: $sub) { id parent_item { id name "
+    q = ("query ($oid: [ID!]) { items(ids: $oid) { id name "
          f"column_values(ids: [{order_ids}, {inv_ids}]) {{ id text ... on FormulaValue {{ display_value }} }} "
          'subitems { id name column_values(ids: ["numbers4","status7__1","text_mm3gh2za","date_mm3d1ear"]) '
-         "{ id text } } } } }")
-    r = requests.post(MONDAY_API, json={"query": q, "variables": {"sub": [str(sub_id)]}},
+         "{ id text } } } }")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"oid": [oid]}},
                       headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
     r.raise_for_status()
     payload = r.json()
     if "errors" in payload:
         raise RuntimeError(f"Monday API error: {payload['errors']}")
     items = (payload.get("data") or {}).get("items") or []
-    parent = (items[0].get("parent_item") if items else None) or None
+    parent = items[0] if items else None
     if not parent:
         return None
 
