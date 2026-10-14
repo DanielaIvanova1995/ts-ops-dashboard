@@ -621,15 +621,21 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   }, [sub_id, orderItemId, jsonFetch]);
   useEffect(() => { load(); }, [load]);
 
-  async function saveInv(i) {
-    const row = inv[i];
-    const val = row.edit === "" ? null : Number(row.edit);
-    setSaving(row.col);
+  const orig = (row) => (row.value == null ? "" : String(row.value));
+  const dirty = inv.some((row) => row.edit !== orig(row));
+  async function saveSlots() {
+    const changed = inv.filter((row) => row.edit !== orig(row));
+    if (!changed.length) return;
+    setSaving("slots");
     try {
-      const r = await jsonFetch("/invoices/order-set", { method: "POST", body: JSON.stringify({ order_item_id: data.order.order_item_id, col: row.col, value: val }) });
-      const dd = await r.json().catch(() => ({}));
-      if (r.ok && dd.ok) { onNotice({ kind: "ok", text: `${row.label} saved on Monday.` }); load(); }
-      else onNotice({ kind: "warn", text: dd.detail || "Couldn’t save." });
+      for (const row of changed) {
+        const val = row.edit === "" ? null : Number(row.edit);
+        const r = await jsonFetch("/invoices/order-set", { method: "POST", body: JSON.stringify({ order_item_id: data.order.order_item_id, col: row.col, value: val }) });
+        const dd = await r.json().catch(() => ({}));
+        if (!r.ok || !dd.ok) { onNotice({ kind: "warn", text: `${row.label}: ${dd.detail || "couldn’t save"}` }); return; }
+      }
+      onNotice({ kind: "ok", text: `Saved ${changed.length} slot${changed.length > 1 ? "s" : ""} on Monday.` });
+      load();
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setSaving(""); }
   }
@@ -650,38 +656,41 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   const o = data.order;
   return (
     <div className="inv-body order-panel">
-      <div className="op-head">
-        <b>Order {o.order_no || o.name}</b>
-        <span className="sub"> · {o.customer || "—"} · {o.supplier || "—"}</span>
-        {o.stage ? <span className="pill grey">{o.stage}</span> : null}
-        {o.payment_status ? <span className="pill grey">{o.payment_status}</span> : null}
-      </div>
-      <div className="op-money">
-        <span>£ to us <b>{money(o.sell_n)}</b></span>
-        <span>£ to supplier <b>{money(o.cost_n)}</b></span>
-        <span>Margin <b>{o.margin || "—"}</b></span>
-        <span>Invoiced so far <b>{o.invoiced_total != null ? money(o.invoiced_total) : "—"}</b></span>
-      </div>
-      <div className="op-inv">
-        <div className="tool-label">Invoice slots — edit &amp; save straight to Monday</div>
-        <div className="op-inv-grid">
-          {inv.map((row, i) => (
-            <div className={`op-inv-cell${row.value != null ? " filled" : ""}`} key={row.col}>
-              <span className="sub">{row.label}</span>
-              <input className="numin" type="number" value={row.edit} onChange={(e) => setInv((xs) => xs.map((x, j) => (j === i ? { ...x, edit: e.target.value } : x)))} style={{ width: 82 }} />
-              <button className="btn ghost" onClick={() => saveInv(i)} disabled={saving === row.col}>{saving === row.col ? "…" : "Save"}</button>
-            </div>
-          ))}
+      <div className="op-card">
+        <div className="op-head">
+          <b>Order {o.order_no || o.name}</b>
+          {o.stage ? <span className="pill grey">{o.stage}</span> : null}
+        </div>
+        <div className="sub op-sub">{o.customer || "—"} · {o.supplier || "—"}{o.payment_status ? ` · ${o.payment_status}` : ""}</div>
+        <div className="op-stats">
+          <div className="op-stat"><span>£ to us</span><b>{money(o.sell_n)}</b></div>
+          <div className="op-stat"><span>£ to supplier</span><b>{money(o.cost_n)}</b></div>
+          <div className="op-stat"><span>Margin</span><b>{o.margin || "—"}</b></div>
+          <div className="op-stat"><span>Invoiced so far</span><b>{o.invoiced_total != null ? money(o.invoiced_total) : "—"}</b></div>
         </div>
       </div>
-      <div className="op-sibs">
-        <div className="tool-label">Invoices on this order ({data.invoices.length})</div>
-        <table className="mini">
+
+      <div className="op-card">
+        <div className="op-card-head"><span>Invoice slots</span>{dirty ? <button className="btn primary sm" onClick={saveSlots} disabled={saving === "slots"}>{saving === "slots" ? "Saving…" : "Save changes"}</button> : null}</div>
+        <div className="op-inv-grid">
+          {inv.map((row, i) => (
+            <label className={`op-inv-cell${row.value != null ? " filled" : ""}${row.edit !== orig(row) ? " dirty" : ""}`} key={row.col}>
+              <span>{row.label}</span>
+              <input className="op-inv-in" type="number" inputMode="decimal" value={row.edit} placeholder="—" onChange={(e) => setInv((xs) => xs.map((x, j) => (j === i ? { ...x, edit: e.target.value } : x)))} />
+            </label>
+          ))}
+        </div>
+        <div className="sub op-hint">Type a figure in a slot and hit <b>Save changes</b> — it writes straight to Monday.</div>
+      </div>
+
+      <div className="op-card">
+        <div className="op-card-head"><span>Invoices on this order ({data.invoices.length})</span></div>
+        <table className="mini op-sibs">
           <thead><tr><th>Invoice</th><th className="num">Total</th><th>Status</th><th>Date</th></tr></thead>
           <tbody>
             {data.invoices.map((s, i) => (
               <tr key={i} className={s.is_current ? "od" : ""}>
-                <td className="ono">{s.name}{s.is_current ? " ← this one" : ""}</td>
+                <td className="ono">{s.name}{s.is_current ? <span className="sub"> · this one</span> : null}</td>
                 <td className="num">{s.total != null ? money(s.total) : "—"}</td>
                 <td className="sub">{s.status || "—"}</td>
                 <td className="sub">{s.date || "—"}</td>
@@ -689,12 +698,12 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
             ))}
           </tbody>
         </table>
+        {o.order_items ? <details className="op-items"><summary className="sub">Order items</summary><div className="sub" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{o.order_items}</div></details> : null}
       </div>
-      {o.order_items ? <details className="op-items"><summary className="sub">Order items</summary><div className="sub" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{o.order_items}</div></details> : null}
-      <div className="op-note">
-        <div className="tool-label">Note (saved to Monday)</div>
+
+      <div className="op-card">
+        <div className="op-card-head"><span>Note</span><button className="btn sm" onClick={saveNote} disabled={saving === "note"}>{saving === "note" ? "Saving…" : "Save note"}</button></div>
         <textarea className="op-note-ta" value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Why this invoice is stuck, what you've checked, what's needed…" />
-        <button className="btn" onClick={saveNote} disabled={saving === "note"}>{saving === "note" ? "Saving…" : "Save note"}</button>
       </div>
     </div>
   );
