@@ -462,6 +462,10 @@ table.mini td { padding: 5px 6px; border-bottom: 1px solid #F0F1F4; vertical-ali
 .op-sibs th, .op-sibs td { padding: 5px 8px; }
 .op-sibs tr.cn td { color: #b4232a; }
 .op-sibs tr.cn .num { font-weight: 700; }
+.op-alarm { background: #fdecec; border: 1px solid #f3b4b4; border-radius: 10px; padding: 10px 12px; color: #a01b22; }
+.op-alarm-head { font-weight: 800; font-size: 13px; margin-bottom: 4px; }
+.op-alarm ul { margin: 0 0 4px; padding-left: 18px; font-size: 12.5px; line-height: 1.45; }
+.op-alarm .sub { color: #a01b22; opacity: .85; }
 .op-net { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .op-net b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .op-note-ta { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; color: var(--ink); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }

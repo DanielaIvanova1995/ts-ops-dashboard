@@ -701,8 +701,30 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   const isCN = (s) => (typeof s.total === "number" && s.total < 0) || /credit|^\s*c?n\b|scn/i.test(s.status || "") || /^(cn|scn|crn)/i.test(s.name || "");
   const net = sibs.reduce((a, x) => a + (typeof x.total === "number" ? x.total : 0), 0);
   const anyCredit = sibs.some(isCN);
+
+  // Alarm: each invoice total should fill exactly ONE INV slot. Compare the multiset of filled slot
+  // values against the multiset of invoice totals — a value in more slots than invoices is a
+  // double-count; a value on more invoices than slots is a missing total (margin reads too high).
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const slotVals = inv.map((x) => x.value).filter((v) => typeof v === "number").map(round2);
+  const invVals = sibs.map((s) => s.total).filter((v) => typeof v === "number").map(round2);
+  const ms = {}, mi = {};
+  slotVals.forEach((v) => { const k = v.toFixed(2); ms[k] = (ms[k] || 0) + 1; });
+  invVals.forEach((v) => { const k = v.toFixed(2); mi[k] = (mi[k] || 0) + 1; });
+  const alarms = [];
+  Object.keys(ms).forEach((k) => { if (ms[k] > (mi[k] || 0)) alarms.push(`£${k} is in ${ms[k]} invoice slots but only ${mi[k] || 0} invoice${(mi[k] || 0) === 1 ? "" : "s"} has that total — it's likely been entered more than once, which double-counts the order.`); });
+  Object.keys(mi).forEach((k) => { if (mi[k] > (ms[k] || 0)) alarms.push(`£${k} is on ${mi[k]} invoice${mi[k] === 1 ? "" : "s"} but only ${ms[k] || 0} slot${(ms[k] || 0) === 1 ? "" : "s"} — a total is missing from the order, so the margin will read too high.`); });
+  if (!alarms.length && slotVals.length !== invVals.length) alarms.push(`${slotVals.length} invoice slot(s) filled but ${invVals.length} invoice(s) on the order — each invoice total should fill exactly one slot.`);
+
   return (
     <div className="inv-body order-panel">
+      {alarms.length ? (
+        <div className="op-alarm">
+          <div className="op-alarm-head">⚠ Invoice slots don’t match the invoices</div>
+          <ul>{alarms.map((a, i) => <li key={i}>{a}</li>)}</ul>
+          <div className="sub">Fix the INV slots below so each invoice total sits in one slot, then the order margin is right.</div>
+        </div>
+      ) : null}
       <div className="op-card">
         <div className="op-head">
           <b>Order {o.order_no || o.name}</b>
