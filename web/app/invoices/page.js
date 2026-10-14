@@ -593,9 +593,8 @@ export default function Invoices() {
                   {al && <span className={`pill ${al.cls}`}>{al.text}</span>}
                   <button className={`btn ghost ${orderOpen.has(iv.sub_id) ? "on" : ""}`} onClick={() => toggleOrder(iv.sub_id)} title="See & edit this order on Monday">Monday {orderOpen.has(iv.sub_id) ? "▾" : "▸"}</button>
                   {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer" title="Open this order in Shopify">Shopify ↗</a>}
-                  {!iv.has_pdf
-                    ? <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>
-                    : <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
+                  {!iv.has_pdf && <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>}
+                  <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy} title={!iv.has_pdf ? "No PDF — for no-pricelist suppliers this checks on the order margin alone" : "Check this invoice"}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>
                   {r && r.ok && approving[iv.sub_id] === "done" && <span className="pill green">approved ✓</span>}
                   {r && r.ok && approving[iv.sub_id] === "flagged" && <span className="pill red">flagged</span>}
                   {r && r.ok && approving[iv.sub_id] !== "done" && approving[iv.sub_id] !== "flagged" && (
@@ -628,25 +627,31 @@ export default function Invoices() {
                       {blocking.length === 0 ? <div className="sub accepted-ok">All issues accepted — you can Approve → QB.</div> : <div className="sub">Accept a line to say the charge is fine (margin’s healthy) — once all are accepted you can approve it cleanly.</div>}
                     </div>
                   ) : null}
-                  <table className="mini">
-                    <thead><tr><th>SKU</th><th>Description</th><th className="num">Qty</th><th className="num">Unit</th><th>Check</th></tr></thead>
-                    <tbody>
-                      {(r.lines || []).map((l, i) => {
-                        const probs = (l.issues || []).filter((x) => x[0] !== "name");
-                        const notes = (l.issues || []).map((x) => x[1]);
-                        return (
-                          <tr key={i}>
-                            <td className="sub">{l.sku || "—"}</td>
-                            <td>{l.desc || "—"}{notes.length ? <div className={`sub ${probs.length ? "mred" : ""}`}>{notes.join(" · ")}</div> : null}</td>
-                            <td className="num">{l.qty ?? "—"}</td>
-                            <td className="num">{l.unit != null ? money(l.unit) : "—"}</td>
-                            <td>{probs.length ? (isAcc(`L${i}`) ? <span className="pill grey">accepted</span> : <span className="pill red">issue</span>) : <span className="pill green">ok</span>}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist — use Approve → QB to push the bill to QuickBooks." : `${r.n_issues} issue(s) found — resolve & re-check, or “Push to QB anyway” if you’re happy to approve it.`}</div>
+                  {r.no_pdf ? (
+                    <div className="sub" style={{ marginTop: 2 }}>No PDF attached — checked on the <b>order margin only</b> (no pricelist held for {r.supplier}). {r.margin != null ? <>Margin <b>{r.margin}%</b> — </> : null}{r.suggested_action === "push" ? "clear to Approve → QB." : r.suggested_action === "hold" ? "below the 10% threshold, so held for review." : "review before approving."}</div>
+                  ) : (
+                    <>
+                      <table className="mini">
+                        <thead><tr><th>SKU</th><th>Description</th><th className="num">Qty</th><th className="num">Unit</th><th>Check</th></tr></thead>
+                        <tbody>
+                          {(r.lines || []).map((l, i) => {
+                            const probs = (l.issues || []).filter((x) => x[0] !== "name");
+                            const notes = (l.issues || []).map((x) => x[1]);
+                            return (
+                              <tr key={i}>
+                                <td className="sub">{l.sku || "—"}</td>
+                                <td>{l.desc || "—"}{notes.length ? <div className={`sub ${probs.length ? "mred" : ""}`}>{notes.join(" · ")}</div> : null}</td>
+                                <td className="num">{l.qty ?? "—"}</td>
+                                <td className="num">{l.unit != null ? money(l.unit) : "—"}</td>
+                                <td>{probs.length ? (isAcc(`L${i}`) ? <span className="pill grey">accepted</span> : <span className="pill red">issue</span>) : <span className="pill green">ok</span>}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <div className="sub" style={{ marginTop: 6 }}>{r.matched ? "All lines match the order & pricelist — use Approve → QB to push the bill to QuickBooks." : `${r.n_issues} issue(s) found — resolve & re-check, or “Push to QB anyway” if you’re happy to approve it.`}</div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

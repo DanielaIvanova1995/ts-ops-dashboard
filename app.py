@@ -1755,7 +1755,7 @@ def _push_decision(matched, is_cn, live_margin, supplier=None, has_discount=Fals
 # Suppliers to skip in the invoice checker entirely (substrings of the normalised supplier
 # name). MB Decor is paid in advance, so nothing needs checking — remove from here to switch
 # it back on.
-EXCLUDED_SUPPLIER_KEYS = ("mbdecor",)
+EXCLUDED_SUPPLIER_KEYS = ()   # MB Decor brought back into the checker 2026-10-14 (auto-approve 10%+)
 
 
 def _is_excluded_supplier(supplier):
@@ -2217,6 +2217,13 @@ SUPPLIER_RULES = {
                  "flag_below": True, "flag_high": True, "delivery_any": True},
     "huws": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
              "flag_below": True, "flag_high": True, "delivery_any": True},
+    # MB Decor: pricelist not loaded yet, so the ORDER MARGIN is the safeguard. Auto-approve a
+    # matched invoice at 10%+ with NO upper cap; below 10% → Needs Review (Daniela 2026-10-14,
+    # interim until the MB Decor pricelist is uploaded). Approvable even with no PDF attached.
+    "mbdecor": {"name": "MB Decor", "no_pricelist": True, "push_min": 10.0,
+                "flag_high": False, "flag_below": True, "delivery_any": True},
+    "mbdecorltd": {"name": "MB Decor", "no_pricelist": True, "push_min": 10.0,
+                   "flag_high": False, "flag_below": True, "delivery_any": True},
 }
 
 

@@ -1382,6 +1382,22 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found in Needs Review")
     if not inv.get("asset_id"):
+        # No PDF: for a supplier we hold no pricelist for (e.g. MB Decor, interim), there's nothing to
+        # line-check against — the ORDER MARGIN is the safeguard. Return a margin-only verdict so it's
+        # still approvable (Daniela 2026-10-14: "approve 10%+ even if there is no pdf").
+        sup = inv.get("supplier")
+        rule = core.SUPPLIER_RULES.get(core.norm_code(sup), {})
+        if rule.get("no_pricelist"):
+            margin = inv.get("order_margin_live")
+            _lo = lo if lo is not None else core.MARGIN_PUSH_MIN
+            _hi = hi if hi is not None else core.MARGIN_PUSH_MAX
+            label, action = core.push_decision(True, False, margin, sup, _lo, _hi)
+            return {"ok": True, "matched": True, "n_issues": 0, "incomplete": False, "missing": [],
+                    "lines": [], "verdict": {"order": True, "price": None, "incomplete": False},
+                    "margin": margin, "supplier": sup, "invoice_no": inv.get("invoice_no"),
+                    "order_no": inv.get("order_no"), "total": None, "no_pdf": True,
+                    "suggested_action": action, "suggested_label": label,
+                    "discrepancy_reason": None}
         return {"ok": False, "detail": "no PDF attached to this invoice"}
     parsed = None
     try:
