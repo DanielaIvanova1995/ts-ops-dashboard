@@ -2005,7 +2005,7 @@ _OV_PATH = Path(__file__).resolve().parent.parent / "price_overrides.json"
 _DELIV_NAMES = {"upb": "UPB", "nbp": "NBP", "eurocell": "Eurocell", "travisperkins": "Travis Perkins",
                 "gap": "GAP", "pjh": "PJH", "molan": "Molan", "decor8": "Decor8",
                 "chasehardware": "Chase Hardware", "bricklink": "Bricklink", "markovitz": "Markovitz",
-                "storm": "Storm"}
+                "storm": "Storm", "mbdecor": "MB Decor"}
 
 
 def _load_json(path):
@@ -2129,7 +2129,7 @@ _DELIV_CATEGORY = {
     "bricklink": _UMBRELLA_BUILDING,
     "pjh": "Bathrooms & plumbing", "carron": "Bathrooms & plumbing",
     "molan": "Polycarbonate & roofing", "storm": "Polycarbonate & roofing",
-    "decor8": "Paint & decorating",
+    "decor8": "Paint & decorating", "mbdecor": "Paint & decorating",
     "chase hardware": "Ironmongery & hardware",
     "ctie": "Electricals",
     "jb kind": "Internal doors", "lpd": "Internal doors", "deanta": "Internal doors",
@@ -2194,6 +2194,9 @@ def _delivery_catalog():
          "notes": "", "detail": None},
         {"supplier": "Southern Sheeting", "basis": "Postcode zone", "we_pay": "by postcode colour zone",
          "free_over": "by zone", "customer": "Set in Shopify shipping", "notes": "", "detail": None},
+        {"supplier": "MB Decor", "basis": "Flat rate", "we_pay": "£25 (£35 Greater London)",
+         "free_over": "no free threshold", "customer": "Set in Shopify shipping",
+         "notes": "£25 standard delivery; £35 for Greater London postcodes.", "detail": None},
         {"supplier": "Storm", "basis": "Per product type", "we_pay": "£21+VAT poly / £80 decking / £80 cladding",
          "free_over": "no free threshold", "customer": "Set in Shopify shipping",
          "notes": "Polycarbonate sheeting carriage doubles to Scotland.",

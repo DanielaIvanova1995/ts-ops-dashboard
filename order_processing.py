@@ -636,6 +636,7 @@ DELIVERY_TO_US = {
     "molan": (23.74, None), "decor8": (5.99, 50), "deanta": (8.00, None),
     "chasehardware": (10.00, None), "bricklink": (16.99, 100),
     "vista": (20.00, None),   # Daniela 2026-08-24 — confirm any free-over threshold
+    "mbdecor": (25.00, None),  # £25 standard; £35 Greater London (handled in the delivery catalog)
 }
 
 
