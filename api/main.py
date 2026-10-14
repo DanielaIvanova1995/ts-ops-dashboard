@@ -1516,7 +1516,14 @@ def process_order(item_id: str):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't route: {e}")
     if res.get("split"):
-        return {"ok": False, "order": tag, "result": "splits across suppliers — handle manually",
+        # Multi-supplier order → TradeHub splits it automatically (a part per supplier, each with its
+        # own priced PO). Never emails a supplier (splits are excluded from PO auto-send).
+        try:
+            msg = op._process_split(o, res)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Auto-split failed: {e}")
+        return {"ok": True, "order": tag, "route": "SPLIT",
+                "result": "multi-supplier — TradeHub split it automatically: " + msg,
                 "summary": routing.summary(res)}
     sup, route_ = res.get("overall_supplier"), res.get("route")
     if route_ == "WDL":                                          # heritage/bifold/uPVC doors → Daniela's group
