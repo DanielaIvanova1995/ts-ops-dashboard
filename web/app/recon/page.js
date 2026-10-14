@@ -246,6 +246,16 @@ export default function Recon() {
   }, [accessKey, jsonFetch]);
   useEffect(() => { loadSaved(); }, [loadSaved]);
 
+  async function dismissSaved(s) {
+    if (!window.confirm(`Remove the saved ${s.supplier} statement from the list? (It won't touch QuickBooks or any payments.)`)) return;
+    try {
+      const res = await jsonFetch("/recon/dismiss", { method: "POST", body: JSON.stringify({ key: s.key, vid: s.vid }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setSaved((xs) => xs.filter((x) => x.key !== s.key)); setNotice({ kind: "ok", text: `Removed ${s.supplier}.` }); }
+      else setNotice({ kind: "warn", text: d.detail || "Couldn’t remove it." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
   async function openSaved(key) {
     try {
       const res = await jsonFetch(`/recon/open?key=${encodeURIComponent(key)}`);
@@ -375,15 +385,16 @@ export default function Recon() {
 
       {saved.length > 0 && (
         <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
-          <div className="tool-label" style={{ marginBottom: 8 }}>Saved statements — still to pay</div>
+          <div className="tool-label" style={{ marginBottom: 8 }}>Saved statements</div>
           <div className="saved-list">
             {saved.map((s) => (
-              <div key={s.key} className="saved-row">
+              <div key={s.key} className={`saved-row${s.settled ? " settled" : ""}`}>
                 <div><b>{s.supplier}</b> <span className="sub">{s.statement_date ? `· ${s.statement_date} ` : ""}{s.saved_at ? `· saved ${s.saved_at}` : ""}</span></div>
                 <div className="saved-right">
-                  <span className="chip amber"><b>{s.n_pay}</b> ready · {money(s.to_pay)}</span>
+                  {s.settled ? <span className="chip grey">settled ✓</span> : <span className="chip amber"><b>{s.n_pay}</b> ready · {money(s.to_pay)}</span>}
                   {s.n_missing ? <span className="chip red">{s.n_missing} not in QB</span> : null}
                   <button className="btn" onClick={() => openSaved(s.key)}>Open</button>
+                  <button className="btn ghost" onClick={() => dismissSaved(s)} title="Remove this saved statement from the list">Remove</button>
                 </div>
               </div>
             ))}

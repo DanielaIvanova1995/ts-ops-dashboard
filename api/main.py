@@ -1036,33 +1036,45 @@ def recon_saved():
         pay_lines = snap.get("pay_lines") or []
         to_pay = snap.get("to_pay") or 0
         n_out = snap.get("n_pay") or 0
+        settled = False
         try:
-            if vid and pay_lines:
+            if vid and pay_lines:                        # live re-check: how much is still unpaid in QB
                 bills = ds.qbo_vendor_bills(vid)
                 open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
                 outstanding = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
                 to_pay = round(sum(float(pl.get("amt") or 0) for pl in outstanding), 2)
                 n_out = len(outstanding)
-                if not outstanding:                      # all paid → auto-remove
-                    try:
-                        ds.recon_delete(key, vid=vid)
-                    except Exception:  # noqa: BLE001
-                        pass
-                    continue
+                settled = not outstanding                # all paid now — but KEEP it (don't auto-delete)
         except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
             pass
-        if not pay_lines and (snap.get("n_pay") or 0) == 0:   # nothing ever to pay → done
-            try:
-                ds.recon_delete(key, vid=vid)
-            except Exception:  # noqa: BLE001
-                pass
-            continue
+        if not pay_lines and (snap.get("n_pay") or 0) == 0:
+            settled = True                               # nothing outstanding — still KEEP it, just flag it
+        # NB: we no longer auto-delete saved reconciliations on load (that was making them "disappear").
+        # They stay until Daniela removes one with the Remove button (POST /recon/dismiss).
         out.append({"key": key, "vid": vid,
                     "supplier": snap.get("vendor_name") or snap.get("supplier"),
                     "statement_date": snap.get("statement_date"), "saved_at": snap.get("saved_at"),
-                    "to_pay": to_pay, "n_pay": n_out, "n_missing": snap.get("n_missing") or 0})
+                    "to_pay": to_pay, "n_pay": n_out, "n_missing": snap.get("n_missing") or 0,
+                    "settled": settled})
+    # Newest first, then push settled ones to the bottom (stable sort keeps the date order within each).
     out.sort(key=lambda s: str(s.get("saved_at") or ""), reverse=True)
+    out.sort(key=lambda s: 1 if s.get("settled") else 0)
     return {"saved": out}
+
+
+class DismissIn(BaseModel):
+    key: str
+    vid: str | None = None
+
+
+@app.post("/recon/dismiss", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_dismiss(body: DismissIn):
+    """Manually remove a saved reconciliation from the list (replaces the old auto-delete-on-load)."""
+    try:
+        ds.recon_delete(body.key, vid=body.vid)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't remove it: {e}")
+    return {"ok": True}
 
 
 def _norm_recon_row(r: dict) -> dict:

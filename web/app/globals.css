@@ -477,6 +477,7 @@ table.mini td { padding: 5px 6px; border-bottom: 1px solid #F0F1F4; vertical-ali
 .accepted-line { text-decoration: line-through; opacity: .6; }
 .accepted-line .accept-btn { text-decoration: none; }
 .accepted-ok { color: #1f8f4e; font-weight: 600; margin-top: 4px; }
+.saved-row.settled { opacity: .62; }
 .btn.ghost.on { color: var(--brand); border-color: var(--brand); }
 .login .sub { margin: 0 0 16px; }
 .loginform { display: flex; gap: 8px; }
