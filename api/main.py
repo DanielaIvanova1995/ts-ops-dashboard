@@ -1819,6 +1819,56 @@ def invoice_fix_margins(body: FixMarginsIn):
     return {"ok": True, "orders": len(done), "filled": filled}
 
 
+@app.get("/invoices/{sub_id}/order", dependencies=[Depends(require_key)])
+def invoice_order_view(sub_id: str):
+    """The Monday-like order view for an invoice: the parent order (totals, margin, stage, supplier),
+    its INV1..INV6 slots (and what's in each), and every sibling invoice on that order — so the whole
+    order can be seen (and amended) from the checker without opening Monday."""
+    try:
+        view = ds.fetch_invoice_order_view(sub_id)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the order from Monday: {e}")
+    if not view:
+        raise HTTPException(status_code=404, detail="No parent order found for this invoice")
+    return view
+
+
+class NoteIn(BaseModel):
+    note: str = ""
+
+
+@app.post("/invoices/{sub_id}/note", dependencies=[Depends(require_key)])
+def invoice_note(sub_id: str, body: NoteIn):
+    """Save a note on an invoice (subitem Notes column, text_mm3gh2za) — for invoices stuck for any
+    reason. Empty note clears it."""
+    try:
+        ds.set_subitem_text(sub_id, "text_mm3gh2za", (body.note or "")[:2000])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save the note on Monday: {e}")
+    return {"ok": True}
+
+
+class OrderFieldIn(BaseModel):
+    order_item_id: str
+    col: str                       # must be one of ds.ORDER_EDITABLE_COLS (INV1..INV6 / numbers48 / numbers6)
+    value: float | None = None     # None / "" clears the cell
+
+
+@app.post("/invoices/order-set", dependencies=[Depends(require_key)])
+def invoice_order_set(body: OrderFieldIn):
+    """Amend an editable column on the parent ORDER from the checker: an INV1..INV6 slot, '£ to us'
+    (numbers48) or '£ to supplier' (numbers6). Writes straight to Monday."""
+    if body.col not in ds.ORDER_EDITABLE_COLS:
+        raise HTTPException(status_code=400, detail="That column can't be edited from here")
+    if not body.order_item_id:
+        raise HTTPException(status_code=400, detail="order_item_id is required")
+    try:
+        ds.set_order_number(body.order_item_id, body.col, body.value)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't write to Monday: {e}")
+    return {"ok": True}
+
+
 @app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
 def invoice_import_issues(limit: int = 100):
     """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and

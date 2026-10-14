@@ -4136,6 +4136,77 @@ def op_rename_item(item_id, new_name: str, token: str | None = None, attempts: i
 INV_TOTAL_COLS = ["numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
                   "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm6agswe"]
 
+# Orders-board columns shown in the invoice checker's "Monday-like" order panel (id → friendly key).
+ORDER_VIEW_COLS = {
+    "text_mkv6z0nt": "order_no", "text2": "customer", "dropdown_mkyqdeqd": "supplier",
+    "numbers48": "sell", "numbers6": "cost", "numeric": "total_cost",
+    "order_items0": "order_items", "color_mktyje8e": "stage", "color_mktydktf": "payment_status",
+    "formula_mkn9918j": "margin", "formula_1_mkm5v6as": "profit",
+}
+# Which order columns the checker is allowed to WRITE (INV slots + the two money columns).
+ORDER_EDITABLE_COLS = set(INV_TOTAL_COLS) | {"numbers48", "numbers6"}
+
+
+def fetch_invoice_order_view(sub_id, token: str | None = None) -> dict | None:
+    """For the invoice checker's Monday-like order panel: given an invoice subitem id, return its
+    parent ORDER (key columns + INV1..INV6 slots) and ALL the sibling invoices on that order, so the
+    whole order can be seen and amended without opening Monday. Returns None if not found."""
+    import re as _re
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    inv_ids = ", ".join(f'"{c}"' for c in INV_TOTAL_COLS)
+    order_ids = ", ".join(f'"{c}"' for c in ORDER_VIEW_COLS)
+    q = ("query ($sub: [ID!]) { items(ids: $sub) { id parent_item { id name "
+         f"column_values(ids: [{order_ids}, {inv_ids}]) {{ id text ... on FormulaValue {{ display_value }} }} "
+         'subitems { id name column_values(ids: ["numbers4","status7__1","text_mm3gh2za","date_mm3d1ear"]) '
+         "{ id text } } } } }")
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"sub": [str(sub_id)]}},
+                      headers={"Authorization": token, "API-Version": "2024-10"}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    items = (payload.get("data") or {}).get("items") or []
+    parent = (items[0].get("parent_item") if items else None) or None
+    if not parent:
+        return None
+
+    def _num(t):
+        if t in (None, ""):
+            return None
+        s = _re.sub(r"[^0-9.\-]", "", str(t))
+        try:
+            return float(s) if s not in ("", "-", ".", "-.") else None
+        except (TypeError, ValueError):
+            return None
+
+    cv = {}
+    for c in parent.get("column_values") or []:
+        cv[c["id"]] = c.get("display_value") if c.get("display_value") is not None else c.get("text")
+    order = {"order_item_id": parent.get("id"), "name": parent.get("name")}
+    for col, key in ORDER_VIEW_COLS.items():
+        order[key] = cv.get(col)
+    order["sell_n"] = _num(cv.get("numbers48"))
+    order["cost_n"] = _num(cv.get("numbers6"))
+    inv, invoiced_total, any_inv = [], 0.0, False
+    for i, col in enumerate(INV_TOTAL_COLS, 1):
+        v = _num(cv.get(col))
+        if v is not None:
+            invoiced_total += v
+            any_inv = True
+        inv.append({"col": col, "label": f"INV{i}", "value": v})
+    order["inv"] = inv
+    order["invoiced_total"] = round(invoiced_total, 2) if any_inv else None
+    sibs = []
+    for s in parent.get("subitems") or []:
+        scv = {c["id"]: c.get("text") for c in (s.get("column_values") or [])}
+        sibs.append({"sub_id": s.get("id"), "name": s.get("name"),
+                     "total": _num(scv.get("numbers4")), "status": scv.get("status7__1"),
+                     "date": scv.get("date_mm3d1ear"), "note": scv.get("text_mm3gh2za") or "",
+                     "is_current": str(s.get("id")) == str(sub_id)})
+    return {"order": order, "invoices": sibs}
+
 
 def set_order_next_invoice_slot(order_item_id, total, skip_if_present: bool = False,
                                 token: str | None = None) -> str | None:

@@ -43,6 +43,8 @@ export default function Invoices() {
   const [discStatus, setDiscStatus] = useState("idle");
   const [unflagging, setUnflagging] = useState({}); // sub_id -> bool
   const [discCopied, setDiscCopied] = useState({}); // sub_id -> bool
+  const [orderOpen, setOrderOpen] = useState(() => new Set()); // sub_ids with the Monday order panel open
+  function toggleOrder(id) { setOrderOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
 
   useEffect(() => {
     try {
@@ -528,7 +530,8 @@ export default function Invoices() {
                 </div>
                 <div className="inv-right">
                   {al && <span className={`pill ${al.cls}`}>{al.text}</span>}
-                  {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer" title="Open this order in Shopify">Order ↗</a>}
+                  <button className={`btn ghost ${orderOpen.has(iv.sub_id) ? "on" : ""}`} onClick={() => toggleOrder(iv.sub_id)} title="See & edit this order on Monday">Monday {orderOpen.has(iv.sub_id) ? "▾" : "▸"}</button>
+                  {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer" title="Open this order in Shopify">Shopify ↗</a>}
                   {!iv.has_pdf
                     ? <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>
                     : <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>}
@@ -545,6 +548,7 @@ export default function Invoices() {
                 </div>
               </div>
 
+              {orderOpen.has(iv.sub_id) && <OrderPanel sub_id={iv.sub_id} jsonFetch={jsonFetch} onNotice={setNotice} />}
               {approveMsg[iv.sub_id] && <div className={`route-msg ${approveMsg[iv.sub_id].kind}`} style={{ margin: "0 14px 12px" }}>{approveMsg[iv.sub_id].text}</div>}
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
               {r && r.ok && (
@@ -590,6 +594,108 @@ export default function Invoices() {
         })}
       </div>
       </>)}
+    </div>
+  );
+}
+
+function OrderPanel({ sub_id, jsonFetch, onNotice }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [inv, setInv] = useState([]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const r = await jsonFetch(`/invoices/${sub_id}/order`);
+      if (!r.ok) throw new Error(`API ${r.status}`);
+      const d = await r.json();
+      setData(d);
+      setInv(d.order.inv.map((x) => ({ ...x, edit: x.value == null ? "" : String(x.value) })));
+      const cur = (d.invoices || []).find((s) => s.is_current);
+      setNote(cur ? cur.note : "");
+    } catch (e) { if (String(e.message) !== "unauthorised") setErr(String(e.message || e)); }
+    finally { setLoading(false); }
+  }, [sub_id, jsonFetch]);
+  useEffect(() => { load(); }, [load]);
+
+  async function saveInv(i) {
+    const row = inv[i];
+    const val = row.edit === "" ? null : Number(row.edit);
+    setSaving(row.col);
+    try {
+      const r = await jsonFetch("/invoices/order-set", { method: "POST", body: JSON.stringify({ order_item_id: data.order.order_item_id, col: row.col, value: val }) });
+      const dd = await r.json().catch(() => ({}));
+      if (r.ok && dd.ok) { onNotice({ kind: "ok", text: `${row.label} saved on Monday.` }); load(); }
+      else onNotice({ kind: "warn", text: dd.detail || "Couldn’t save." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setSaving(""); }
+  }
+  async function saveNote() {
+    setSaving("note");
+    try {
+      const r = await jsonFetch(`/invoices/${sub_id}/note`, { method: "POST", body: JSON.stringify({ note }) });
+      const dd = await r.json().catch(() => ({}));
+      if (r.ok && dd.ok) onNotice({ kind: "ok", text: "Note saved on Monday." });
+      else onNotice({ kind: "warn", text: dd.detail || "Couldn’t save the note." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setSaving(""); }
+  }
+
+  if (loading) return <div className="inv-body"><div className="state"><span className="spinner" />Reading the order from Monday…</div></div>;
+  if (err) return <div className="inv-body"><div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{err}</div></div>;
+  if (!data) return null;
+  const o = data.order;
+  return (
+    <div className="inv-body order-panel">
+      <div className="op-head">
+        <b>Order {o.order_no || o.name}</b>
+        <span className="sub"> · {o.customer || "—"} · {o.supplier || "—"}</span>
+        {o.stage ? <span className="pill grey">{o.stage}</span> : null}
+        {o.payment_status ? <span className="pill grey">{o.payment_status}</span> : null}
+      </div>
+      <div className="op-money">
+        <span>£ to us <b>{money(o.sell_n)}</b></span>
+        <span>£ to supplier <b>{money(o.cost_n)}</b></span>
+        <span>Margin <b>{o.margin || "—"}</b></span>
+        <span>Invoiced so far <b>{o.invoiced_total != null ? money(o.invoiced_total) : "—"}</b></span>
+      </div>
+      <div className="op-inv">
+        <div className="tool-label">Invoice slots — edit &amp; save straight to Monday</div>
+        <div className="op-inv-grid">
+          {inv.map((row, i) => (
+            <div className={`op-inv-cell${row.value != null ? " filled" : ""}`} key={row.col}>
+              <span className="sub">{row.label}</span>
+              <input className="numin" type="number" value={row.edit} onChange={(e) => setInv((xs) => xs.map((x, j) => (j === i ? { ...x, edit: e.target.value } : x)))} style={{ width: 82 }} />
+              <button className="btn ghost" onClick={() => saveInv(i)} disabled={saving === row.col}>{saving === row.col ? "…" : "Save"}</button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="op-sibs">
+        <div className="tool-label">Invoices on this order ({data.invoices.length})</div>
+        <table className="mini">
+          <thead><tr><th>Invoice</th><th className="num">Total</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {data.invoices.map((s, i) => (
+              <tr key={i} className={s.is_current ? "od" : ""}>
+                <td className="ono">{s.name}{s.is_current ? " ← this one" : ""}</td>
+                <td className="num">{s.total != null ? money(s.total) : "—"}</td>
+                <td className="sub">{s.status || "—"}</td>
+                <td className="sub">{s.date || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {o.order_items ? <details className="op-items"><summary className="sub">Order items</summary><div className="sub" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{o.order_items}</div></details> : null}
+      <div className="op-note">
+        <div className="tool-label">Note (saved to Monday)</div>
+        <textarea className="op-note-ta" value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Why this invoice is stuck, what you've checked, what's needed…" />
+        <button className="btn" onClick={saveNote} disabled={saving === "note"}>{saving === "note" ? "Saving…" : "Save note"}</button>
+      </div>
     </div>
   );
 }
