@@ -41,6 +41,33 @@ def resolve_clad_colour(stated, palette):
     return None, "unrecognised"
 
 
+def _clad_boards(clad, cov, openings, cav):
+    """Resolve the board count for a cladding take-off from ANY of three inputs: a number of boards,
+    a gross m² area, or height × width. `input_mode` picks which ("boards" | "hw" | "area", default
+    area). Returns (boards, net_m2, gross_m2, mode), or (None, 0, 0, mode) when the inputs don't give
+    a positive quantity. Appends a note when height × width was used to work the area out."""
+    mode = (clad.get("input_mode") or "area").lower()
+    height = clad.get("wall_height_m") or 0
+    width = clad.get("total_width_m") or 0
+    if mode == "boards":
+        boards = int(clad.get("board_count") or 0)
+        if boards <= 0:
+            return None, 0, 0, mode
+        net = boards * cov / 1.10          # back out an approx net area (for battens/trim sizing)
+        return boards, net, net + openings, mode
+    if mode == "hw":
+        gross = (height * width) if (height and width) else 0
+        if gross > 0:
+            cav.append(f"Area worked out from {height:.1f} m high × {width:.1f} m wide = {gross:.1f} m².")
+    else:
+        gross = clad.get("gross_area_m2") or 0
+    net = max(0.0, gross - openings)
+    if net <= 0:
+        return None, 0, 0, mode
+    boards = math.ceil(net / cov * 1.10)   # +10% waste
+    return boards, net, gross, mode
+
+
 def cedral_takeoff(clad):
     """Cedral fibre-cement cladding take-off. Boards (Cedral Lap ~0.53 m²/board, or Cedral Click
     ~0.60) + corner profiles + start/base profile + optional battens/fixings. Sizes every accessory
@@ -50,21 +77,22 @@ def cedral_takeoff(clad):
     is_click = "click" in prod_l
     product = "Cedral Click" if is_click else "Cedral Lap"
     cov = 0.60 if is_click else 0.53
-    gross = clad.get("gross_area_m2") or 0
     openings = clad.get("openings_m2") or 0
-    net = max(0.0, gross - openings)
-    if net <= 0:
+    cav = []
+    boards, net, gross, mode = _clad_boards(clad, cov, openings, cav)
+    if boards is None:
         return None, None
     colour_in = (clad.get("colour") or "").strip()
     colour, _chow = resolve_clad_colour(colour_in, CEDRAL_COLOURS)
     colour = colour or ""
-    cav = []
 
-    boards = math.ceil(net / cov * 1.10)     # +10% waste
     raw = [{"description": f"{product} cladding board" + (f" — {colour}" if colour else ""),
             "qty": boards, "search": f"{product} Plank {colour}".strip()}]
-    cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) ÷ "
-               f"{cov} m²/board + 10% waste = {boards} {product} boards.")
+    if mode == "boards":
+        cav.append(f"Quoting the {boards} {product} board(s) you specified (~{net:.1f} m²).")
+    else:
+        cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) ÷ "
+                   f"{cov} m²/board + 10% waste = {boards} {product} boards.")
     if not colour_in:
         cav.append("Colour/finish not confirmed — please confirm which Cedral colour you'd like.")
     elif _chow == "fuzzy":
@@ -148,22 +176,23 @@ def hardie_takeoff(clad):
     is_vl = any(k in _pl for k in ("vl", "click", "interlock"))
     product = "Hardie VL Plank" if is_vl else "Hardie Plank"
     cov = 0.72 if is_vl else 0.54          # VL Plank ~0.72 m²/board; lap HardiePlank 0.54
-    gross = clad.get("gross_area_m2") or 0
     openings = clad.get("openings_m2") or 0
-    net = max(0.0, gross - openings)
-    if net <= 0:
+    cav = []
+    boards, net, gross, mode = _clad_boards(clad, cov, openings, cav)
+    if boards is None:
         return None, None
     colour_in = (clad.get("colour") or "").strip()
     colour, _chow = resolve_clad_colour(colour_in, HARDIE_COLOURS)   # map 'sage green' → the real
     colour = colour or ""                                            #   Hardie colour, never default
-    cav = []
 
-    boards = math.ceil(net / cov * 1.10)   # +10% waste
     board_desc = f"{product} cladding board" + (f" — {colour}" if colour else "")
     raw = [{"description": board_desc, "qty": boards,
             "search": f"{product} {colour}".strip()}]
-    cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) "
-               f"÷ {cov} m²/board + 10% waste = {boards} boards.")
+    if mode == "boards":
+        cav.append(f"Quoting the {boards} {product} board(s) you specified (~{net:.1f} m²).")
+    else:
+        cav.append(f"Boards: {net:.1f} m² to clad ({gross:.1f} m² less {openings:.1f} m² openings) "
+                   f"÷ {cov} m²/board + 10% waste = {boards} boards.")
     if not colour_in:
         cav.append("Colour/finish not confirmed — please let us know which colour you'd like.")
     elif _chow == "fuzzy":

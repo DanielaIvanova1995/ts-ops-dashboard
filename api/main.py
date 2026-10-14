@@ -2152,7 +2152,9 @@ def pricing_delivery():
 class CedralQuoteIn(BaseModel):
     system: str = "Lap"                 # "Lap" or "Click"
     colour: str = ""
-    gross_area_m2: float
+    input_mode: str = "area"            # "area" | "hw" (height×width) | "boards"
+    board_count: int | None = None
+    gross_area_m2: float = 0.0
     openings_m2: float = 0.0
     wall_height_m: float | None = None
     total_width_m: float | None = None
@@ -2172,6 +2174,7 @@ def quote_cedral(body: CedralQuoteIn):
     import quote_core as qc
     import order_processing as op
     clad = {"product": f"Cedral {body.system}".strip(), "colour": body.colour,
+            "input_mode": body.input_mode, "board_count": body.board_count,
             "gross_area_m2": body.gross_area_m2, "openings_m2": body.openings_m2,
             "wall_height_m": body.wall_height_m, "total_width_m": body.total_width_m,
             "num_windows": body.num_windows, "external_corners": body.external_corners,
@@ -2236,7 +2239,9 @@ def quote_cedral(body: CedralQuoteIn):
 class HardieQuoteIn(BaseModel):
     system: str = "Lap"                 # "Lap" (HardiePlank) or "VL" (VL Plank / 'Click')
     colour: str = ""
-    gross_area_m2: float
+    input_mode: str = "area"            # "area" | "hw" (height×width) | "boards"
+    board_count: int | None = None
+    gross_area_m2: float = 0.0
     openings_m2: float = 0.0
     wall_height_m: float | None = None
     total_width_m: float | None = None
@@ -2260,6 +2265,7 @@ def quote_hardie(body: HardieQuoteIn):
     import order_processing as op
     sys_name = "Hardie VL Plank" if (body.system or "").lower() in ("vl", "click", "interlock") else "Hardie Plank"
     clad = {"product": sys_name, "colour": body.colour,
+            "input_mode": body.input_mode, "board_count": body.board_count,
             "gross_area_m2": body.gross_area_m2, "openings_m2": body.openings_m2,
             "wall_height_m": body.wall_height_m, "total_width_m": body.total_width_m,
             "num_windows": body.num_windows, "external_corners": body.external_corners,

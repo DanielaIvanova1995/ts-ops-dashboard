@@ -104,6 +104,21 @@ function money(v) {
 }
 function pct(v) { return v == null ? "—" : `${(v * 100).toFixed(1)}%`; }
 
+// Live Discount Desk (mirrors quote_core.discount_floor) so edited quantities update it instantly.
+const SHOPIFY_FEE = 0.018, ABANDONED_CART = 0.04;
+const DISC_BANDS = [[1500, 0.15, "Under £1.5k"], [5000, 0.25, "£1.5k–£5k"], [15000, 0.40, "£5k–£15k"], [Infinity, 0.60, "Over £15k"]];
+function discountFloor(orderValue, margin) {
+  const [, give, band] = DISC_BANDS.find(([cap]) => orderValue < cap);
+  const cost = orderValue * (1 - margin);
+  const floorMargin = Math.max(0.08, margin * (1 - give));
+  const floorPrice = floorMargin < 1 ? cost / (1 - floorMargin) : orderValue;
+  const maxDisc = Math.max(0, orderValue - floorPrice);
+  const noRoom = margin <= floorMargin || maxDisc <= 0;
+  const eff = noRoom ? orderValue : floorPrice;
+  const four = +(orderValue * (1 - ABANDONED_CART)).toFixed(2);
+  return { give, band, floor_price: eff, max_disc: noRoom ? 0 : maxDisc, no_room: noRoom, four_pc_price: four, four_breaches: four < eff };
+}
+
 export default function Quotes() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -112,7 +127,8 @@ export default function Quotes() {
   const [range, setRange] = useState("cedral");
   const [f, setF] = useState({
     // cladding
-    system: "Lap", colour: "", gross_area_m2: "", openings_m2: "", wall_height_m: "", total_width_m: "",
+    system: "Lap", colour: "", input_mode: "area", board_count: "",
+    gross_area_m2: "", openings_m2: "", wall_height_m: "", total_width_m: "",
     external_corners: "", internal_corners: "", num_windows: "",
     wants_trims: true, wants_battens: false, wants_screws: true, wants_epdm: false, wants_paint: false,
     // roof (molan)
@@ -125,6 +141,7 @@ export default function Quotes() {
   });
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
+  const [qlines, setQlines] = useState([]);   // editable copy of the take-off lines (quantities)
   const [err, setErr] = useState("");
   const [showGuide, setShowGuide] = useState(true);
 
@@ -159,7 +176,7 @@ export default function Quotes() {
   const num = (v) => (v === "" || v == null ? null : Number(v));
 
   function pickRange(r) {
-    setRange(r); setRes(null); setErr(""); setDraft(null); setCopied(false);
+    setRange(r); setRes(null); setQlines([]); setErr(""); setDraft(null); setCopied(false);
     setExtras([]); setPresults(null); setPsearch("");
     if (RANGES[r].kind === "clad") setF((s) => ({ ...s, system: RANGES[r].defaultSystem }));
   }
@@ -182,8 +199,10 @@ export default function Quotes() {
   function setExtraQty(i, q) { setExtras((x) => x.map((e, j) => (j === i ? { ...e, qty: Math.max(1, Number(q) || 1) } : e))); }
   function removeExtra(i) { setExtras((x) => x.filter((_, j) => j !== i)); }
 
+  function setLineQty(i, v) { setQlines((ls) => ls.map((l, j) => (j === i ? { ...l, qty: Math.max(0, Number(v) || 0) } : l))); }
+
   async function build() {
-    setErr(""); setRes(null); setDraft(null); setCopied(false); setExtras([]); setPresults(null);
+    setErr(""); setRes(null); setQlines([]); setDraft(null); setCopied(false); setExtras([]); setPresults(null);
     let body;
     if (cfg.kind === "roof") {
       if (!f.width || !f.rake) { setErr("Enter the roof span (width) and slope length."); return; }
@@ -198,9 +217,12 @@ export default function Quotes() {
       body = { width: Number(f.width), slope: Number(f.rake), sheet_width_mm: Number(f.st_width_mm),
         sheet_type: f.st_sheet_type, colour: f.st_colour, bar_colour: f.st_bar_colour, include_acc: f.include_acc };
     } else {
-      if (!f.gross_area_m2) { setErr("Enter the gross wall area (m²)."); return; }
+      if (f.input_mode === "area" && !f.gross_area_m2) { setErr("Enter the gross wall area (m²)."); return; }
+      if (f.input_mode === "hw" && (!f.wall_height_m || !f.total_width_m)) { setErr("Enter the wall height and total width."); return; }
+      if (f.input_mode === "boards" && !f.board_count) { setErr("Enter the number of boards."); return; }
       body = { system: f.system, colour: f.colour,
-        gross_area_m2: Number(f.gross_area_m2), openings_m2: Number(f.openings_m2 || 0),
+        input_mode: f.input_mode, board_count: num(f.board_count),
+        gross_area_m2: Number(f.gross_area_m2 || 0), openings_m2: Number(f.openings_m2 || 0),
         wall_height_m: num(f.wall_height_m), total_width_m: num(f.total_width_m),
         external_corners: num(f.external_corners), internal_corners: Number(f.internal_corners || 0),
         num_windows: num(f.num_windows),
@@ -214,15 +236,26 @@ export default function Quotes() {
       if (!r.ok) throw new Error(d.detail || `API ${r.status}`);
       if (!d.ok) { setErr(d.detail || "Couldn’t build the quote."); return; }
       setRes(d);
+      setQlines((d.lines || []).map((l) => ({ ...l })));
     } catch (e) { if (String(e.message) !== "unauthorised") setErr(String(e.message || e)); }
     finally { setBusy(false); }
   }
 
-  // Lines that matched a product with a variant id — the only ones a draft order can carry.
-  // Take-off lines plus any hand-added extras (normalised to the same {matched, qty} shape).
+  // Live totals from the (editable) take-off quantities — so changing a qty updates the quote,
+  // the margin, the discount desk, the draft and the email instantly.
+  const pricedLines = qlines.filter((l) => l.unit_sell != null && l.ajw_supplied && l.unit_cost != null);
+  const liveSell = pricedLines.reduce((s, l) => s + l.unit_sell * l.qty, 0);
+  const liveCost = pricedLines.reduce((s, l) => s + l.unit_cost * l.qty, 0);
+  const liveMargin = liveSell > 0 ? (liveSell - liveCost) / liveSell : null;
+  const liveMarginNet = liveMargin != null ? +((liveMargin - SHOPIFY_FEE) * 100).toFixed(1) : null;
+  const liveDisc = liveMargin != null ? discountFloor(liveSell, liveMargin) : null;
   const extrasSell = extras.reduce((s, e) => s + (Number(e.unit_sell) || 0) * e.qty, 0);
+
+  // Lines that matched a product with a variant id — the only ones a draft order can carry.
+  // Edited take-off lines (qty > 0) plus any hand-added extras.
   const draftableLines = [
-    ...(res?.lines || []).filter((l) => l.matched && l.matched.variant_id && l.unit_sell != null),
+    ...qlines.filter((l) => l.matched && l.matched.variant_id && l.unit_sell != null && l.qty > 0)
+      .map((l) => ({ matched: { variant_id: l.matched.variant_id }, qty: l.qty })),
     ...extras.filter((e) => e.variant_id && e.unit_sell != null).map((e) => ({ matched: { variant_id: e.variant_id }, qty: e.qty })),
   ];
 
@@ -243,16 +276,15 @@ export default function Quotes() {
   }
 
   function emailText() {
-    const t = res.totals;
     const hi = cust.name ? `Hi ${cust.name.split(" ")[0]},` : "Hi there,";
-    const priced = (res.lines || []).filter((l) => l.unit_sell != null);
-    const unpriced = (res.lines || []).filter((l) => l.unit_sell == null);
+    const priced = qlines.filter((l) => l.unit_sell != null && l.qty > 0);
+    const unpriced = qlines.filter((l) => l.unit_sell == null && l.qty > 0);
     const L = [];
     L.push(hi, "");
     L.push(`Thank you for your enquiry — please find your quote for ${res.product} below.`, "");
-    priced.forEach((l) => L.push(`• ${l.qty} × ${l.description} — ${money(l.line_sell)}`));
+    priced.forEach((l) => L.push(`• ${l.qty} × ${l.description} — ${money(l.unit_sell * l.qty)}`));
     extras.forEach((e) => L.push(`• ${e.qty} × ${e.title}${e.sku ? ` (${e.sku})` : ""} — ${money((Number(e.unit_sell) || 0) * e.qty)}`));
-    const grand = (t.sell || 0) + extrasSell;
+    const grand = liveSell + extrasSell;
     if (grand) {
       const vat = grand * 0.2;
       L.push("", `Subtotal (ex VAT): ${money(grand)}`, `VAT (20%): ${money(vat)}`, `Total (inc VAT): ${money(grand + vat)}`);
@@ -294,7 +326,6 @@ export default function Quotes() {
     );
   }
 
-  const t = res?.totals, dsc = res?.discount;
   return (
     <div className="wrap">
       <div className="topbar">
@@ -401,6 +432,14 @@ export default function Quotes() {
       ) : (
         <div className="card q-form">
           <div className="q-section">The wall</div>
+          <div className="q-opts" style={{ marginBottom: 10 }}>
+            <span className="sub">How do you want to size it?</span>
+            <div className="seg">
+              <button type="button" className={`seg-btn ${f.input_mode === "area" ? "on" : ""}`} onClick={() => set("input_mode", "area")}>By area (m²)</button>
+              <button type="button" className={`seg-btn ${f.input_mode === "hw" ? "on" : ""}`} onClick={() => set("input_mode", "hw")}>Height × width</button>
+              <button type="button" className={`seg-btn ${f.input_mode === "boards" ? "on" : ""}`} onClick={() => set("input_mode", "boards")}>Number of boards</button>
+            </div>
+          </div>
           <div className="q-grid">
             <label className="fld"><span>System</span>
               <select className="filter" value={f.system} onChange={(e) => set("system", e.target.value)}>
@@ -413,10 +452,11 @@ export default function Quotes() {
                 {cfg.colours.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
-            <label className="fld"><span>Gross wall area (m²) *</span><input className="search" type="number" inputMode="decimal" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} placeholder="all elevations" /></label>
-            <label className="fld"><span>Openings (m²)</span><input className="search" type="number" inputMode="decimal" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows + doors to deduct" /></label>
-            <label className="fld"><span>Wall height (m)</span><input className="search" type="number" inputMode="decimal" value={f.wall_height_m} onChange={(e) => set("wall_height_m", e.target.value)} placeholder="optional — assumes 2.4" /></label>
-            <label className="fld"><span>Total run width (m)</span><input className="search" type="number" inputMode="decimal" value={f.total_width_m} onChange={(e) => set("total_width_m", e.target.value)} placeholder="optional" /></label>
+            {f.input_mode === "area" && <label className="fld"><span>Gross wall area (m²) *</span><input className="search" type="number" inputMode="decimal" value={f.gross_area_m2} onChange={(e) => set("gross_area_m2", e.target.value)} placeholder="all elevations" /></label>}
+            {f.input_mode === "boards" && <label className="fld"><span>Number of boards *</span><input className="search" type="number" inputMode="numeric" value={f.board_count} onChange={(e) => set("board_count", e.target.value)} placeholder="total boards needed" /></label>}
+            {f.input_mode !== "boards" && <label className="fld"><span>Openings (m²)</span><input className="search" type="number" inputMode="decimal" value={f.openings_m2} onChange={(e) => set("openings_m2", e.target.value)} placeholder="windows + doors to deduct" /></label>}
+            <label className="fld"><span>Wall height (m){f.input_mode === "hw" ? " *" : ""}</span><input className="search" type="number" inputMode="decimal" value={f.wall_height_m} onChange={(e) => set("wall_height_m", e.target.value)} placeholder={f.input_mode === "hw" ? "" : "optional — assumes 2.4"} /></label>
+            <label className="fld"><span>Total run width (m){f.input_mode === "hw" ? " *" : ""}</span><input className="search" type="number" inputMode="decimal" value={f.total_width_m} onChange={(e) => set("total_width_m", e.target.value)} placeholder={f.input_mode === "hw" ? "" : "optional"} /></label>
           </div>
 
           <div className="q-section">Corners &amp; openings</div>
@@ -445,18 +485,18 @@ export default function Quotes() {
       {res && (
         <>
           <div className="card" style={{ padding: "6px 12px 12px", marginBottom: 10 }}>
-            <div className="tool-label">{res.product}{res.colour && cfg.kind === "clad" ? ` · ${res.colour}` : ""} — {t.n_priced}/{t.n_total} lines priced</div>
+            <div className="tool-label">{res.product}{res.colour && cfg.kind === "clad" ? ` · ${res.colour}` : ""} — {pricedLines.length}/{qlines.length} lines priced · edit any quantity below</div>
             <table className="mini">
               <thead><tr><th>Item</th><th className="num">Qty</th><th>Matched product</th><th className="num">Unit</th><th className="num">Line</th><th className="num">Cost ({cfg.supplier})</th></tr></thead>
               <tbody>
-                {res.lines.map((l, i) => (
+                {qlines.map((l, i) => (
                   <tr key={i} className={l.note && !l.ajw_supplied ? "od" : ""}>
                     <td>{l.description}{l.note ? <div className="sub mamber">{l.note}</div> : null}</td>
-                    <td className="num">{l.qty}</td>
+                    <td className="num"><input className="numin" type="number" min="0" value={l.qty} onChange={(ev) => setLineQty(i, ev.target.value)} style={{ width: 56 }} /></td>
                     <td className="sub">{l.matched ? `${l.matched.title || "—"}${l.matched.sku ? ` (${l.matched.sku})` : ""}` : "—"}</td>
                     <td className="num">{l.unit_sell != null ? money(l.unit_sell) : "—"}</td>
-                    <td className="num">{l.line_sell != null ? money(l.line_sell) : "—"}</td>
-                    <td className="num sub">{l.line_cost != null ? money(l.line_cost) : "—"}</td>
+                    <td className="num">{l.unit_sell != null ? money(l.unit_sell * l.qty) : "—"}</td>
+                    <td className="num sub">{l.unit_cost != null ? money(l.unit_cost * l.qty) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -507,20 +547,20 @@ export default function Quotes() {
           <div className="q-cards">
             <div className="card q-tot">
               <div className="tool-label">Totals (ex VAT)</div>
-              <div className="kv"><span>Sell{extras.length ? " (take-off)" : ""}</span><b>{money(t.sell)}</b></div>
+              <div className="kv"><span>Sell{extras.length ? " (take-off)" : ""}</span><b>{money(liveSell)}</b></div>
               {extras.length ? <div className="kv"><span>Extras</span><b>{money(extrasSell)}</b></div> : null}
-              {extras.length ? <div className="kv"><span>Sell incl. extras</span><b>{money((t.sell || 0) + extrasSell)}</b></div> : null}
-              <div className="kv"><span>Cost ({cfg.supplier})</span><b>{money(t.cost)}</b></div>
-              <div className="kv big"><span>Margin (after 1.8% fee)</span><b className={t.margin_net == null ? "" : t.margin_net < 8 ? "mred" : t.margin_net < 15 ? "mamber" : "mgreen"}>{t.margin_net == null ? "—" : `${t.margin_net}%`}</b></div>
+              {extras.length ? <div className="kv"><span>Sell incl. extras</span><b>{money(liveSell + extrasSell)}</b></div> : null}
+              <div className="kv"><span>Cost ({cfg.supplier})</span><b>{money(liveCost)}</b></div>
+              <div className="kv big"><span>Margin (after 1.8% fee)</span><b className={liveMarginNet == null ? "" : liveMarginNet < 8 ? "mred" : liveMarginNet < 15 ? "mamber" : "mgreen"}>{liveMarginNet == null ? "—" : `${liveMarginNet}%`}</b></div>
             </div>
-            {dsc && (
+            {liveDisc && (
               <div className="card q-tot">
-                <div className="tool-label">Discount desk — {dsc.band}</div>
-                <div className="sub" style={{ marginBottom: 4 }}>You may give up to {pct(dsc.give)} of the margin away, down to a {money(dsc.floor_price)} floor (never below 8%).</div>
-                <div className="kv"><span>Lowest you may quote</span><b>{money(dsc.floor_price)}</b></div>
-                <div className="kv"><span>Max discount</span><b>{dsc.no_room ? "no room" : money(dsc.max_disc)}</b></div>
-                <div className="kv"><span>Opening price (less 4%)</span><b>{money(dsc.four_pc_price)}</b></div>
-                {dsc.four_breaches ? <div className="route-msg warn" style={{ marginTop: 6 }}>Even the standard 4% off dips below the floor — Daniela’s call.</div> : null}
+                <div className="tool-label">Discount desk — {liveDisc.band}</div>
+                <div className="sub" style={{ marginBottom: 4 }}>You may give up to {pct(liveDisc.give)} of the margin away, down to a {money(liveDisc.floor_price)} floor (never below 8%).</div>
+                <div className="kv"><span>Lowest you may quote</span><b>{money(liveDisc.floor_price)}</b></div>
+                <div className="kv"><span>Max discount</span><b>{liveDisc.no_room ? "no room" : money(liveDisc.max_disc)}</b></div>
+                <div className="kv"><span>Opening price (less 4%)</span><b>{money(liveDisc.four_pc_price)}</b></div>
+                {liveDisc.four_breaches ? <div className="route-msg warn" style={{ marginTop: 6 }}>Even the standard 4% off dips below the floor — Daniela’s call.</div> : null}
               </div>
             )}
           </div>
