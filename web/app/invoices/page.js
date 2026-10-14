@@ -86,6 +86,10 @@ export default function Invoices() {
   const [discCopied, setDiscCopied] = useState({}); // sub_id -> bool
   const [orderOpen, setOrderOpen] = useState(() => new Set()); // sub_ids with the Monday order panel open
   function toggleOrder(id) { setOrderOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  const [accepted, setAccepted] = useState({}); // sub_id -> Set(line keys the user has accepted as OK)
+  function toggleAccept(sub_id, key) {
+    setAccepted((a) => { const n = { ...a }; const s = new Set(n[sub_id] || []); s.has(key) ? s.delete(key) : s.add(key); n[sub_id] = s; return n; });
+  }
 
   useEffect(() => {
     try {
@@ -233,6 +237,7 @@ export default function Invoices() {
 
   const doCheck = useCallback(async (sub_id) => {
     setChecking((c) => ({ ...c, [sub_id]: true }));
+    setAccepted((a) => { const n = { ...a }; delete n[sub_id]; return n; });   // fresh check → clear accepts
     try {
       const res = await jsonFetch(`/invoices/${sub_id}/check?lo=${floor}&hi=${ceil}`, { method: "POST" });
       if (!res.ok) throw new Error(`API ${res.status}`);
@@ -561,6 +566,19 @@ export default function Invoices() {
           const r = checks[iv.sub_id];
           const busy = checking[iv.sub_id];
           const al = r && r.ok ? actionLabel(r.suggested_action, r.matched) : null;
+          // Per-line accept: group each problem LINE (and each missing item) so one "accept" clears it.
+          const probLines = [];
+          if (r && r.ok) {
+            (r.lines || []).forEach((l, i) => {
+              const iss = (l.issues || []).filter((x) => x[0] !== "name");
+              if (iss.length) probLines.push({ key: `L${i}`, idx: i, sku: l.sku || l.desc || "line", msgs: iss.map((x) => x[1]) });
+            });
+            (r.missing || []).forEach((m) => probLines.push({ key: `M${m}`, sku: null, msgs: [`On the order but not invoiced: ${m}`] }));
+          }
+          const accSet = accepted[iv.sub_id];
+          const isAcc = (k) => !!(accSet && accSet.has(k));
+          const blocking = probLines.filter((p) => !isAcc(p.key));
+          const effMatched = !!(r && r.ok && (r.matched || (probLines.length > 0 && blocking.length === 0)));
           return (
             <div className="card inv-card" key={iv.sub_id}>
               <div className="inv-head">
@@ -582,8 +600,8 @@ export default function Invoices() {
                   {r && r.ok && approving[iv.sub_id] === "flagged" && <span className="pill red">flagged</span>}
                   {r && r.ok && approving[iv.sub_id] !== "done" && approving[iv.sub_id] !== "flagged" && (
                     <>
-                      {r.matched
-                        ? <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"}>{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>
+                      {(r.matched || effMatched)
+                        ? <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"} title={effMatched && !r.matched ? "All remaining issues accepted — approve to QuickBooks" : "Approve to QuickBooks"}>{approving[iv.sub_id] === "working" ? "…" : (effMatched && !r.matched ? "Approve → QB (accepted)" : "Approve → QB")}</button>
                         : <button className="btn" onClick={() => doApprove(iv, true)} disabled={approving[iv.sub_id] === "working"} title="Push to QuickBooks even though it isn't fully matched">{approving[iv.sub_id] === "working" ? "…" : "Push to QB anyway"}</button>}
                       <button className="btn" onClick={() => doFlag(iv)} disabled={approving[iv.sub_id] === "working"} title="Flag as a discrepancy on Monday">Flag</button>
                     </>
@@ -596,21 +614,20 @@ export default function Invoices() {
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
               {r && r.ok && (
                 <div className="inv-body">
-                  {(() => {
-                    const probs = [];
-                    (r.lines || []).forEach((l) => (l.issues || []).filter((x) => x[0] !== "name")
-                      .forEach((x) => probs.push({ sku: l.sku || l.desc || "line", msg: x[1] })));
-                    (r.missing || []).forEach((m) => probs.push({ sku: null, msg: `On the order but not invoiced: ${m}` }));
-                    if (!probs.length) return null;
-                    return (
-                      <div className="warn-note col" style={{ marginBottom: 8 }}>
-                        <div className="warn-head"><IconWarn /> What doesn’t match ({probs.length})</div>
-                        <ul className="disc-list">
-                          {probs.map((p, i) => <li key={i}>{p.sku ? <><b>{p.sku}</b> — </> : null}{p.msg}</li>)}
-                        </ul>
-                      </div>
-                    );
-                  })()}
+                  {probLines.length ? (
+                    <div className="warn-note col" style={{ marginBottom: 8 }}>
+                      <div className="warn-head"><IconWarn /> What doesn’t match ({blocking.length}{blocking.length !== probLines.length ? ` of ${probLines.length}` : ""})</div>
+                      <ul className="disc-list">
+                        {probLines.map((p) => (
+                          <li key={p.key} className={isAcc(p.key) ? "accepted-line" : ""}>
+                            {p.sku ? <><b>{p.sku}</b> — </> : null}{p.msgs.join(" · ")}
+                            <button className="linkish accept-btn" onClick={() => toggleAccept(iv.sub_id, p.key)}>{isAcc(p.key) ? "undo" : "accept"}</button>
+                          </li>
+                        ))}
+                      </ul>
+                      {blocking.length === 0 ? <div className="sub accepted-ok">All issues accepted — you can Approve → QB.</div> : <div className="sub">Accept a line to say the charge is fine (margin’s healthy) — once all are accepted you can approve it cleanly.</div>}
+                    </div>
+                  ) : null}
                   <table className="mini">
                     <thead><tr><th>SKU</th><th>Description</th><th className="num">Qty</th><th className="num">Unit</th><th>Check</th></tr></thead>
                     <tbody>
@@ -623,7 +640,7 @@ export default function Invoices() {
                             <td>{l.desc || "—"}{notes.length ? <div className={`sub ${probs.length ? "mred" : ""}`}>{notes.join(" · ")}</div> : null}</td>
                             <td className="num">{l.qty ?? "—"}</td>
                             <td className="num">{l.unit != null ? money(l.unit) : "—"}</td>
-                            <td>{probs.length ? <span className="pill red">issue</span> : <span className="pill green">ok</span>}</td>
+                            <td>{probs.length ? (isAcc(`L${i}`) ? <span className="pill grey">accepted</span> : <span className="pill red">issue</span>) : <span className="pill green">ok</span>}</td>
                           </tr>
                         );
                       })}
