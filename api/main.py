@@ -1178,6 +1178,16 @@ def recon_bank_accounts():
         raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks bank accounts: {e}")
 
 
+@app.get("/recon/vendors", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_vendors():
+    """Active QuickBooks vendors for the statement-recon supplier picker — so the supplier is SELECTED
+    (and matches QB exactly) instead of typed into a free-text box."""
+    try:
+        return {"vendors": ds.qbo_list_vendors()}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks vendors: {e}")
+
+
 class PayIn(BaseModel):
     vendor_id: str
     bank_id: str

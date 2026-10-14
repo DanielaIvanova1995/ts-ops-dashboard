@@ -4905,6 +4905,16 @@ def qbo_find_vendor(name: str):
             "balance": best.get("Balance")}
 
 
+def qbo_list_vendors(limit: int = 1000):
+    """All ACTIVE QuickBooks vendors → [{id, name}] sorted by name — for the statement-recon supplier
+    picker, so a supplier is selected (and matches QB exactly) rather than typed."""
+    rows = qbo_query(f"select Id, DisplayName from Vendor where Active = true MAXRESULTS {int(limit)}")
+    out = [{"id": v.get("Id"), "name": (v.get("DisplayName") or "").strip()}
+           for v in (rows.get("Vendor") or []) if (v.get("DisplayName") or "").strip()]
+    out.sort(key=lambda v: v["name"].lower())
+    return out
+
+
 def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
     """QuickBooks Bills for a vendor → [{doc_no, date, total, balance, paid, ref}].
     balance 0 = paid. Read-only."""

@@ -198,6 +198,7 @@ export default function Recon() {
 
   const [qb, setQb] = useState(null);
   const [supplier, setSupplier] = useState("");
+  const [vendors, setVendors] = useState([]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -236,6 +237,7 @@ export default function Recon() {
   useEffect(() => {
     if (!accessKey || needPin) return;
     jsonFetch("/recon/status").then((r) => r.ok && r.json()).then((d) => d && setQb(d)).catch(() => {});
+    jsonFetch("/recon/vendors").then((r) => r.ok && r.json()).then((d) => d && setVendors(d.vendors || [])).catch(() => {});
   }, [accessKey, needPin, jsonFetch]);
 
   const loadSaved = useCallback(() => {
@@ -357,7 +359,14 @@ export default function Recon() {
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
         <div className="recon-upload">
           <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" className="filepick" />
-          <input className="search" style={{ maxWidth: 240, flex: "none" }} placeholder="Supplier (optional override)" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+          {vendors.length ? (
+            <select className="filter" style={{ maxWidth: 280, flex: "none" }} value={supplier} onChange={(e) => setSupplier(e.target.value)} title="Pick the QuickBooks supplier (or leave on auto-detect)">
+              <option value="">Auto-detect supplier from statement</option>
+              {vendors.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+            </select>
+          ) : (
+            <input className="search" style={{ maxWidth: 240, flex: "none" }} placeholder="Supplier (optional override)" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+          )}
           <button className="btn primary" onClick={reconcile} disabled={busy}>{busy ? "Reconciling…" : "Reconcile"}</button>
         </div>
         <div className="sub" style={{ marginTop: 8 }}>Drop a supplier statement (PDF or CSV). It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
