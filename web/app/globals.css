@@ -460,6 +460,10 @@ table.mini td { padding: 5px 6px; border-bottom: 1px solid #F0F1F4; vertical-ali
 .op-inv-in { width: 100%; box-sizing: border-box; border: 0; font: inherit; font-size: 13px; padding: 1px 0; outline: none; background: transparent; color: var(--ink); font-variant-numeric: tabular-nums; }
 .op-hint { margin-top: 8px; }
 .op-sibs th, .op-sibs td { padding: 5px 8px; }
+.op-sibs tr.cn td { color: #b4232a; }
+.op-sibs tr.cn .num { font-weight: 700; }
+.op-net { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.op-net b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .op-note-ta { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; color: var(--ink); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
 .op-note-ta:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 2px rgba(242,106,33,.13); }
 .op-items { margin-top: 8px; }

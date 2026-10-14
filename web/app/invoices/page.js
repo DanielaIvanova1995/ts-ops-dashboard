@@ -17,6 +17,47 @@ function actionLabel(a, matched) {
   return { cls: "grey", text: "Matches" };
 }
 
+// Pull the specific discrepancies out of a check result, and best-effort the overcharge total.
+// Overcharge comes from (invoiced − agreed) × qty on priced lines where we have the figures, else
+// from the two £ amounts in the issue message ("£X vs agreed/expected £Y").
+function discrepancyDetail(r) {
+  const lines = [];
+  let oc = 0, ocOk = false, approx = false;
+  (r?.lines || []).forEach((l) => {
+    (l.issues || []).filter((x) => x[0] !== "name").forEach((x) => {
+      lines.push(`${l.sku || l.desc || "line"}: ${x[1]}`);
+      if (x[0] === "price" && typeof l.unit === "number" && typeof l.cost === "number" && typeof l.qty === "number" && l.unit > l.cost) {
+        oc += (l.unit - l.cost) * l.qty; ocOk = true;
+      } else {
+        const m = /£\s*([\d,]+(?:\.\d+)?)[^£]*£\s*([\d,]+(?:\.\d+)?)/.exec(x[1] || "");
+        if (m) { oc += parseFloat(m[1].replace(/,/g, "")) - parseFloat(m[2].replace(/,/g, "")); ocOk = true; approx = true; }
+        else approx = true;
+      }
+    });
+  });
+  (r?.missing || []).forEach((m) => lines.push(`on the order but not invoiced: ${m}`));
+  const overcharge = ocOk && oc > 0.005 ? Math.round(oc * 100) / 100 : null;
+  return { lines, overcharge, approx };
+}
+
+// The discrepancy note written to Monday AND carried into the supplier query — states what's wrong
+// and HOW to resolve it: full credit + reinvoice at the corrected amount, OR credit the difference.
+function discrepancyReason(iv, r) {
+  const d = discrepancyDetail(r);
+  const L = ["TradeHub discrepancy:"];
+  (d.lines.length ? d.lines : ["see invoice"]).forEach((s) => L.push("• " + s));
+  const tot = typeof iv.total === "number" ? iv.total : null;
+  const f = (n) => `£${n.toFixed(2)}`;
+  if (d.overcharge != null) {
+    const correct = tot != null ? tot - d.overcharge : null;
+    L.push("", `Overcharged by ${d.approx ? "~" : ""}${f(d.overcharge)}.`);
+    L.push(`Resolution — EITHER credit ${iv.invoice_no} in full${tot != null ? ` (${f(tot)})` : ""} and reinvoice at the corrected amount${correct != null ? ` (${f(correct)})` : ""}, OR issue a credit note for the ${f(d.overcharge)} difference.`);
+  } else {
+    L.push("", `Resolution — EITHER credit ${iv.invoice_no} in full and reinvoice at the corrected amount, OR issue a credit note for the difference.`);
+  }
+  return L.join("\n");
+}
+
 export default function Invoices() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -95,13 +136,19 @@ export default function Invoices() {
   useEffect(() => { if (accessKey && tab === "disc") loadDisc(); }, [accessKey, tab, loadDisc]);
 
   function discEmailText(iv) {
+    // The stored reason (from a TradeHub flag) already carries the specifics + a resolution line;
+    // we still spell the two options out so every query asks for the standard resolution.
+    const hasRes = /resolution/i.test(iv.reason || "");
     const L = [];
     L.push("Hi,", "");
     L.push(`Re invoice ${iv.invoice_no}${iv.order_no ? ` (our order ${iv.order_no})` : ""}${iv.supplier ? ` — ${iv.supplier}` : ""}`.trim(), "");
-    L.push("While checking this invoice against our order we've found a discrepancy:", "");
+    L.push("Having checked this invoice against our order, there's a discrepancy:", "");
     L.push(iv.reason ? iv.reason : "(details to follow)", "");
-    L.push("Please could you review and send a corrected invoice or credit note as appropriate.",
-      "Happy to go through it if that's easier.", "", "Many thanks,", "Trade Superstore Online");
+    if (!hasRes) {
+      L.push("To put it right, please EITHER credit this invoice in full and reinvoice at the corrected amount, OR issue a credit note for the difference — whichever is easier your end.");
+    }
+    L.push("", "Once we have the credit note / corrected invoice we'll process payment on the correct figure.",
+      "", "Many thanks,", "Trade Superstore Online");
     return L.join("\n");
   }
   async function copyDiscEmail(iv) {
@@ -234,14 +281,10 @@ export default function Invoices() {
   async function doFlag(iv) {
     const sub_id = iv.sub_id;
     const r = checks[sub_id];
-    let reason = (r && r.discrepancy_reason) || "";
-    if (!reason && r && r.ok) {
-      const probs = [];
-      (r.lines || []).forEach((l) => (l.issues || []).filter((x) => x[0] !== "name").forEach((x) => probs.push(`${l.sku || l.desc || "line"}: ${x[1]}`)));
-      (r.missing || []).forEach((m) => probs.push(`on the order but not invoiced: ${m}`));
-      reason = probs.join("; ");
-    }
-    if (!window.confirm(`Flag invoice ${iv.invoice_no} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue.`)) return;
+    // Rich reason: the specific discrepancies + the resolution ask (credit & reinvoice, or credit
+    // the difference). Falls back to the one-line reason if we don't have a full check result.
+    const reason = (r && r.ok) ? discrepancyReason(iv, r) : ((r && r.discrepancy_reason) || "Discrepancy — see invoice");
+    if (!window.confirm(`Flag invoice ${iv.invoice_no} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue, with the resolution ask (credit & reinvoice / credit the difference) saved as the note.`)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));
     try {
@@ -654,6 +697,10 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   if (err) return <div className="inv-body"><div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{err}</div></div>;
   if (!data) return null;
   const o = data.order;
+  const sibs = data.invoices || [];
+  const isCN = (s) => (typeof s.total === "number" && s.total < 0) || /credit|^\s*c?n\b|scn/i.test(s.status || "") || /^(cn|scn|crn)/i.test(s.name || "");
+  const net = sibs.reduce((a, x) => a + (typeof x.total === "number" ? x.total : 0), 0);
+  const anyCredit = sibs.some(isCN);
   return (
     <div className="inv-body order-panel">
       <div className="op-card">
@@ -684,13 +731,13 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
       </div>
 
       <div className="op-card">
-        <div className="op-card-head"><span>Invoices on this order ({data.invoices.length})</span></div>
+        <div className="op-card-head"><span>Invoices &amp; credits on this order ({sibs.length})</span></div>
         <table className="mini op-sibs">
           <thead><tr><th>Invoice</th><th className="num">Total</th><th>Status</th><th>Date</th></tr></thead>
           <tbody>
-            {data.invoices.map((s, i) => (
-              <tr key={i} className={s.is_current ? "od" : ""}>
-                <td className="ono">{s.name}{s.is_current ? <span className="sub"> · this one</span> : null}</td>
+            {sibs.map((s, i) => (
+              <tr key={i} className={`${s.is_current ? "od " : ""}${isCN(s) ? "cn" : ""}`}>
+                <td className="ono">{s.name}{isCN(s) ? <span className="pill red" style={{ marginLeft: 6 }}>credit</span> : null}{s.is_current ? <span className="sub"> · this one</span> : null}</td>
                 <td className="num">{s.total != null ? money(s.total) : "—"}</td>
                 <td className="sub">{s.status || "—"}</td>
                 <td className="sub">{s.date || "—"}</td>
@@ -698,6 +745,12 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
             ))}
           </tbody>
         </table>
+        <div className="sub op-net">
+          Net of all invoices &amp; credits: <b>{money(net)}</b>
+          {o.cost_n != null ? <> · order cost <b>{money(o.cost_n)}</b></> : null}
+          {o.cost_n != null && Math.abs(net - o.cost_n) > 0.01 ? <span className="mamber"> · differs by {money(Math.abs(net - o.cost_n))}</span> : null}
+          {anyCredit ? <div style={{ marginTop: 2 }}>Looks like a credit / reinvoice — check the net above matches the corrected order cost before approving.</div> : null}
+        </div>
         {o.order_items ? <details className="op-items"><summary className="sub">Order items</summary><div className="sub" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{o.order_items}</div></details> : null}
       </div>
 
