@@ -269,6 +269,13 @@ def meta():
             suppliers.add(mondays[0])       # a real Monday option (writes land)
         else:
             suppliers.add(code_name[k])     # from the PO/phone map, not on Monday
+    # MB Decor is always offered as "MB Decor" (with the space) — never the legacy "MBDecor" /
+    # "MB Decor/DIY" labels (Daniela 2026-10-16). The "MB Decor" Monday label (id 89) exists, so
+    # writes land correctly.
+    _mb = {s for s in suppliers if "mbdecor" in _canon(s)}
+    if _mb:
+        suppliers -= _mb
+        suppliers.add("MB Decor")
     return {"suppliers": sorted(suppliers, key=str.lower), "stages": list(ds.OP_STAGES)}
 
 
@@ -1399,7 +1406,7 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
         # still approvable (Daniela 2026-10-14: "approve 10%+ even if there is no pdf").
         sup = inv.get("supplier")
         rule = core.SUPPLIER_RULES.get(core.norm_code(sup), {})
-        if rule.get("no_pricelist"):
+        if rule.get("no_pricelist") or rule.get("pdf_optional"):
             margin = inv.get("order_margin_live")
             _lo = lo if lo is not None else core.MARGIN_PUSH_MIN
             _hi = hi if hi is not None else core.MARGIN_PUSH_MAX

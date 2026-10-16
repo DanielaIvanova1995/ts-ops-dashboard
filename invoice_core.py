@@ -70,12 +70,12 @@ SUPPLIER_RULES = {
                  "flag_below": True, "flag_high": True, "delivery_any": True},
     "huws": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
              "flag_below": True, "flag_high": True, "delivery_any": True},
-    # MB Decor: pricelist not loaded yet, so the ORDER MARGIN is the safeguard. Auto-approve a
-    # matched invoice at 10%+ with NO upper cap; below 10% → Needs Review (Daniela 2026-10-14,
-    # interim until the MB Decor pricelist is uploaded).
-    "mbdecor": {"name": "MB Decor", "no_pricelist": True, "push_min": 10.0,
+    # MB Decor: pricelist loaded 2026-10-16 (price_overrides.json "MB Decor", by Item Code QMB..).
+    # Lines are price-checked against it; auto-approve matched at 10%+ with NO upper cap; below 10% →
+    # Needs Review. pdf_optional = still approvable with no PDF (order margin is the safeguard).
+    "mbdecor": {"name": "MB Decor", "pdf_optional": True, "push_min": 10.0,
                 "flag_high": False, "flag_below": True, "delivery_any": True},
-    "mbdecorltd": {"name": "MB Decor", "no_pricelist": True, "push_min": 10.0,
+    "mbdecorltd": {"name": "MB Decor", "pdf_optional": True, "push_min": 10.0,
                    "flag_high": False, "flag_below": True, "delivery_any": True},
 }
 SUPPLIER_EMAILS = {

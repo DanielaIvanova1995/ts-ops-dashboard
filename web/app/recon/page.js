@@ -292,7 +292,7 @@ export default function Recon() {
       const res = await fetch(`${API}/recon`, { method: "POST", cache: "no-store", headers: { "X-TradeHub-Key": accessKey || "", "X-TradeHub-Statements-Key": pin || "" }, body: fd });
       if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); return; }
       if (res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); return; }
-      if (!res.ok) throw new Error(`API ${res.status}`);
+      if (!res.ok) { const ed = await res.json().catch(() => ({})); throw new Error(ed.detail || `API ${res.status}`); }
       const d = await res.json();
       if (d.ok === false && d.need_vendor) { setNotice({ kind: "warn", text: d.detail || "No QuickBooks vendor match." }); }
       else { setResult(d); loadSaved(); }
