@@ -366,6 +366,12 @@ export default function Recon() {
         </div>
       </div>
 
+      {qb && qb.qbo_connected === false && (
+        <div className="route-msg warn" style={{ marginBottom: 12 }}>
+          ⚠ <b>QuickBooks is disconnected</b> — reconciling, the supplier list and approvals all read from it, so they won’t work until it’s reconnected. Open the live TradeHub app’s QuickBooks panel and click <b>Connect QuickBooks</b>, then come back and refresh this page.
+        </div>
+      )}
+
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
         <div className="recon-upload">
           <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" className="filepick" />
