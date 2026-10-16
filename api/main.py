@@ -912,6 +912,19 @@ def recon_status():
     return {"qbo_connected": connected, "company": company}
 
 
+@app.get("/recon/qbo-connect-url", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_qbo_connect_url():
+    """The QuickBooks OAuth URL so the user can (re)connect QuickBooks straight from the hub. The
+    OAuth completes on the registered redirect (the Streamlit app) and the token is stored in the
+    SHARED store (Monday), so the hub sees it connected right after. Read-only consent."""
+    import secrets as _secrets
+    try:
+        url = ds.qbo_auth_url(_secrets.token_urlsafe(24))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build the QuickBooks connect link: {e}")
+    return {"url": url}
+
+
 def _enrich_num(v):
     if v in (None, ""):
         return None

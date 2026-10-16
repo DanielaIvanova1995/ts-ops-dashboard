@@ -197,6 +197,7 @@ export default function Recon() {
   const [pinErr, setPinErr] = useState("");
 
   const [qb, setQb] = useState(null);
+  const [qbUrl, setQbUrl] = useState("");
   const [supplier, setSupplier] = useState("");
   const [vendors, setVendors] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -239,6 +240,17 @@ export default function Recon() {
     jsonFetch("/recon/status").then((r) => r.ok && r.json()).then((d) => d && setQb(d)).catch(() => {});
     jsonFetch("/recon/vendors").then((r) => r.ok && r.json()).then((d) => d && setVendors(d.vendors || [])).catch(() => {});
   }, [accessKey, needPin, jsonFetch]);
+
+  // When QuickBooks is disconnected, fetch the connect link so we can show a "Connect" button here.
+  useEffect(() => {
+    if (qb && qb.qbo_connected === false && !qbUrl && !needPin) {
+      jsonFetch("/recon/qbo-connect-url").then((r) => r.ok && r.json()).then((d) => d && d.url && setQbUrl(d.url)).catch(() => {});
+    }
+  }, [qb, qbUrl, needPin, jsonFetch]);
+
+  const recheckQb = useCallback(() => {
+    jsonFetch("/recon/status").then((r) => r.ok && r.json()).then((d) => { if (d) { setQb(d); if (d.qbo_connected) { setNotice({ kind: "ok", text: "QuickBooks connected ✓" }); jsonFetch("/recon/vendors").then((r2) => r2.ok && r2.json()).then((v) => v && setVendors(v.vendors || [])).catch(() => {}); } } }).catch(() => {});
+  }, [jsonFetch]);
 
   const loadSaved = useCallback(() => {
     if (!accessKey) return;
@@ -368,8 +380,18 @@ export default function Recon() {
 
       {qb && qb.qbo_connected === false && (
         <div className="route-msg warn" style={{ marginBottom: 12 }}>
-          ⚠ <b>QuickBooks is disconnected</b> — reconciling, the supplier list and approvals all read from it, so they won’t work until it’s reconnected. Open the live TradeHub app’s QuickBooks panel and click <b>Connect QuickBooks</b>, then come back and refresh this page.
+          <div>⚠ <b>QuickBooks is disconnected</b> — reconciling, the supplier list and approvals all read from it, so they won’t work until it’s reconnected.</div>
+          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {qbUrl
+              ? <a className="btn primary" href={qbUrl} target="_blank" rel="noreferrer">Connect QuickBooks</a>
+              : <span className="sub">Loading the connect link…</span>}
+            <button className="btn" onClick={recheckQb}>I’ve connected — re-check</button>
+            <span className="sub">Opens QuickBooks to sign in &amp; approve (read-only). Then come back and hit “re-check”.</span>
+          </div>
         </div>
+      )}
+      {qb && qb.qbo_connected && qb.company && (
+        <div className="route-msg ok" style={{ marginBottom: 12 }}>QuickBooks connected — <b>{qb.company}</b>.</div>
       )}
 
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
