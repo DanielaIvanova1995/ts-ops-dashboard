@@ -172,8 +172,17 @@ export default function Board() {
   // (keeps your manual choice); if it's unrouted, route it first then generate. Updates the row.
   const processOne = useCallback(async (o) => {
     const path = o.supplier ? `/orders/${o.item_id}/po` : `/orders/${o.item_id}/process`;
-    const res = await apiFetch(path, { method: "POST" });
-    if (!res.ok) throw new Error(`process ${res.status}`);
+    // Transient 5xx (the API worker briefly overloaded during a big batch) are retried a few times —
+    // processing an order is safe to repeat (it re-routes / re-attaches the same PO), so a hiccup
+    // never surfaces as "error: process 502". 4xx aren't retried (they won't fix themselves).
+    let res, lastStatus = 0;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 700 * attempt));
+      res = await apiFetch(path, { method: "POST" });   // apiFetch throws "unauthorised" on 401
+      lastStatus = res.status;
+      if (res.ok || res.status < 500) break;
+    }
+    if (!res.ok) throw new Error(`the server was busy (${lastStatus}) — try this one again`);
     const d = await res.json();
     setOrders((os) => os.map((x) => (x.item_id === o.item_id
       ? { ...x, supplier: d.supplier ?? x.supplier, stage: d.stage ?? x.stage, has_po: d.attached ? true : x.has_po }
@@ -186,7 +195,9 @@ export default function Board() {
     if (!ids.length) return;
     const results = [];
     setProc({ running: true, done: 0, total: ids.length, results: [] });
-    for (const o of ids) {
+    for (let i = 0; i < ids.length; i++) {
+      const o = ids[i];
+      if (i) await new Promise((r) => setTimeout(r, 200));   // gentle pacing so the API worker keeps up
       let text = "—", kind = "warn";
       try {
         const d = await processOne(o);
@@ -194,7 +205,7 @@ export default function Board() {
         kind = d.ok ? "ok" : "warn";
       } catch (e) {
         if (String(e.message) === "unauthorised") break;
-        text = "error: " + String(e.message || e);
+        text = String(e.message || e);
       }
       results.push({ order: o.order_no, text, kind });
       setProc({ running: true, done: results.length, total: ids.length, results: [...results] });
