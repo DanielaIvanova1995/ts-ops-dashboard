@@ -172,17 +172,23 @@ export default function Board() {
   // (keeps your manual choice); if it's unrouted, route it first then generate. Updates the row.
   const processOne = useCallback(async (o) => {
     const path = o.supplier ? `/orders/${o.item_id}/po` : `/orders/${o.item_id}/process`;
-    // Transient 5xx (the API worker briefly overloaded during a big batch) are retried a few times —
-    // processing an order is safe to repeat (it re-routes / re-attaches the same PO), so a hiccup
-    // never surfaces as "error: process 502". 4xx aren't retried (they won't fix themselves).
-    let res, lastStatus = 0;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (attempt) await new Promise((r) => setTimeout(r, 700 * attempt));
-      res = await apiFetch(path, { method: "POST" });   // apiFetch throws "unauthorised" on 401
-      lastStatus = res.status;
+    // Retry transient failures — a 5xx (worker briefly overloaded) OR a dropped connection /
+    // "Failed to fetch" (the API restarting for a deploy). Processing an order is safe to repeat
+    // (it re-routes / re-attaches the same PO), so a hiccup never fails the order. 401 (auth) and
+    // 4xx are not retried. Up to 6 tries with growing backoff (~covers a short restart).
+    let res = null, lastErr = "";
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, Math.min(4000, 600 * attempt)));
+      try {
+        res = await apiFetch(path, { method: "POST" });   // apiFetch throws "unauthorised" on 401
+      } catch (e) {
+        if (String(e.message) === "unauthorised") throw e;      // never retry an auth failure
+        res = null; lastErr = "couldn’t reach the API (it may be restarting)"; continue;   // network drop → retry
+      }
       if (res.ok || res.status < 500) break;
+      lastErr = `the server was busy (${res.status})`;
     }
-    if (!res.ok) throw new Error(`the server was busy (${lastStatus}) — try this one again`);
+    if (!res || !res.ok) throw new Error(`${lastErr || "couldn’t process"} — try this one again`);
     const d = await res.json();
     setOrders((os) => os.map((x) => (x.item_id === o.item_id
       ? { ...x, supplier: d.supplier ?? x.supplier, stage: d.stage ?? x.stage, has_po: d.attached ? true : x.has_po }
