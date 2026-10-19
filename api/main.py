@@ -677,13 +677,17 @@ def generate_po(item_id: str, body: PoIn | None = None):
     Optional Adjust overrides (address / delivery / notes) are applied via _build_doc."""
     import order_processing as op
     import order_docs
-    o = _fetch_one_order(item_id)
+    try:
+        o = _fetch_one_order(item_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "attached": False, "order": item_id, "result": f"couldn't read the order: {str(e)[:150]}"}
     if not o:
-        raise HTTPException(status_code=404, detail="Order not found")
+        return {"ok": False, "attached": False, "order": item_id, "result": "order not found on Monday"}
+    tag = o.get("name") or o.get("order_no") or item_id
     try:
         res = _attach_doc(op, order_docs, item_id, o, overrides=(body.dict() if body else None))
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't generate/attach the PDF: {e}")
+        return {"ok": False, "attached": False, "order": tag, "result": f"couldn't generate/attach the PO: {str(e)[:150]}"}
     res["supplier"] = (o.get("supplier") or "") or None
     return res
 
@@ -1560,9 +1564,12 @@ def process_order(item_id: str):
     orders are handed back for manual handling rather than guessed."""
     import order_processing as op
     import order_docs
-    o = _fetch_one_order(item_id)
+    try:
+        o = _fetch_one_order(item_id)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "order": item_id, "result": f"couldn't read the order: {str(e)[:150]}"}
     if not o:
-        raise HTTPException(status_code=404, detail="Order not found")
+        return {"ok": False, "order": item_id, "result": "order not found on Monday"}
     tag = o.get("name") or o.get("order_no") or item_id
     sid = (o.get("shopify_id") or "").strip()
     if not sid:
@@ -1572,14 +1579,17 @@ def process_order(item_id: str):
         pc = (ds.fetch_order_shipping(sid) or {}).get("postcode")
         res = routing.route_order(lines, postcode=pc, sku_supplier=_api_sole_feed_supplier)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't route: {e}")
+        return {"ok": False, "order": tag, "result": f"couldn't route (Shopify/routing): {str(e)[:150]}"}
     if res.get("split"):
         # Multi-supplier order → TradeHub splits it automatically (a part per supplier, each with its
-        # own priced PO). Never emails a supplier (splits are excluded from PO auto-send).
+        # own priced PO). Never emails a supplier. If the split can't complete, leave it for manual
+        # handling with a clear reason — NEVER error the whole process run.
         try:
             msg = op._process_split(o, res)
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=f"Auto-split failed: {e}")
+            return {"ok": False, "order": tag, "route": "SPLIT",
+                    "result": f"multi-supplier — couldn't auto-split: {str(e)[:140]} — open it and split manually",
+                    "summary": routing.summary(res)}
         return {"ok": True, "order": tag, "route": "SPLIT",
                 "result": "multi-supplier — TradeHub split it automatically: " + msg,
                 "summary": routing.summary(res)}
@@ -1588,7 +1598,7 @@ def process_order(item_id: str):
         try:
             ds.move_order_to_group(item_id, ds.WDL_GROUP)
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=f"Couldn't move to Windows, Doors & Lanterns: {e}")
+            return {"ok": False, "order": tag, "result": f"door order — couldn't move to Windows, Doors & Lanterns: {str(e)[:140]}"}
         return {"ok": True, "order": tag, "route": "WDL",
                 "result": "→ moved to Windows, Doors & Lanterns (door order — no PO)"}
     in_house = (not sup) and route_ in ("SAMPLES", "CLEARANCE")   # samples/clearance: post in-house, no PO
@@ -1617,14 +1627,14 @@ def process_order(item_id: str):
         ds.op_set_status(item_id, init_stage)
         o["stage"] = init_stage
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Routed, but couldn't write to Monday: {e}")
+        return {"ok": False, "order": tag, "result": f"routed to {sup or route_}, but couldn't write to Monday: {str(e)[:140]}"}
     try:
         doc_res = _attach_doc(op, order_docs, item_id, o)
     except Exception as e:  # noqa: BLE001
         if in_house:                                            # a slip hiccup must not block a sample
             return {"ok": True, "order": tag, "supplier": None, "route": route_, "stage": init_stage,
                     "result": f"→ {route_} · {init_stage} · Del Method “To Post” (slip skipped)"}
-        raise HTTPException(status_code=502, detail=f"Supplier set, but PO failed: {e}")
+        return {"ok": False, "order": tag, "result": f"supplier set to {sup}, but the PO didn't attach: {str(e)[:140]}"}
     # Safe to SEND PO? Two guards (same as _process_one): PO verified-attached AND a branch email is
     # confirmed on Monday (read back) so the automation can't fire to nowhere.
     final_stage, auto_sent = init_stage, False
