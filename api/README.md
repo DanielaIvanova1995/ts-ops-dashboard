@@ -20,11 +20,20 @@ Then: `http://localhost:8000/health` and `http://localhost:8000/orders`, interac
 - **New Web Service** on the Pro workspace, same repo, **branch `main`**.
 - **Root Directory:** repo root (leave blank) — the app imports modules from the root.
 - **Build:** `pip install -r api/requirements.txt`
-- **Start:** `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+- **Start:** `uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 3`
+  - `--workers 3` runs three processes so several people/batches process **in parallel** without
+    queueing behind one worker (the cause of the "colleague can't process while I am" 502s).
+    uvicorn has no per-request timeout, so long PO/split/upload requests are never cut off.
+  - **Safe under multiple workers:** the background scheduler is lease-coordinated
+    (`scheduler.hold_lease()` via Supabase) — every worker starts it but only the lease owner runs
+    the jobs, so nothing double-runs. All durable state is external (Monday / Shopify / Supabase),
+    so there's no shared in-memory state to corrupt.
+  - Each worker loads the full app, so RAM ≈ (single-worker footprint) × workers — run **3 workers
+    on a 1 GB+ instance** (bump off Starter if it restarts/OOMs).
 - **Env vars:** the same Monday/Shopify secrets as the Streamlit service, plus
   `WEB_ORIGINS` = the front-end's URL(s), comma-separated (e.g. the Vercel domain).
 - **Health check path:** `/health`
-- Instance: **Starter** is fine to begin (it's just an API); bump later if needed.
+- Instance: **Starter** works for one worker; use **1 GB+** for `--workers 3`.
 
 This service ships **nothing** to the live Streamlit app — Render runs them as two separate services
 from the same repo.
