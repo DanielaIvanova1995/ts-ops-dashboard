@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware            # noqa: E402
+from fastapi.responses import RedirectResponse               # noqa: E402
 from pydantic import BaseModel                                # noqa: E402
 
 import data_sources as ds                             # noqa: E402  (reused — Monday/Shopify calls)
@@ -89,8 +90,29 @@ def recon_lock_status():
     return {"locked": bool(_STATEMENTS_KEY)}
 
 
+def _hub_url() -> str:
+    """The front-end hub's base URL (first https origin in WEB_ORIGINS), for redirecting back after
+    the QuickBooks OAuth handshake. Falls back to the production hub."""
+    for o in _origins:
+        if o.startswith("https://"):
+            return o.rstrip("/")
+    return "https://hub.tradesuperstoreonline.co.uk"
+
+
 @app.get("/")
-def root():
+def root(code: str | None = None, realmId: str | None = None, state: str | None = None):
+    """Service status — AND the QuickBooks OAuth callback. When Intuit redirects here with
+    code+realmId (needs APP_BASE_URL set to this API's URL and this URL registered in the Intuit app),
+    finish the handshake (store the shared token) and bounce the user to the hub's Statements screen,
+    so reconnecting QuickBooks is 100% inside the hub — no Streamlit hop."""
+    if code and realmId:
+        dest = _hub_url() + "/recon"
+        try:
+            ds.qbo_exchange_code(code, realmId)
+            return RedirectResponse(url=dest + "?qbo=connected", status_code=302)
+        except Exception as e:  # noqa: BLE001
+            return RedirectResponse(url=dest + "?qbo=error&msg=" + str(e)[:120].replace(" ", "+"),
+                                    status_code=302)
     return {"service": "tradehub-api", "status": "ok", "locked": bool(_ACCESS_KEY), "docs": "/docs"}
 
 
