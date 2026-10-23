@@ -10,6 +10,7 @@ samples, clearance, supplier-unidentified).
 """
 import json
 import os
+import re
 
 ORANGE = (242, 106, 33)
 INK = (29, 29, 29)
@@ -113,6 +114,25 @@ def validate_doc(d, kind):
                 errs.append(f"[{label}] line {i + 1} (SKU {sku}) missing Description")
             if _blank(qty):
                 errs.append(f"[{label}] line {i + 1} (SKU {sku}) missing Qty")
+    # HARD DUPLICATE-LINE GUARD: two identical lines (same SKU + description + qty) must NEVER appear
+    # on a PO or slip. Shopify never emits two identical lines, so a duplicate is a build bug that
+    # over-orders — order 31938 had every line duplicated, the extra stock was delivered and we were
+    # billed for it. Any duplicate BLOCKS the document (no PDF, so it can't be attached or sent) and
+    # the processor fixes the lines in Adjust first (Daniela 2026-10-23).
+    _seen = {}
+    for i, l in enumerate(lines):
+        ll = list(l)
+        sku_n = re.sub(r"[^a-z0-9]", "", str(ll[0] if ll else "").lower())
+        desc_n = " ".join(str(ll[1] if len(ll) > 1 else "").split()).lower()
+        qty_n = str(ll[2] if len(ll) > 2 else "").strip()
+        if not (sku_n or desc_n):
+            continue
+        key = (sku_n, desc_n, qty_n)
+        if key in _seen:
+            errs.append(f"[{label}] DUPLICATE line {i + 1} (SKU {ll[0] or '-'}) — identical to line "
+                        f"{_seen[key] + 1}. This over-orders — fix the lines in Adjust, then regenerate.")
+        else:
+            _seen[key] = i
     if kind == "po":
         sums = d.get("sums")
         if not isinstance(sums, list) or not sums:
