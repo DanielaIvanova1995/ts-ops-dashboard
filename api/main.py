@@ -91,12 +91,14 @@ def recon_lock_status():
 
 
 def _hub_url() -> str:
-    """The front-end hub's base URL (first https origin in WEB_ORIGINS), for redirecting back after
-    the QuickBooks OAuth handshake. Falls back to the production hub."""
-    for o in _origins:
-        if o.startswith("https://"):
-            return o.rstrip("/")
-    return "https://hub.tradesuperstoreonline.co.uk"
+    """The front-end hub's base URL, for redirecting back after the QuickBooks OAuth handshake.
+    Prefers the custom hub domain over the *.vercel.app default (so the user keeps their saved access
+    code / PIN, which are per-origin). Falls back to the production hub."""
+    https = [o.rstrip("/") for o in _origins if o.startswith("https://")]
+    for o in https:                      # prefer a custom domain (e.g. hub.tradesuperstoreonline.co.uk)
+        if "vercel.app" not in o:
+            return o
+    return https[0] if https else "https://hub.tradesuperstoreonline.co.uk"
 
 
 @app.get("/")
