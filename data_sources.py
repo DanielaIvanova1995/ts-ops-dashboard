@@ -4309,6 +4309,53 @@ def reconcile_order_inv_slots(order_item_id, token: str | None = None) -> int:
     return n_filled
 
 
+def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_floor: float = 90.0,
+                      dry_run: bool = False, token: str | None = None) -> dict:
+    """Board-wide repair of the ~98% margin bug: fill any invoice totals missing from the order's INV
+    slots so the Monday margin formula is right. Scans invoices in the given Payment-Status labels
+    (default Needs Review + Matched), dedupes by order, and runs reconcile_order_inv_slots on each.
+    With high_margin_only (default), only touches orders whose live margin is unknown or >= margin_floor
+    — i.e. the broken ones — so healthy orders are left alone. Duplicate-safe (never overwrites).
+    Returns {ok, orders_checked, orders_fixed, filled, items}. dry_run reports without writing."""
+    status_labels = status_labels or [3, 9]           # Needs Review + Matched (TradeHub)
+    data = fetch_invoices_by_status(status_labels, limit=500, token=token)
+    invs = data.get("invoices") or []
+    seen, orders_fixed, filled, items = set(), 0, 0, []
+    for i in invs:
+        oid = i.get("order_item_id")
+        ono = (i.get("order_no") or "").strip()
+        okey = str(oid or ono)
+        if not okey or okey in seen:
+            continue
+        seen.add(okey)
+        m = i.get("order_margin_live")
+        if high_margin_only and not (m is None or (isinstance(m, (int, float)) and m >= margin_floor)):
+            continue
+        if not oid and ono:
+            try:
+                o = find_order_item_by_number(ono, token=token)
+                oid = o.get("id") if o else None
+            except Exception:  # noqa: BLE001
+                oid = None
+        if not oid:
+            continue
+        if dry_run:
+            items.append({"order": ono, "margin": m})
+            orders_fixed += 1
+            continue
+        try:
+            n = reconcile_order_inv_slots(oid, token=token)
+        except Exception as e:  # noqa: BLE001
+            items.append({"order": ono, "error": str(e)[:100]})
+            continue
+        if n:
+            orders_fixed += 1
+            filled += n
+            items.append({"order": ono, "margin_before": m, "filled": n})
+    return {"ok": True, "orders_checked": len(seen), "orders_fixed": orders_fixed,
+            "filled": filled, "items": items[:60]}
+
+
 def delete_subitem(sub_id, token: str | None = None, attempts: int = 6) -> bool:
     """Delete a subitem (an invoice / credit note) from Monday. DESTRUCTIVE and permanent —
     the caller must confirm first. Raises on API failure.

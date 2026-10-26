@@ -1305,6 +1305,77 @@ def recon_vendors():
         raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks vendors: {e}")
 
 
+class AutoCfgIn(BaseModel):
+    auto_enabled: bool | None = None
+    interval_min: int | None = None
+    folder: str | None = None
+
+
+@app.post("/recon/auto-run", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_auto_run(dry_run: bool = False, force: bool = False):
+    """Reconcile ALL statements sitting in the Outlook statements folder now, in the background (so the
+    request returns straight away). Saves each as its vendor's latest snapshot and archives the email.
+    Poll /recon/auto-status for progress/result."""
+    import threading
+    import statement_recon
+
+    def _work():
+        try:
+            import supabase_db
+            if supabase_db.configured():
+                supabase_db.config_set(statement_recon.STATUS_KEY, {
+                    "running": True, "reason": "manual",
+                    "at": _dt.datetime.now(_dt.timezone.utc).isoformat()})
+        except Exception:  # noqa: BLE001
+            pass
+        statement_recon.run_auto(dry_run=dry_run, force=force)   # writes its own final status
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.get("/recon/auto-status", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_auto_status():
+    """Latest statement auto-reconcile result (manual or the daily auto run) + the auto config."""
+    import statement_recon
+    try:
+        import supabase_db
+        ok = supabase_db.configured()
+        st = (supabase_db.config_get(statement_recon.STATUS_KEY) if ok else None) or {}
+        cfg = (supabase_db.config_get(statement_recon.CONFIG_KEY) if ok else None) or {}
+    except Exception:  # noqa: BLE001
+        st, cfg = {}, {}
+    return {"status": st, "auto_enabled": cfg.get("auto_enabled", True),
+            "interval_min": int(cfg.get("interval_min") or 1440),
+            "folder": cfg.get("folder") or statement_recon.STATEMENTS_FOLDER}
+
+
+@app.post("/recon/auto-config", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_auto_config(body: AutoCfgIn):
+    """Turn the daily statement auto-reconcile on/off, set its interval (1440 = once a day) and the
+    Outlook folder it scans."""
+    import statement_recon
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Config store not available.")
+        cur = supabase_db.config_get(statement_recon.CONFIG_KEY) or {}
+        if body.auto_enabled is not None:
+            cur["auto_enabled"] = bool(body.auto_enabled)
+        if body.interval_min is not None:
+            cur["interval_min"] = max(60, int(body.interval_min))
+        if body.folder is not None and body.folder.strip():
+            cur["folder"] = body.folder.strip()
+        supabase_db.config_set(statement_recon.CONFIG_KEY, cur)
+        return {"ok": True, "auto_enabled": cur.get("auto_enabled", True),
+                "interval_min": int(cur.get("interval_min") or 1440),
+                "folder": cur.get("folder") or statement_recon.STATEMENTS_FOLDER}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
+
+
 class PayIn(BaseModel):
     vendor_id: str
     bank_id: str
@@ -2075,6 +2146,79 @@ def invoice_fix_margins(body: FixMarginsIn):
         except Exception:  # noqa: BLE001
             pass
     return {"ok": True, "orders": len(done), "filled": filled}
+
+
+def _save_status(key: str, payload: dict):
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.config_set(key, {**payload, "at": _dt.datetime.now(_dt.timezone.utc).isoformat()})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _get_status(key: str) -> dict:
+    try:
+        import supabase_db
+        return (supabase_db.config_get(key) if supabase_db.configured() else None) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.post("/invoices/fix-margins-all", dependencies=[Depends(require_key)])
+def invoice_fix_margins_all(dry_run: bool = False):
+    """Fix the ~98% margins across the WHOLE board in one go: fill any invoice totals missing from the
+    orders' INV slots (duplicate-safe; only touches orders whose margin is unknown or >= 90%). Runs in
+    the background so the request returns straight away — poll /invoices/fix-margins-status."""
+    import threading
+
+    def _work():
+        _save_status("fix_margins_status", {"running": True, "reason": "manual"})
+        try:
+            r = ds.fix_margins_sweep(dry_run=dry_run)
+            _save_status("fix_margins_status", {
+                "running": False, "ok": r.get("ok"), "orders_checked": r.get("orders_checked"),
+                "orders_fixed": r.get("orders_fixed"), "filled": r.get("filled"),
+                "items": (r.get("items") or [])[:40], "reason": "manual", "dry_run": dry_run})
+        except Exception as e:  # noqa: BLE001
+            _save_status("fix_margins_status", {"running": False, "ok": False, "error": str(e)[:200], "reason": "manual"})
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.get("/invoices/fix-margins-status", dependencies=[Depends(require_key)])
+def invoice_fix_margins_status():
+    """Latest fix-margins sweep result (manual or the daily auto run) + the auto config."""
+    try:
+        import supabase_db
+        cfg = (supabase_db.config_get("fix_margins") if supabase_db.configured() else None) or {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    return {"status": _get_status("fix_margins_status"),
+            "auto_enabled": cfg.get("auto_enabled", True),
+            "interval_min": int(cfg.get("interval_min") or 1440)}
+
+
+@app.post("/invoices/fix-margins-config", dependencies=[Depends(require_key)])
+def invoice_fix_margins_config(body: AutoCfgIn):
+    """Turn the daily fix-margins sweep on/off (and set its interval in minutes; 1440 = once a day)."""
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Config store not available.")
+        cur = supabase_db.config_get("fix_margins") or {}
+        if body.auto_enabled is not None:
+            cur["auto_enabled"] = bool(body.auto_enabled)
+        if body.interval_min is not None:
+            cur["interval_min"] = max(60, int(body.interval_min))
+        supabase_db.config_set("fix_margins", cur)
+        return {"ok": True, "auto_enabled": cur.get("auto_enabled", True),
+                "interval_min": int(cur.get("interval_min") or 1440)}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
 
 
 @app.get("/invoices/{sub_id}/order", dependencies=[Depends(require_key)])

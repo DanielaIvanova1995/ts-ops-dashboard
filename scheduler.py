@@ -88,6 +88,29 @@ def _cfg(name: str) -> dict:
         return {}
 
 
+def _due(name: str, interval_min: int) -> bool:
+    """True if the daily job `name` hasn't run within its interval (read from the persisted
+    '<name>_status' timestamp). Survives restarts/deploys, so a once-a-day job doesn't re-run on
+    every process restart."""
+    st = _cfg(name + "_status")
+    at = st.get("at")
+    if not at:
+        return True
+    try:
+        return (_now() - _dt.datetime.fromisoformat(at)).total_seconds() >= max(1, interval_min) * 60
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _write_status(name: str, payload: dict):
+    if not supabase_db:
+        return
+    try:
+        supabase_db.config_set(name + "_status", {**payload, "at": _now().isoformat()})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def loop():
     """The scheduler tick loop (runs forever in a daemon thread)."""
     next_run = {"email_triage": 0.0, "quote_triage": 0.0}
@@ -109,6 +132,36 @@ def loop():
                     _run("quote_triage", lambda: quote_triage.run_triage(
                         dry_run=False, since_days=qt.get("since_days"),
                         max_total=int(qt.get("max_total") or 40)))
+
+                # Daily: auto-reconcile supplier statements dropped in the Outlook folder, so each
+                # supplier's latest is already reconciled in the Statements list before payments.
+                sr = _cfg("statement_recon")
+                if sr.get("auto_enabled", True) and _due("statement_recon", int(sr.get("interval_min") or 1440)):
+                    try:
+                        import statement_recon
+                        statement_recon.run_auto(max_total=int(sr.get("max_total") or 40))  # writes its own status
+                    except Exception as e:  # noqa: BLE001
+                        _write_status("statement_recon", {"ok": False, "error": str(e)[:200], "reason": "auto"})
+
+                # Daily: repair ~98% margins by filling any invoice totals missing from the order's
+                # INV slots across the board (duplicate-safe; only touches high-margin/unknown ones).
+                fm = _cfg("fix_margins")
+                if fm.get("auto_enabled", True) and _due("fix_margins", int(fm.get("interval_min") or 1440)):
+                    try:
+                        import data_sources as _ds
+                        r = _ds.fix_margins_sweep()
+                        _write_status("fix_margins", {
+                            "ok": r.get("ok"), "orders_checked": r.get("orders_checked"),
+                            "orders_fixed": r.get("orders_fixed"), "filled": r.get("filled"),
+                            "items": (r.get("items") or [])[:40], "reason": "auto"})
+                        if r.get("filled") and supabase_db:
+                            try:
+                                supabase_db.audit("scheduler", "fix_margins",
+                                                  f"filled {r.get('filled')} slots on {r.get('orders_fixed')} orders", "")
+                            except Exception:  # noqa: BLE001
+                                pass
+                    except Exception as e:  # noqa: BLE001
+                        _write_status("fix_margins", {"ok": False, "error": str(e)[:200], "reason": "auto"})
         except Exception:  # noqa: BLE001 — a bad tick must never kill the loop
             pass
         _time.sleep(_POLL)
