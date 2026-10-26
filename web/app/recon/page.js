@@ -81,6 +81,19 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     setCredSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
   }
 
+  async function markCreditUsed(i) {
+    const c = credits[i]; if (!c) return;
+    try {
+      const res = await jsonFetch("/recon/credit-apply", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, credits: [{ ref: c.ref, amount: c.amount, date: c.date }], remit_ref: "manual" }) });
+      const d = await res.json();
+      if (res.ok && d.ok) {
+        setCredits((cs) => cs.map((x, j) => j === i ? { ...x, applied: true, remit_ref: "manual" } : x));
+        setCredSel((s) => { const n = new Set(s); n.delete(i); return n; });
+        onNotice({ kind: "ok", text: `Credit ${c.ref || ""} marked used — it won’t be offered again.` });
+      } else onNotice({ kind: "warn", text: d.detail || "Couldn’t mark it used." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
   async function undoCredit(i) {
     const c = credits[i]; if (!c) return;
     try {
@@ -179,7 +192,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
                   <td className="num">{money(c.amount)}</td>
                   <td>{c.applied
                     ? <span className="sub">already used{c.remit_ref ? ` · ${c.remit_ref}` : ""}{c.applied_at ? ` · ${c.applied_at}` : ""} <button className="linkish" onClick={() => undoCredit(i)} title="Put this credit back in play">undo</button></span>
-                    : null}</td>
+                    : <button className="linkish" onClick={() => markCreditUsed(i)} title="Mark this credit as already used so it won’t be offered again">mark used</button>}</td>
                 </tr>
               ))}
             </tbody>
