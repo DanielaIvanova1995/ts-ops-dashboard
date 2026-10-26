@@ -380,6 +380,35 @@ export default function Invoices() {
     if (approved.length) setList((l) => l.filter((x) => !approved.includes(x.invoice_no)));
   }
 
+  // Push the selected invoices straight to QuickBooks WITHOUT running the check — for ones she's
+  // already happy with. Creates a QB bill for each via /recon/approve (never double-creates).
+  async function pushSelected() {
+    const ids = [...sel];
+    if (!ids.length) return;
+    if (!window.confirm(`Push ${ids.length} invoice(s) straight to QuickBooks without checking? This creates a bill in QuickBooks for each.`)) return;
+    const results = [];
+    setProc({ running: true, done: 0, total: ids.length, results: [] });
+    for (const sub_id of ids) {
+      const iv = list.find((x) => x.sub_id === sub_id);
+      let text = "—", kind = "warn";
+      if (iv) {
+        setApproving((a) => ({ ...a, [sub_id]: "working" }));
+        try {
+          const ar = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
+          const ad = await ar.json();
+          if (ar.ok && ad.ok) { text = `pushed — ${ad.detail}`; kind = "ok"; setApproving((a) => ({ ...a, [sub_id]: "done" })); }
+          else { text = `couldn’t push: ${ad.detail || ""}`; setApproving((a) => ({ ...a, [sub_id]: "err" })); }
+        } catch (e) { if (String(e.message) === "unauthorised") break; text = "error"; setApproving((a) => ({ ...a, [sub_id]: "err" })); }
+      }
+      results.push({ inv: iv ? iv.invoice_no : sub_id, text, kind });
+      setProc({ running: true, done: results.length, total: ids.length, results: [...results] });
+    }
+    setProc((p) => ({ ...(p || {}), running: false }));
+    setSel(new Set());
+    const pushed = results.filter((r) => r.kind === "ok").map((r) => r.inv);
+    if (pushed.length) setList((l) => l.filter((x) => !pushed.includes(x.invoice_no)));
+  }
+
   if (needKey) {
     return (
       <div className="wrap">
@@ -501,6 +530,7 @@ export default function Invoices() {
           {shown.length > 0 && <button className="btn" onClick={toggleAllShown}>{allShownSelected ? "Clear" : "Select all"}</button>}
           {sel.size > 0 && <button className="btn" onClick={fixMargins} disabled={fixingMargins} title="Add any invoice totals missing from the order on Monday so the margin is right">{fixingMargins ? "Fixing…" : `Fix margins (${sel.size})`}</button>}
           {sel.size > 0 && <button className="btn primary" onClick={checkApproveSelected} disabled={proc?.running}>{proc?.running ? `Working ${proc.done}/${proc.total}…` : `Check & approve (${sel.size})`}</button>}
+          {sel.size > 0 && <button className="btn" onClick={pushSelected} disabled={proc?.running} title="Create the QB bill for each selected invoice without running the check">{proc?.running ? "…" : `Push to QB (${sel.size})`}</button>}
         </div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}
       </div>
@@ -602,6 +632,8 @@ export default function Invoices() {
                   {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer" title="Open this order in Shopify">Shopify ↗</a>}
                   {!iv.has_pdf && <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>}
                   <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy} title={!iv.has_pdf ? "No PDF — for no-pricelist suppliers this checks on the order margin alone" : "Check this invoice"}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>
+                  {!r && approving[iv.sub_id] === "done" && <span className="pill green">pushed ✓</span>}
+                  {!r && approving[iv.sub_id] !== "done" && <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"} title="Create the QB bill now without running the check">{approving[iv.sub_id] === "working" ? "…" : "Push to QB"}</button>}
                   {r && r.ok && approving[iv.sub_id] === "done" && <span className="pill green">approved ✓</span>}
                   {r && r.ok && approving[iv.sub_id] === "flagged" && <span className="pill red">flagged</span>}
                   {r && r.ok && approving[iv.sub_id] !== "done" && approving[iv.sub_id] !== "flagged" && (
