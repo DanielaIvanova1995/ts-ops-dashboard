@@ -1058,6 +1058,11 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
                statement_date=stmt.get("statement_date"), balance=stmt.get("balance"),
                filename=file.filename)
+    # Flag any credit notes already used on a previous remittance so they aren't double-applied.
+    try:
+        rec["credits"] = ds.applied_credits_annotate(vid, rec.get("credits") or [])
+    except Exception:  # noqa: BLE001
+        pass
     # Persist the latest reconciliation for this supplier (one per vendor; Supabase + Monday blob).
     try:
         snap = dict(rec)
@@ -1222,6 +1227,11 @@ def recon_open(key: str):
             pass
     snap["rows"] = rows
     snap["pay_lines"] = pay_lines
+    # Flag credit notes that have already been used on a remittance so they aren't offered again.
+    try:
+        snap["credits"] = ds.applied_credits_annotate(vid, snap.get("credits") or [])
+    except Exception:  # noqa: BLE001
+        pass
     return snap
 
 
@@ -1317,6 +1327,7 @@ def recon_pay(body: PayIn):
 
 class RemitIn(BaseModel):
     supplier: str = ""
+    vendor_id: str = ""          # QB vendor id — so applied credits are remembered against it
     ref: str = ""
     to_email: str = ""
     total: float = 0.0
@@ -1356,8 +1367,44 @@ def recon_remittance(body: RemitIn):
                                                   pdf_bytes=pdf, pdf_name=pdf_name)
         except Exception:  # noqa: BLE001
             draft_link = None     # still return the PDF so it can be downloaded/sent manually
+    # Remember the credit notes used on this remittance so they aren't offered again on the next
+    # statement (QuickBooks has no vendor-credit API, so this ledger is the only guard against
+    # double-counting). Can be undone with /recon/credit-unapply.
+    credits_applied = 0
+    if body.vendor_id and (body.credits or []):
+        try:
+            credits_applied = ds.applied_credits_mark(body.vendor_id, body.credits, remit_ref=ref)
+        except Exception:  # noqa: BLE001
+            credits_applied = 0
     return {"ok": True, "pdf_b64": base64.b64encode(pdf).decode(), "pdf_name": pdf_name,
-            "draft_link": draft_link, "to_email": (body.to_email or "").strip()}
+            "draft_link": draft_link, "to_email": (body.to_email or "").strip(),
+            "credits_applied": credits_applied}
+
+
+class CreditApplyIn(BaseModel):
+    vendor_id: str = ""
+    credits: list[dict] = []     # [{ref, amount, date}]
+    remit_ref: str = ""
+
+
+@app.post("/recon/credit-apply", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_credit_apply(body: CreditApplyIn):
+    """Manually mark credit notes as applied (used) for a vendor, so they drop off future statements."""
+    try:
+        n = ds.applied_credits_mark(body.vendor_id, body.credits, remit_ref=body.remit_ref or "manual")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't mark credits applied: {e}")
+    return {"ok": True, "applied": n}
+
+
+@app.post("/recon/credit-unapply", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_credit_unapply(body: CreditApplyIn):
+    """Undo — put credit notes back in play (remove them from the applied ledger)."""
+    try:
+        n = ds.applied_credits_unmark(body.vendor_id, body.credits)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't un-apply credits: {e}")
+    return {"ok": True, "unapplied": n}
 
 
 class QueryMissingIn(BaseModel):

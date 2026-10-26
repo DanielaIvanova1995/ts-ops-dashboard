@@ -5113,6 +5113,116 @@ def recon_delete(supplier_key: str, vid: str | None = None, token=None) -> bool:
     return True
 
 
+# ---- Applied credit notes --------------------------------------------------------------------
+# Credit notes live only on the supplier statement — QuickBooks has no API to apply a vendor credit,
+# so once a credit is used on a remittance nothing stops it reappearing on the next statement rec and
+# being double-counted. This little ledger remembers which credits have been applied (per QB vendor)
+# so they're flagged 'already applied' and not offered again. Same Monday-blob pattern as recon_save.
+QBO_CREDITS_ITEM = "Applied Credit Notes"
+
+
+def _credit_key(ref, amount) -> str:
+    """Stable key for a credit note = normalised ref + absolute amount (2dp), so the same credit
+    matches across statements even if the sign or spacing differs."""
+    import re as _re
+    r = _re.sub(r"[^a-z0-9]", "", str(ref or "").lower())
+    try:
+        a = f"{abs(float(amount or 0)):.2f}"
+    except Exception:  # noqa: BLE001
+        a = "0.00"
+    return f"{r}|{a}"
+
+
+def applied_credits_load(token=None) -> dict:
+    """{vid: {credit_key: {ref, amount, date, applied_at, remit_ref}}} of credit notes already used."""
+    import base64 as _b64
+    import json as _json
+    import re as _re
+    token = token or get_token()
+    item_id = _config_item_named(QBO_CREDITS_ITEM, token)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:1){body}}}",
+                       {"i": [str(item_id)]}, token)
+    ups = (((data.get("items") or [{}])[0]).get("updates") or [])
+    if not ups:
+        return {}
+    b64 = _re.sub(r"[^A-Za-z0-9+/=]", "", ups[0].get("body") or "")
+    try:
+        return _json.loads(_b64.b64decode(b64).decode()) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _applied_credits_write(m: dict, token=None):
+    import base64 as _b64
+    import json as _json
+    token = token or get_token()
+    item_id = _config_item_named(QBO_CREDITS_ITEM, token)
+    monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
+
+
+def applied_credits_mark(vid, credits, remit_ref="", token=None) -> int:
+    """Record credit notes as applied for a vendor. credits: [{ref, amount, date}]. Returns count."""
+    import time as _t
+    if not vid or not credits:
+        return 0
+    token = token or get_token()
+    m = applied_credits_load(token)
+    vid = str(vid)
+    bucket = dict(m.get(vid) or {})
+    stamp = _t.strftime("%Y-%m-%d")
+    n = 0
+    for c in credits:
+        if not (c.get("ref") or c.get("amount")):
+            continue
+        bucket[_credit_key(c.get("ref"), c.get("amount"))] = {
+            "ref": c.get("ref"), "amount": c.get("amount"), "date": c.get("date"),
+            "applied_at": stamp, "remit_ref": remit_ref}
+        n += 1
+    m[vid] = bucket
+    _applied_credits_write(m, token)
+    return n
+
+
+def applied_credits_unmark(vid, credits, token=None) -> int:
+    """Remove credit notes from the applied store (undo). Returns count removed."""
+    if not vid or not credits:
+        return 0
+    token = token or get_token()
+    m = applied_credits_load(token)
+    vid = str(vid)
+    bucket = dict(m.get(vid) or {})
+    n = 0
+    for c in credits:
+        k = _credit_key(c.get("ref"), c.get("amount"))
+        if k in bucket:
+            del bucket[k]
+            n += 1
+    if bucket:
+        m[vid] = bucket
+    else:
+        m.pop(vid, None)
+    _applied_credits_write(m, token)
+    return n
+
+
+def applied_credits_annotate(vid, credits, token=None) -> list:
+    """Return the credits list with 'applied'/'applied_at'/'remit_ref' set from the store."""
+    if not credits:
+        return credits or []
+    try:
+        bucket = (applied_credits_load(token).get(str(vid)) or {})
+    except Exception:  # noqa: BLE001
+        return credits
+    out = []
+    for c in credits:
+        cc = dict(c)
+        rec = bucket.get(_credit_key(c.get("ref"), c.get("amount")))
+        if rec:
+            cc.update(applied=True, applied_at=rec.get("applied_at"), remit_ref=rec.get("remit_ref"))
+        out.append(cc)
+    return out
+
+
 def _config_file_column(token=None):
     """(board_id, file_column_id) for a 'Statement' file column on the TradeHub Config board;
     created if it doesn't exist."""

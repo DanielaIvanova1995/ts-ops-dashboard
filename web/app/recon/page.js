@@ -30,7 +30,8 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     });
   const overdueCount = lines.filter((l) => l._od).length;
   const [sel, setSel] = useState(() => new Set(lines.map((l) => l.bill_id)));
-  const [credSel, setCredSel] = useState(() => new Set((r.credits || []).map((_, i) => i)));
+  const [credits, setCredits] = useState(() => r.credits || []);
+  const [credSel, setCredSel] = useState(() => new Set((r.credits || []).map((_, i) => i).filter((i) => !(r.credits[i] || {}).applied)));
   const [ref, setRef] = useState("");
   const [banks, setBanks] = useState([]);
   const [bank, setBank] = useState("");
@@ -42,7 +43,9 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
 
   useEffect(() => {
     setSel(new Set((r.pay_lines || []).map((l) => l.bill_id)));
-    setCredSel(new Set((r.credits || []).map((_, i) => i)));   // default: all credits selected
+    setCredits(r.credits || []);
+    // default: select only credits NOT already used on a previous remittance
+    setCredSel(new Set((r.credits || []).map((_, i) => i).filter((i) => !(r.credits[i] || {}).applied)));
   }, [r]);
   useEffect(() => {
     const sup = (r.vendor_name || r.supplier || "").split(" ")[0] || "REM";
@@ -70,10 +73,26 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   function toggle(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const selLines = lines.filter((l) => sel.has(l.bill_id));
   const invTotal = round2(selLines.reduce((s, l) => s + (Number(l.amt) || 0), 0));
-  const selCredits = (r.credits || []).filter((_, i) => credSel.has(i));
+  const selCredits = credits.filter((_, i) => credSel.has(i));
   const creditTotal = round2(selCredits.reduce((s, c) => s + (Number(c.amount) || 0), 0));
   const net = round2(invTotal + creditTotal);
-  function toggleCred(i) { setCredSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; }); }
+  function toggleCred(i) {
+    if ((credits[i] || {}).applied) return;   // already used — must Undo first
+    setCredSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
+  }
+
+  async function undoCredit(i) {
+    const c = credits[i]; if (!c) return;
+    try {
+      const res = await jsonFetch("/recon/credit-unapply", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, credits: [{ ref: c.ref, amount: c.amount, date: c.date }] }) });
+      const d = await res.json();
+      if (res.ok && d.ok) {
+        setCredits((cs) => cs.map((x, j) => j === i ? { ...x, applied: false, applied_at: undefined, remit_ref: undefined } : x));
+        setCredSel((s) => { const n = new Set(s); n.add(i); return n; });
+        onNotice({ kind: "ok", text: `Credit ${c.ref || ""} put back in play.` });
+      } else onNotice({ kind: "warn", text: d.detail || "Couldn’t undo it." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
 
   async function markPaid() {
     if (!bank) { onNotice({ kind: "warn", text: "Choose a bank account to pay from." }); return; }
@@ -101,7 +120,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     if (!selLines.length && !selCredits.length) { onNotice({ kind: "warn", text: "Nothing selected for the remittance." }); return; }
     setRemitting(true);
     try {
-      const res = await jsonFetch("/recon/remittance", { method: "POST", body: JSON.stringify({ supplier: r.vendor_name || r.supplier, ref, to_email: remitTo, total: net, inv_lines: selLines, credits: selCredits }) });
+      const res = await jsonFetch("/recon/remittance", { method: "POST", body: JSON.stringify({ supplier: r.vendor_name || r.supplier, vendor_id: r.vendor_id || "", ref, to_email: remitTo, total: net, inv_lines: selLines, credits: selCredits }) });
       const d = await res.json();
       if (res.ok && d.ok) {
         try {
@@ -110,7 +129,14 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
           const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" }));
           const a = document.createElement("a"); a.href = url; a.download = d.pdf_name; a.click(); URL.revokeObjectURL(url);
         } catch {}
-        onNotice({ kind: "ok", text: d.draft_link ? `Remittance drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t create the Outlook draft — send it manually)" : ""}` });
+        // Mark the credits just used as applied so they're not offered again, and untick them.
+        if (d.credits_applied) {
+          const usedKeys = new Set(selCredits.map((c) => `${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`));
+          setCredits((cs) => cs.map((c) => usedKeys.has(`${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`) ? { ...c, applied: true, remit_ref: ref } : c));
+          setCredSel((s) => { const n = new Set(s); credits.forEach((c, i) => { if (usedKeys.has(`${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`)) n.delete(i); }); return n; });
+        }
+        const credMsg = d.credits_applied ? ` ${d.credits_applied} credit(s) marked used.` : "";
+        onNotice({ kind: "ok", text: (d.draft_link ? `Remittance drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t create the Outlook draft — send it manually)" : ""}`) + credMsg });
       } else onNotice({ kind: "warn", text: d.detail || "Couldn’t build the remittance." });
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setRemitting(false); }
@@ -139,18 +165,21 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
           ))}
         </tbody>
       </table>
-      {(r.credits || []).length ? (
+      {credits.length ? (
         <div style={{ marginTop: 10 }}>
           <div className="tool-label">Credit notes — tick the ones to apply</div>
           <table className="mini">
-            <thead><tr><th></th><th>Credit</th><th>Date</th><th className="num">Amount</th></tr></thead>
+            <thead><tr><th></th><th>Credit</th><th>Date</th><th className="num">Amount</th><th></th></tr></thead>
             <tbody>
-              {(r.credits || []).map((c, i) => (
-                <tr key={i}>
-                  <td><input type="checkbox" checked={credSel.has(i)} onChange={() => toggleCred(i)} /></td>
+              {credits.map((c, i) => (
+                <tr key={i} style={c.applied ? { opacity: 0.6 } : undefined}>
+                  <td><input type="checkbox" checked={credSel.has(i)} disabled={!!c.applied} onChange={() => toggleCred(i)} /></td>
                   <td>{c.ref || "credit"}</td>
                   <td className="sub">{c.date || "—"}</td>
                   <td className="num">{money(c.amount)}</td>
+                  <td>{c.applied
+                    ? <span className="sub">already used{c.remit_ref ? ` · ${c.remit_ref}` : ""}{c.applied_at ? ` · ${c.applied_at}` : ""} <button className="linkish" onClick={() => undoCredit(i)} title="Put this credit back in play">undo</button></span>
+                    : null}</td>
                 </tr>
               ))}
             </tbody>
