@@ -5376,11 +5376,12 @@ def subitems_bill_details(names, token=None) -> dict:
         except ValueError:
             return None
 
+    import json as _json
     uniq = list(dict.fromkeys(str(n).strip() for n in (names or []) if str(n).strip()))
     out = {}
     q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
          'columns:[{column_id:"name",column_values:$vals}]){items{id name '
-         'column_values(ids:["numbers4","status7__1","date_mm3d1ear"]){id text} '
+         'column_values(ids:["numbers4","status7__1","date_mm3d1ear","file_mm38gx3j"]){id text value} '
          'parent_item{name column_values(ids:["dropdown_mkyqdeqd"]){text}}}}}')
     for i in range(0, len(uniq), 50):
         chunk = uniq[i:i + 50]
@@ -5390,6 +5391,14 @@ def subitems_bill_details(names, token=None) -> dict:
             continue
         for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
             cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+            raw = {c["id"]: c.get("value") for c in (it.get("column_values") or [])}
+            asset_id = None
+            try:
+                files = (_json.loads(raw.get("file_mm38gx3j") or "{}") or {}).get("files") or []
+                if files:
+                    asset_id = files[0].get("assetId")
+            except Exception:  # noqa: BLE001
+                asset_id = None
             parent = it.get("parent_item") or {}
             pcv = parent.get("column_values") or []
             out[str(it.get("name") or "").strip()] = {
@@ -5398,6 +5407,7 @@ def subitems_bill_details(names, token=None) -> dict:
                 "status": cvs.get("status7__1") or "",
                 "parent_name": parent.get("name") or "",
                 "supplier": (pcv[0].get("text") if pcv else "") or "",
+                "asset_id": asset_id,
             }
     return out
 

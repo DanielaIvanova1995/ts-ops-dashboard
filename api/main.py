@@ -1757,6 +1757,39 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
 
 
+def _invoice_date_from_pdf(det: dict) -> str | None:
+    """Best-effort REAL invoice date from the attached PDF — cached parse first, else read the PDF.
+    Used to date a QuickBooks bill correctly when Monday has no invoice date (older Make-era imports),
+    so we don't just fall back to today."""
+    sub_id = det.get("sub_id")
+    try:
+        import supabase_db
+        if sub_id and supabase_db.configured():
+            d = (supabase_db.invoice_parse_get(f"sub:{sub_id}") or {}).get("invoice_date")
+            if d:
+                return str(d)
+    except Exception:  # noqa: BLE001
+        pass
+    aid = det.get("asset_id")
+    if not aid:
+        return None
+    try:
+        url = ds.monday_asset_url(aid)
+        parsed = ds.read_invoice_pdf(url) if url else None
+        if parsed and not parsed.get("error"):
+            try:
+                import supabase_db
+                if sub_id and supabase_db.configured():
+                    supabase_db.invoice_parse_set(f"sub:{sub_id}", parsed)
+            except Exception:  # noqa: BLE001
+                pass
+            d = parsed.get("invoice_date")
+            return str(d) if d else None
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 class ApproveIn(BaseModel):
     invoice_no: str
     inv_date: str | None = None   # statement line date, used as a fallback if Monday has none
@@ -1778,8 +1811,15 @@ def recon_approve(body: ApproveIn):
     if not det:
         return {"ok": False, "detail": "couldn't find this invoice on Monday"}
     inv_date = (det.get("invoice_date") or body.inv_date or "")[:10]
+    date_source = "monday" if (det.get("invoice_date") or "").strip() else ("statement" if inv_date else "")
     if not inv_date:
-        return {"ok": False, "detail": "no invoice date on Monday or the statement — add one first"}
+        # Monday has no invoice date (usually an older Make-era import). Read the REAL date off the
+        # invoice PDF so the bill is dated correctly; only fall back to today if the PDF has none.
+        pdate = _invoice_date_from_pdf(det)
+        if pdate:
+            inv_date, date_source = pdate[:10], "pdf"
+        else:
+            inv_date, date_source = _dt.date.today().isoformat(), "today"
     total = det.get("total")
     if not isinstance(total, (int, float)) or total == 0:
         return {"ok": False, "detail": "no invoice total on Monday"}
@@ -1812,7 +1852,9 @@ def recon_approve(body: ApproveIn):
                 ds.set_invoice_status(det["sub_id"], _APPROVED_QB_LABEL, create_missing=True)
             except Exception:  # noqa: BLE001
                 pass
-        return {"ok": True, "detail": created}
+        note = " · invoice date defaulted to today — check it" if date_source == "today" else (
+            f" · dated {inv_date} from the invoice PDF" if date_source == "pdf" else "")
+        return {"ok": True, "detail": created + note, "inv_date": inv_date, "date_source": date_source}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "detail": str(e)[:160]}
 
