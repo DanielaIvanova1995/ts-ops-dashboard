@@ -5317,7 +5317,18 @@ def subitems_bill_details(names, token=None) -> dict:
     """For invoice numbers (subitem names), return {name: {sub_id, total, invoice_date, status,
     parent_name}} — everything needed to create a QuickBooks bill for an approved-but-missing
     invoice. Exact-name match on the invoices subitems board."""
+    import re as _re
     token = token or get_token()
+
+    def _num(v):
+        if v in (None, ""):
+            return None
+        t = _re.sub(r"[^0-9.\-]", "", str(v))
+        try:
+            return float(t) if t not in ("", "-", ".", "-.") else None
+        except ValueError:
+            return None
+
     uniq = list(dict.fromkeys(str(n).strip() for n in (names or []) if str(n).strip()))
     out = {}
     q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
