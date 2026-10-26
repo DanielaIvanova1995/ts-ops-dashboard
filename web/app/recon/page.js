@@ -206,6 +206,8 @@ export default function Recon() {
   const [approving, setApproving] = useState({});
   const [saved, setSaved] = useState([]);
   const fileRef = useRef(null);
+  const [picked, setPicked] = useState(null);   // the chosen statement file (click or drag-drop)
+  const [drag, setDrag] = useState(false);
 
   useEffect(() => {
     let k = null, p = "";
@@ -294,7 +296,7 @@ export default function Recon() {
   }
 
   async function reconcile() {
-    const f = fileRef.current?.files?.[0];
+    const f = picked || fileRef.current?.files?.[0];
     if (!f) { setNotice({ kind: "warn", text: "Choose a statement file first." }); return; }
     setBusy(true); setNotice(null); setResult(null);
     try {
@@ -395,8 +397,35 @@ export default function Recon() {
       )}
 
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
-        <div className="recon-upload">
-          <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" className="filepick" />
+        <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" style={{ display: "none" }}
+          onChange={(e) => setPicked(e.target.files?.[0] || null)} />
+        <div
+          onClick={() => fileRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); if (!drag) setDrag(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setDrag(false); }}
+          onDrop={(e) => {
+            e.preventDefault(); setDrag(false);
+            const f = e.dataTransfer.files?.[0];
+            if (f) { setPicked(f); try { fileRef.current.files = e.dataTransfer.files; } catch {} }
+          }}
+          role="button" tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileRef.current?.click(); } }}
+          style={{
+            border: `2px dashed ${drag ? "#e05a00" : "rgba(127,127,127,0.4)"}`,
+            background: drag ? "rgba(224,90,0,0.07)" : "rgba(127,127,127,0.05)",
+            borderRadius: 12, padding: "34px 20px", textAlign: "center", cursor: "pointer",
+            transition: "border-color .15s ease, background .15s ease",
+          }}
+        >
+          <div style={{ fontSize: 22, lineHeight: 1 }}>{picked ? "📄" : "⬆"}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginTop: 8 }}>
+            {picked ? picked.name : (drag ? "Drop to upload" : "Drop a supplier statement here")}
+          </div>
+          <div className="sub" style={{ marginTop: 4 }}>
+            {picked ? "Click to choose a different file" : "or click to browse — PDF, CSV or TXT"}
+          </div>
+        </div>
+        <div className="recon-upload" style={{ marginTop: 12 }}>
           {vendors.length ? (
             <select className="filter" style={{ maxWidth: 280, flex: "none" }} value={supplier} onChange={(e) => setSupplier(e.target.value)} title="Pick the QuickBooks supplier (or leave on auto-detect)">
               <option value="">Auto-detect supplier from statement</option>
@@ -407,7 +436,7 @@ export default function Recon() {
           )}
           <button className="btn primary" onClick={reconcile} disabled={busy}>{busy ? "Reconciling…" : "Reconcile"}</button>
         </div>
-        <div className="sub" style={{ marginTop: 8 }}>Drop a supplier statement (PDF or CSV). It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
+        <div className="sub" style={{ marginTop: 8 }}>It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 10 }}>{notice.text}</div>}
       </div>
 
