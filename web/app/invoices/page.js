@@ -116,16 +116,16 @@ export default function Invoices() {
   }, [accessKey]);
 
   const load = useCallback(async () => {
-    if (!accessKey) return;
+    if (!accessKey || tab === "disc") return;
     setStatus("loading"); setErr("");
     try {
-      const res = await jsonFetch("/invoices");
+      const res = await jsonFetch(tab === "matched" ? "/invoices/matched" : "/invoices");
       if (!res.ok) throw new Error(`API ${res.status}`);
       const d = await res.json();
       setList(d.invoices || []); setStatus("ok");
     } catch (e) { if (String(e.message) !== "unauthorised") { setErr(String(e.message || e)); setStatus("error"); } }
-  }, [accessKey, jsonFetch]);
-  useEffect(() => { if (accessKey) load(); }, [accessKey, load]);
+  }, [accessKey, jsonFetch, tab]);
+  useEffect(() => { if (accessKey && tab !== "disc") load(); }, [accessKey, tab, load]);
 
   const loadDisc = useCallback(async () => {
     if (!accessKey) return;
@@ -417,12 +417,13 @@ export default function Invoices() {
         <div className="pagetitle">Invoice Checker</div>
         <div className="right">
           <div className="seg">
-            <button className={`seg-btn ${tab === "review" ? "on" : ""}`} onClick={() => setTab("review")}>To review{status === "ok" ? ` (${list.length})` : ""}</button>
+            <button className={`seg-btn ${tab === "review" ? "on" : ""}`} onClick={() => setTab("review")}>To review{tab === "review" && status === "ok" ? ` (${list.length})` : ""}</button>
+            <button className={`seg-btn ${tab === "matched" ? "on" : ""}`} onClick={() => setTab("matched")}>Matched{tab === "matched" && status === "ok" ? ` (${list.length})` : ""}</button>
             <button className={`seg-btn ${tab === "disc" ? "on" : ""}`} onClick={() => setTab("disc")}>Discrepancies{discStatus === "ok" ? ` (${disc.length})` : ""}</button>
           </div>
-          {tab === "review"
+          {tab !== "disc"
             ? <>
-                <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} to review</> : status === "loading" ? "Loading…" : ""}</span>
+                <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} {tab === "matched" ? "matched" : "to review"}</> : status === "loading" ? "Loading…" : ""}</span>
                 <button className="btn primary" onClick={load} disabled={status === "loading"}>{status === "loading" ? "Refreshing…" : "Refresh"}</button>
               </>
             : <button className="btn primary" onClick={loadDisc} disabled={discStatus === "loading"}>{discStatus === "loading" ? "Refreshing…" : "Refresh"}</button>}
@@ -472,7 +473,13 @@ export default function Invoices() {
         </>
       )}
 
-      {tab === "review" && (<>
+      {(tab === "review" || tab === "matched") && (<>
+
+      {tab === "matched" && (
+        <div className="route-msg ok" style={{ marginBottom: 8 }}>
+          These invoices were auto-matched by TradeHub (invoice ✓ order ✓ price). Review and <b>Approve → QB</b> to post them to QuickBooks, or flag any that don’t look right.
+        </div>
+      )}
 
       <div className="card" style={{ padding: "8px 12px", marginBottom: 8 }}>
         <div className="inv-controls">
@@ -558,7 +565,7 @@ export default function Invoices() {
       )}
 
       {status === "error" && <div className="card"><div className="state err">Couldn’t load invoices ({err}).</div></div>}
-      {status === "ok" && list.length === 0 && <div className="card"><div className="state">No invoices in Needs Review. 🎉</div></div>}
+      {status === "ok" && list.length === 0 && <div className="card"><div className="state">{tab === "matched" ? "No auto-matched invoices waiting. 🎉" : "No invoices in Needs Review. 🎉"}</div></div>}
       {status === "ok" && list.length > 0 && shown.length === 0 && <div className="card"><div className="state">No invoices match this filter.</div></div>}
 
       <div className="inv-list">

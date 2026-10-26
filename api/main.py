@@ -1507,6 +1507,7 @@ def recon_query_missing(body: QueryMissingIn):
 # ---- Invoice checker (Phase A: list Needs-Review invoices → 3-way check → verdict) --------------
 _NEEDS_REVIEW_LABEL = 3   # Subitems board "Payment Status" = Needs Review
 _DISCREPANCY_LABEL = 4    # Subitems board "Payment Status" = Discrepancy (flagged/queried)
+_MATCHED_LABEL = 9        # Subitems board "Payment Status" = Matched (TradeHub) — auto-matched, awaiting approval
 
 
 @functools.lru_cache(maxsize=1)
@@ -1550,6 +1551,26 @@ def invoices():
     return {"count": len(out), "invoices": out}
 
 
+@app.get("/invoices/matched", dependencies=[Depends(require_key)])
+def invoices_matched():
+    """Invoices TradeHub auto-matched (Payment Status = 'Matched (TradeHub)') — passed the 3-way check
+    but not yet pushed to QuickBooks, so they can be reviewed and approved from the hub. Same shape as
+    /invoices (excluded suppliers removed, same-£ possible-duplicate flag)."""
+    import invoice_core as core
+    try:
+        data = ds.fetch_invoices_by_status([_MATCHED_LABEL], limit=500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    invs = [i for i in (data.get("invoices") or []) if not core.is_excluded_supplier(i.get("supplier"))]
+    amt_dups = core.amount_dup_ids(invs)
+    out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
+            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
+            "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
+            "order_url": i.get("order_url"), "order_item_id": i.get("order_item_id"),
+            "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
+    return {"count": len(out), "invoices": out}
+
+
 @app.get("/invoices/discrepancies", dependencies=[Depends(require_key)])
 def invoice_discrepancies():
     """Invoices flagged 'Discrepancy' on the Monday invoices board — the ones that didn't match and
@@ -1579,12 +1600,13 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
     reading the PDF with Claude each time."""
     import invoice_core as core
     try:
-        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=500)
+        # Look in Needs Review AND Matched (TradeHub) so a matched invoice can be re-checked too.
+        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL, _MATCHED_LABEL], limit=500)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
     inv = next((i for i in (data.get("invoices") or []) if str(i.get("sub_id")) == str(sub_id)), None)
     if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found in Needs Review")
+        raise HTTPException(status_code=404, detail="Invoice not found in Needs Review or Matched")
     if not inv.get("asset_id"):
         # No PDF: for a supplier we hold no pricelist for (e.g. MB Decor, interim), there's nothing to
         # line-check against — the ORDER MARGIN is the safeguard. Return a margin-only verdict so it's
