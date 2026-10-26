@@ -58,6 +58,80 @@ function discrepancyReason(iv, r) {
   return L.join("\n");
 }
 
+function ImportPanel({ jsonFetch, onNotice }) {
+  const [open, setOpen] = useState(false);
+  const [folder, setFolder] = useState("Travis Perkins");
+  const [running, setRunning] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  async function run(dry) {
+    if (!dry && !window.confirm(`Import for real from "${folder}"? This creates invoice subitems on Monday.`)) return;
+    setRunning(true); setStatus(null);
+    try {
+      const res = await jsonFetch("/invoices/import-run", { method: "POST", body: JSON.stringify({ folders: folder.trim() ? [folder.trim()] : null, dry_run: dry, limit: 15 }) });
+      const d = await res.json();
+      if (!(res.ok && d.started)) { onNotice({ kind: "warn", text: d.detail || "Couldn’t start the import." }); setRunning(false); return; }
+      let tries = 0;
+      const poll = async () => {
+        tries++;
+        try {
+          const sr = await jsonFetch("/invoices/import-run-status");
+          const sd = await sr.json();
+          const st = sd.status || {};
+          setStatus(st);
+          if (st.running && tries < 80) setTimeout(poll, 3000);
+          else setRunning(false);
+        } catch { setRunning(false); }
+      };
+      setTimeout(poll, 2500);
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); setRunning(false); }
+  }
+
+  const items = status?.items || [];
+  const would = items.filter((x) => x.status === "would_import" || x.status === "imported");
+  const failed = items.filter((x) => x.status === "failed");
+  const byAddr = would.filter((x) => /customer/i.test(x.detail || ""));
+  return (
+    <div className="card" style={{ padding: "10px 14px", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button className="btn ghost" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} Import from email</button>
+        <span className="sub">Preview how invoices in an Outlook folder match to orders — including by delivery address.</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          <div className="inv-controls">
+            <input className="search" style={{ maxWidth: 240, flex: "none" }} value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Supplier folder (e.g. Travis Perkins)" />
+            <button className="btn primary" onClick={() => run(true)} disabled={running}>{running ? "Working…" : "Preview (dry run)"}</button>
+          </div>
+          {running && <div className="sub" style={{ marginTop: 8 }}>Reading &amp; matching invoices… each PDF is parsed, so give it a moment.</div>}
+          {status && !status.running && (
+            status.error
+              ? <div className="route-msg warn" style={{ marginTop: 10 }}>{status.error}</div>
+              : (
+                <div style={{ marginTop: 10 }}>
+                  <div className="sub">Scanned {status.scanned ?? 0} · <b>{status.dry_run ? "would match" : "imported"} {status.imported ?? 0}</b>{byAddr.length ? <> · <b>{byAddr.length}</b> by address</> : null} · failed {status.failed ?? 0} · skipped {status.skipped ?? 0}{status.capped ? " · (capped — run again for more)" : ""}</div>
+                  {would.length > 0 && (
+                    <table className="mini" style={{ marginTop: 8 }}>
+                      <thead><tr><th>Invoice</th><th>Supplier</th><th>Order</th><th>How it matched</th></tr></thead>
+                      <tbody>{would.map((x, i) => <tr key={i}><td>{x.invoice_no || "—"}</td><td className="sub">{x.supplier || "—"}</td><td>{x.order_no || "—"}</td><td className="sub">{x.detail || ""}</td></tr>)}</tbody>
+                    </table>
+                  )}
+                  {failed.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div className="sub"><b>{failed.length}</b> didn’t match an order:</div>
+                      <table className="mini"><tbody>{failed.map((x, i) => <tr key={i}><td>{x.invoice_no || "—"}</td><td className="sub">{x.detail || ""}</td></tr>)}</tbody></table>
+                    </div>
+                  )}
+                  {status.dry_run && would.length > 0 && <button className="btn primary" style={{ marginTop: 10 }} onClick={() => run(false)} disabled={running}>Import these for real</button>}
+                </div>
+              )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Invoices() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -503,6 +577,8 @@ export default function Invoices() {
       )}
 
       {(tab === "review" || tab === "matched") && (<>
+
+      {tab === "review" && <ImportPanel jsonFetch={jsonFetch} onNotice={setNotice} />}
 
       {tab === "matched" && (
         <div className="route-msg ok" style={{ marginBottom: 8 }}>

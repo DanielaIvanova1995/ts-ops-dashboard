@@ -2263,6 +2263,48 @@ def invoice_fix_margins_config(body: AutoCfgIn):
         raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
 
 
+class ImportRunIn(BaseModel):
+    folders: list[str] | None = None      # folder names to scan (e.g. ["Travis Perkins"])
+    dry_run: bool = True                  # preview: parse + match, write nothing
+    limit: int | None = 15
+    since_days: int | None = None
+
+
+@app.post("/invoices/import-run", dependencies=[Depends(require_key)])
+def invoice_import_run(body: ImportRunIn):
+    """Run the invoice importer in the background — default a PREVIEW (dry_run) scoped to the given
+    Outlook folder(s), so matches (incl. the new delivery-address matching) can be checked before
+    anything is written. Poll /invoices/import-run-status. dry_run=false imports for real."""
+    import threading
+    import invoice_import
+
+    folders = [f.strip() for f in (body.folders or []) if f and f.strip()] or None
+    lim = max(1, min(int(body.limit or 15), 60))
+
+    def _work():
+        _save_status("invoice_import_run_status", {"running": True, "dry_run": body.dry_run,
+                                                   "folders": folders})
+        try:
+            r = invoice_import.run_import(folders=folders, dry_run=body.dry_run,
+                                          limit_per_folder=lim, max_total=lim, since_days=body.since_days)
+            _save_status("invoice_import_run_status", {
+                "running": False, "dry_run": body.dry_run, "folders": folders,
+                **{k: r.get(k) for k in ("ok", "scanned", "imported", "skipped", "failed",
+                                         "ignored", "archived", "capped", "error")},
+                "items": (r.get("items") or [])[:60]})
+        except Exception as e:  # noqa: BLE001
+            _save_status("invoice_import_run_status", {"running": False, "ok": False, "error": str(e)[:200]})
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.get("/invoices/import-run-status", dependencies=[Depends(require_key)])
+def invoice_import_run_status():
+    """Latest hub-triggered import run (preview or live)."""
+    return {"status": _get_status("invoice_import_run_status")}
+
+
 @app.get("/invoices/{sub_id}/order", dependencies=[Depends(require_key)])
 def invoice_order_view(sub_id: str, order_item_id: str | None = None):
     """The Monday-like order view for an invoice: the parent order (totals, margin, stage, supplier),
