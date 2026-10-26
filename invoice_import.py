@@ -456,9 +456,12 @@ def _handle_pdf(mailbox, msg, folder_name, a, i, n_pdfs, dry_run, summary, token
                 supabase_db.invoice_import_log(key, "skipped", invoice_no=inv_no,
                                                order_no=o_exist.get("order_no"), detail=rec["detail"])
             return "skipped"
-    # No PO match → try the CUSTOMER name + postcode on the invoice (drop-ship delivery address).
-    # Conservative: only auto-attach on a single confident match (postcode + supplier/amount).
-    if not order and not po:
+    # No order yet → try the CUSTOMER name + postcode on the invoice (drop-ship delivery address).
+    # Runs even when a po_number was parsed but didn't resolve to a Monday order — Travis Perkins and
+    # other merchants print their OWN ref (captured as po_number) rather than our order number, so the
+    # only reliable link is the delivery address. Conservative: only auto-attach on a single confident
+    # match (postcode + supplier/amount), so a parsed-but-unmatched ref can't cause a wrong attach.
+    if not order:
         cust = (parsed.get("customer_name") or "").strip()
         cpc = (parsed.get("customer_postcode") or "").strip()
         if cust:
