@@ -178,6 +178,81 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   );
 }
 
+function MissingPanel({ r, jsonFetch, onNotice }) {
+  // Invoices that are on the statement but we hold NO record of (not in QuickBooks). These are the
+  // ones to ask the supplier's accounts team to send copies of. Normalise legacy snapshot keys too.
+  const missing = (r.rows || [])
+    .map((raw) => ({
+      invoice: raw.invoice || raw.inv || "",
+      order: raw.order_no || raw.order || raw.order_ref || "",
+      inv_date: raw.inv_date || raw.date || "",
+      amount: raw.amount != null ? raw.amount : raw.amt,
+      status: raw.status || "",
+    }))
+    .filter((x) => x.status === "missing" && x.invoice);
+  const [sel, setSel] = useState(() => new Set(missing.map((_, i) => i)));
+  const [email, setEmail] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  useEffect(() => { setSel(new Set(missing.map((_, i) => i))); setPreview(null); }, [r]);  // eslint-disable-line react-hooks/exhaustive-deps
+  if (!missing.length) return null;
+  function toggle(i) { setSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; }); }
+  const chosen = missing.filter((_, i) => sel.has(i));
+  const total = round2(chosen.reduce((s, x) => s + (Number(x.amount) || 0), 0));
+
+  async function draft() {
+    if (!chosen.length) { onNotice({ kind: "warn", text: "Tick at least one invoice to request." }); return; }
+    setDrafting(true);
+    try {
+      const res = await jsonFetch("/recon/query-missing", { method: "POST", body: JSON.stringify({
+        supplier: r.vendor_name || r.supplier, to_email: email.trim(), statement_date: r.statement_date || "",
+        lines: chosen.map((x) => ({ invoice: x.invoice, inv_date: x.inv_date, amount: x.amount, order: x.order })),
+      }) });
+      const d = await res.json();
+      if (res.ok && d.ok) {
+        setPreview(d.body);
+        if (d.draft_link) onNotice({ kind: "ok", text: `Drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send it there.` });
+        else {
+          try { await navigator.clipboard.writeText(`Subject: ${d.subject}\n\n${d.body}`); onNotice({ kind: "ok", text: "Email copied to clipboard — paste into Outlook. (Add a recipient email and re-draft to create it in Outlook automatically.)" }); }
+          catch { onNotice({ kind: "ok", text: "Email ready below to copy. (Add a recipient email to draft it in Outlook automatically.)" }); }
+        }
+      } else onNotice({ kind: "warn", text: d.detail || "Couldn’t draft the email." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setDrafting(false); }
+  }
+
+  return (
+    <div className="paypanel" style={{ marginTop: 14 }}>
+      <div className="tool-label">Not in our records — request copies from {r.vendor_name || r.supplier}’s accounts team <span className="pill red" style={{ marginLeft: 8 }}>{missing.length}</span></div>
+      <div className="sel-ctl">
+        <button type="button" className="btn ghost" onClick={() => setSel(new Set(missing.map((_, i) => i)))}>Select all ({missing.length})</button>
+        <button type="button" className="btn ghost" onClick={() => setSel(new Set())} disabled={!sel.size}>Clear</button>
+        <span className="sub" style={{ marginLeft: "auto" }}>{chosen.length} selected · {money(total)}</span>
+      </div>
+      <table className="mini">
+        <thead><tr><th></th><th>Invoice</th><th>Order</th><th>Date</th><th className="num">Amount</th></tr></thead>
+        <tbody>
+          {missing.map((x, i) => (
+            <tr key={i}>
+              <td><input type="checkbox" checked={sel.has(i)} onChange={() => toggle(i)} /></td>
+              <td>{x.invoice}</td>
+              <td className="sub">{x.order || "—"}</td>
+              <td className="sub">{x.inv_date || "—"}</td>
+              <td className="num">{money(x.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="pay-ctl" style={{ marginTop: 8 }}>
+        <input className="search" style={{ maxWidth: 320, flex: "none" }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Supplier accounts email (to draft the request)" />
+        <button className="btn primary" onClick={draft} disabled={drafting}>{drafting ? "…" : `Draft request for ${chosen.length} invoice${chosen.length === 1 ? "" : "s"}`}</button>
+      </div>
+      <div className="sub" style={{ marginTop: 6 }}>Drafts an email in Outlook (Accounts) asking them to send copies — nothing is sent until you review it. No email to hand? Leave it blank and the request is copied to your clipboard to paste in.</div>
+      {preview ? <pre style={{ marginTop: 10, whiteSpace: "pre-wrap", fontSize: 12.5, background: "rgba(127,127,127,0.06)", border: "1px solid rgba(127,127,127,0.2)", borderRadius: 8, padding: "10px 12px", fontFamily: "inherit" }}>{preview}</pre> : null}
+    </div>
+  );
+}
+
 function statusPill(s) {
   if (s === "paid") return { cls: "green", label: "Paid" };
   if (s === "ready") return { cls: "amber", label: "Ready to pay" };
@@ -313,6 +388,32 @@ export default function Recon() {
     } catch (e) {
       setNotice({ kind: "warn", text: "Couldn’t reconcile — " + String(e.message || e) });
     } finally { setBusy(false); }
+  }
+
+  function downloadCsv() {
+    if (!result) return;
+    const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const header = ["Invoice", "Order", "Inv date", "Amount", "Unpaid", "Due", "Margin %", "Monday stage", "vs QuickBooks"];
+    const rows = (result.rows || []).map((raw) => [
+      raw.invoice || raw.inv || "",
+      raw.order_no || raw.order || raw.order_ref || "",
+      raw.inv_date || raw.date || "",
+      raw.amount != null ? raw.amount : raw.amt,
+      raw.unpaid != null ? raw.unpaid : (raw.balance != null ? raw.balance : raw.amt),
+      raw.due_date || raw.stmt_due || "",
+      raw.margin == null ? "" : raw.margin,
+      raw.monday_status || "",
+      statusPill(raw.status).label,
+    ]);
+    const credits = (result.credits || []).map((c) => ["CN " + (c.ref || ""), "", c.date || "", c.amount, "", "", "", "", "Credit note"]);
+    const csv = [header, ...rows, ...credits].map((row) => row.map(esc).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const sup = (result.vendor_name || result.supplier || "statement").replace(/[^A-Za-z0-9]+/g, "_");
+    const stamp = (result.statement_date || "").replace(/[^0-9]/g, "") || "export";
+    const a = document.createElement("a");
+    a.href = url; a.download = `Reconciliation_${sup}_${stamp}.csv`; a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function doApprove(row) {
@@ -471,6 +572,7 @@ export default function Recon() {
               {r.n_missing ? <span className="chip red"><b>{r.n_missing}</b> not in QB</span> : null}
               {r.n_paid ? <span className="chip green"><b>{r.n_paid}</b> paid</span> : null}
               <span className="chip grey">Statement {money(r.stmt_total)}</span>
+              <button className="btn ghost" onClick={downloadCsv} title="Download the whole reconciliation as a CSV">⬇ CSV</button>
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>
@@ -525,6 +627,7 @@ export default function Recon() {
               <b>Credit notes:</b> {r.credits.map((c, i) => <span key={i} className="sub"> {c.ref || "credit"} {money(c.amount)}{i < r.credits.length - 1 ? " ·" : ""}</span>)}
             </div>
           ) : null}
+          <MissingPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice} />
           <PayPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice}
             onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
         </div>

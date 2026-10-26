@@ -1360,6 +1360,59 @@ def recon_remittance(body: RemitIn):
             "draft_link": draft_link, "to_email": (body.to_email or "").strip()}
 
 
+class QueryMissingIn(BaseModel):
+    supplier: str = ""
+    to_email: str = ""
+    statement_date: str = ""
+    lines: list[dict] = []   # [{invoice, inv_date, amount, order}] for invoices we have no record of
+
+
+@app.post("/recon/query-missing", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_query_missing(body: QueryMissingIn):
+    """Draft an Outlook email to the supplier's accounts team asking them to send copies of the
+    invoices that are on their statement but that we have NO record of (not in QuickBooks, not on
+    Monday, not in the mailbox). Never auto-sent — lands in Drafts for review. Returns the draft link
+    and the email body so it can be copied if Outlook drafting is unavailable."""
+    lines = [l for l in (body.lines or []) if (l.get("invoice") or "").strip()]
+    if not lines:
+        return {"ok": False, "detail": "No invoices selected to query."}
+    sup = (body.supplier or "the supplier").strip()
+    total = round(sum(float(l.get("amount") or 0) for l in lines), 2)
+    stmt = (body.statement_date or "").strip()
+    rows = []
+    for l in lines:
+        inv = (l.get("invoice") or "").strip()
+        dt = (l.get("inv_date") or "").strip()
+        amt = float(l.get("amount") or 0)
+        ordref = (l.get("order") or "").strip()
+        bits = [f"  • {inv}"]
+        if dt:
+            bits.append(dt)
+        bits.append(f"£{amt:,.2f}")
+        if ordref and ordref != "—":
+            bits.append(f"(your order {ordref})")
+        rows.append("   ".join(bits))
+    subject = f"Missing invoices — {sup} statement" + (f" dated {stmt}" if stmt else "")
+    body_txt = (
+        "Hi,\n\n"
+        f"We're reconciling your statement{f' dated {stmt}' if stmt else ''} and the "
+        f"{len(lines)} invoice(s) below appear on it, but we have no record of ever receiving them. "
+        "Please could your accounts team send us copies so we can get them checked and paid?\n\n"
+        + "\n".join(rows)
+        + f"\n\nTotal queried: £{total:,.2f}\n\n"
+        "Many thanks,\nTrade Superstore Online\nAccounts"
+    )
+    draft_link = None
+    if (body.to_email or "").strip():
+        try:
+            draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, body.to_email.strip(),
+                                                  subject, body_txt)
+        except Exception:  # noqa: BLE001
+            draft_link = None     # still return the text so it can be copied/sent manually
+    return {"ok": True, "draft_link": draft_link, "to_email": (body.to_email or "").strip(),
+            "subject": subject, "body": body_txt, "n": len(lines), "total": total}
+
+
 # ---- Invoice checker (Phase A: list Needs-Review invoices → 3-way check → verdict) --------------
 _NEEDS_REVIEW_LABEL = 3   # Subitems board "Payment Status" = Needs Review
 _DISCREPANCY_LABEL = 4    # Subitems board "Payment Status" = Discrepancy (flagged/queried)
