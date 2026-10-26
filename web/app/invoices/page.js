@@ -443,7 +443,7 @@ export default function Invoices() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span className="ono">{iv.invoice_no}</span>
                     <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
-                    {iv.margin != null ? <span className="pill grey" style={{ marginLeft: 8 }}>margin {iv.margin}%</span> : null}
+                    {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
                     {iv.flagged_on ? <span className="sub" style={{ marginLeft: 8 }}>flagged {iv.flagged_on}</span> : null}
                   </div>
                   <div className="inv-right">
@@ -594,7 +594,7 @@ export default function Invoices() {
                   <span className="ono">{iv.invoice_no}</span>
                   <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
                   {iv.possible_dup ? <span className="pill red" style={{ marginLeft: 8 }}>possible duplicate of {iv.possible_dup}</span> : null}
-                  {iv.margin != null ? <span className="pill grey" style={{ marginLeft: 8 }}>margin {iv.margin}%</span> : null}
+                  {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
                 </div>
                 <div className="inv-right">
                   {al && <span className={`pill ${al.cls}`}>{al.text}</span>}
