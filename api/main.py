@@ -1431,13 +1431,10 @@ def recon_query_missing(body: QueryMissingIn):
         inv = (l.get("invoice") or "").strip()
         dt = (l.get("inv_date") or "").strip()
         amt = float(l.get("amount") or 0)
-        ordref = (l.get("order") or "").strip()
         bits = [f"  • {inv}"]
         if dt:
             bits.append(dt)
         bits.append(f"£{amt:,.2f}")
-        if ordref and ordref != "—":
-            bits.append(f"(your order {ordref})")
         rows.append("   ".join(bits))
     subject = f"Missing invoices — {sup} statement" + (f" dated {stmt}" if stmt else "")
     body_txt = (
