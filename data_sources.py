@@ -3251,12 +3251,16 @@ def list_folder_invoice_messages(mailbox: str, folder_id: str, limit: int = 50,
 
 
 def fetch_message_pdf_attachments(mailbox: str, message_id: str, token: str | None = None,
-                                  max_bytes: int = 8_000_000, max_items: int = 6) -> list:
-    """A message's PDF attachments as [{name, bytes}]. Two-step (list without contentBytes, then
+                                  max_bytes: int = 8_000_000, max_items: int = 6,
+                                  exts: tuple = (".pdf",)) -> list:
+    """A message's attachments as [{name, bytes}], filtered to `exts` (default PDF only — the invoice
+    importer's behaviour is unchanged). Statement auto-reconcile passes a wider set (pdf/xlsx/csv),
+    since Travis Perkins & others send statements as Excel. Two-step (list without contentBytes, then
     download each) — selecting contentBytes on the attachments collection 400s (it lives on the
-    fileAttachment subtype). This is the robust pattern the statement reader uses."""
+    fileAttachment subtype)."""
     import base64 as _b64
     token = token or ms_token()
+    exts = tuple(e.lower() for e in exts)
     r = requests.get(f"{GRAPH}/users/{mailbox}/messages/{message_id}/attachments",
                      headers={"Authorization": f"Bearer {token}"},
                      params={"$select": "id,name,contentType,size"}, timeout=30)
@@ -3265,7 +3269,8 @@ def fetch_message_pdf_attachments(mailbox: str, message_id: str, token: str | No
     for a in r.json().get("value", []):
         ctype = (a.get("contentType") or "").split(";")[0].strip().lower()
         nm = a.get("name") or ""
-        if ctype != "application/pdf" and not nm.lower().endswith(".pdf"):
+        is_pdf = ctype == "application/pdf" or nm.lower().endswith(".pdf")
+        if not (nm.lower().endswith(exts) or (".pdf" in exts and is_pdf)):
             continue
         if (a.get("size") or 0) > max_bytes:
             continue
@@ -4824,6 +4829,38 @@ def qbo_disconnect():
 # the AI, and read the matching bills from QuickBooks, so we can reconcile what
 # the supplier says we owe against what we've entered / paid.
 # ---------------------------------------------------------------------------
+def statement_xlsx_to_text(xlsx_bytes: bytes, max_rows: int = 2000) -> str:
+    """Flatten an .xlsx/.xls supplier statement to tab-separated text so read_statement_pdf's parser
+    can read it (Travis Perkins & others send statements as Excel, not PDF). Dates become ISO, blank
+    trailing cells are trimmed, empty rows dropped. One line per row, across all non-empty sheets."""
+    import io
+    import datetime as _dt
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True, read_only=True)
+    lines = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            vals = list(row)
+            while vals and vals[-1] in (None, ""):
+                vals.pop()
+            if not vals:
+                continue
+            cells = []
+            for v in vals:
+                if isinstance(v, (_dt.datetime, _dt.date)):
+                    cells.append(v.strftime("%Y-%m-%d"))
+                elif v is None:
+                    cells.append("")
+                else:
+                    cells.append(str(v))
+            lines.append("\t".join(cells))
+            if len(lines) >= max_rows:
+                break
+        if len(lines) >= max_rows:
+            break
+    return "\n".join(lines)
+
+
 def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str = None) -> dict:
     """Read a supplier statement of account with Claude — from a PDF (URL or bytes) OR from
     already-extracted `text` (Excel/CSV statements). Returns:

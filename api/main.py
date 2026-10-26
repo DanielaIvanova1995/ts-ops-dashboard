@@ -1044,6 +1044,8 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     try:
         if name.endswith(".pdf"):
             stmt = ds.read_statement_pdf(pdf_bytes=by)
+        elif name.endswith((".xlsx", ".xlsm", ".xls")):
+            stmt = ds.read_statement_pdf(text=ds.statement_xlsx_to_text(by))
         else:
             stmt = ds.read_statement_pdf(text=by.decode("utf-8", "ignore"))
     except Exception as e:  # noqa: BLE001

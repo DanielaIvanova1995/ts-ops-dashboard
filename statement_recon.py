@@ -66,7 +66,12 @@ def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do
     """Reconcile ONE statement (PDF bytes or raw text). Returns the rec dict (same shape as the
     /recon endpoint). do_save=True persists it as this vendor's latest snapshot. On no QuickBooks
     vendor match returns {ok: False, need_vendor: True, ...}."""
-    if pdf_bytes is not None:
+    fn = (filename or "").lower()
+    if pdf_bytes is not None and fn.endswith((".xlsx", ".xlsm", ".xls")):
+        stmt = ds.read_statement_pdf(text=ds.statement_xlsx_to_text(pdf_bytes))
+    elif pdf_bytes is not None and fn.endswith((".csv", ".txt")):
+        stmt = ds.read_statement_pdf(text=pdf_bytes.decode("utf-8", "ignore"))
+    elif pdf_bytes is not None:
         stmt = ds.read_statement_pdf(pdf_bytes=pdf_bytes)
     else:
         stmt = ds.read_statement_pdf(text=text or "")
@@ -164,7 +169,8 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
             except Exception:  # noqa: BLE001
                 pass
         try:
-            pdfs = ds.fetch_message_pdf_attachments(mailbox, mid)
+            pdfs = ds.fetch_message_pdf_attachments(
+                mailbox, mid, exts=(".pdf", ".xlsx", ".xlsm", ".xls", ".csv"))
         except Exception as e:  # noqa: BLE001
             res["failed"] += 1
             res["items"].append({"subject": m.get("subject"), "status": "error", "detail": str(e)[:120]})

@@ -542,7 +542,7 @@ export default function Recon() {
       )}
 
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
-        <input ref={fileRef} type="file" accept=".pdf,.csv,.txt" style={{ display: "none" }}
+        <input ref={fileRef} type="file" accept=".pdf,.csv,.txt,.xlsx,.xlsm,.xls" style={{ display: "none" }}
           onChange={(e) => setPicked(e.target.files?.[0] || null)} />
         <div
           onClick={() => fileRef.current?.click()}
@@ -567,7 +567,7 @@ export default function Recon() {
             {picked ? picked.name : (drag ? "Drop to upload" : "Drop a supplier statement here")}
           </div>
           <div className="sub" style={{ marginTop: 4 }}>
-            {picked ? "Click to choose a different file" : "or click to browse — PDF, CSV or TXT"}
+            {picked ? "Click to choose a different file" : "or click to browse — PDF, Excel or CSV"}
           </div>
         </div>
         <div className="recon-upload" style={{ marginTop: 12 }}>
