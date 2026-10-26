@@ -963,33 +963,68 @@ def _enrich_num(v):
         return None
 
 
+def _inv_core(s) -> str:
+    """Digit core of an invoice number for loose matching within one supplier: the digits with
+    leading zeros dropped, so '019780', 'PSI-019780' and '19780' all key to '19780'."""
+    d = _re.sub(r"\D", "", str(s or ""))
+    return d.lstrip("0") or d
+
+
+def _inv_name_candidates(num) -> list:
+    """Exact-name forms to look up on Monday for a statement invoice number. Covers leading zeros and
+    the 'PSI-' prefix Carron stores on Monday but omits from its statement."""
+    s = str(num).strip()
+    base = {s, s.lstrip("0")}
+    digits = _re.sub(r"\D", "", s)
+    if digits:
+        base.update({digits, digits.lstrip("0")})
+    out = set()
+    for b in base:
+        if not b:
+            continue
+        out.update({b, "PSI-" + b, "PSI" + b})
+    return [x for x in out if x]
+
+
 def _statement_monday_enrich(invoice_numbers: list) -> dict:
-    """For each statement invoice number, look up its subitem on the Monday invoices board (one
-    batched query) → {invoice_no: {monday_status, order_no (incl. -1/-2 split suffix), is_split,
-    margin}}. order_no comes from the PARENT order item name; margin from the parent's sell/cost."""
+    """For each statement invoice number, look up its subitem on the Monday invoices board (batched)
+    → {invoice_no: {monday_status, order_no (incl. -1/-2 split suffix), is_split, margin}}. order_no
+    comes from the PARENT order item name; margin from the parent's sell/cost. Matching is by the
+    invoice's DIGIT CORE, so a Monday name that carries a supplier prefix/leading zeros the statement
+    omits (e.g. Carron 'PSI-019780' vs statement '019780') still matches — otherwise an invoice that
+    IS on Monday was wrongly treated as missing and chased from the supplier."""
     nums = [str(n).strip() for n in (invoice_numbers or []) if str(n).strip()]
     if not nums:
         return {}
+    # core → the original statement number (unique per supplier), plus every name form to look up.
+    core_to_num, all_cands = {}, []
+    for n in nums:
+        core_to_num.setdefault(_inv_core(n), n)
+        all_cands.extend(_inv_name_candidates(n))
+    all_cands = list(dict.fromkeys(all_cands))
     q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
          'columns:[{column_id:"name",column_values:$vals}]){items{id name '
          'column_values(ids:["status7__1"]){id text} '
          'parent_item{name column_values(ids:["text_mkv6z0nt","numbers48","numbers6"]){id text}}}}}')
     out = {}
     tok = ds.get_token()
-    for i in range(0, len(nums), 50):
-        chunk = nums[i:i + 50]
+    for i in range(0, len(all_cands), 100):
+        chunk = all_cands[i:i + 100]
         try:
             data = ds._monday_gql(q, {"b": str(ds.SUBITEMS_BOARD_ID), "vals": chunk}, tok)
         except Exception:  # noqa: BLE001
             continue
         for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
+            stmt_num = core_to_num.get(_inv_core(it.get("name")))
+            if not stmt_num or stmt_num in out:
+                continue
             cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
             parent = it.get("parent_item") or {}
             pcv = {c["id"]: (c.get("text") or "") for c in (parent.get("column_values") or [])}
             sell, cost = _enrich_num(pcv.get("numbers48")), _enrich_num(pcv.get("numbers6"))
             margin = round((sell - cost) / sell * 100, 1) if (sell and cost is not None and sell > 0) else None
             pname = (parent.get("name") or "").strip()
-            out[str(it.get("name") or "").strip()] = {
+            out[stmt_num] = {
                 "monday_status": cvs.get("status7__1") or "",
                 "order_no": pname or (pcv.get("text_mkv6z0nt") or ""),
                 "is_split": bool(_re.search(r"-\d+$", pname)),
@@ -1225,6 +1260,18 @@ def recon_open(key: str):
             pay_lines = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
         except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
             pass
+    # Refresh the Monday stage/order/margin on open so older snapshots pick up matching fixes (e.g.
+    # Carron 'PSI-' prefix) — otherwise an invoice that's actually on Monday keeps a stale blank stage
+    # and gets wrongly chased as missing.
+    try:
+        enrich = _statement_monday_enrich([r.get("invoice") for r in rows])
+        for r in rows:
+            e = enrich.get(str(r.get("invoice") or "").strip())
+            if e:
+                r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
+                         is_split=e.get("is_split"), margin=e.get("margin"))
+    except Exception:  # noqa: BLE001
+        pass
     snap["rows"] = rows
     snap["pay_lines"] = pay_lines
     # Flag credit notes that have already been used on a remittance so they aren't offered again.
