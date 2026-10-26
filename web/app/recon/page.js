@@ -221,8 +221,9 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
 }
 
 function MissingPanel({ r, jsonFetch, onNotice }) {
-  // Invoices that are on the statement but we hold NO record of (not in QuickBooks). These are the
-  // ones to ask the supplier's accounts team to send copies of. Normalise legacy snapshot keys too.
+  // Invoices on the statement that we hold NO record of anywhere — not in QuickBooks AND not on
+  // Monday. These are the only ones to ask the supplier to send copies of. An invoice that IS on
+  // Monday (has a Monday stage) but not yet in QB just needs approving, so it's excluded here.
   const missing = (r.rows || [])
     .map((raw) => ({
       invoice: raw.invoice || raw.inv || "",
@@ -230,8 +231,9 @@ function MissingPanel({ r, jsonFetch, onNotice }) {
       inv_date: raw.inv_date || raw.date || "",
       amount: raw.amount != null ? raw.amount : raw.amt,
       status: raw.status || "",
+      monday_status: raw.monday_status || "",
     }))
-    .filter((x) => x.status === "missing" && x.invoice);
+    .filter((x) => x.status === "missing" && x.invoice && !x.monday_status);
   const [sel, setSel] = useState(() => new Set(missing.map((_, i) => i)));
   const [email, setEmail] = useState("");
   const [drafting, setDrafting] = useState(false);
