@@ -118,7 +118,12 @@ def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do
         rec["credits"] = ds.applied_credits_annotate(vid, rec.get("credits") or [])
     except Exception:  # noqa: BLE001
         pass
-    if do_save:
+    # Guard: never overwrite a vendor's snapshot with an EMPTY parse (no rows, no pay lines, no
+    # credits) — that's a failed/unreadable statement, and clobbering a good snapshot loses data
+    # (how the Travis Perkins .xlsx wiped the Eurocell snapshot when xlsx wasn't yet supported).
+    has_content = bool(rec.get("rows") or rec.get("pay_lines") or rec.get("credits"))
+    rec["empty"] = not has_content
+    if do_save and has_content:
         try:
             snap = dict(rec)
             snap["vid"] = vid
@@ -156,6 +161,9 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
         res.update(ok=False, error=f"couldn't list {folder!r}: {str(e)[:120]}")
         _set_status(res, "preview" if dry_run else "auto")
         return res
+    # Process OLDEST first so that, for a supplier with several statements, the NEWEST is reconciled
+    # last and becomes the kept per-vendor snapshot (recon_save replaces by vendor).
+    msgs = list(reversed(msgs))
     archive_id = None
     for m in msgs:
         mid = m.get("id")

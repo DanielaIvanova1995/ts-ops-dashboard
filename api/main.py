@@ -1100,14 +1100,17 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
         rec["credits"] = ds.applied_credits_annotate(vid, rec.get("credits") or [])
     except Exception:  # noqa: BLE001
         pass
-    # Persist the latest reconciliation for this supplier (one per vendor; Supabase + Monday blob).
-    try:
-        snap = dict(rec)
-        snap["vid"] = vid
-        snap["saved_at"] = _dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-        ds.recon_save(f"v{vid}", snap)
-    except Exception:  # noqa: BLE001
-        pass
+    # Persist the latest reconciliation for this supplier (one per vendor; Supabase + Monday blob) —
+    # but NEVER save an empty parse (no rows/pay lines/credits): that's an unreadable statement, and
+    # clobbering a good snapshot loses data (how a bad Travis Perkins .xlsx wiped the Eurocell one).
+    if rec.get("rows") or rec.get("pay_lines") or rec.get("credits"):
+        try:
+            snap = dict(rec)
+            snap["vid"] = vid
+            snap["saved_at"] = _dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+            ds.recon_save(f"v{vid}", snap)
+        except Exception:  # noqa: BLE001
+            pass
     return rec
 
 
