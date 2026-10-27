@@ -491,6 +491,7 @@ export default function Recon() {
   const [saved, setSaved] = useState([]);
   const [excluded, setExcluded] = useState([]);   // never-reconcile skip-list [{vid, name}]
   const [exclPick, setExclPick] = useState("");
+  const [exclOpen, setExclOpen] = useState(false); // collapsed by default
   const fileRef = useRef(null);
   const [picked, setPicked] = useState(null);   // the chosen statement file (click or drag-drop)
   const [drag, setDrag] = useState(false);
@@ -827,23 +828,29 @@ export default function Recon() {
       )}
 
       <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
-        <div className="tool-label" style={{ marginBottom: 8 }}>Never reconcile these suppliers</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {excluded.length === 0 && <span className="sub">None — the sweep reconciles every supplier in the folder.</span>}
-          {[...excluded].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))).map((e) => (
-            <span key={e.vid} className="pill grey">{e.name || `vendor ${e.vid}`}
-              <button className="linkish" style={{ marginLeft: 6 }} onClick={() => removeExclude(e.vid)} title="Allow this supplier to reconcile again">allow</button>
-            </span>
-          ))}
-        </div>
-        <div className="recon-upload" style={{ marginTop: 10 }}>
-          <select className="filter" style={{ maxWidth: 280, flex: "none" }} value={exclPick} onChange={(e) => setExclPick(e.target.value)} title="Pick a QuickBooks supplier to never auto-reconcile">
-            <option value="">Add a supplier to skip…</option>
-            {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-          <button className="btn" onClick={addExcludePick} disabled={!exclPick}>Add to skip-list</button>
-        </div>
-        <div className="sub" style={{ marginTop: 6 }}>Skipped suppliers aren’t reconciled by the daily run or “Reconcile all now”, and their statements are archived out of the folder.</div>
+        <button className="linkish" onClick={() => setExclOpen(!exclOpen)} style={{ fontWeight: 600 }}>
+          {exclOpen ? "▾" : "▸"} Never reconcile these suppliers{excluded.length ? ` (${excluded.length})` : ""}
+        </button>
+        {exclOpen && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              {excluded.length === 0 && <span className="sub">None — the sweep reconciles every supplier in the folder.</span>}
+              {[...excluded].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))).map((e) => (
+                <span key={e.vid} className="pill grey">{e.name || `vendor ${e.vid}`}
+                  <button className="linkish" style={{ marginLeft: 6 }} onClick={() => removeExclude(e.vid)} title="Allow this supplier to reconcile again">allow</button>
+                </span>
+              ))}
+            </div>
+            <div className="recon-upload" style={{ marginTop: 10 }}>
+              <select className="filter" style={{ maxWidth: 280, flex: "none" }} value={exclPick} onChange={(e) => setExclPick(e.target.value)} title="Pick a QuickBooks supplier to never auto-reconcile">
+                <option value="">Add a supplier to skip…</option>
+                {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </select>
+              <button className="btn" onClick={addExcludePick} disabled={!exclPick}>Add to skip-list</button>
+            </div>
+            <div className="sub" style={{ marginTop: 6 }}>Skipped suppliers aren’t reconciled by the daily run or “Reconcile all now”, and their statements are archived out of the folder.</div>
+          </div>
+        )}
       </div>
 
       {r && (
