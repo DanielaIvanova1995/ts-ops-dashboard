@@ -1367,6 +1367,44 @@ def recon_exclude(body: ExcludeIn):
     return {"ok": True, "excluded": excl}
 
 
+class ChaseIn(BaseModel):
+    supplier: str = ""
+    email: str = ""
+    reason: str = "missing"      # "missing" (no statement) | "stale" (last one too old)
+    last_date: str = ""
+
+
+@app.post("/recon/chase-statement", dependencies=[Depends(require_statements_key)])
+def recon_chase_statement(body: ChaseIn):
+    """Draft an email to a supplier asking for their latest statement of account — for suppliers we
+    have no statement from, or whose last statement is too old. Drafted in Outlook (Accounts) for
+    review, never auto-sent. Looks up the supplier's accounts email if one isn't passed."""
+    import recon_core
+    sup = (body.supplier or "").strip()
+    email = (body.email or "").strip()
+    if not email and sup:
+        try:
+            email = (ds.list_supplier_emails() or {}).get(recon_core.norm_code(sup)) or ""
+        except Exception:  # noqa: BLE001
+            email = ""
+    if body.reason == "stale" and (body.last_date or "").strip():
+        ask = (f"Our most recent statement of account from you is dated {body.last_date}. Please could "
+               "you send us your latest statement so we can reconcile it and schedule payment?")
+    else:
+        ask = ("Please could you send us your latest statement of account? We don't have a recent one "
+               "on file, and we reconcile supplier statements before scheduling payment.")
+    body_txt = f"Hi,\n\n{ask}\n\nMany thanks,\nTrade Superstore Online\nAccounts"
+    subject = "Statement of account request — Trade Superstore Online"
+    draft_link = None
+    if email:
+        try:
+            draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+        except Exception:  # noqa: BLE001
+            draft_link = None
+    return {"ok": True, "draft_link": draft_link, "email": email, "supplier": sup,
+            "subject": subject, "body": body_txt}
+
+
 @app.post("/recon/unexclude", dependencies=[Depends(require_statements_key)])
 def recon_unexclude(body: ExcludeIn):
     """Remove a supplier from the never-reconcile skip-list (allow it again)."""
@@ -1463,7 +1501,12 @@ def recon_coverage():
         excluded = cfg2.get("excluded") or []
     except Exception:  # noqa: BLE001
         excluded = []
-    return {"saved": saved, "suppliers": suppliers, "folder_waiting": waiting, "excluded": excluded}
+    try:
+        emails = ds.list_supplier_emails()
+    except Exception:  # noqa: BLE001
+        emails = {}
+    return {"saved": saved, "suppliers": suppliers, "folder_waiting": waiting,
+            "excluded": excluded, "emails": emails}
 
 
 @app.get("/recon/auto-status", dependencies=[Depends(require_statements_key)])

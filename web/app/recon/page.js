@@ -370,6 +370,20 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
   const missing = (cov?.suppliers || []).filter((s) => !covered(s)).sort((a, b) => String(a).localeCompare(String(b)));
   const stale = (cov?.saved || []).filter((x) => x.stale);
 
+  async function chase(supplier, reason, lastDate) {
+    const email = (cov?.emails || {})[norm(supplier)] || "";
+    const msg = email
+      ? `Draft a statement request to ${supplier} at ${email}?`
+      : `Draft a statement request for ${supplier}? No email is on file, so it'll be drafted without a recipient for you to add in Outlook.`;
+    if (!window.confirm(msg)) return;
+    try {
+      const res = await jsonFetch("/recon/chase-statement", { method: "POST", body: JSON.stringify({ supplier, email, reason, last_date: lastDate || "" }) });
+      const d = await res.json();
+      if (res.ok && d.ok) onNotice({ kind: "ok", text: d.draft_link ? `Statement request drafted to ${d.email || supplier} — review & send in Outlook.` : `Draft prepared${d.email ? "" : " — no email on file, add a recipient in Outlook"}.` });
+      else onNotice({ kind: "warn", text: d.detail || "Couldn’t draft it." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
   return (
     <div className="card" style={{ padding: "12px 16px", marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -427,11 +441,23 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
               ))}
             </div>
           )}
+          {stale.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div className="sub" style={{ marginBottom: 4 }}>Last statement over 35 days old — chase a fresh one:</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {[...stale].sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""))).map((s, i) => (
+                  <span key={i} className="pill amber">{s.supplier} ⏱<button className="linkish" style={{ marginLeft: 6 }} onClick={() => chase(s.supplier, "stale", s.statement_date || s.saved_at)} title="Draft an email asking for their latest statement">✉ chase</button></span>
+                ))}
+              </div>
+            </div>
+          )}
           {showMissing && missing.length > 0 && (
             <div style={{ marginTop: 8 }}>
-              <div className="sub" style={{ marginBottom: 4 }}>No statement reconciled yet (chase or drop one in the folder):</div>
+              <div className="sub" style={{ marginBottom: 4 }}>No statement reconciled yet — chase, or drop one in the folder:</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {missing.map((s, i) => <span key={i} className="pill grey">{s}</span>)}
+                {missing.map((s, i) => (
+                  <span key={i} className="pill grey">{s}<button className="linkish" style={{ marginLeft: 6 }} onClick={() => chase(s, "missing")} title="Draft an email asking for their latest statement">✉ chase</button></span>
+                ))}
               </div>
             </div>
           )}

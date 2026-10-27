@@ -5148,6 +5148,56 @@ def list_supplier_names(token=None) -> list:
         return []
 
 
+def list_supplier_emails(token=None) -> dict:
+    """{normalised supplier name: best accounts email} from the Suppliers board (9826930125)
+    subitems (Email col text_mkws3sgb). Prefers an accounts/credit/invoicing/remittance contact,
+    then an account manager, then any. Keyed by BOTH the group title and the item name (normalised)
+    so a QuickBooks/statement supplier name can be matched. Emails are cleaned of mailto:/quotes/
+    trailing junk."""
+    import re as _re
+    token = token or get_token()
+
+    def _clean(e):
+        e = _re.sub(r"^\s*mailto:", "", (e or "").strip(), flags=_re.I)
+        m = _re.search(r"[\w.+-]+@[\w.-]+\.\w+", e)
+        return m.group(0).rstrip(".") if m else ""
+
+    def _norm(s):
+        return _re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+    def _rank(name):
+        n = (name or "").lower()
+        if any(k in n for k in ("account", "credit", "invoic", "remit", "billing", "ledger")) and "manager" not in n:
+            return 0
+        if "manager" in n:
+            return 1
+        return 2
+
+    q = ('query($b:ID!){boards(ids:[$b]){items_page(limit:200){items{name group{title} '
+         'subitems{name column_values(ids:["text_mkws3sgb"]){text}}}}}}')
+    try:
+        data = _monday_gql(q, {"b": "9826930125"}, token)
+    except Exception:  # noqa: BLE001
+        return {}
+    items = ((((data.get("boards") or [{}])[0]).get("items_page") or {}).get("items") or [])
+    out = {}
+    for it in items:
+        cands = []
+        for sub in (it.get("subitems") or []):
+            cv = sub.get("column_values") or []
+            email = _clean(cv[0].get("text") if cv else "")
+            if email:
+                cands.append((sub.get("name") or "", email))
+        if not cands:
+            continue
+        cands.sort(key=lambda c: _rank(c[0]))
+        best = cands[0][1]
+        for k in ((it.get("group") or {}).get("title"), it.get("name")):
+            if k and _norm(k) not in out:
+                out[_norm(k)] = best
+    return out
+
+
 def fetch_supplier_credit_limits(token=None):
     """{supplier/account name: credit limit (£)} from the 'Suppliers and Contacts' board
     (9826930125), Credit Limit column numeric_mkxckems. Keyed by both the group (supplier)
