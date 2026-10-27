@@ -173,6 +173,20 @@ def loop():
                                 "scanned": r.get("scanned")}
                     _run("invoice_import", _imp)
 
+                # Invoice CHECK — check every Needs Review invoice (invoice vs order vs price) and
+                # mark the clean, in-margin ones 'Matched (TradeHub)' for Daniela to approve. NEVER
+                # auto-approves to QuickBooks and never auto-marks Discrepancy (that stays manual).
+                ic = _cfg("invoice_check")
+                if ic.get("auto_enabled", True) and now >= next_run.get("invoice_check", 0.0):
+                    next_run["invoice_check"] = now + max(600, int(ic.get("interval_min") or 30) * 60)
+                    import run_invoice_check
+                    def _chk():
+                        r = run_invoice_check.main(check_only=True, dry_run=False)
+                        return {"ok": (r or {}).get("ok", True), "moved": (r or {}).get("matched"),
+                                "failed": (r or {}).get("fail"), "checked": (r or {}).get("checked"),
+                                "review": (r or {}).get("review")}
+                    _run("invoice_check", _chk)
+
                 # Daily: auto-reconcile supplier statements dropped in the Outlook folder, so each
                 # supplier's latest is already reconciled in the Statements list before payments.
                 sr = _cfg("statement_recon")

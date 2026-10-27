@@ -97,8 +97,13 @@ def _read_pdf(inv):
         return {"error": str(e)}
 
 
-def main():
-    log(f"=== invoice auto-check — {'DRY RUN (writes NOTHING)' if DRY_RUN else 'LIVE'} "
+def main(check_only=False, dry_run=None):
+    """Headless invoice auto-check. check_only=True marks clean, in-margin invoices 'Matched
+    (TradeHub)' for Daniela to approve (NEVER writes the approve label / never touches QuickBooks),
+    and leaves everything else in Needs Review. dry_run overrides the env DRY_RUN."""
+    dry = DRY_RUN if dry_run is None else bool(dry_run)
+    log(f"=== invoice auto-check — {'DRY RUN (writes NOTHING)' if dry else 'LIVE'}"
+        f"{' · CHECK-ONLY (mark Matched, no approve)' if check_only else ''} "
         f"· push floor {LO:.0f}% · flag > {HI:.0f}% ===")
     lookup = _load_lookup()
     pidx = core.pricelist_index(lookup)
@@ -131,7 +136,7 @@ def main():
             dupflag += 1
             log(f"  {no} ({sup}, order {inv.get('order_no')}): POSSIBLE DUPLICATE — same £ as "
                 f"invoice {amt_dups[str(inv['sub_id'])]} -> left in Needs Review")
-            if not DRY_RUN:
+            if not dry:
                 try:
                     ds.set_subitem_text(
                         inv["sub_id"], "text_mm3gh2za",
@@ -168,7 +173,7 @@ def main():
         label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"),
                                             sup, LO, HI)
         m = inv.get("order_margin_live")
-        verb = "would set" if DRY_RUN else "set"
+        verb = "would set" if dry else "set"
         # Only auto-APPROVE or auto-HOLD. Never auto-mark Discrepancy — that's set by hand
         # after review + emailing the supplier. High-margin 'flag' and real mismatches are
         # LEFT in Needs Review.
@@ -186,20 +191,26 @@ def main():
             log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s) "
                 "-> left in Needs Review for you to check")
             continue
+        # check-only: a clean, in-margin invoice (would be auto-approved) is marked 'Matched
+        # (TradeHub)' for Daniela to approve; a 'hold' (matched but low margin) is LEFT in Needs
+        # Review rather than relabelled. check_only never writes the approve label.
+        write_label = ("Matched (TradeHub)" if (check_only and action == "push") else label)
+        write_it = (not check_only) or (action == "push")
         log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s), "
-            f"margin {m if m is not None else '—'} -> {verb} {label}")
-        if not DRY_RUN:
+            f"margin {m if m is not None else '—'} -> {verb} {write_label if write_it else 'left in Needs Review'}")
+        if not dry and write_it:
             try:
-                ds.set_invoice_status(inv["sub_id"], label)
+                ds.set_invoice_status(inv["sub_id"], write_label)
             except Exception as e:  # noqa: BLE001
                 log("     status write failed:", str(e)[:120])
         time.sleep(0.2)
 
-    log(f"=== done · checked {n} · push {pushed} · hold {held} · flag {flagged} · "
-        f"review {review} · possible-dup {dupflag} · unreadable {fail} ===")
-    if DRY_RUN:
+    log(f"=== done · checked {n} · {'matched' if check_only else 'push'} {pushed} · hold {held} · "
+        f"flag {flagged} · review {review} · possible-dup {dupflag} · unreadable {fail} ===")
+    if dry:
         log("DRY RUN — nothing was written to Monday. Set DRY_RUN=0 to go live.")
-    return 0
+    return {"ok": True, "checked": n, "matched": pushed, "hold": held, "flag": flagged,
+            "review": review, "dup": dupflag, "fail": fail}
 
 
 REPORT_BOARD_NAME = "TradeHub — Invoice Auto-check Reports"
@@ -282,5 +293,6 @@ def report_run(hours=24):
 if __name__ == "__main__":
     if "--report" in sys.argv:
         sys.exit(report_run(int(os.environ.get("REPORT_HOURS", "24"))))
-    sys.exit(main())
+    _r = main(check_only=("--check-only" in sys.argv))
+    sys.exit(0 if (isinstance(_r, dict) and _r.get("ok")) else (_r if isinstance(_r, int) else 1))
 
