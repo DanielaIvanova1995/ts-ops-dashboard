@@ -25,9 +25,10 @@ try:
 except Exception:  # noqa: BLE001
     supabase_db = None
 
+STATEMENTS_MAILBOX = "hello@tradesuperstoreonline.co.uk"  # where the Statements folder lives (Daniela set it under hello@)
 STATEMENTS_FOLDER = "Statements"              # the Outlook folder she drops statements into
 ARCHIVE_FOLDER = "Statements - Reconciled"    # processed statements land here
-CONFIG_KEY = "statement_recon"                # {auto_enabled, interval_min, max_total, folder, archive}
+CONFIG_KEY = "statement_recon"                # {auto_enabled, interval_min, max_total, folder, archive, mailbox}
 STATUS_KEY = "statement_recon_status"
 
 
@@ -142,7 +143,7 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
     cfg = _cfg()
     folder = folder or cfg.get("folder") or STATEMENTS_FOLDER
     archive = archive or cfg.get("archive") or ARCHIVE_FOLDER
-    mailbox = ds.INVOICE_IMPORT_MAILBOX
+    mailbox = cfg.get("mailbox") or STATEMENTS_MAILBOX
     res = {"ok": True, "reconciled": 0, "failed": 0, "need_vendor": 0, "skipped": 0,
            "items": [], "folder": folder}
     try:
