@@ -102,6 +102,29 @@ def _due(name: str, interval_min: int) -> bool:
         return True
 
 
+def _due_at_hour(name: str, hour: int, tzname: str = "Europe/London") -> bool:
+    """True if the daily job `name` should run now because it's on/after `hour` (local time) and it
+    hasn't already run today. Fires once per day at a fixed wall-clock hour (DST-aware via zoneinfo;
+    falls back to UTC if the tz database isn't available)."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(tzname)
+    except Exception:  # noqa: BLE001
+        tz = _dt.timezone.utc
+    now_local = _now().astimezone(tz)
+    if now_local.hour < hour:
+        return False
+    st = _cfg(name + "_status")
+    at = st.get("at")
+    if not at:
+        return True
+    try:
+        last_local = _dt.datetime.fromisoformat(at).astimezone(tz)
+        return last_local.date() < now_local.date()   # hasn't run yet today
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _write_status(name: str, payload: dict):
     if not supabase_db:
         return
@@ -136,7 +159,12 @@ def loop():
                 # Daily: auto-reconcile supplier statements dropped in the Outlook folder, so each
                 # supplier's latest is already reconciled in the Statements list before payments.
                 sr = _cfg("statement_recon")
-                if sr.get("auto_enabled", True) and _due("statement_recon", int(sr.get("interval_min") or 1440)):
+                # Run at a fixed wall-clock hour (default 6am UK) — set run_hour=null in config to fall
+                # back to the rolling once-every-interval_min timer instead.
+                _rh = sr.get("run_hour", 6)
+                _sr_due = (_due_at_hour("statement_recon", int(_rh)) if _rh is not None
+                           else _due("statement_recon", int(sr.get("interval_min") or 1440)))
+                if sr.get("auto_enabled", True) and _sr_due:
                     try:
                         import statement_recon
                         statement_recon.run_auto(max_total=int(sr.get("max_total") or 40))  # writes its own status
