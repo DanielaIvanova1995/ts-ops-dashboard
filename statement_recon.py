@@ -25,7 +25,7 @@ try:
 except Exception:  # noqa: BLE001
     supabase_db = None
 
-STATEMENTS_MAILBOX = "hello@tradesuperstoreonline.co.uk"  # where the Statements folder lives (Daniela set it under hello@)
+STATEMENTS_MAILBOX = "accounts@tradesuperstoreonline.co.uk"  # where the Statements folder lives (canonical accounts mailbox; same folder also mirrored under hello@)
 STATEMENTS_FOLDER = "Statements"              # the Outlook folder she drops statements into
 ARCHIVE_FOLDER = "Statements - Reconciled"    # processed statements land here
 CONFIG_KEY = "statement_recon"                # {auto_enabled, interval_min, max_total, folder, archive, mailbox}
