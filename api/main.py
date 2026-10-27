@@ -129,6 +129,15 @@ def diag(sweep: int = 0):
     """Yes/no status of the backend's integrations — no secrets returned. Open (booleans only) so it
     can be checked quickly. Confirms whether Supabase + QuickBooks are usable from THIS service."""
     out = {"supabase_configured": False, "supabase_read_ok": None, "qbo_connected": None}
+    # Access-code diagnostics — lengths/flags ONLY, never the value. Lets us tell apart a stray
+    # quote/space/case issue (len mismatch) from a genuine wrong code (same len, still rejected).
+    _raw_ak = os.environ.get("TRADEHUB_ACCESS_KEY") or ""
+    out["access_key"] = {
+        "set": bool(_ACCESS_KEY), "effective_len": len(_ACCESS_KEY), "raw_env_len": len(_raw_ak),
+        "surrounding_quotes": bool(_ACCESS_KEY) and _ACCESS_KEY[:1] in "'\"" and _ACCESS_KEY[-1:] in "'\"",
+        "has_space": " " in _ACCESS_KEY, "non_ascii": any(ord(c) > 126 for c in _ACCESS_KEY),
+    }
+    out["statements_key_set"] = bool(_STATEMENTS_KEY)
     try:
         import supabase_db as sdb
         out["supabase_configured"] = bool(sdb.configured())
