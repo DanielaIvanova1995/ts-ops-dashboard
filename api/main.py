@@ -1333,6 +1333,52 @@ class AutoCfgIn(BaseModel):
     folder: str | None = None
 
 
+class ExcludeIn(BaseModel):
+    vid: str = ""
+    supplier: str = ""
+
+
+def _statement_cfg():
+    import supabase_db
+    import statement_recon
+    if not supabase_db.configured():
+        return None, None, None
+    return supabase_db, statement_recon, (supabase_db.config_get(statement_recon.CONFIG_KEY) or {})
+
+
+@app.post("/recon/exclude", dependencies=[Depends(require_statements_key)])
+def recon_exclude(body: ExcludeIn):
+    """Add a supplier to the never-reconcile skip-list (by QuickBooks vendor id) AND remove its saved
+    reconciliation now. The auto-reconcile then skips any statement from this vendor."""
+    vid = str(body.vid or "").strip()
+    if not vid:
+        return {"ok": False, "detail": "vendor id required"}
+    sdb, sr, cfg = _statement_cfg()
+    if not sdb:
+        raise HTTPException(status_code=503, detail="Config store not available.")
+    excl = [e for e in (cfg.get("excluded") or []) if str(e.get("vid")) != vid]
+    excl.append({"vid": vid, "name": (body.supplier or "").strip()})
+    cfg["excluded"] = excl
+    sdb.config_set(sr.CONFIG_KEY, cfg)
+    try:
+        ds.recon_delete(f"v{vid}", vid=vid)      # drop its saved reconciliation from the list now
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "excluded": excl}
+
+
+@app.post("/recon/unexclude", dependencies=[Depends(require_statements_key)])
+def recon_unexclude(body: ExcludeIn):
+    """Remove a supplier from the never-reconcile skip-list (allow it again)."""
+    vid = str(body.vid or "").strip()
+    sdb, sr, cfg = _statement_cfg()
+    if not sdb:
+        raise HTTPException(status_code=503, detail="Config store not available.")
+    cfg["excluded"] = [e for e in (cfg.get("excluded") or []) if str(e.get("vid")) != vid]
+    sdb.config_set(sr.CONFIG_KEY, cfg)
+    return {"ok": True, "excluded": cfg["excluded"]}
+
+
 @app.post("/recon/auto-run", dependencies=[Depends(require_statements_key)])
 def recon_auto_run(dry_run: bool = False, force: bool = False):
     """Reconcile ALL statements sitting in the Outlook statements folder now, in the background (so the
@@ -1409,7 +1455,15 @@ def recon_coverage():
             waiting = len(ds.list_folder_invoice_messages(mailbox, fid, limit=50))
     except Exception:  # noqa: BLE001
         waiting = None
-    return {"saved": saved, "suppliers": suppliers, "folder_waiting": waiting}
+    excluded = []
+    try:
+        import statement_recon
+        import supabase_db
+        cfg2 = (supabase_db.config_get(statement_recon.CONFIG_KEY) if supabase_db.configured() else None) or {}
+        excluded = cfg2.get("excluded") or []
+    except Exception:  # noqa: BLE001
+        excluded = []
+    return {"saved": saved, "suppliers": suppliers, "folder_waiting": waiting, "excluded": excluded}
 
 
 @app.get("/recon/auto-status", dependencies=[Depends(require_statements_key)])

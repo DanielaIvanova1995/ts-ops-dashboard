@@ -47,7 +47,7 @@ def _set_status(res: dict, reason: str, running: bool = False):
             "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "reconciled": res.get("reconciled"), "failed": res.get("failed"),
             "need_vendor": res.get("need_vendor"), "skipped": res.get("skipped"),
-            "total": res.get("total"), "done": res.get("done"),
+            "excluded": res.get("excluded"), "total": res.get("total"), "done": res.get("done"),
             "running": bool(running),
             "ok": res.get("ok"), "error": res.get("error"),
             "items": (res.get("items") or [])[-40:], "reason": reason})
@@ -100,10 +100,12 @@ def _enrich(invoice_numbers):
         return {}
 
 
-def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do_save=False) -> dict:
+def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do_save=False,
+                    excluded=None) -> dict:
     """Reconcile ONE statement (PDF bytes or raw text). Returns the rec dict (same shape as the
     /recon endpoint). do_save=True persists it as this vendor's latest snapshot. On no QuickBooks
-    vendor match returns {ok: False, need_vendor: True, ...}."""
+    vendor match returns {ok: False, need_vendor: True, ...}. `excluded` is a set of QB vendor ids to
+    SKIP (suppliers Daniela never wants auto-reconciled) → returns {ok: False, excluded: True}."""
     fn = (filename or "").lower()
     if pdf_bytes is not None and fn.endswith((".xlsx", ".xlsm", ".xls")):
         stmt = ds.read_statement_pdf(text=ds.statement_xlsx_to_text(pdf_bytes))
@@ -134,6 +136,9 @@ def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do
                 "filename": filename}
     if vname:
         sup = vname
+    if excluded and str(vid) in {str(x) for x in excluded}:
+        return {"ok": False, "excluded": True, "supplier": vname or sup, "vid": str(vid),
+                "filename": filename}
     bills = ds.qbo_vendor_bills(vid)
     try:
         paymap = ds.qbo_vendor_payments(vid)
@@ -184,7 +189,8 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
     folder = folder or cfg.get("folder") or STATEMENTS_FOLDER
     archive = archive or cfg.get("archive") or ARCHIVE_FOLDER
     mailbox = cfg.get("mailbox") or STATEMENTS_MAILBOX
-    res = {"ok": True, "reconciled": 0, "failed": 0, "need_vendor": 0, "skipped": 0,
+    excluded = {str(e.get("vid")) for e in (cfg.get("excluded") or []) if e.get("vid")}
+    res = {"ok": True, "reconciled": 0, "failed": 0, "need_vendor": 0, "skipped": 0, "excluded": 0,
            "items": [], "folder": folder}
     try:
         fid = ds.find_or_create_mail_folder(mailbox, folder, create=not dry_run)
@@ -231,7 +237,8 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
         for att in pdfs:
             try:
                 rec = reconcile_bytes(pdf_bytes=att.get("bytes"),
-                                      filename=att.get("name") or "statement.pdf", do_save=not dry_run)
+                                      filename=att.get("name") or "statement.pdf", do_save=not dry_run,
+                                      excluded=excluded)
             except Exception as e:  # noqa: BLE001
                 all_ok = False
                 res["failed"] += 1
@@ -243,6 +250,11 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
                 res["items"].append({"supplier": rec.get("vendor_name") or rec.get("supplier"),
                                      "status": "reconciled", "n_pay": rec.get("n_pay"),
                                      "to_pay": rec.get("to_pay"), "n_missing": rec.get("n_missing")})
+            elif rec.get("excluded"):
+                # Supplier on the skip-list — don't reconcile, but it's "handled" so archive it out.
+                res["excluded"] += 1
+                res["items"].append({"supplier": rec.get("supplier"), "status": "excluded",
+                                     "detail": "skipped (on your never-reconcile list)"})
             elif rec.get("need_vendor"):
                 all_ok = False
                 res["need_vendor"] += 1

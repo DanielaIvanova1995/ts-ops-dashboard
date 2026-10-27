@@ -453,6 +453,8 @@ export default function Recon() {
   const [notice, setNotice] = useState(null);
   const [approving, setApproving] = useState({});
   const [saved, setSaved] = useState([]);
+  const [excluded, setExcluded] = useState([]);   // never-reconcile skip-list [{vid, name}]
+  const [exclPick, setExclPick] = useState("");
   const fileRef = useRef(null);
   const [picked, setPicked] = useState(null);   // the chosen statement file (click or drag-drop)
   const [drag, setDrag] = useState(false);
@@ -511,6 +513,31 @@ export default function Recon() {
     if (needPin) return;
     jsonFetch("/recon/saved").then((r) => r.ok && r.json()).then((d) => d && setSaved(d.saved || [])).catch(() => {});
   }, [needPin, jsonFetch]);
+
+  const loadExcluded = useCallback(() => {
+    if (needPin) return;
+    jsonFetch("/recon/coverage").then((r) => r.ok && r.json()).then((d) => d && setExcluded(d.excluded || [])).catch(() => {});
+  }, [needPin, jsonFetch]);
+  useEffect(() => { loadExcluded(); }, [loadExcluded]);
+
+  async function addExcludePick() {
+    const v = vendors.find((x) => String(x.id) === String(exclPick));
+    if (!v) return;
+    try {
+      const res = await jsonFetch("/recon/exclude", { method: "POST", body: JSON.stringify({ vid: String(v.id), supplier: v.name || "" }) });
+      const d = await res.json();
+      if (res.ok && d.ok) { setExcluded(d.excluded || []); setSaved((xs) => xs.filter((x) => String(x.vid) !== String(v.id))); setExclPick(""); setNotice({ kind: "ok", text: `${v.name} added to the never-reconcile list.` }); }
+      else setNotice({ kind: "warn", text: d.detail || "Couldn’t add it." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
+  async function removeExclude(vid) {
+    try {
+      const res = await jsonFetch("/recon/unexclude", { method: "POST", body: JSON.stringify({ vid: String(vid) }) });
+      const d = await res.json();
+      if (res.ok && d.ok) { setExcluded(d.excluded || []); setNotice({ kind: "ok", text: "Allowed again — it'll reconcile on the next run." }); }
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
   useEffect(() => { loadSaved(); }, [loadSaved]);
 
   async function dismissSaved(s) {
@@ -520,6 +547,17 @@ export default function Recon() {
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) { setSaved((xs) => xs.filter((x) => x.key !== s.key)); setNotice({ kind: "ok", text: `Removed ${s.supplier}.` }); }
       else setNotice({ kind: "warn", text: d.detail || "Couldn’t remove it." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
+  async function excludeSupplier(vid, supplier) {
+    if (!vid) { setNotice({ kind: "warn", text: "No QuickBooks vendor id for this supplier." }); return; }
+    if (!window.confirm(`Never auto-reconcile ${supplier || "this supplier"} again? It'll be removed from the list and skipped on future runs. (You can allow it again any time.)`)) return;
+    try {
+      const res = await jsonFetch("/recon/exclude", { method: "POST", body: JSON.stringify({ vid: String(vid), supplier: supplier || "" }) });
+      const d = await res.json();
+      if (res.ok && d.ok) { setSaved((xs) => xs.filter((x) => String(x.vid) !== String(vid))); setExcluded(d.excluded || []); setNotice({ kind: "ok", text: `${supplier || "Supplier"} added to the never-reconcile list.` }); }
+      else setNotice({ kind: "warn", text: d.detail || "Couldn’t add it." });
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
   }
 
@@ -744,12 +782,33 @@ export default function Recon() {
                   {s.n_missing ? <span className="chip red">{s.n_missing} not in QB</span> : null}
                   <button className="btn" onClick={() => openSaved(s.key)}>Open</button>
                   <button className="btn ghost" onClick={() => dismissSaved(s)} title="Remove this saved statement from the list">Remove</button>
+                  <button className="btn ghost" onClick={() => excludeSupplier(s.vid, s.supplier)} title="Never auto-reconcile this supplier again (removes it and skips it on future runs)">Don’t reconcile</button>
                 </div>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+        <div className="tool-label" style={{ marginBottom: 8 }}>Never reconcile these suppliers</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          {excluded.length === 0 && <span className="sub">None — the sweep reconciles every supplier in the folder.</span>}
+          {excluded.map((e) => (
+            <span key={e.vid} className="pill grey">{e.name || `vendor ${e.vid}`}
+              <button className="linkish" style={{ marginLeft: 6 }} onClick={() => removeExclude(e.vid)} title="Allow this supplier to reconcile again">allow</button>
+            </span>
+          ))}
+        </div>
+        <div className="recon-upload" style={{ marginTop: 10 }}>
+          <select className="filter" style={{ maxWidth: 280, flex: "none" }} value={exclPick} onChange={(e) => setExclPick(e.target.value)} title="Pick a QuickBooks supplier to never auto-reconcile">
+            <option value="">Add a supplier to skip…</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+          <button className="btn" onClick={addExcludePick} disabled={!exclPick}>Add to skip-list</button>
+        </div>
+        <div className="sub" style={{ marginTop: 6 }}>Skipped suppliers aren’t reconciled by the daily run or “Reconcile all now”, and their statements are archived out of the folder.</div>
+      </div>
 
       {r && (
         <div className="card">
