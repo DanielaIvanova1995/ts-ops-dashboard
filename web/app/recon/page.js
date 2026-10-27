@@ -318,6 +318,19 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
   }, [jsonFetch]);
   useEffect(() => { loadStatus(); loadCov(); }, [loadStatus, loadCov]);
 
+  // While a run is in progress (this tab, the daily job, or another session), keep refreshing the
+  // status every few seconds so the list of reconciled suppliers grows live.
+  useEffect(() => {
+    if (!status?.status?.running) return;
+    const t = setInterval(() => { loadStatus(); }, 3000);
+    return () => clearInterval(t);
+  }, [status?.status?.running, loadStatus]);
+
+  // When a run finishes (running flips off), refresh the saved/coverage list so the new ones show.
+  useEffect(() => {
+    if (status && status.status && status.status.running === false) loadCov();
+  }, [status?.status?.running, loadCov]);
+
   async function runNow() {
     setRunning(true);
     try {
@@ -364,10 +377,25 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
         </span>
         <button className="btn primary" onClick={runNow} disabled={running}>{running ? "Reconciling…" : "Reconcile all now"}</button>
       </div>
-      {(st.at || st.running) && (
-        <div className="sub" style={{ marginTop: 8 }}>
-          {st.running ? "Running now…" : <>Last run {String(st.at || "").slice(0, 16).replace("T", " ")}: <b>{st.reconciled ?? 0}</b> reconciled{st.need_vendor ? `, ${st.need_vendor} no-vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}{st.skipped ? `, ${st.skipped} already done` : ""}.</>}
-          {st.error ? <span className="route-msg warn" style={{ display: "block", marginTop: 6 }}>{st.error}</span> : null}
+      {(st.at || st.running || running) && (
+        <div style={{ marginTop: 8 }}>
+          <div className="sub">
+            {st.running || running
+              ? <>⏳ Reconciling… <b>{st.done ?? 0}{st.total ? ` of ${st.total}` : ""}</b> done · {st.reconciled ?? 0} reconciled{st.need_vendor ? `, ${st.need_vendor} need a vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}</>
+              : <>Last run {String(st.at || "").slice(0, 16).replace("T", " ")}: <b>{st.reconciled ?? 0}</b> reconciled{st.need_vendor ? `, ${st.need_vendor} need a vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}{st.skipped ? `, ${st.skipped} already done` : ""}.</>}
+          </div>
+          {st.error ? <div className="route-msg warn" style={{ marginTop: 6 }}>{st.error}</div> : null}
+          {(st.items || []).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {(st.items || []).map((it, i) => (
+                <span key={i} className={`pill ${it.status === "reconciled" ? "green" : it.status === "need_vendor" ? "amber" : "red"}`} title={it.detail || ""}>
+                  {it.supplier || it.subject || "statement"}
+                  {it.status === "reconciled" && it.to_pay ? ` · ${money(it.to_pay)}` : ""}
+                  {it.status === "need_vendor" ? " · needs vendor" : it.status !== "reconciled" ? ` · ${it.status || "failed"}` : ""}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {cov && typeof cov.folder_waiting === "number" && cov.folder_waiting > 0 && (

@@ -39,7 +39,7 @@ def _cfg() -> dict:
         return {}
 
 
-def _set_status(res: dict, reason: str):
+def _set_status(res: dict, reason: str, running: bool = False):
     if not supabase_db:
         return
     try:
@@ -47,8 +47,10 @@ def _set_status(res: dict, reason: str):
             "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "reconciled": res.get("reconciled"), "failed": res.get("failed"),
             "need_vendor": res.get("need_vendor"), "skipped": res.get("skipped"),
+            "total": res.get("total"), "done": res.get("done"),
+            "running": bool(running),
             "ok": res.get("ok"), "error": res.get("error"),
-            "items": (res.get("items") or [])[:40], "reason": reason})
+            "items": (res.get("items") or [])[-40:], "reason": reason})
     except Exception:  # noqa: BLE001
         pass
 
@@ -203,6 +205,9 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
     # Process OLDEST first so that, for a supplier with several statements, the NEWEST is reconciled
     # last and becomes the kept per-vendor snapshot (recon_save replaces by vendor).
     msgs = list(reversed(msgs))
+    res["total"] = len(msgs)
+    res["done"] = 0
+    _set_status(res, "preview" if dry_run else "auto", running=True)   # initial progress
     archive_id = None
     for m in msgs:
         mid = m.get("id")
@@ -262,6 +267,9 @@ def run_auto(folder=None, archive=None, max_total=40, dry_run=False, force=False
                     supabase_db.invoice_import_log(seen_key, "reconciled")
                 except Exception:  # noqa: BLE001
                     pass
+        # Live progress after each statement so the UI can list them as they come through.
+        res["done"] = res.get("done", 0) + 1
+        _set_status(res, "preview" if dry_run else "auto", running=True)
     res["moved"] = res["reconciled"]     # scheduler status reads "moved"
-    _set_status(res, "preview" if dry_run else "auto")
+    _set_status(res, "preview" if dry_run else "auto", running=False)   # final
     return res
