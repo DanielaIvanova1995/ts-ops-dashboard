@@ -156,6 +156,23 @@ def loop():
                         dry_run=False, since_days=qt.get("since_days"),
                         max_total=int(qt.get("max_total") or 40)))
 
+                # Invoice import — ALWAYS-ON here (it used to run only inside Streamlit, so when that
+                # wasn't open the Suppliers folders filled up and nothing imported). Scans accounts@
+                # Inbox/Suppliers, creates the Monday invoice subitems, archives handled emails.
+                ii = _cfg("invoice_import")
+                if ii.get("auto_enabled", True) and now >= next_run.get("invoice_import", 0.0):
+                    next_run["invoice_import"] = now + max(600, int(ii.get("interval_min") or 20) * 60)
+                    import invoice_import
+                    def _imp():
+                        r = invoice_import.run_import(dry_run=False,
+                                                      max_total=int(ii.get("max_total") or 40))
+                        # map to the status shape _run records (moved/failed)
+                        return {"ok": r.get("ok"), "moved": r.get("imported"), "failed": r.get("failed"),
+                                "skipped": r.get("skipped"), "error": r.get("error"),
+                                "imported": r.get("imported"), "ignored": r.get("ignored"),
+                                "scanned": r.get("scanned")}
+                    _run("invoice_import", _imp)
+
                 # Daily: auto-reconcile supplier statements dropped in the Outlook folder, so each
                 # supplier's latest is already reconciled in the Statements list before payments.
                 sr = _cfg("statement_recon")
