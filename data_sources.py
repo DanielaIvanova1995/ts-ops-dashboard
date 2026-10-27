@@ -5165,18 +5165,23 @@ def _recon_monday_blob(token=None):
 
 
 def recon_load_all(token=None):
-    """{supplier_key: snapshot} of the latest saved statement reconciliation per supplier. Durable
-    source of truth is **Supabase** (one row per save, latest kept per vendor, no size cap); the
-    Monday text blob is only a fallback when there's no database."""
+    """{supplier_key: snapshot} of the latest saved statement reconciliation per supplier. MERGES
+    both stores so nothing can vanish: the legacy Monday blob as a base, with Supabase (the durable,
+    no-size-cap source of truth) overlaid on top per vendor. So entries survive whether they were
+    saved to Monday (older runs) or Supabase (now)."""
+    merged = {}
+    try:
+        merged.update(_recon_monday_blob(token) or {})
+    except Exception:  # noqa: BLE001
+        pass
     try:
         import supabase_db
         if supabase_db.configured():
-            db = supabase_db.recon_load_all()
-            if db:
-                return db
+            db = supabase_db.recon_load_all() or {}
+            merged.update(db)                 # Supabase wins per vendor (newest)
     except Exception:  # noqa: BLE001
         pass
-    return _recon_monday_blob(token)
+    return merged
 
 
 def recon_save(supplier_key: str, snapshot: dict, token=None):
@@ -5185,29 +5190,36 @@ def recon_save(supplier_key: str, snapshot: dict, token=None):
     the Monday-blob size limit that was resetting the list to just the last run. Only falls back to
     the Monday blob when there's no database."""
     vid = str(snapshot.get("vid") or "")
+    ok_db = False
     try:
         import supabase_db
         if supabase_db.configured():
-            supabase_db.recon_save(vid or supplier_key, snapshot)
-            try:
-                supabase_db.audit("", "recon_save",
-                                  str(snapshot.get("supplier") or supplier_key), supplier_key)
-            except Exception:  # noqa: BLE001
-                pass
-            return
+            ok_db = bool(supabase_db.recon_save(vid or supplier_key, snapshot))
+            if ok_db:
+                try:
+                    supabase_db.audit("", "recon_save",
+                                      str(snapshot.get("supplier") or supplier_key), supplier_key)
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception:  # noqa: BLE001
+        ok_db = False
+    # Also keep the Monday blob updated (one-per-vendor replace) as a fallback — but when Supabase
+    # already has it, skip the Monday write if the blob would get too big (the old overflow bug).
+    try:
+        import base64 as _b64
+        import json as _json
+        token = token or get_token()
+        m = _recon_monday_blob(token)
+        if vid:
+            m = {k: v for k, v in m.items()
+                 if k == supplier_key or str(v.get("vid") or "") != vid}
+        m[supplier_key] = snapshot
+        body = _b64.b64encode(_json.dumps(m).encode()).decode()
+        if not (ok_db and len(body) > 350000):
+            item_id = _config_item_named(QBO_RECON_ITEM, token)
+            monday_post_update(item_id, body, token)
     except Exception:  # noqa: BLE001
         pass
-    # No Supabase → legacy Monday blob (one-per-vendor replace).
-    import base64 as _b64
-    import json as _json
-    token = token or get_token()
-    m = _recon_monday_blob(token)
-    if vid:
-        m = {k: v for k, v in m.items()
-             if k == supplier_key or str(v.get("vid") or "") != vid}
-    m[supplier_key] = snapshot
-    item_id = _config_item_named(QBO_RECON_ITEM, token)
-    monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
 
 
 def recon_delete(supplier_key: str, vid: str | None = None, token=None) -> bool:
