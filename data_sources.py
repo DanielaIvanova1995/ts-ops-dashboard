@@ -5534,6 +5534,56 @@ def qbo_create_bill(vendor_id, doc_number, total_inc_vat, txn_date=None, descrip
     return qbo_create("bill", body)
 
 
+def qbo_approve_invoice(invoice_no, inv_date=None) -> dict:
+    """Approve ONE invoice to QuickBooks: resolve the vendor, create the bill (idempotent — never
+    double-creates), and mark the Monday subitem 'Approved (To QB by TradeHub)'. inv_date is a
+    fallback when Monday has no invoice date (else today). The reusable core of the manual
+    /recon/approve, used by the scheduled auto-approver. Returns {ok, detail}."""
+    import datetime as _dt
+    import recon_core
+    name = (invoice_no or "").strip()
+    if not name:
+        return {"ok": False, "detail": "no invoice number"}
+    det = (subitems_bill_details([name]) or {}).get(name)
+    if not det:
+        return {"ok": False, "detail": "couldn't find this invoice on Monday"}
+    d = (det.get("invoice_date") or inv_date or "")[:10] or _dt.date.today().isoformat()
+    total = det.get("total")
+    if not isinstance(total, (int, float)) or total == 0:
+        return {"ok": False, "detail": "no invoice total on Monday"}
+    supplier = det.get("supplier") or ""
+    try:
+        vinfo = (qbo_vendor_map_load() or {}).get(recon_core.norm_code(supplier))
+        vid = vinfo.get("id") if vinfo else None
+        if not vid:
+            v = qbo_find_vendor(supplier)
+            vid = v.get("id") if v else None
+    except Exception:  # noqa: BLE001
+        vid = None
+    if not vid:
+        return {"ok": False, "detail": f"couldn't match supplier “{supplier}” to a QuickBooks vendor"}
+    if not det.get("invoice_date") and det.get("sub_id"):
+        try:
+            set_subitem_text(det["sub_id"], "date_mm3d1ear", d)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        if qbo_bill_exists(name):
+            created = "already on QuickBooks"
+        else:
+            qbo_create_bill(vid, name, total, txn_date=d, description=name,
+                            private_note=det.get("parent_name"))
+            created = f"bill created in QuickBooks (£{total:,.2f})"
+        if det.get("sub_id"):
+            try:
+                set_invoice_status(det["sub_id"], "Approved (To QB by TradeHub)", create_missing=True)
+            except Exception:  # noqa: BLE001
+                pass
+        return {"ok": True, "detail": created}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e)[:160]}
+
+
 def subitems_bill_details(names, token=None) -> dict:
     """For invoice numbers (subitem names), return {name: {sub_id, total, invoice_date, status,
     parent_name}} — everything needed to create a QuickBooks bill for an approved-but-missing

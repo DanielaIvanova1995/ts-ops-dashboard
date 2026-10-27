@@ -173,15 +173,18 @@ def loop():
                                 "scanned": r.get("scanned")}
                     _run("invoice_import", _imp)
 
-                # Invoice CHECK — check every Needs Review invoice (invoice vs order vs price) and
-                # mark the clean, in-margin ones 'Matched (TradeHub)' for Daniela to approve. NEVER
-                # auto-approves to QuickBooks and never auto-marks Discrepancy (that stays manual).
+                # Invoice CHECK + AUTO-APPROVE — check every Needs Review AND Matched invoice (invoice
+                # vs order vs price) and push the clean, in-margin ones straight to QuickBooks + mark
+                # 'Approved (To QB by TradeHub)' on Monday (Daniela 2026-10-27: push in-margin ones
+                # directly). Out-of-margin / mismatched stay in Needs Review; never auto-marks
+                # Discrepancy. Set invoice_check config check_only=true to revert to mark-Matched-only.
                 ic = _cfg("invoice_check")
                 if ic.get("auto_enabled", True) and now >= next_run.get("invoice_check", 0.0):
                     next_run["invoice_check"] = now + max(600, int(ic.get("interval_min") or 30) * 60)
                     import run_invoice_check
+                    _co = bool(ic.get("check_only", False))
                     def _chk():
-                        r = run_invoice_check.main(check_only=True, dry_run=False)
+                        r = run_invoice_check.main(check_only=_co, dry_run=False)
                         return {"ok": (r or {}).get("ok", True), "moved": (r or {}).get("matched"),
                                 "failed": (r or {}).get("fail"), "checked": (r or {}).get("checked"),
                                 "review": (r or {}).get("review")}

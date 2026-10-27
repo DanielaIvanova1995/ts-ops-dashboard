@@ -36,6 +36,7 @@ import data_sources as ds          # noqa: E402  (after .env load)
 import invoice_core as core        # noqa: E402
 
 NEEDS_REVIEW_LABEL = 3             # status7__1 "Needs Review"
+MATCHED_LABEL = 9                  # status7__1 "Matched (TradeHub)" — auto-matched, awaiting approval
 DRY_RUN = os.environ.get("DRY_RUN", "1").strip().lower() not in ("0", "false", "no", "off")
 LO = float(os.environ.get("INV_MARGIN_MIN", core.MARGIN_PUSH_MIN))
 HI = float(os.environ.get("INV_MARGIN_MAX", core.MARGIN_PUSH_MAX))
@@ -111,11 +112,14 @@ def main(check_only=False, dry_run=None):
     cidx = core.supplier_code_index(pidx)
     log(f"pricelist: {len(pidx)} SKUs · supplier-titles: {len(tidx)} · supplier-codes: {len(cidx)}")
 
+    # Full-auto also sweeps already-Matched invoices so the current Matched backlog gets pushed to QB
+    # too; check-only only looks at Needs Review.
+    labels = [NEEDS_REVIEW_LABEL] if check_only else [NEEDS_REVIEW_LABEL, MATCHED_LABEL]
     try:
-        data = ds.fetch_invoices_by_status([NEEDS_REVIEW_LABEL], limit=500)
+        data = ds.fetch_invoices_by_status(labels, limit=500)
     except Exception as e:  # noqa: BLE001
-        log("ERROR: couldn't fetch Needs Review from Monday —", e)
-        return 1
+        log("ERROR: couldn't fetch invoices from Monday —", e)
+        return {"ok": False, "error": str(e)[:160]}
     invs = [i for i in data.get("invoices", []) if not core.is_excluded_supplier(i.get("supplier"))]
     skipped = len(data.get("invoices", [])) - len(invs)
     log(f"Needs Review: {len(invs)} invoice(s)"
@@ -191,9 +195,21 @@ def main(check_only=False, dry_run=None):
             log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s) "
                 "-> left in Needs Review for you to check")
             continue
-        # check-only: a clean, in-margin invoice (would be auto-approved) is marked 'Matched
-        # (TradeHub)' for Daniela to approve; a 'hold' (matched but low margin) is LEFT in Needs
-        # Review rather than relabelled. check_only never writes the approve label.
+        # FULL-AUTO: a clean, in-margin invoice (action "push") is approved straight to QuickBooks —
+        # create the bill + mark 'Approved (To QB by TradeHub)'. CHECK-ONLY instead marks it
+        # 'Matched (TradeHub)' for Daniela. A 'hold' (matched but low margin) is left in Needs Review.
+        if action == "push" and not check_only:
+            if dry:
+                log(f"  {no} ({sup}, order {inv.get('order_no')}): margin {m} -> would APPROVE to QB")
+            else:
+                ap = ds.qbo_approve_invoice(inv.get("invoice_no"), inv_date=parsed.get("invoice_date"))
+                if ap.get("ok"):
+                    log(f"  {no} ({sup}, order {inv.get('order_no')}): margin {m} -> {ap.get('detail')}")
+                else:
+                    held += 1; pushed -= 1    # couldn't approve → leave for review, count correction
+                    log(f"  {no} ({sup}): NOT approved — {ap.get('detail')} (left in place)")
+            time.sleep(0.2)
+            continue
         write_label = ("Matched (TradeHub)" if (check_only and action == "push") else label)
         write_it = (not check_only) or (action == "push")
         log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s), "
