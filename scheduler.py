@@ -160,12 +160,15 @@ def loop():
                 # wasn't open the Suppliers folders filled up and nothing imported). Scans accounts@
                 # Inbox/Suppliers, creates the Monday invoice subitems, archives handled emails.
                 ii = _cfg("invoice_import")
+                # CATCH-UP: force an aggressive rate to clear the backlog fast, regardless of any old
+                # config (at most every 10 min, at least 80 emails/run). Dial back later if wanted.
+                _ii_int = min(int(ii.get("interval_min") or 10), 10)
+                _ii_max = max(int(ii.get("max_total") or 80), 80)
                 if ii.get("auto_enabled", True) and now >= next_run.get("invoice_import", 0.0):
-                    next_run["invoice_import"] = now + max(600, int(ii.get("interval_min") or 20) * 60)
+                    next_run["invoice_import"] = now + max(600, _ii_int * 60)
                     import invoice_import
                     def _imp():
-                        r = invoice_import.run_import(dry_run=False,
-                                                      max_total=int(ii.get("max_total") or 40))
+                        r = invoice_import.run_import(dry_run=False, max_total=_ii_max)
                         # map to the status shape _run records (moved/failed)
                         return {"ok": r.get("ok"), "moved": r.get("imported"), "failed": r.get("failed"),
                                 "skipped": r.get("skipped"), "error": r.get("error"),
@@ -179,12 +182,14 @@ def loop():
                 # directly). Out-of-margin / mismatched stay in Needs Review; never auto-marks
                 # Discrepancy. Set invoice_check config check_only=true to revert to mark-Matched-only.
                 ic = _cfg("invoice_check")
+                _ic_int = min(int(ic.get("interval_min") or 10), 10)      # catch-up: every 10 min
+                _ic_max = max(int(ic.get("max_total") or 80), 80)         # catch-up: 80/run
                 if ic.get("auto_enabled", True) and now >= next_run.get("invoice_check", 0.0):
-                    next_run["invoice_check"] = now + max(600, int(ic.get("interval_min") or 30) * 60)
+                    next_run["invoice_check"] = now + max(600, _ic_int * 60)
                     import run_invoice_check
                     _co = bool(ic.get("check_only", False))
                     def _chk():
-                        r = run_invoice_check.main(check_only=_co, dry_run=False)
+                        r = run_invoice_check.main(check_only=_co, dry_run=False, max_total=_ic_max)
                         return {"ok": (r or {}).get("ok", True), "moved": (r or {}).get("matched"),
                                 "failed": (r or {}).get("fail"), "checked": (r or {}).get("checked"),
                                 "review": (r or {}).get("review")}

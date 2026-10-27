@@ -98,7 +98,7 @@ def _read_pdf(inv):
         return {"error": str(e)}
 
 
-def main(check_only=False, dry_run=None):
+def main(check_only=False, dry_run=None, max_total=None):
     """Headless invoice auto-check. check_only=True marks clean, in-margin invoices 'Matched
     (TradeHub)' for Daniela to approve (NEVER writes the approve label / never touches QuickBooks),
     and leaves everything else in Needs Review. dry_run overrides the env DRY_RUN."""
@@ -132,7 +132,7 @@ def main(check_only=False, dry_run=None):
     amt_dups = core.amount_dup_ids(invs)          # same order + same £, different inv number
 
     n = pushed = held = flagged = review = dupflag = fail = 0
-    for inv in invs[:MAX_INVOICES]:
+    for inv in invs[:(max_total or MAX_INVOICES)]:
         n += 1
         no, sup, sid = inv.get("invoice_no"), inv.get("supplier"), inv.get("shopify_order_id")
         # Suspected double-invoice → never auto-approve; leave in Needs Review with a note.
