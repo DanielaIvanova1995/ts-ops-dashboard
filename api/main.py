@@ -1129,10 +1129,11 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
 
 
 @app.get("/recon/saved", dependencies=[Depends(require_statements_key)])
-def recon_saved():
-    """The latest saved reconciliation per supplier — with a LIVE re-check against QuickBooks: any
-    statement whose ready-to-pay bills are now all paid is auto-removed (and dropped from the store).
-    Returns light summaries; open one with /recon/open."""
+def recon_saved(live: int = 0):
+    """The latest saved reconciliation per supplier. FAST by default — reads the stored summaries and
+    does NOT call QuickBooks (so the list loads instantly however many suppliers there are). Pass
+    live=1 to re-check each against QuickBooks for the current unpaid total (slower). Open one with
+    /recon/open."""
     try:
         allsnaps = ds.recon_load_all() or {}
     except Exception as e:  # noqa: BLE001
@@ -1144,16 +1145,17 @@ def recon_saved():
         to_pay = snap.get("to_pay") or 0
         n_out = snap.get("n_pay") or 0
         settled = False
-        try:
-            if vid and pay_lines:                        # live re-check: how much is still unpaid in QB
-                bills = ds.qbo_vendor_bills(vid)
-                open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
-                outstanding = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
-                to_pay = round(sum(float(pl.get("amt") or 0) for pl in outstanding), 2)
-                n_out = len(outstanding)
-                settled = not outstanding                # all paid now — but KEEP it (don't auto-delete)
-        except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
-            pass
+        if live:
+            try:
+                if vid and pay_lines:                    # live re-check: how much is still unpaid in QB
+                    bills = ds.qbo_vendor_bills(vid)
+                    open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
+                    outstanding = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
+                    to_pay = round(sum(float(pl.get("amt") or 0) for pl in outstanding), 2)
+                    n_out = len(outstanding)
+                    settled = not outstanding            # all paid now — but KEEP it (don't auto-delete)
+            except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
+                pass
         if not pay_lines and (snap.get("n_pay") or 0) == 0:
             settled = True                               # nothing outstanding — still KEEP it, just flag it
         # NB: we no longer auto-delete saved reconciliations on load (that was making them "disappear").
