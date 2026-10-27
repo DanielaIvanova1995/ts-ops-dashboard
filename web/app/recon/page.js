@@ -366,6 +366,11 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
           {st.error ? <span className="route-msg warn" style={{ display: "block", marginTop: 6 }}>{st.error}</span> : null}
         </div>
       )}
+      {cov && typeof cov.folder_waiting === "number" && cov.folder_waiting > 0 && (
+        <div className="route-msg ok" style={{ marginTop: 8 }}>
+          📥 <b>{cov.folder_waiting}</b> statement{cov.folder_waiting === 1 ? "" : "s"} waiting in the folder — hit <b>Reconcile all now</b> to process {cov.folder_waiting === 1 ? "it" : "them"}.
+        </div>
+      )}
       {cov && (
         <div style={{ marginTop: 10 }}>
           <div className="sub">
@@ -411,6 +416,8 @@ export default function Recon() {
   const [vendors, setVendors] = useState([]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [openKey, setOpenKey] = useState(null);  // key of the currently-open saved reconciliation
+  const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
   const [approving, setApproving] = useState({});
   const [saved, setSaved] = useState([]);
@@ -484,15 +491,27 @@ export default function Recon() {
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
   }
 
-  async function openSaved(key) {
+  async function openSaved(key, { scroll = true, quiet = false } = {}) {
     try {
+      setOpenKey(key);
       const res = await jsonFetch(`/recon/open?key=${encodeURIComponent(key)}`);
       if (!res.ok) throw new Error(`API ${res.status}`);
       setResult(await res.json());
-      try { window.scrollTo(0, 0); } catch {}
+      if (scroll) { try { window.scrollTo(0, 0); } catch {} }
+      if (!quiet) setNotice(null);
     } catch (e) {
       if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) });
     }
+  }
+
+  // Re-run the live check on the open reconciliation — re-reads QuickBooks so a just-approved invoice
+  // flips from "Not in QuickBooks" to ready, and refreshes Monday stage/margin.
+  async function refreshResult() {
+    const key = openKey || (result && (result.vid || result.vendor_id) ? `v${result.vid || result.vendor_id}` : null);
+    if (!key) return;
+    setRefreshing(true);
+    try { await openSaved(key, { scroll: false, quiet: true }); loadSaved(); setNotice({ kind: "ok", text: "Refreshed against QuickBooks." }); }
+    finally { setRefreshing(false); }
   }
 
   function submitKey(e) {
@@ -712,6 +731,7 @@ export default function Recon() {
               {r.n_missing ? <span className="chip red"><b>{r.n_missing}</b> not in QB</span> : null}
               {r.n_paid ? <span className="chip green"><b>{r.n_paid}</b> paid</span> : null}
               <span className="chip grey">Statement {money(r.stmt_total)}</span>
+              <button className="btn ghost" onClick={refreshResult} disabled={refreshing} title="Re-check against QuickBooks — picks up invoices you've just approved">{refreshing ? "Refreshing…" : "↻ Refresh"}</button>
               <button className="btn ghost" onClick={downloadCsv} title="Download the whole reconciliation as a CSV">⬇ CSV</button>
             </div>
           </div>

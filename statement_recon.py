@@ -53,6 +53,41 @@ def _set_status(res: dict, reason: str):
         pass
 
 
+def _parse_stmt_date(s):
+    """Best-effort date parse for a statement_date — handles ISO and UK d/m/y. None if unknown."""
+    import datetime as _d
+    import re as _re
+    t = str(s or "").strip()[:10]
+    if not t:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y"):
+        try:
+            return _d.datetime.strptime(t, fmt).date()
+        except ValueError:
+            continue
+    m = _re.search(r"(\d{4})-(\d{2})-(\d{2})", str(s or ""))
+    if m:
+        try:
+            return _d.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    return None
+
+
+def _existing_is_newer(vid, new_date) -> bool:
+    """True if the vendor's already-saved snapshot has a statement date strictly NEWER than this one
+    — so we don't overwrite the latest statement with an older one (both dates must be parseable)."""
+    nd = _parse_stmt_date(new_date)
+    if not nd:
+        return False
+    try:
+        existing = (ds.recon_load_all() or {}).get(f"v{vid}")
+    except Exception:  # noqa: BLE001
+        return False
+    ed = _parse_stmt_date((existing or {}).get("statement_date"))
+    return bool(ed and ed > nd)
+
+
 def _enrich(invoice_numbers):
     """Reuse the API's Monday enrichment (single source of truth — carries the Carron PSI- /
     digit-core matching). Imported lazily so this module has no load-time dependency on the API."""
@@ -124,6 +159,9 @@ def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do
     # (how the Travis Perkins .xlsx wiped the Eurocell snapshot when xlsx wasn't yet supported).
     has_content = bool(rec.get("rows") or rec.get("pay_lines") or rec.get("credits"))
     rec["empty"] = not has_content
+    if do_save and has_content and _existing_is_newer(vid, rec.get("statement_date")):
+        rec["kept_newer_existing"] = True   # a newer statement is already saved for this vendor
+        return rec
     if do_save and has_content:
         try:
             snap = dict(rec)

@@ -1382,7 +1382,21 @@ def recon_coverage():
         suppliers = ds.list_supplier_names()
     except Exception:  # noqa: BLE001
         suppliers = []
-    return {"saved": saved, "suppliers": suppliers}
+    # How many statements are sitting in the folder waiting to be reconciled (new/unprocessed) — a
+    # prompt to hit "Reconcile all now". Reconciled ones are archived out, so this = what's new.
+    waiting = None
+    try:
+        import statement_recon
+        import supabase_db
+        cfg = (supabase_db.config_get(statement_recon.CONFIG_KEY) if supabase_db.configured() else None) or {}
+        mailbox = cfg.get("mailbox") or statement_recon.STATEMENTS_MAILBOX
+        folder = cfg.get("folder") or statement_recon.STATEMENTS_FOLDER
+        fid = ds.find_or_create_mail_folder(mailbox, folder, create=False)
+        if fid:
+            waiting = len(ds.list_folder_invoice_messages(mailbox, fid, limit=50))
+    except Exception:  # noqa: BLE001
+        waiting = None
+    return {"saved": saved, "suppliers": suppliers, "folder_waiting": waiting}
 
 
 @app.get("/recon/auto-status", dependencies=[Depends(require_statements_key)])
