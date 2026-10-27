@@ -1347,7 +1347,17 @@ def recon_auto_run(dry_run: bool = False, force: bool = False):
                     "at": _dt.datetime.now(_dt.timezone.utc).isoformat()})
         except Exception:  # noqa: BLE001
             pass
-        statement_recon.run_auto(dry_run=dry_run, force=force)   # writes its own final status
+        try:
+            statement_recon.run_auto(dry_run=dry_run, force=force)   # writes its own final status
+        except Exception as e:  # noqa: BLE001 — guarantee a terminal status so the UI never hangs
+            try:
+                import supabase_db
+                if supabase_db.configured():
+                    supabase_db.config_set(statement_recon.STATUS_KEY, {
+                        "running": False, "ok": False, "error": str(e)[:200], "reason": "manual",
+                        "at": _dt.datetime.now(_dt.timezone.utc).isoformat()})
+            except Exception:  # noqa: BLE001
+                pass
 
     threading.Thread(target=_work, daemon=True).start()
     return {"ok": True, "started": True}

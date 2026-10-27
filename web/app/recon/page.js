@@ -331,8 +331,12 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
         try {
           const sr = await jsonFetch("/recon/auto-status"); const sd = await sr.json();
           setStatus(sd);
-          if (sd.status?.running && tries < 150) setTimeout(poll, 4000);
-          else { setRunning(false); loadCov(); }
+          if (sd.status?.running && tries < 150) { setTimeout(poll, 4000); return; }
+          setRunning(false); loadCov();
+          const s = sd.status || {};
+          onNotice(s.error
+            ? { kind: "warn", text: `Reconcile finished with an error: ${s.error}` }
+            : { kind: "ok", text: `Reconcile finished — ${s.reconciled ?? 0} reconciled${s.failed ? `, ${s.failed} failed` : ""}${s.need_vendor ? `, ${s.need_vendor} need a QuickBooks vendor` : ""}${s.skipped ? `, ${s.skipped} already done` : ""}.` });
         } catch { setRunning(false); }
       };
       setTimeout(poll, 3500);
