@@ -4870,11 +4870,26 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
      `due_date` = the payment due date for the line if the statement shows one. Amounts GBP;
      credits/payments negative."""
     import base64 as _b64
+    import hashlib as _hl
     import json as _json
     import re as _re
     key = get_secret("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("No ANTHROPIC_API_KEY configured")
+    # Cache the AI read by content hash, so re-running a statement already read doesn't re-parse it
+    # (the slow step). New statements still cost one read; repeats are near-instant.
+    _ckey = None
+    try:
+        _raw = pdf_bytes if pdf_bytes is not None else (str(text).encode() if text is not None else None)
+        if _raw is not None:
+            _ckey = "stmt:" + _hl.sha1(_raw).hexdigest()
+            import supabase_db
+            if supabase_db.configured():
+                _cached = supabase_db.invoice_parse_get(_ckey)
+                if _cached and not _cached.get("error"):
+                    return _cached
+    except Exception:  # noqa: BLE001
+        _ckey = _ckey if "_ckey" in dir() else None
     prompt = (
         "Read this SUPPLIER STATEMENT OF ACCOUNT carefully and extract every transaction line. "
         "Reply with ONLY a JSON object, no other text:\n"
@@ -4933,8 +4948,19 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
     if not m:
         raise RuntimeError("Could not read the statement PDF")
     raw = m.group(0)
+
+    def _cache(parsed):
+        if _ckey and isinstance(parsed, dict) and not parsed.get("error"):
+            try:
+                import supabase_db
+                if supabase_db.configured():
+                    supabase_db.invoice_parse_set(_ckey, parsed)
+            except Exception:  # noqa: BLE001
+                pass
+        return parsed
+
     try:
-        return _json.loads(raw)
+        return _cache(_json.loads(raw))
     except _json.JSONDecodeError:
         # Very long statement → the model's JSON came back truncated/malformed. Salvage: rebuild
         # from the header fields + every COMPLETE line object we can parse, so reconciliation still
@@ -4957,10 +4983,10 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
         if not line_objs:
             raise RuntimeError("Couldn't read the statement — the parse came back malformed "
                                "(the statement may be very long). Reboot and try again.")
-        return {"supplier": _fld("supplier"), "customer_ref": _fld("customer_ref"),
-                "statement_date": _fld("statement_date"), "currency": _fld("currency") or "GBP",
-                "balance": _fld("balance"), "lines": line_objs, "aged": {},
-                "_partial": True}
+        return _cache({"supplier": _fld("supplier"), "customer_ref": _fld("customer_ref"),
+                       "statement_date": _fld("statement_date"), "currency": _fld("currency") or "GBP",
+                       "balance": _fld("balance"), "lines": line_objs, "aged": {},
+                       "_partial": True})
 
 
 def qbo_find_vendor(name: str):
