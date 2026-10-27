@@ -367,7 +367,7 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
     const w = n.slice(0, Math.min(5, n.length));
     return savedNames.some((sn) => sn && (sn.includes(w) || n.includes(sn.slice(0, 5))));
   };
-  const missing = (cov?.suppliers || []).filter((s) => !covered(s));
+  const missing = (cov?.suppliers || []).filter((s) => !covered(s)).sort((a, b) => String(a).localeCompare(String(b)));
   const stale = (cov?.saved || []).filter((x) => x.stale);
 
   return (
@@ -422,7 +422,7 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
           </div>
           {(cov.saved || []).length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-              {(cov.saved || []).map((s, i) => (
+              {[...(cov.saved || [])].sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""))).map((s, i) => (
                 <span key={i} className={`pill ${s.stale ? "amber" : "green"}`} title={`saved ${s.saved_at || "?"}${s.to_pay ? ` · ${money(s.to_pay)} ready` : ""}`}>{s.supplier}{s.stale ? " ⏱" : ""}</span>
               ))}
             </div>
@@ -784,7 +784,7 @@ export default function Recon() {
         <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
           <div className="tool-label" style={{ marginBottom: 8 }}>Saved statements</div>
           <div className="saved-list">
-            {saved.map((s) => (
+            {[...saved].sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""))).map((s) => (
               <div key={s.key} className={`saved-row${s.settled ? " settled" : ""}`}>
                 <div><b>{s.supplier}</b> <span className="sub">{s.statement_date ? `· ${s.statement_date} ` : ""}{s.saved_at ? `· saved ${s.saved_at}` : ""}</span></div>
                 <div className="saved-right">
@@ -804,7 +804,7 @@ export default function Recon() {
         <div className="tool-label" style={{ marginBottom: 8 }}>Never reconcile these suppliers</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {excluded.length === 0 && <span className="sub">None — the sweep reconciles every supplier in the folder.</span>}
-          {excluded.map((e) => (
+          {[...excluded].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))).map((e) => (
             <span key={e.vid} className="pill grey">{e.name || `vendor ${e.vid}`}
               <button className="linkish" style={{ marginLeft: 6 }} onClick={() => removeExclude(e.vid)} title="Allow this supplier to reconcile again">allow</button>
             </span>
