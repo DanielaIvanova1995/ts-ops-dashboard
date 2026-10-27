@@ -25,7 +25,7 @@ try:
 except Exception:  # noqa: BLE001
     supabase_db = None
 
-STATEMENTS_MAILBOX = "hello@tradesuperstoreonline.co.uk"  # where the Statements folder with the actual statements lives (confirmed 20 there; accounts@ copy was empty). Override via config 'mailbox'.
+STATEMENTS_MAILBOX = "accounts@tradesuperstoreonline.co.uk"  # the permanent home for statements (same mailbox the invoice importer uses). Override via config 'mailbox'.
 STATEMENTS_FOLDER = "Statements"              # the Outlook folder she drops statements into
 ARCHIVE_FOLDER = "Statements - Reconciled"    # processed statements land here
 CONFIG_KEY = "statement_recon"                # {auto_enabled, interval_min, max_total, folder, archive, mailbox}
