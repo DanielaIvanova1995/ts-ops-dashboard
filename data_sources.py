@@ -5143,8 +5143,10 @@ def fetch_supplier_credit_limits(token=None):
 QBO_RECON_ITEM = "Statement Reconciliations"
 
 
-def recon_load_all(token=None):
-    """{supplier_key: snapshot} of the latest saved statement reconciliation per supplier."""
+def _recon_monday_blob(token=None):
+    """The legacy Monday text-blob store of saved reconciliations ({supplier_key: snapshot}). Used
+    only as a fallback when Supabase isn't configured — a single Monday update caps out once many
+    full snapshots are stored (which silently reset the list to just the latest run)."""
     import base64 as _b64
     import json as _json
     import re as _re
@@ -5162,52 +5164,78 @@ def recon_load_all(token=None):
         return {}
 
 
+def recon_load_all(token=None):
+    """{supplier_key: snapshot} of the latest saved statement reconciliation per supplier. Durable
+    source of truth is **Supabase** (one row per save, latest kept per vendor, no size cap); the
+    Monday text blob is only a fallback when there's no database."""
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            db = supabase_db.recon_load_all()
+            if db:
+                return db
+    except Exception:  # noqa: BLE001
+        pass
+    return _recon_monday_blob(token)
+
+
 def recon_save(supplier_key: str, snapshot: dict, token=None):
-    """Save/replace the latest reconciliation snapshot for a supplier. Keeps exactly ONE per
-    supplier: any older entry for the same QuickBooks vendor (by vid) is cleared first, so a
-    newer statement always replaces the previous one even if the supplier name differs slightly."""
+    """Save/replace the latest reconciliation snapshot for a supplier (one per QuickBooks vendor).
+    Writes to Supabase (durable, no size cap) when configured — that's the source of truth and avoids
+    the Monday-blob size limit that was resetting the list to just the last run. Only falls back to
+    the Monday blob when there's no database."""
+    vid = str(snapshot.get("vid") or "")
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.recon_save(vid or supplier_key, snapshot)
+            try:
+                supabase_db.audit("", "recon_save",
+                                  str(snapshot.get("supplier") or supplier_key), supplier_key)
+            except Exception:  # noqa: BLE001
+                pass
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    # No Supabase → legacy Monday blob (one-per-vendor replace).
     import base64 as _b64
     import json as _json
     token = token or get_token()
-    m = recon_load_all(token)
-    vid = str(snapshot.get("vid") or "")
+    m = _recon_monday_blob(token)
     if vid:
         m = {k: v for k, v in m.items()
              if k == supplier_key or str(v.get("vid") or "") != vid}
     m[supplier_key] = snapshot
     item_id = _config_item_named(QBO_RECON_ITEM, token)
     monday_post_update(item_id, _b64.b64encode(_json.dumps(m).encode()).decode(), token)
-    # Platform Phase 1: ALSO write to Supabase (durable history) — best-effort, never blocks the
-    # Monday save. Inert until SUPABASE_URL/SERVICE_KEY are set, so behaviour is unchanged otherwise.
-    try:
-        import supabase_db
-        if supabase_db.configured():
-            supabase_db.recon_save(vid or supplier_key, snapshot)
-            supabase_db.audit("", "recon_save",
-                              str(snapshot.get("supplier") or supplier_key), supplier_key)
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def recon_delete(supplier_key: str, vid: str | None = None, token=None) -> bool:
-    """Remove a saved reconciliation from the Monday snapshot blob so it drops off the saved list.
-    Removes the given key AND any entry sharing the same QuickBooks vendor id (vid), so a statement
-    that appears under a slightly different key is cleared too. Supabase history is left intact (it
-    is the durable audit trail); the UI hides those separately. Returns True if anything changed."""
-    import base64 as _b64
-    import json as _json
-    token = token or get_token()
-    m = recon_load_all(token)
-    if not m:
-        return False
-    vid = str(vid or "")
-    keep = {k: v for k, v in m.items()
-            if k != supplier_key and not (vid and str(v.get("vid") or "") == vid)}
-    if len(keep) == len(m):
-        return False
-    item_id = _config_item_named(QBO_RECON_ITEM, token)
-    monday_post_update(item_id, _b64.b64encode(_json.dumps(keep).encode()).decode(), token)
-    return True
+    """Remove a saved reconciliation so it drops off the list — from Supabase (all rows for the
+    vendor) and the legacy Monday blob. Returns True if anything was removed."""
+    vid = str(vid or "") or (supplier_key[1:] if str(supplier_key).startswith("v") else "")
+    done = False
+    try:
+        import supabase_db
+        if supabase_db.configured() and vid:
+            done = bool(supabase_db.recon_delete(vid)) or done
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import base64 as _b64
+        import json as _json
+        token = token or get_token()
+        m = _recon_monday_blob(token)
+        if m:
+            keep = {k: v for k, v in m.items()
+                    if k != supplier_key and not (vid and str(v.get("vid") or "") == vid)}
+            if len(keep) != len(m):
+                item_id = _config_item_named(QBO_RECON_ITEM, token)
+                monday_post_update(item_id, _b64.b64encode(_json.dumps(keep).encode()).decode(), token)
+                done = True
+    except Exception:  # noqa: BLE001
+        pass
+    return done
 
 
 # ---- Applied credit notes --------------------------------------------------------------------

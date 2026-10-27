@@ -136,6 +136,18 @@ def recon_load_all() -> dict:
         return {}
 
 
+def recon_delete(vid: str) -> bool:
+    """Remove ALL saved reconciliation rows for a vendor (so the Remove button clears it from the
+    list). Best-effort; returns True on success."""
+    if not configured():
+        return False
+    try:
+        _client().table("reconciliations").delete().eq("vendor_id", str(vid)).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def recon_history(vid: str, limit: int = 50) -> list:
     """Recent saved reconciliations for a vendor (newest first) — the real history."""
     if not configured():
