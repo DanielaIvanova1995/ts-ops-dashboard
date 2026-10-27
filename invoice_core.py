@@ -102,6 +102,12 @@ PRODUCT_EQUIV = [
     {"supplier": "upb", "inv_sku": "5300303", "order_name_has": ["fixing", "screws"]},
     # UPB 'VL7 HardiePlank Screw 4.2x40mm' (5300319) = our 'VL (Coloured) Fixing Screws' order line.
     {"supplier": "upb", "inv_sku": "5300319", "order_name_has": ["fixing", "screws"]},
+    # Anthracite Grey HardiePlank Coloured Fixing Screws (UPB code 5300448) = our VL7 order line.
+    {"supplier": "upb", "inv_sku": "5300448", "order_name_has": ["fixing", "screws"]},
+    # Catch-all: UPB bills its HardiePlank coloured fixing screws under per-colour codes
+    # (5300303/5300319/5300448/…), all our single 'VL… Coloured Fixing Screws' line — so match ANY
+    # UPB invoice line described as 'fixing screws' to the order's fixing-screws line.
+    {"supplier": "upb", "inv_name_has": ["fixing", "screws"], "order_name_has": ["fixing", "screws"]},
 ]
 
 _TOK_ABBREV = {
