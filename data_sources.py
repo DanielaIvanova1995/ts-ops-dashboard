@@ -4966,15 +4966,23 @@ def read_statement_pdf(pdf_url: str = None, pdf_bytes: bytes = None, text: str =
 def qbo_find_vendor(name: str):
     """Best-match QuickBooks Vendor for a supplier name → {id, name, balance}. None if not found.
     Tries an exact-ish name match, then a contains match on the statement supplier."""
-    n = (name or "").strip().replace("'", "''")
+    import re as _re
+    n = (name or "").strip()
     if not n:
         return None
-    rows = qbo_query(f"select Id, DisplayName, Balance from Vendor where Active = true")
+    # MAXRESULTS matters: QuickBooks defaults to only 100 rows, so without it vendors past the first
+    # 100 were never seen and matches failed even though the vendor exists (the "UPB isn't matched
+    # though it's right there" bug). Pull all active vendors.
+    rows = qbo_query("select Id, DisplayName, Balance from Vendor where Active = true MAXRESULTS 1000")
     vendors = rows.get("Vendor") or []
-    low = name.strip().lower()
-    # exact, then startswith, then token-overlap
+    low = n.lower()
+    _nn = lambda s: _re.sub(r"[^a-z0-9]", "", (s or "").lower())   # punctuation/space-insensitive
+    nlow = _nn(n)
+    # normalised-exact, then exact, then startswith, then token-overlap
     def score(v):
         d = (v.get("DisplayName") or "").lower()
+        if nlow and _nn(d) == nlow:
+            return 4
         if d == low:
             return 3
         if d.startswith(low[:6]) or low.startswith(d[:6]):

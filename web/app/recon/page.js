@@ -319,12 +319,15 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
   useEffect(() => { loadStatus(); loadCov(); }, [loadStatus, loadCov]);
 
   // While a run is in progress (this tab, the daily job, or another session), keep refreshing the
-  // status every few seconds so the list of reconciled suppliers grows live.
+  // status every few seconds so the list of reconciled suppliers grows live. A "running" status
+  // whose timestamp is >12 min old is treated as a crashed/stale run, not active — stop polling it.
   useEffect(() => {
-    if (!status?.status?.running) return;
+    const s = status?.status || {};
+    const ageMin = s.at ? (Date.now() - new Date(s.at).getTime()) / 60000 : 999;
+    if (!(s.running && ageMin < 12)) return;
     const t = setInterval(() => { loadStatus(); }, 3000);
     return () => clearInterval(t);
-  }, [status?.status?.running, loadStatus]);
+  }, [status?.status?.running, status?.status?.at, loadStatus]);
 
   // When a run finishes (running flips off), refresh the saved/coverage list so the new ones show.
   useEffect(() => {
@@ -377,12 +380,18 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
         </span>
         <button className="btn primary" onClick={runNow} disabled={running}>{running ? "Reconciling…" : "Reconcile all now"}</button>
       </div>
-      {(st.at || st.running || running) && (
+      {(st.at || st.running || running) && (() => {
+        const ageMin = st.at ? (Date.now() - new Date(st.at).getTime()) / 60000 : 999;
+        const activeRun = running || (st.running && ageMin < 12);
+        const stuckRun = st.running && ageMin >= 12 && !running;
+        return (
         <div style={{ marginTop: 8 }}>
           <div className="sub">
-            {st.running || running
+            {activeRun
               ? <>⏳ Reconciling… <b>{st.done ?? 0}{st.total ? ` of ${st.total}` : ""}</b> done · {st.reconciled ?? 0} reconciled{st.need_vendor ? `, ${st.need_vendor} need a vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}</>
-              : <>Last run {String(st.at || "").slice(0, 16).replace("T", " ")}: <b>{st.reconciled ?? 0}</b> reconciled{st.need_vendor ? `, ${st.need_vendor} need a vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}{st.skipped ? `, ${st.skipped} already done` : ""}.</>}
+              : stuckRun
+                ? <>⚠ A previous run didn’t finish (it got {st.reconciled ?? 0}). Hit <b>Reconcile all now</b> to restart — the done ones are saved.</>
+                : <>Last run {String(st.at || "").slice(0, 16).replace("T", " ")}: <b>{st.reconciled ?? 0}</b> reconciled{st.need_vendor ? `, ${st.need_vendor} need a vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}{st.skipped ? `, ${st.skipped} already done` : ""}.</>}
           </div>
           {st.error ? <div className="route-msg warn" style={{ marginTop: 6 }}>{st.error}</div> : null}
           {(st.items || []).length > 0 && (
@@ -397,7 +406,8 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
       {cov && typeof cov.folder_waiting === "number" && cov.folder_waiting > 0 && (
         <div className="route-msg ok" style={{ marginTop: 8 }}>
           📥 <b>{cov.folder_waiting}</b> statement{cov.folder_waiting === 1 ? "" : "s"} waiting in the folder — hit <b>Reconcile all now</b> to process {cov.folder_waiting === 1 ? "it" : "them"}.
