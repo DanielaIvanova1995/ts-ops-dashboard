@@ -76,12 +76,26 @@ _STATEMENTS_KEY = (os.environ.get("TRADEHUB_STATEMENTS_KEY") or "").strip()
 
 
 def require_statements_key(x_tradehub_statements_key: str | None = Header(default=None)):
-    """Guard the Statements section. 403 (not 401) on a bad PIN so the front-end can tell this apart
-    from the shared-access-code gate and re-prompt for the statements passcode only."""
+    """Guard the Statements section. The 6-digit statements passcode gets you in on its OWN — the
+    shared access code is NOT required here (Daniela 2026-10-27). 403 (not 401) on a bad PIN so the
+    front-end re-prompts for the statements passcode only."""
     if not _STATEMENTS_KEY:
         return  # no statements PIN configured → section open until TRADEHUB_STATEMENTS_KEY is set
     if not x_tradehub_statements_key or not hmac.compare_digest(x_tradehub_statements_key, _STATEMENTS_KEY):
         raise HTTPException(status_code=403, detail="Invalid or missing Statements passcode")
+
+
+def require_key_or_statements(x_tradehub_key: str | None = Header(default=None),
+                              x_tradehub_statements_key: str | None = Header(default=None)):
+    """Pass if EITHER the shared access code OR the Statements passcode is valid. For actions reached
+    from both the main hub (access code) and the Statements section (6-digit), e.g. approving a bill."""
+    if not _ACCESS_KEY and not _STATEMENTS_KEY:
+        return
+    if _ACCESS_KEY and x_tradehub_key and hmac.compare_digest(x_tradehub_key, _ACCESS_KEY):
+        return
+    if _STATEMENTS_KEY and x_tradehub_statements_key and hmac.compare_digest(x_tradehub_statements_key, _STATEMENTS_KEY):
+        return
+    raise HTTPException(status_code=401, detail="Invalid or missing access code")
 
 
 @app.get("/recon/lock-status")
@@ -924,7 +938,7 @@ def merge_parts(body: MergeIn):
 
 
 # ---- Statement reconciliation (Phase A: upload a statement → match against QuickBooks) -----------
-@app.get("/recon/status", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/status", dependencies=[Depends(require_statements_key)])
 def recon_status():
     """Is QuickBooks connected, and which company — shown at the top of the recon screen."""
     try:
@@ -940,7 +954,7 @@ def recon_status():
     return {"qbo_connected": connected, "company": company}
 
 
-@app.get("/recon/qbo-connect-url", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/qbo-connect-url", dependencies=[Depends(require_statements_key)])
 def recon_qbo_connect_url():
     """The QuickBooks OAuth URL so the user can (re)connect QuickBooks straight from the hub. The
     OAuth completes on the registered redirect (the Streamlit app) and the token is stored in the
@@ -1033,7 +1047,7 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
     return out
 
 
-@app.post("/recon", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon", dependencies=[Depends(require_statements_key)])
 async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     """Upload a supplier statement (PDF, or text/CSV) → parse it (reuses read_statement_pdf) → match
     every invoice line to the vendor's QuickBooks bills (recon_core.reconcile). Read-only: shows
@@ -1114,7 +1128,7 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     return rec
 
 
-@app.get("/recon/saved", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/saved", dependencies=[Depends(require_statements_key)])
 def recon_saved():
     """The latest saved reconciliation per supplier — with a LIVE re-check against QuickBooks: any
     statement whose ready-to-pay bills are now all paid is auto-removed (and dropped from the store).
@@ -1160,7 +1174,7 @@ class DismissIn(BaseModel):
     vid: str | None = None
 
 
-@app.post("/recon/dismiss", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/dismiss", dependencies=[Depends(require_statements_key)])
 def recon_dismiss(body: DismissIn):
     """Manually remove a saved reconciliation from the list (replaces the old auto-delete-on-load)."""
     try:
@@ -1199,7 +1213,7 @@ def _norm_recon_row(r: dict) -> dict:
     }
 
 
-@app.get("/recon/open", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/open", dependencies=[Depends(require_statements_key)])
 def recon_open(key: str):
     """Return a saved reconciliation's full snapshot (rows etc.) so it can be reopened without
     re-uploading the statement. Legacy snapshots are normalised; if their rows are unrecoverable the
@@ -1291,7 +1305,7 @@ def recon_open(key: str):
 _ACCOUNTS_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
 
 
-@app.get("/recon/bank-accounts", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/bank-accounts", dependencies=[Depends(require_statements_key)])
 def recon_bank_accounts():
     """QuickBooks bank accounts for the 'pay from' picker."""
     try:
@@ -1300,7 +1314,7 @@ def recon_bank_accounts():
         raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks bank accounts: {e}")
 
 
-@app.get("/recon/vendors", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/vendors", dependencies=[Depends(require_statements_key)])
 def recon_vendors():
     """Active QuickBooks vendors for the statement-recon supplier picker — so the supplier is SELECTED
     (and matches QB exactly) instead of typed into a free-text box."""
@@ -1316,7 +1330,7 @@ class AutoCfgIn(BaseModel):
     folder: str | None = None
 
 
-@app.post("/recon/auto-run", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/auto-run", dependencies=[Depends(require_statements_key)])
 def recon_auto_run(dry_run: bool = False, force: bool = False):
     """Reconcile ALL statements sitting in the Outlook statements folder now, in the background (so the
     request returns straight away). Saves each as its vendor's latest snapshot and archives the email.
@@ -1339,7 +1353,7 @@ def recon_auto_run(dry_run: bool = False, force: bool = False):
     return {"ok": True, "started": True}
 
 
-@app.get("/recon/coverage", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/coverage", dependencies=[Depends(require_statements_key)])
 def recon_coverage():
     """Statement coverage: the saved reconciliations (one per supplier) + the full supplier list from
     the Suppliers board, so the UI can show who's been reconciled recently and who's missing a
@@ -1371,7 +1385,7 @@ def recon_coverage():
     return {"saved": saved, "suppliers": suppliers}
 
 
-@app.get("/recon/auto-status", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.get("/recon/auto-status", dependencies=[Depends(require_statements_key)])
 def recon_auto_status():
     """Latest statement auto-reconcile result (manual or the daily auto run) + the auto config."""
     import statement_recon
@@ -1387,7 +1401,7 @@ def recon_auto_status():
             "folder": cfg.get("folder") or statement_recon.STATEMENTS_FOLDER}
 
 
-@app.post("/recon/auto-config", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/auto-config", dependencies=[Depends(require_statements_key)])
 def recon_auto_config(body: AutoCfgIn):
     """Turn the daily statement auto-reconcile on/off, set its interval (1440 = once a day) and the
     Outlook folder it scans."""
@@ -1420,7 +1434,7 @@ class PayIn(BaseModel):
     lines: list[dict]   # [{bill_id, amount}]
 
 
-@app.post("/recon/pay", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/pay", dependencies=[Depends(require_statements_key)])
 def recon_pay(body: PayIn):
     """Record a QuickBooks bill payment that settles the selected bills (marks them paid). FINANCIAL
     WRITE — the front-end confirms first. The money is still moved via the bank separately; this only
@@ -1490,7 +1504,7 @@ class RemitIn(BaseModel):
     credits: list[dict] = []     # credit notes to net off
 
 
-@app.post("/recon/remittance", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/remittance", dependencies=[Depends(require_statements_key)])
 def recon_remittance(body: RemitIn):
     """Build the branded remittance-advice PDF and create an Outlook DRAFT to the supplier (never
     auto-sent — a person reviews and sends it). Returns the PDF (base64) to download too."""
@@ -1542,7 +1556,7 @@ class CreditApplyIn(BaseModel):
     remit_ref: str = ""
 
 
-@app.post("/recon/credit-apply", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/credit-apply", dependencies=[Depends(require_statements_key)])
 def recon_credit_apply(body: CreditApplyIn):
     """Manually mark credit notes as applied (used) for a vendor, so they drop off future statements."""
     try:
@@ -1552,7 +1566,7 @@ def recon_credit_apply(body: CreditApplyIn):
     return {"ok": True, "applied": n}
 
 
-@app.post("/recon/credit-unapply", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/credit-unapply", dependencies=[Depends(require_statements_key)])
 def recon_credit_unapply(body: CreditApplyIn):
     """Undo — put credit notes back in play (remove them from the applied ledger)."""
     try:
@@ -1569,7 +1583,7 @@ class QueryMissingIn(BaseModel):
     lines: list[dict] = []   # [{invoice, inv_date, amount, order}] for invoices we have no record of
 
 
-@app.post("/recon/query-missing", dependencies=[Depends(require_key), Depends(require_statements_key)])
+@app.post("/recon/query-missing", dependencies=[Depends(require_statements_key)])
 def recon_query_missing(body: QueryMissingIn):
     """Draft an Outlook email to the supplier's accounts team asking them to send copies of the
     invoices that are on their statement but that we have NO record of (not in QuickBooks, not on
@@ -1832,7 +1846,7 @@ class ApproveIn(BaseModel):
     inv_date: str | None = None   # statement line date, used as a fallback if Monday has none
 
 
-@app.post("/recon/approve", dependencies=[Depends(require_key)])
+@app.post("/recon/approve", dependencies=[Depends(require_key_or_statements)])
 def recon_approve(body: ApproveIn):
     """Approve an invoice → create its bill in QuickBooks and mark the Monday subitem 'Approved (To
     QB by TradeHub)'. Mirrors the live app's _approve_to_quickbooks. FINANCIAL WRITE — the front-end

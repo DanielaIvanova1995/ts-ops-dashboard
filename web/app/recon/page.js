@@ -423,7 +423,7 @@ export default function Recon() {
     try { k = localStorage.getItem(KEY_STORE); } catch {}
     try { p = localStorage.getItem(PIN_STORE) || ""; } catch {}
     if (p) setPin(p);
-    if (k) setAccessKey(k); else setNeedKey(true);
+    if (k) setAccessKey(k);   // optional — kept if present; Statements is gated by the 6-digit passcode only
   }, []);
 
   const jsonFetch = useCallback(async (path, opts = {}) => {
@@ -432,25 +432,30 @@ export default function Recon() {
       headers: { "Content-Type": "application/json", "X-TradeHub-Key": accessKey || "",
         "X-TradeHub-Statements-Key": pin || "", ...(opts.headers || {}) },
     });
-    if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); setErr("That access code wasn’t accepted by the server. Check it’s exactly right (it’s the shared TradeHub access code)."); throw new Error("unauthorised"); }
-    if (res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); throw new Error("locked"); }
+    // Statements is gated by the 6-digit passcode only, so ANY auth failure (401/403) re-prompts for
+    // the passcode — there's no separate access-code screen here. Only show the "didn't work" message
+    // when a passcode was actually entered (avoids a scary error on the very first load).
+    if (res.status === 401 || res.status === 403) {
+      try { localStorage.removeItem(PIN_STORE); } catch {}
+      setNeedPin(true); setPinErr(pin ? "That passcode didn’t work — try again." : ""); setPin("");
+      throw new Error("locked");
+    }
     return res;
   }, [accessKey, pin]);
 
   // Is the Statements section passcode-protected? If so and we have no PIN yet, prompt for it.
   useEffect(() => {
-    if (!accessKey) return;
     fetch(`${API}/recon/lock-status`, { cache: "no-store" })
       .then((r) => r.ok && r.json())
       .then((d) => { if (d && d.locked && !pin) setNeedPin(true); })
       .catch(() => {});
-  }, [accessKey, pin]);
+  }, [pin]);
 
   useEffect(() => {
-    if (!accessKey || needPin) return;
+    if (needPin) return;
     jsonFetch("/recon/status").then((r) => r.ok && r.json()).then((d) => d && setQb(d)).catch(() => {});
     jsonFetch("/recon/vendors").then((r) => r.ok && r.json()).then((d) => d && setVendors(d.vendors || [])).catch(() => {});
-  }, [accessKey, needPin, jsonFetch]);
+  }, [needPin, jsonFetch]);
 
   // When QuickBooks is disconnected, fetch the connect link so we can show a "Connect" button here.
   useEffect(() => {
@@ -464,9 +469,9 @@ export default function Recon() {
   }, [jsonFetch]);
 
   const loadSaved = useCallback(() => {
-    if (!accessKey) return;
+    if (needPin) return;
     jsonFetch("/recon/saved").then((r) => r.ok && r.json()).then((d) => d && setSaved(d.saved || [])).catch(() => {});
-  }, [accessKey, jsonFetch]);
+  }, [needPin, jsonFetch]);
   useEffect(() => { loadSaved(); }, [loadSaved]);
 
   async function dismissSaved(s) {
@@ -513,8 +518,7 @@ export default function Recon() {
       fd.append("file", f);
       if (supplier.trim()) fd.append("supplier", supplier.trim());
       const res = await fetch(`${API}/recon`, { method: "POST", cache: "no-store", headers: { "X-TradeHub-Key": accessKey || "", "X-TradeHub-Statements-Key": pin || "" }, body: fd });
-      if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); return; }
-      if (res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); return; }
+      if (res.status === 401 || res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); return; }
       if (!res.ok) { const ed = await res.json().catch(() => ({})); throw new Error(ed.detail || `API ${res.status}`); }
       const d = await res.json();
       if (d.ok === false && d.need_vendor) { setNotice({ kind: "warn", text: d.detail || "No QuickBooks vendor match." }); }
