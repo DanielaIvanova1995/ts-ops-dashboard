@@ -432,7 +432,7 @@ export default function Recon() {
       headers: { "Content-Type": "application/json", "X-TradeHub-Key": accessKey || "",
         "X-TradeHub-Statements-Key": pin || "", ...(opts.headers || {}) },
     });
-    if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); throw new Error("unauthorised"); }
+    if (res.status === 401) { try { localStorage.removeItem(KEY_STORE); } catch {} setAccessKey(null); setNeedKey(true); setErr("That access code wasn’t accepted by the server. Check it’s exactly right (it’s the shared TradeHub access code)."); throw new Error("unauthorised"); }
     if (res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); throw new Error("locked"); }
     return res;
   }, [accessKey, pin]);
