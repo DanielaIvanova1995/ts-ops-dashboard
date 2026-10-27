@@ -495,10 +495,10 @@ export default function Recon() {
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
   }
 
-  async function openSaved(key, { scroll = true, quiet = false } = {}) {
+  async function openSaved(key, { scroll = true, quiet = false, live = false } = {}) {
     try {
       setOpenKey(key);
-      const res = await jsonFetch(`/recon/open?key=${encodeURIComponent(key)}`);
+      const res = await jsonFetch(`/recon/open?key=${encodeURIComponent(key)}${live ? "&refresh=1" : ""}`);
       if (!res.ok) throw new Error(`API ${res.status}`);
       setResult(await res.json());
       if (scroll) { try { window.scrollTo(0, 0); } catch {} }
@@ -514,7 +514,7 @@ export default function Recon() {
     const key = openKey || (result && (result.vid || result.vendor_id) ? `v${result.vid || result.vendor_id}` : null);
     if (!key) return;
     setRefreshing(true);
-    try { await openSaved(key, { scroll: false, quiet: true }); loadSaved(); setNotice({ kind: "ok", text: "Refreshed against QuickBooks." }); }
+    try { await openSaved(key, { scroll: false, quiet: true, live: true }); loadSaved(); setNotice({ kind: "ok", text: "Refreshed against QuickBooks." }); }
     finally { setRefreshing(false); }
   }
 
@@ -737,6 +737,7 @@ export default function Recon() {
               <span className="chip grey">Statement {money(r.stmt_total)}</span>
               <button className="btn ghost" onClick={refreshResult} disabled={refreshing} title="Re-check against QuickBooks — picks up invoices you've just approved">{refreshing ? "Refreshing…" : "↻ Refresh"}</button>
               <button className="btn ghost" onClick={downloadCsv} title="Download the whole reconciliation as a CSV">⬇ CSV</button>
+              <button className="btn ghost" onClick={() => { setResult(null); setOpenKey(null); }} title="Close this reconciliation">✕ Close</button>
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>

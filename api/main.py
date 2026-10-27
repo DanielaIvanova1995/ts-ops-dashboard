@@ -1214,7 +1214,7 @@ def _norm_recon_row(r: dict) -> dict:
 
 
 @app.get("/recon/open", dependencies=[Depends(require_statements_key)])
-def recon_open(key: str):
+def recon_open(key: str, refresh: int = 0):
     """Return a saved reconciliation's full snapshot (rows etc.) so it can be reopened without
     re-uploading the statement. Legacy snapshots are normalised; if their rows are unrecoverable the
     table is rebuilt from the still-valid pay_lines so a reopened statement never shows empty rows."""
@@ -1258,11 +1258,14 @@ def recon_open(key: str):
         r["overdue"] = recon_core.is_overdue(r.get("inv_date"))
     for pl in pay_lines:
         pl["overdue"] = recon_core.is_overdue(pl.get("inv_date"))
-    # Reflect LIVE QuickBooks so a reopened statement shows what's actually paid now: mark each row
-    # paid/ready by its current bill status, and keep only still-open bills in the pay list.
     vid = str(snap.get("vid") or "")
     supplier = snap.get("vendor_name") or snap.get("supplier") or ""
-    if vid:
+    # Opening is INSTANT by default — it shows the saved snapshot as-is (keeping its ready-to-pay
+    # list). The live QuickBooks re-check + Monday re-enrich (slow, and it filters the pay list down
+    # to still-open QB bills) only runs on an explicit Refresh (?refresh=1), via the ↻ Refresh button.
+    if refresh and vid:
+        # Reflect LIVE QuickBooks: mark each row paid/ready by current bill status, keep only
+        # still-open bills in the pay list.
         try:
             bills = ds.qbo_vendor_bills(vid)
             open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
@@ -1279,18 +1282,16 @@ def recon_open(key: str):
             pay_lines = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
         except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
             pass
-    # Refresh the Monday stage/order/margin on open so older snapshots pick up matching fixes (e.g.
-    # Carron 'PSI-' prefix) — otherwise an invoice that's actually on Monday keeps a stale blank stage
-    # and gets wrongly chased as missing.
-    try:
-        enrich = _statement_monday_enrich([r.get("invoice") for r in rows])
-        for r in rows:
-            e = enrich.get(str(r.get("invoice") or "").strip())
-            if e:
-                r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
-                         is_split=e.get("is_split"), margin=e.get("margin"))
-    except Exception:  # noqa: BLE001
-        pass
+        # Re-enrich Monday stage/order/margin so older snapshots pick up matching fixes.
+        try:
+            enrich = _statement_monday_enrich([r.get("invoice") for r in rows])
+            for r in rows:
+                e = enrich.get(str(r.get("invoice") or "").strip())
+                if e:
+                    r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
+                             is_split=e.get("is_split"), margin=e.get("margin"))
+        except Exception:  # noqa: BLE001
+            pass
     snap["rows"] = rows
     snap["pay_lines"] = pay_lines
     # Flag credit notes that have already been used on a remittance so they aren't offered again.
