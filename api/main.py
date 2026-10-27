@@ -1339,6 +1339,38 @@ def recon_auto_run(dry_run: bool = False, force: bool = False):
     return {"ok": True, "started": True}
 
 
+@app.get("/recon/coverage", dependencies=[Depends(require_key), Depends(require_statements_key)])
+def recon_coverage():
+    """Statement coverage: the saved reconciliations (one per supplier) + the full supplier list from
+    the Suppliers board, so the UI can show who's been reconciled recently and who's missing a
+    statement. Also flags snapshots older than ~35 days as stale (statement overdue)."""
+    import recon_core
+    try:
+        snaps = ds.recon_load_all() or {}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't load saved reconciliations: {e}")
+    today = _dt.date.today()
+    saved = []
+    for k, s in snaps.items():
+        sa = (s.get("saved_at") or "")[:10]
+        stale = False
+        try:
+            if sa:
+                stale = (today - _dt.date.fromisoformat(sa)).days > 35
+        except Exception:  # noqa: BLE001
+            stale = False
+        saved.append({"supplier": s.get("vendor_name") or s.get("supplier") or k, "vid": s.get("vid"),
+                      "saved_at": s.get("saved_at"), "statement_date": s.get("statement_date"),
+                      "n_pay": s.get("n_pay"), "to_pay": s.get("to_pay"),
+                      "n_missing": s.get("n_missing"), "stale": stale})
+    saved.sort(key=lambda x: str(x.get("saved_at") or ""), reverse=True)
+    try:
+        suppliers = ds.list_supplier_names()
+    except Exception:  # noqa: BLE001
+        suppliers = []
+    return {"saved": saved, "suppliers": suppliers}
+
+
 @app.get("/recon/auto-status", dependencies=[Depends(require_key), Depends(require_statements_key)])
 def recon_auto_status():
     """Latest statement auto-reconcile result (manual or the daily auto run) + the auto config."""

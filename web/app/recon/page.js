@@ -304,6 +304,96 @@ function statusPill(s) {
   return { cls: "grey", label: s || "—" };
 }
 
+function AutoReconcilePanel({ jsonFetch, onNotice }) {
+  const [status, setStatus] = useState(null);     // { status:{...}, auto_enabled, interval_min, folder }
+  const [cov, setCov] = useState(null);           // { saved:[...], suppliers:[...] }
+  const [running, setRunning] = useState(false);
+  const [showMissing, setShowMissing] = useState(false);
+
+  const loadStatus = useCallback(async () => {
+    try { const r = await jsonFetch("/recon/auto-status"); if (r.ok) setStatus(await r.json()); } catch {}
+  }, [jsonFetch]);
+  const loadCov = useCallback(async () => {
+    try { const r = await jsonFetch("/recon/coverage"); if (r.ok) setCov(await r.json()); } catch {}
+  }, [jsonFetch]);
+  useEffect(() => { loadStatus(); loadCov(); }, [loadStatus, loadCov]);
+
+  async function runNow() {
+    setRunning(true);
+    try {
+      const r = await jsonFetch("/recon/auto-run", { method: "POST" });
+      const d = await r.json();
+      if (!(r.ok && d.started)) { onNotice({ kind: "warn", text: "Couldn’t start the run." }); setRunning(false); return; }
+      onNotice({ kind: "ok", text: "Reconciling the whole folder in the background — this can take a few minutes." });
+      let tries = 0;
+      const poll = async () => {
+        tries++;
+        try {
+          const sr = await jsonFetch("/recon/auto-status"); const sd = await sr.json();
+          setStatus(sd);
+          if (sd.status?.running && tries < 150) setTimeout(poll, 4000);
+          else { setRunning(false); loadCov(); }
+        } catch { setRunning(false); }
+      };
+      setTimeout(poll, 3500);
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); setRunning(false); }
+  }
+
+  const st = status?.status || {};
+  const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const savedNames = (cov?.saved || []).map((x) => norm(x.supplier)).filter(Boolean);
+  const covered = (sup) => {
+    const n = norm(sup); if (!n) return false;
+    const w = n.slice(0, Math.min(5, n.length));
+    return savedNames.some((sn) => sn && (sn.includes(w) || n.includes(sn.slice(0, 5))));
+  };
+  const missing = (cov?.suppliers || []).filter((s) => !covered(s));
+  const stale = (cov?.saved || []).filter((x) => x.stale);
+
+  return (
+    <div className="card" style={{ padding: "12px 16px", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 700 }}>Auto-reconcile</div>
+        <span className="sub" style={{ flex: 1, minWidth: 180 }}>
+          Scans the <b>Statements</b> folder in accounts@, reconciles each, keeps the latest per supplier.
+          {status ? <> Runs automatically {status.interval_min >= 1440 ? "once a day" : `every ${Math.round((status.interval_min || 1440) / 60)}h`}{status.auto_enabled === false ? " (off)" : ""}.</> : null}
+        </span>
+        <button className="btn primary" onClick={runNow} disabled={running}>{running ? "Reconciling…" : "Reconcile all now"}</button>
+      </div>
+      {(st.at || st.running) && (
+        <div className="sub" style={{ marginTop: 8 }}>
+          {st.running ? "Running now…" : <>Last run {String(st.at || "").slice(0, 16).replace("T", " ")}: <b>{st.reconciled ?? 0}</b> reconciled{st.need_vendor ? `, ${st.need_vendor} no-vendor` : ""}{st.failed ? `, ${st.failed} failed` : ""}{st.skipped ? `, ${st.skipped} already done` : ""}.</>}
+          {st.error ? <span className="route-msg warn" style={{ display: "block", marginTop: 6 }}>{st.error}</span> : null}
+        </div>
+      )}
+      {cov && (
+        <div style={{ marginTop: 10 }}>
+          <div className="sub">
+            <b>{(cov.saved || []).length}</b> supplier{(cov.saved || []).length === 1 ? "" : "s"} reconciled
+            {stale.length ? <> · <span className="pill amber">{stale.length} stale (&gt;35 days)</span></> : null}
+            {missing.length ? <> · <button className="linkish" onClick={() => setShowMissing(!showMissing)}>{missing.length} with no statement yet {showMissing ? "▾" : "▸"}</button></> : null}
+          </div>
+          {(cov.saved || []).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              {(cov.saved || []).map((s, i) => (
+                <span key={i} className={`pill ${s.stale ? "amber" : "green"}`} title={`saved ${s.saved_at || "?"}${s.to_pay ? ` · ${money(s.to_pay)} ready` : ""}`}>{s.supplier}{s.stale ? " ⏱" : ""}</span>
+              ))}
+            </div>
+          )}
+          {showMissing && missing.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div className="sub" style={{ marginBottom: 4 }}>No statement reconciled yet (chase or drop one in the folder):</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {missing.map((s, i) => <span key={i} className="pill grey">{s}</span>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Recon() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -584,6 +674,8 @@ export default function Recon() {
         <div className="sub" style={{ marginTop: 8 }}>It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 10 }}>{notice.text}</div>}
       </div>
+
+      {!needPin && <AutoReconcilePanel jsonFetch={jsonFetch} onNotice={setNotice} />}
 
       {saved.length > 0 && (
         <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>

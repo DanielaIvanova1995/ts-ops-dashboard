@@ -5101,6 +5101,19 @@ def qbo_vendor_map_save(supplier_key: str, vendor_id, vendor_name: str, token=No
         pass
 
 
+def list_supplier_names(token=None) -> list:
+    """The supplier names from the 'Suppliers and Contacts' board (9826930125) — the GROUP titles,
+    which are the supplier universe (one group per supplier). Used for statement coverage ('which
+    suppliers are we missing a statement for')."""
+    token = token or get_token()
+    try:
+        data = _monday_gql('query { boards(ids: 9826930125) { groups { title } } }', {}, token)
+        groups = (((data.get("boards") or [{}])[0]).get("groups") or [])
+        return [g.get("title") for g in groups if (g.get("title") or "").strip()]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def fetch_supplier_credit_limits(token=None):
     """{supplier/account name: credit limit (£)} from the 'Suppliers and Contacts' board
     (9826930125), Credit Limit column numeric_mkxckems. Keyed by both the group (supplier)
