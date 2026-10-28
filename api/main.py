@@ -1877,6 +1877,20 @@ def invoices_matched():
     return {"count": len(out), "invoices": out}
 
 
+@app.get("/invoices/search", dependencies=[Depends(require_key)])
+def invoices_search(q: str = "", limit: int = 50):
+    """Find any invoice by its number across ALL Payment Statuses (not just the open tab) — powers
+    the 'search all invoices' box so a matched/approved/discrepancy invoice is still findable."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"count": 0, "invoices": []}
+    try:
+        res = ds.search_invoices(q, limit=min(max(int(limit), 1), 100))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't search invoices: {e}")
+    return {"count": len(res), "invoices": res}
+
+
 @app.get("/invoices/discrepancies", dependencies=[Depends(require_key)])
 def invoice_discrepancies():
     """Invoices flagged 'Discrepancy' on the Monday invoices board — the ones that didn't match and

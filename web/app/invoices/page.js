@@ -145,6 +145,7 @@ export default function Invoices() {
   const [ceil, setCeil] = useState(35);
   const [supFilter, setSupFilter] = useState("");
   const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]); // server-side matches across ALL statuses
   const [sortBy, setSortBy] = useState("");
   const [onlyDup, setOnlyDup] = useState(false);
   const [tab, setTab] = useState("review");       // "review" | "disc"
@@ -211,6 +212,22 @@ export default function Invoices() {
     } catch (e) { if (String(e.message) !== "unauthorised") setDiscStatus("error"); }
   }, [accessKey, jsonFetch]);
   useEffect(() => { if (accessKey && tab === "disc") loadDisc(); }, [accessKey, tab, loadDisc]);
+
+  // Search ALL invoices (any status) server-side so the box finds a matched/approved/discrepancy one
+  // that isn't in the open tab. Debounced; cleared when the query is short or on the Discrepancies tab.
+  useEffect(() => {
+    const qq = query.trim();
+    if (!accessKey || tab === "disc" || qq.length < 2) { setSearchResults([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await jsonFetch(`/invoices/search?q=${encodeURIComponent(qq)}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        setSearchResults(d.invoices || []);
+      } catch (e) { if (String(e.message) !== "unauthorised") setSearchResults([]); }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [query, accessKey, tab, jsonFetch]);
 
   function discEmailText(iv) {
     // Friendly supplier query: opener, the specifics (the saved reason), the standard ask, our
@@ -724,6 +741,33 @@ export default function Invoices() {
         </div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}
       </div>
+
+      {query.trim().length >= 2 && (() => {
+        // Invoices matching the search that AREN'T in the current tab — found across all statuses.
+        const haveIds = new Set(shown.map((x) => String(x.sub_id)));
+        const extra = (searchResults || []).filter((r) => !haveIds.has(String(r.sub_id)));
+        if (!extra.length) return null;
+        return (
+          <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+            <div className="sub" style={{ marginBottom: 8 }}>Also found matching <b>“{query.trim()}”</b> (any status, not in this tab):</div>
+            <table className="mini">
+              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order</th><th className="num">Total</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {extra.map((r) => (
+                  <tr key={r.sub_id}>
+                    <td className="ono">{r.invoice_no}</td>
+                    <td className="sub">{r.supplier || "—"}</td>
+                    <td className="sub">{r.order_no || "—"}</td>
+                    <td className="num">{r.total != null ? money(r.total) : "—"}</td>
+                    <td><span className="pill grey">{r.status || "—"}</span></td>
+                    <td style={{ whiteSpace: "nowrap" }}>{r.order_url && <a className="btn ghost" href={r.order_url} target="_blank" rel="noreferrer">Order ↗</a>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       {issues.length > 0 && (
         <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>

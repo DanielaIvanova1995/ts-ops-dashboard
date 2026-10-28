@@ -1311,6 +1311,64 @@ def fetch_matched_marked(days: int = 7, token: str | None = None) -> list:
     return rows
 
 
+def search_invoices(q: str, limit: int = 50, token: str | None = None) -> list:
+    """Find invoices (Subitems board) whose invoice NUMBER contains q, across ALL Payment Statuses —
+    so the search box can surface an invoice that's already Matched / Approved / Discrepancy, not just
+    the ones in the open tab. Lightweight: no PDF download or live-margin recompute. Returns
+    [{sub_id, invoice_no, supplier, order_no, total, status, has_pdf, order_item_id}]."""
+    import json as _json
+    import re as _re
+    token = token or get_token()
+    q = (q or "").strip()
+    q_safe = _re.sub(r"[^A-Za-z0-9 ._/\-]", "", q)[:60]          # sanitize for safe inline use
+    if len(q_safe) < 2:
+        return []
+    store = get_secret("SHOPIFY_STORE")
+    fields = ('id name column_values(ids:["numbers4","status7__1","file_mm38gx3j"]){id text value} '
+              'parent_item{ id column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd","text_mm04tmac"]){id text} }')
+    query = ('query($b:[ID!],$l:Int!){boards(ids:$b){items_page(limit:$l,query_params:{rules:['
+             '{column_id:"name",compare_value:["%s"],operator:contains_text}]}){items{ %s }}}}'
+             % (q_safe, fields))
+    try:
+        data = _monday_gql(query, {"b": [str(SUBITEMS_BOARD_ID)], "l": int(limit)}, token)
+    except Exception:  # noqa: BLE001
+        return []
+    items = ((((data.get("boards") or [{}])[0]).get("items_page") or {}).get("items") or [])
+
+    def _n(v):
+        if not v:
+            return None
+        s = _re.sub(r"[^0-9.\-]", "", str(v))
+        try:
+            return float(s) if s not in ("", "-", ".") else None
+        except ValueError:
+            return None
+
+    out = []
+    for it in items:
+        cv = {c["id"]: c for c in it.get("column_values", [])}
+        p = it.get("parent_item") or {}
+        pcv = {c["id"]: c for c in (p.get("column_values") or [])}
+        has_pdf = False
+        fv = cv.get("file_mm38gx3j", {}) or {}
+        if fv.get("value"):
+            try:
+                has_pdf = bool(_json.loads(fv["value"]).get("files"))
+            except Exception:  # noqa: BLE001
+                has_pdf = False
+        sid = (pcv.get("text_mm04tmac", {}) or {}).get("text") or ""
+        out.append({
+            "sub_id": str(it.get("id")), "invoice_no": it.get("name"),
+            "total": _n((cv.get("numbers4", {}) or {}).get("text")),
+            "status": (cv.get("status7__1", {}) or {}).get("text") or "",
+            "supplier": (pcv.get("dropdown_mkyqdeqd", {}) or {}).get("text") or "",
+            "order_no": (pcv.get("text_mkv6z0nt", {}) or {}).get("text") or "",
+            "order_item_id": p.get("id"), "has_pdf": has_pdf,
+            "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
+        })
+    return out
+
+
 def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = None) -> dict:
     """Subitems on the Subitems board whose Payment Status is any of label_ids.
     Returns {invoices:[{sub_id, invoice_no, total, asset_id, file_name, order_no,
@@ -4324,6 +4382,36 @@ def reconcile_order_inv_slots(order_item_id, token: str | None = None) -> int:
     return n_filled
 
 
+# Legacy 'Total Cost' column on the Orders board. It's still ADDED in the Total Profit / Margin
+# formula ({numbers48} - (fees + {numeric} + INV1..INV5)), so if it holds a value AND the INV slots
+# are filled, the cost is DOUBLE-counted and the margin reads too low. Cost now lives in the INV slots.
+TOTAL_COST_COL = "numeric"
+
+
+def clear_total_cost_if_inv(order_item_id, token: str | None = None) -> bool:
+    """Clear the legacy 'Total Cost' (numeric) column when the order's cost is already in the INV
+    slots — so it isn't double-counted with INV1-5 in the Monday Total Profit / Margin formula. Only
+    clears when at least one INV slot has a value AND Total Cost currently holds a non-zero value (so
+    an order with no invoices yet never has its cost wiped). Returns True if it cleared it."""
+    import json as _json
+    token = token or get_token()
+    ids = _json.dumps(INV_TOTAL_COLS + [TOTAL_COST_COL])
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){column_values(ids:%s){id text}}}" % ids,
+                       {"i": [str(order_item_id)]}, token)
+    cvs = (((data.get("items") or [{}])[0]).get("column_values") or [])
+    by_id = {c["id"]: (c.get("text") or "").strip() for c in cvs}
+    has_inv = any(by_id.get(c, "") for c in INV_TOTAL_COLS)
+    tc = by_id.get(TOTAL_COST_COL, "")
+    try:
+        tc_val = float(tc.replace(",", "")) if tc else 0.0
+    except ValueError:
+        tc_val = 0.0
+    if has_inv and tc_val != 0.0:
+        set_order_number(order_item_id, TOTAL_COST_COL, None, token)      # clear to empty
+        return True
+    return False
+
+
 def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_floor: float = 90.0,
                       dry_run: bool = False, token: str | None = None) -> dict:
     """Board-wide repair of the ~98% margin bug: fill any invoice totals missing from the order's INV
@@ -4335,7 +4423,7 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
     status_labels = status_labels or [3, 9]           # Needs Review + Matched (TradeHub)
     data = fetch_invoices_by_status(status_labels, limit=500, token=token)
     invs = data.get("invoices") or []
-    seen, orders_fixed, filled, items = set(), 0, 0, []
+    seen, orders_fixed, filled, items, cleared_tc = set(), 0, 0, [], 0
     for i in invs:
         oid = i.get("order_item_id")
         ono = (i.get("order_no") or "").strip()
@@ -4363,12 +4451,21 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
         except Exception as e:  # noqa: BLE001
             items.append({"order": ono, "error": str(e)[:100]})
             continue
-        if n:
+        # Also clear the legacy 'Total Cost' (numeric) so it isn't double-counted with the INV slots
+        # in the Monday margin formula (Daniela 2026-10-28).
+        cleared = False
+        try:
+            cleared = clear_total_cost_if_inv(oid, token=token)
+        except Exception:  # noqa: BLE001
+            cleared = False
+        if cleared:
+            cleared_tc += 1
+        if n or cleared:
             orders_fixed += 1
             filled += n
-            items.append({"order": ono, "margin_before": m, "filled": n})
+            items.append({"order": ono, "margin_before": m, "filled": n, "cleared_total_cost": cleared})
     return {"ok": True, "orders_checked": len(seen), "orders_fixed": orders_fixed,
-            "filled": filled, "items": items[:60]}
+            "filled": filled, "cleared_total_cost": cleared_tc, "items": items[:60]}
 
 
 def delete_subitem(sub_id, token: str | None = None, attempts: int = 6) -> bool:
