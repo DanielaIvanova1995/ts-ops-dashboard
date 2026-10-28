@@ -718,12 +718,15 @@ export default function Invoices() {
                     <input type="checkbox" checked={discSel.has(iv.sub_id)} onChange={() => toggleDiscSel(iv.sub_id)} />
                   </label>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <span className="ono">{iv.invoice_no}</span>
-                    <span className="sub"> · {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}</span>
-                    {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
-                    {(() => { const a = discAgeDays(iv); return a == null ? null : <span className={`pill ${a >= 14 ? "red" : a >= AGING_DAYS ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={`Flagged ${iv.flagged_on || ""} — ${a} day${a === 1 ? "" : "s"} ago`}>{a}d open</span>; })()}
-                    {iv.sent ? <span className="pill grey" style={{ marginLeft: 6 }} title={iv.sent}>chased</span> : <span className="pill amber" style={{ marginLeft: 6 }}>not chased</span>}
-                    {iv.flagged_on ? <span className="sub" style={{ marginLeft: 8 }}>flagged {iv.flagged_on}</span> : null}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span className="ono">{iv.invoice_no}</span>
+                      {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
+                      {(() => { const a = discAgeDays(iv); return a == null ? null : <span className={`pill ${a >= 14 ? "red" : a >= AGING_DAYS ? "amber" : "green"}`} title={`Flagged ${iv.flagged_on || ""} — ${a} day${a === 1 ? "" : "s"} ago`}>{a}d open</span>; })()}
+                      {iv.sent ? <span className="pill grey" title={iv.sent}>chased</span> : <span className="pill amber">not chased</span>}
+                    </div>
+                    <div className="sub" style={{ marginTop: 3 }}>
+                      {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}{iv.flagged_on ? ` · flagged ${iv.flagged_on}` : ""}
+                    </div>
                   </div>
                   <div className="inv-right">
                     {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer">Order ↗</a>}
@@ -957,6 +960,12 @@ export default function Invoices() {
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
               {r && r.ok && (
                 <div className="inv-body">
+                  {r.over_invoiced && (
+                    <div className="warn-note col" style={{ marginBottom: 8 }}>
+                      <div className="warn-head"><IconWarn /> Possible double-charge on this order</div>
+                      <div className="sub">The <b>{r.over_invoiced.n} invoices</b> on order {ordNo(iv)} total <b>{money(r.over_invoiced.billed)}</b> against a sell of <b>{money(r.over_invoiced.sell)}</b> — only a <b>{r.over_invoiced.projected_margin}%</b> margin. Check all the invoices on this order against each other before paying; it looks like items have been billed more than once.</div>
+                    </div>
+                  )}
                   {probLines.length ? (
                     <div className="warn-note col" style={{ marginBottom: 8 }}>
                       <div className="warn-head"><IconWarn /> What doesn’t match ({blocking.length}{blocking.length !== probLines.length ? ` of ${probLines.length}` : ""})</div>

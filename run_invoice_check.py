@@ -176,6 +176,20 @@ def main(check_only=False, dry_run=None, max_total=None):
         is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
         label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"),
                                             sup, LO, HI)
+        # Order-level double-charge guard: don't auto-APPROVE when the WHOLE order has been
+        # over-invoiced across ALL its invoices/credits (a 2nd invoice re-billing items a 1st already
+        # covered — order 31371, each looks fine alone). Hold it in Needs Review for a human to query.
+        if action == "push" and not is_cn:
+            try:
+                _ov = ds.order_overbilled(inv.get("order_item_id"), inv.get("to_us"),
+                                          core.SUPPLIER_RULES.get(core.norm_code(sup), {}).get("push_min", LO))
+            except Exception:  # noqa: BLE001
+                _ov = None
+            if _ov:
+                action = "hold"
+                log(f"  {inv.get('invoice_no')} ({sup}, order {inv.get('order_no')}): matched BUT order "
+                    f"over-invoiced — {_ov['n']} invoices total £{_ov['billed']:.2f} vs sell "
+                    f"£{_ov['sell']:.2f} ({_ov['projected_margin']}%) -> held (possible double-charge)")
         m = inv.get("order_margin_live")
         verb = "would set" if dry else "set"
         # Only auto-APPROVE or auto-HOLD. Never auto-mark Discrepancy — that's set by hand

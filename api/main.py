@@ -2091,7 +2091,25 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     _lo = lo if lo is not None else core.MARGIN_PUSH_MIN
     _hi = hi if hi is not None else core.MARGIN_PUSH_MAX
+    _rule = core.SUPPLIER_RULES.get(core.norm_code(sup), {})
+    _lo_eff = _rule.get("push_min", _lo)
     label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"), sup, _lo, _hi)
+    # Order-level double-charge guard: even if THIS invoice matches on its own, flag it when the WHOLE
+    # order has been over-invoiced across ALL its invoices/credits (order 31371) — a second invoice can
+    # re-bill items a first already covered and each looks fine alone. Considers them together.
+    over = None
+    try:
+        over = ds.order_overbilled(inv.get("order_item_id"), inv.get("to_us"), _lo_eff)
+    except Exception:  # noqa: BLE001
+        over = None
+    over_reason = None
+    if over and not is_cn:
+        matched = False
+        label, action = core.DISCREPANCY_LABEL, "flag"
+        over_reason = (f"Possible double-charge: the {over['n']} invoices on this order total "
+                       f"£{over['billed']:,.2f} against a sell of £{over['sell']:,.2f} — only a "
+                       f"{over['projected_margin']}% margin. Check all invoices on this order against "
+                       f"each other; it looks like items have been billed more than once.")
 
     def _line_out(l):
         o = {k: v for k, v in l.items() if k != "issues" and not k.startswith("_")}
@@ -2103,9 +2121,9 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
             "lines": [_line_out(l) for l in (res.get("lines") or [])],
             "verdict": core.verdict(res), "margin": inv.get("order_margin_live"),
             "supplier": sup, "invoice_no": inv.get("invoice_no"), "order_no": inv.get("order_no"),
-            "total": parsed.get("total"),
+            "total": parsed.get("total"), "over_invoiced": over,
             "suggested_action": action, "suggested_label": label,
-            "discrepancy_reason": (None if matched else core.discrepancy_reason(res))}
+            "discrepancy_reason": over_reason or (None if matched else core.discrepancy_reason(res))}
 
 
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"

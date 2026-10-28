@@ -4367,6 +4367,28 @@ def set_order_next_invoice_slot(order_item_id, total, skip_if_present: bool = Fa
     return None                                        # all slots full (6+ invoices on one order)
 
 
+def order_overbilled(order_item_id, sell, lo, token: str | None = None) -> dict | None:
+    """Order-level double-charge guard. Sums EVERY invoice total on the order (credit notes net off,
+    they're stored negative) and, when there are 2+ invoices, checks the whole-order margin that
+    leaves vs the sell (£ to us). If that margin is below `lo`, the order has been OVER-invoiced —
+    e.g. a second invoice re-billing items a first already covered (order 31371), which each looks
+    fine on its own. Returns {billed, sell, projected_margin, n} when over-invoiced, else None.
+    Considers ALL invoices + credits together, not one in isolation."""
+    if not order_item_id or not isinstance(sell, (int, float)) or sell <= 0:
+        return None
+    try:
+        sibs = order_subitem_totals(order_item_id, token)
+    except Exception:  # noqa: BLE001
+        return None
+    if len(sibs) < 2:                       # a single invoice can't double-charge the order
+        return None
+    billed = round(sum(sibs), 2)            # net of credit notes
+    proj = (sell - sell * 0.02 - billed) / sell * 100.0      # order margin after the 2% Shopify fee
+    if proj < lo:
+        return {"billed": billed, "sell": round(sell, 2), "projected_margin": round(proj, 1), "n": len(sibs)}
+    return None
+
+
 def order_subitem_totals(order_item_id, token: str | None = None) -> list:
     """The totals (numbers4) of every invoice subitem on an order → [float, …]. The authoritative
     list of what's been invoiced against the order (used to reconcile the INV slots)."""
