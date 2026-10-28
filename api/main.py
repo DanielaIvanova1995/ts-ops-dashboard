@@ -1883,7 +1883,7 @@ def invoices():
     invs = [i for i in (data.get("invoices") or []) if not core.is_excluded_supplier(i.get("supplier"))]
     amt_dups = core.amount_dup_ids(invs)
     out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
-            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
+            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "order_part": i.get("order_part"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "order_url": i.get("order_url"), "order_item_id": i.get("order_item_id"),
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
@@ -1903,7 +1903,7 @@ def invoices_matched():
     invs = [i for i in (data.get("invoices") or []) if not core.is_excluded_supplier(i.get("supplier"))]
     amt_dups = core.amount_dup_ids(invs)
     out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
-            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
+            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "order_part": i.get("order_part"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "order_url": i.get("order_url"), "order_item_id": i.get("order_item_id"),
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
@@ -1935,7 +1935,7 @@ def invoice_discrepancies():
         raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
     invs = data.get("invoices") or []
     out = [{"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
-            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "total": i.get("total"),
+            "supplier": i.get("supplier"), "order_no": i.get("order_no"), "order_part": i.get("order_part"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "reason": (i.get("query_note") or "").strip(),
             "sent": (i.get("action_note") or "").strip(),

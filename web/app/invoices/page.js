@@ -9,6 +9,9 @@ function money(v) {
   const n = Number(v);
   return Number.isFinite(n) ? "£" + n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
 }
+// Order number for display — prefers the Monday item name (order_part), which carries the split
+// suffix like "31824-2", so split orders show -1/-2 instead of just the base number.
+function ordNo(iv) { return (iv?.order_part || iv?.order_no || "").toString().trim() || "—"; }
 function actionLabel(a, matched) {
   if (!matched) return { cls: "red", text: "Discrepancy — needs review" };
   if (a === "push") return { cls: "green", text: "Matches — ready to approve" };
@@ -602,7 +605,7 @@ export default function Invoices() {
     if (onlyDup && !iv.possible_dup) return false;
     if (query) {
       const q = query.toLowerCase();
-      if (!`${iv.invoice_no || ""} ${iv.supplier || ""} ${iv.order_no || ""}`.toLowerCase().includes(q)) return false;
+      if (!`${iv.invoice_no || ""} ${iv.supplier || ""} ${iv.order_no || ""} ${iv.order_part || ""}`.toLowerCase().includes(q)) return false;
     }
     return true;
   });
@@ -611,6 +614,22 @@ export default function Invoices() {
   else if (sortBy === "total") shown.sort((a, b) => (b.total || 0) - (a.total || 0));
   const allShownSelected = shown.length > 0 && shown.every((x) => sel.has(x.sub_id));
   function toggleAllShown() { setSel(allShownSelected ? new Set() : new Set(shown.map((x) => x.sub_id))); }
+
+  // Group the shown invoices so multiple invoices for ONE order sit together in a highlighted box.
+  // Keeps the current sort order (a group appears at its first member's position). Groups by the FULL
+  // order number incl. any split suffix (31824-2), so only invoices for the SAME part are grouped.
+  const orderGroups = (() => {
+    const idx = new Map();
+    const groups = [];
+    shown.forEach((iv) => {
+      const k = ordNo(iv);
+      const key = k && k !== "—" ? k : `__${iv.sub_id}`;   // no order number → its own single group
+      if (key.startsWith("__") || !idx.has(key)) { if (!key.startsWith("__")) idx.set(key, groups.length); groups.push({ key, order_no: k, items: [iv] }); }
+      else { groups[idx.get(key)].items.push(iv); }
+    });
+    groups.forEach((g) => { g.total = g.items.reduce((a, x) => a + (typeof x.total === "number" ? x.total : 0), 0); });
+    return groups;
+  })();
 
   return (
     <div className="wrap">
@@ -690,7 +709,7 @@ export default function Invoices() {
                   </label>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span className="ono">{iv.invoice_no}</span>
-                    <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
+                    <span className="sub"> · {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}</span>
                     {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
                     {(() => { const a = discAgeDays(iv); return a == null ? null : <span className={`pill ${a >= 14 ? "red" : a >= AGING_DAYS ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={`Flagged ${iv.flagged_on || ""} — ${a} day${a === 1 ? "" : "s"} ago`}>{a}d open</span>; })()}
                     {iv.sent ? <span className="pill grey" style={{ marginLeft: 6 }} title={iv.sent}>chased</span> : <span className="pill amber" style={{ marginLeft: 6 }}>not chased</span>}
@@ -775,7 +794,7 @@ export default function Invoices() {
                   <tr key={r.sub_id}>
                     <td className="ono">{r.invoice_no}</td>
                     <td className="sub">{r.supplier || "—"}</td>
-                    <td className="sub">{r.order_no || "—"}</td>
+                    <td className="sub">{ordNo(r)}</td>
                     <td className="num">{r.total != null ? money(r.total) : "—"}</td>
                     <td><span className="pill grey">{r.status || "—"}</span></td>
                     <td style={{ whiteSpace: "nowrap" }}>{r.order_url && <a className="btn ghost" href={r.order_url} target="_blank" rel="noreferrer">Order ↗</a>}</td>
@@ -851,7 +870,8 @@ export default function Invoices() {
       {status === "ok" && list.length > 0 && shown.length === 0 && <div className="card"><div className="state">No invoices match this filter.</div></div>}
 
       <div className="inv-list">
-        {shown.map((iv) => {
+        {(() => {
+        const renderInvoiceCard = (iv) => {
           const r = checks[iv.sub_id];
           const busy = checking[iv.sub_id];
           const al = r && r.ok ? actionLabel(r.suggested_action, r.matched) : null;
@@ -874,7 +894,7 @@ export default function Invoices() {
                 <label className="inv-chk"><input type="checkbox" checked={sel.has(iv.sub_id)} onChange={() => toggleSel(iv.sub_id)} /></label>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span className="ono">{iv.invoice_no}</span>
-                  <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
+                  <span className="sub"> · {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}</span>
                   {iv.possible_dup ? <span className="pill red" style={{ marginLeft: 8 }}>possible duplicate of {iv.possible_dup}</span> : null}
                   {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
                 </div>
@@ -948,7 +968,14 @@ export default function Invoices() {
               )}
             </div>
           );
-        })}
+        };
+        return orderGroups.map((g) => g.items.length > 1 ? (
+          <div key={g.key} className="order-group" style={{ border: "2px solid var(--accent, #2563eb)", borderRadius: 12, background: "rgba(37,99,235,0.05)", padding: 8, marginBottom: 12 }}>
+            <div className="sub" style={{ fontWeight: 700, padding: "2px 6px 8px" }}>📦 Order {g.order_no} — {g.items.length} invoices · {money(g.total)}</div>
+            {g.items.map((iv) => renderInvoiceCard(iv))}
+          </div>
+        ) : renderInvoiceCard(g.items[0]));
+        })()}
       </div>
       </>)}
     </div>
@@ -1041,7 +1068,7 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
       ) : null}
       <div className="op-card">
         <div className="op-head">
-          <b>Order {o.order_no || o.name}</b>
+          <b>Order {o.name || o.order_no}</b>
           {o.stage ? <span className="pill grey">{o.stage}</span> : null}
         </div>
         <div className="sub op-sub">{o.customer || "—"} · {o.supplier || "—"}{o.payment_status ? ` · ${o.payment_status}` : ""}</div>

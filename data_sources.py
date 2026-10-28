@@ -1325,7 +1325,7 @@ def search_invoices(q: str, limit: int = 50, token: str | None = None) -> list:
         return []
     store = get_secret("SHOPIFY_STORE")
     fields = ('id name column_values(ids:["numbers4","status7__1","file_mm38gx3j"]){id text value} '
-              'parent_item{ id column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd","text_mm04tmac"]){id text} }')
+              'parent_item{ id name column_values(ids:["text_mkv6z0nt","dropdown_mkyqdeqd","text_mm04tmac"]){id text} }')
     query = ('query($b:[ID!],$l:Int!){boards(ids:$b){items_page(limit:$l,query_params:{rules:['
              '{column_id:"name",compare_value:["%s"],operator:contains_text}]}){items{ %s }}}}'
              % (q_safe, fields))
@@ -1363,6 +1363,7 @@ def search_invoices(q: str, limit: int = 50, token: str | None = None) -> list:
             "status": (cv.get("status7__1", {}) or {}).get("text") or "",
             "supplier": (pcv.get("dropdown_mkyqdeqd", {}) or {}).get("text") or "",
             "order_no": (pcv.get("text_mkv6z0nt", {}) or {}).get("text") or "",
+            "order_part": (p.get("name") or "").strip() or None,   # carries split suffix (-1/-2)
             "order_item_id": p.get("id"), "has_pdf": has_pdf,
             "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
         })
