@@ -252,6 +252,27 @@ export default function Invoices() {
     finally { setChasing(false); }
   }
 
+  // Approve a flagged invoice straight to QuickBooks from the Discrepancies tab (when the query turns
+  // out fine). Creates the bill and clears it from the discrepancy queue. Credit notes are skipped
+  // server-side (left for a vendor credit).
+  async function doApproveDisc(iv) {
+    const sub_id = iv.sub_id;
+    if (!window.confirm(`Invoice ${iv.invoice_no} is flagged as a discrepancy. Approve it to QuickBooks anyway? This creates its bill and clears it from the discrepancy queue.`)) return;
+    setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    try {
+      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
+      const d = await res.json().catch(() => ({ ok: false, detail: `API ${res.status}` }));
+      if (res.ok && d.ok) {
+        setApproving((a) => ({ ...a, [sub_id]: "done" }));
+        setNotice({ kind: "ok", text: `${iv.invoice_no}: ${d.detail || "approved to QuickBooks"}` });
+        setTimeout(() => setDisc((l) => l.filter((x) => x.sub_id !== sub_id)), 1200);
+      } else {
+        setApproving((a) => ({ ...a, [sub_id]: "err" }));
+        setNotice({ kind: "warn", text: `${iv.invoice_no}: ${d.detail || "couldn’t approve"}` });
+      }
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
   async function doUnflag(iv) {
     if (!window.confirm(`Move invoice ${iv.invoice_no} back to Needs Review? The discrepancy is treated as resolved.`)) return;
     setUnflagging((u) => ({ ...u, [iv.sub_id]: true }));
@@ -642,7 +663,8 @@ export default function Invoices() {
                   </div>
                   <div className="inv-right">
                     {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer">Order ↗</a>}
-                    <button className="btn primary" onClick={() => chaseDiscrepancies(new Set([iv.sub_id]))} disabled={chasing} title="Draft an Outlook query email to this supplier for review">Chase</button>
+                    <button className="btn primary" onClick={() => doApproveDisc(iv)} disabled={approving[iv.sub_id] === "working"} title="Approve this invoice to QuickBooks (overrides the discrepancy)">{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>
+                    <button className="btn" onClick={() => chaseDiscrepancies(new Set([iv.sub_id]))} disabled={chasing} title="Draft an Outlook query email to this supplier for review">Chase</button>
                     <button className="btn" onClick={() => copyDiscEmail(iv)} title="Copy a query email to the supplier">{discCopied[iv.sub_id] ? "Copied ✓" : "Copy query email"}</button>
                     <button className="btn" onClick={() => doUnflag(iv)} disabled={unflagging[iv.sub_id]} title="Move back to Needs Review">{unflagging[iv.sub_id] ? "…" : "Move back to review"}</button>
                   </div>
