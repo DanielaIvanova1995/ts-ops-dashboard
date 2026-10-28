@@ -1930,24 +1930,31 @@ def invoices_chase_discrepancies(body: ChaseDiscIn):
     results = []
     for sup, items in groups.items():
         email = (emails.get(core.norm_code(sup)) or "") if sup else ""
-        lines = ["Hi,", "",
-                 "Having checked the following invoice(s) against our orders, there are discrepancies "
-                 "we need resolving:", ""]
+        n = len(items)
+        _one = n == 1
+        opener = ("Hope you're well. We've been going through invoice "
+                  f"{items[0].get('invoice_no') or 'this invoice'} and there's a discrepancy we "
+                  "wanted to flag:") if _one else (
+                  "Hope you're well. We've been going through a few invoices and spotted some "
+                  "discrepancies we wanted to flag:")
+        lines = ["Hi,", "", opener, ""]
         for i in items:
             inv = i.get("invoice_no") or "?"
             on = i.get("order_no")
             reason = (i.get("query_note") or "").strip()
-            lines.append(f"Invoice {inv}" + (f" (our order {on})" if on else "") + ":")
-            lines.append(reason if reason else "(discrepancy — details to follow)")
+            if not _one:
+                lines.append(f"Invoice {inv}" + (f" (order {on})" if on else "") + ":")
+            lines.append(reason if reason else "(see invoice)")
             lines.append("")
         lines += [
-            "For each, please EITHER credit the invoice in full and reinvoice at the corrected amount, "
-            "OR issue a credit note for the difference — whichever is easier your end.", "",
-            "Once we have the corrected invoice / credit note we'll process payment on the right figure.",
-            "", "Many thanks,", "Trade Superstore Online", "Accounts"]
+            "For each, would you be able to either credit the invoice in full and reinvoice at the "
+            "corrected amount, or send a credit note for the difference — whichever's easiest? We'll "
+            + ("then get the invoice cleared together with its credit note." if _one else
+               "then get the invoices cleared together with their credit notes."), "",
+            "Thanks so much,", "Trade Superstore Online", "Accounts"]
         body_txt = "\n".join(lines)
-        n = len(items)
-        subject = f"Invoice query — Trade Superstore Online ({n} invoice{'s' if n != 1 else ''})"
+        subject = (f"Query on invoice {items[0].get('invoice_no') or 'invoice'}" if _one
+                   else f"Query on {n} invoices")
         draft_link = None
         if email:
             try:
@@ -2466,17 +2473,16 @@ def invoice_flag(sub_id: str, body: FlagIn):
             return out
         inv = (body.invoice_no or "").strip() or "this invoice"
         on = (body.order_no or "").strip()
-        subject = f"Invoice query — Trade Superstore Online ({body.invoice_no or 'invoice'})"
+        subject = f"Query on invoice {body.invoice_no}" if (body.invoice_no or "").strip() else "Invoice query"
         body_txt = "\n".join([
             "Hi,", "",
-            f"Re invoice {inv}" + (f" (our order {on})" if on else "")
-            + (f" — {body.supplier}" if body.supplier else "") + ":", "",
-            "Having checked this invoice against our order, there's a discrepancy:", "",
-            reason or "(discrepancy — see invoice)", "",
-            "To put it right, please EITHER credit this invoice in full and reinvoice at the corrected "
-            "amount, OR issue a credit note for the difference — whichever is easier your end.", "",
-            "Once we have the corrected invoice / credit note we'll process payment on the right figure.",
-            "", "Many thanks,", "Trade Superstore Online", "Accounts"])
+            f"Hope you're well. We've been going through invoice {inv}" + (f" (order {on})" if on else "")
+            + " and there's a discrepancy we wanted to flag:", "",
+            reason or "(see invoice)", "",
+            "Would you be able to put this right — either credit the invoice in full and reinvoice at "
+            "the corrected amount, or send a credit note for the difference, whichever's easiest for "
+            "you? We'll then get the invoice cleared together with its credit note.", "",
+            "Thanks so much,", "Trade Superstore Online", "Accounts"])
         try:
             ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
             emailed = True

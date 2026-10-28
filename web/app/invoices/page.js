@@ -40,21 +40,15 @@ function discrepancyDetail(r) {
   return { lines, overcharge, approx };
 }
 
-// The discrepancy note written to Monday AND carried into the supplier query — states what's wrong
-// and HOW to resolve it: full credit + reinvoice at the corrected amount, OR credit the difference.
+// The discrepancy SPECIFICS — what's wrong, as bullet points — written to Monday AND dropped into
+// the supplier query email. Just the facts; the email template supplies the friendly ask + closing,
+// so no internal tool name and no resolution boilerplate here (that would double up in the email).
 function discrepancyReason(iv, r) {
   const d = discrepancyDetail(r);
-  const L = ["TradeHub discrepancy:"];
+  const L = [];
   (d.lines.length ? d.lines : ["see invoice"]).forEach((s) => L.push("• " + s));
-  const tot = typeof iv.total === "number" ? iv.total : null;
   const f = (n) => `£${n.toFixed(2)}`;
-  if (d.overcharge != null) {
-    const correct = tot != null ? tot - d.overcharge : null;
-    L.push("", `Overcharged by ${d.approx ? "~" : ""}${f(d.overcharge)}.`);
-    L.push(`Resolution — EITHER credit ${iv.invoice_no} in full${tot != null ? ` (${f(tot)})` : ""} and reinvoice at the corrected amount${correct != null ? ` (${f(correct)})` : ""}, OR issue a credit note for the ${f(d.overcharge)} difference.`);
-  } else {
-    L.push("", `Resolution — EITHER credit ${iv.invoice_no} in full and reinvoice at the corrected amount, OR issue a credit note for the difference.`);
-  }
+  if (d.overcharge != null) L.push(`Overcharged by ${d.approx ? "~" : ""}${f(d.overcharge)}.`);
   return L.join("\n");
 }
 
@@ -218,19 +212,14 @@ export default function Invoices() {
   useEffect(() => { if (accessKey && tab === "disc") loadDisc(); }, [accessKey, tab, loadDisc]);
 
   function discEmailText(iv) {
-    // The stored reason (from a TradeHub flag) already carries the specifics + a resolution line;
-    // we still spell the two options out so every query asks for the standard resolution.
-    const hasRes = /resolution/i.test(iv.reason || "");
+    // Friendly supplier query: opener, the specifics (the saved reason), the standard ask, our
+    // closing. No internal tool name, no supplier name (it's going to them).
     const L = [];
     L.push("Hi,", "");
-    L.push(`Re invoice ${iv.invoice_no}${iv.order_no ? ` (our order ${iv.order_no})` : ""}${iv.supplier ? ` — ${iv.supplier}` : ""}`.trim(), "");
-    L.push("Having checked this invoice against our order, there's a discrepancy:", "");
-    L.push(iv.reason ? iv.reason : "(details to follow)", "");
-    if (!hasRes) {
-      L.push("To put it right, please EITHER credit this invoice in full and reinvoice at the corrected amount, OR issue a credit note for the difference — whichever is easier your end.");
-    }
-    L.push("", "Once we have the credit note / corrected invoice we'll process payment on the correct figure.",
-      "", "Many thanks,", "Trade Superstore Online");
+    L.push(`Hope you're well. We've been going through invoice ${iv.invoice_no}${iv.order_no ? ` (order ${iv.order_no})` : ""} and there's a discrepancy we wanted to flag:`, "");
+    L.push(iv.reason ? iv.reason : "(see invoice)", "");
+    L.push("Would you be able to put this right — either credit the invoice in full and reinvoice at the corrected amount, or send a credit note for the difference, whichever's easiest for you? We'll then get the invoice cleared together with its credit note.", "");
+    L.push("Thanks so much,", "Trade Superstore Online", "Accounts");
     return L.join("\n");
   }
   async function copyDiscEmail(iv) {
