@@ -5561,6 +5561,12 @@ def qbo_approve_invoice(invoice_no, inv_date=None) -> dict:
     total = det.get("total")
     if not isinstance(total, (int, float)) or total == 0:
         return {"ok": False, "detail": "no invoice total on Monday"}
+    # Credit note (negative total): never post as a QB bill — QuickBooks rejects negative bills with a
+    # business-validation error (SC10972), and a credit belongs as a Vendor Credit, handled manually.
+    # Skip cleanly so neither the manual Push nor the auto-pusher throws a QB error on it.
+    if total < 0:
+        return {"ok": False, "credit_note": True,
+                "detail": "credit note — not auto-pushed to QuickBooks (enter it as a vendor credit)"}
     supplier = det.get("supplier") or ""
     try:
         vinfo = (qbo_vendor_map_load() or {}).get(recon_core.norm_code(supplier))
