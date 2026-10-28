@@ -1939,10 +1939,26 @@ def invoice_discrepancies():
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "reason": (i.get("query_note") or "").strip(),
             "sent": (i.get("action_note") or "").strip(),
+            "progress": (i.get("progress") or "").strip(),
             "flagged_on": i.get("date"), "order_url": i.get("order_url")} for i in invs]
     # Most recently flagged first (status change date).
     out.sort(key=lambda r: r.get("flagged_on") or "", reverse=True)
     return {"count": len(out), "invoices": out}
+
+
+class ProgressIn(BaseModel):
+    note: str = ""
+
+
+@app.post("/invoices/{sub_id}/progress", dependencies=[Depends(require_key)])
+def invoice_progress(sub_id: str, body: ProgressIn):
+    """Save the running Progress note on a discrepancy (subitem 'Progress' column, long_text_mm8jcvz3)
+    — for tracking where a query's got to (chased, credit promised, received…). Empty clears it."""
+    try:
+        ds.set_subitem_text(sub_id, "long_text_mm8jcvz3", (body.note or "")[:4000])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save the progress note on Monday: {e}")
+    return {"ok": True}
 
 
 class ChaseDiscIn(BaseModel):

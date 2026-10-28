@@ -170,6 +170,8 @@ export default function Invoices() {
   const [chasing, setChasing] = useState(false);
   const [chaseResult, setChaseResult] = useState(null); // {drafted, suppliers:[...]}
   const [discSupFilter, setDiscSupFilter] = useState(""); // "" = all suppliers on the Discrepancies tab
+  const [progEdit, setProgEdit] = useState({}); // sub_id -> edited progress note text
+  const [savingProg, setSavingProg] = useState({}); // sub_id -> bool
   function toggleDiscSel(id) { setDiscSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const [orderOpen, setOrderOpen] = useState(() => new Set()); // sub_ids with the Monday order panel open
   function toggleOrder(id) { setOrderOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -310,6 +312,22 @@ export default function Invoices() {
         setNotice({ kind: "warn", text: `${iv.invoice_no}: ${d.detail || "couldn’t approve"}` });
       }
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
+  async function saveProgress(iv) {
+    const sub_id = iv.sub_id;
+    const note = (progEdit[sub_id] ?? iv.progress ?? "");
+    setSavingProg((s) => ({ ...s, [sub_id]: true }));
+    try {
+      const res = await jsonFetch(`/invoices/${sub_id}/progress`, { method: "POST", body: JSON.stringify({ note }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setDisc((l) => l.map((x) => (x.sub_id === sub_id ? { ...x, progress: note } : x)));
+        setProgEdit((e) => { const n = { ...e }; delete n[sub_id]; return n; });
+        setNotice({ kind: "ok", text: `Progress saved on ${iv.invoice_no}.` });
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t save progress." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setSavingProg((s) => ({ ...s, [sub_id]: false })); }
   }
 
   async function doUnflag(iv) {
@@ -751,6 +769,17 @@ export default function Invoices() {
                     <div className="sub">Flagged as a discrepancy on Monday, but no reason was saved against it (flagged by hand or before reasons were recorded). Open the order to review, or move it back to the checker.</div>
                   </div>
                 )}
+                <div className="inv-body" style={{ paddingTop: 0 }}>
+                  <div className="sub" style={{ fontWeight: 600, marginBottom: 4 }}>Progress notes</div>
+                  <textarea className="input" rows={2} style={{ width: "100%", resize: "vertical" }}
+                    placeholder="e.g. Chased 28/10 — credit promised; waiting on credit note…"
+                    value={progEdit[iv.sub_id] ?? iv.progress ?? ""}
+                    onChange={(e) => setProgEdit((s) => ({ ...s, [iv.sub_id]: e.target.value }))} />
+                  <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <button className="btn" onClick={() => saveProgress(iv)} disabled={savingProg[iv.sub_id] || (progEdit[iv.sub_id] ?? iv.progress ?? "") === (iv.progress ?? "")}>{savingProg[iv.sub_id] ? "Saving…" : "Save progress"}</button>
+                    {iv.progress && (progEdit[iv.sub_id] ?? iv.progress) === iv.progress ? <span className="sub">saved ✓</span> : null}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

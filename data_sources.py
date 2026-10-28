@@ -1420,7 +1420,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     item_fields = """
             id name created_at
             column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1",
-              "text_mm3gh2za", "text_mm3gjrap", "date_mm3d1ear"]) { id value text }
+              "text_mm3gh2za", "text_mm3gjrap", "date_mm3d1ear", "long_text_mm8jcvz3"]) { id value text }
             parent_item { id name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
                 "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
@@ -1508,6 +1508,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "order_items": pcv.get("order_items0") or "",
             "query_note": (cv.get("text_mm3gh2za", {}) or {}).get("text") or "",   # discrepancy reason
             "action_note": (cv.get("text_mm3gjrap", {}) or {}).get("text") or "",  # 'Queried…' = sent out
+            "progress": (cv.get("long_text_mm8jcvz3", {}) or {}).get("text") or "",  # running progress notes
             "invoice_date": (cv.get("date_mm3d1ear", {}) or {}).get("text") or "",
             "order_margin_live": margin_live,
             "agreed_cost": agreed_cost,
