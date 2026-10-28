@@ -506,6 +506,40 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     return out
 
 
+def fetch_order_totals(order_ids, token: str | None = None) -> dict:
+    """Live Shopify order TOTAL (inc VAT + shipping = what the customer paid) per order, batched —
+    {order_id(str): total(float)}. Used to sanity-check Monday's '£ to us' (numbers48, also the
+    customer-paid figure) against Shopify. One call per 100 orders."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    ids = [str(o).strip() for o in (order_ids or []) if str(o).strip()]
+    out = {}
+    for i in range(0, len(ids), 100):
+        gids = [f"gid://shopify/Order/{s}" for s in ids[i:i + 100]]
+        q = ("query($ids:[ID!]!){ nodes(ids:$ids){ ... on Order { id "
+             "totalPriceSet{shopMoney{amount}} } } }")
+        try:
+            r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                              json={"query": q, "variables": {"ids": gids}},
+                              headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                              timeout=30)
+            r.raise_for_status()
+            payload = r.json()
+        except Exception:  # noqa: BLE001
+            continue
+        for n in ((payload.get("data") or {}).get("nodes") or []):
+            if not n:
+                continue
+            sid = str(n.get("id") or "").rsplit("/", 1)[-1]
+            try:
+                amt = float((((n.get("totalPriceSet") or {}).get("shopMoney") or {}).get("amount")))
+            except (TypeError, ValueError):
+                amt = None
+            if sid and amt is not None:
+                out[sid] = amt
+    return out
+
+
 def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     """Order line items WITH each product's Shopify vendor + product type — the inputs the routing
     engine needs to pick a supplier. Returns [{title, sku, qty, vendor, product_type}]. One call
@@ -4424,7 +4458,7 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
     status_labels = status_labels or [3, 9]           # Needs Review + Matched (TradeHub)
     data = fetch_invoices_by_status(status_labels, limit=500, token=token)
     invs = data.get("invoices") or []
-    seen, orders_fixed, filled, items, cleared_tc = set(), 0, 0, [], 0
+    seen, orders_fixed, filled, items, cleared_tc, tot_check = set(), 0, 0, [], 0, {}
     for i in invs:
         oid = i.get("order_item_id")
         ono = (i.get("order_no") or "").strip()
@@ -4432,6 +4466,12 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
         if not okey or okey in seen:
             continue
         seen.add(okey)
+        # Collect NON-SPLIT orders for the Shopify-vs-Monday '£ to us' total check (batched after the
+        # loop). A split part (order name like 31824-2) only holds part of the order, so its '£ to us'
+        # won't equal the whole Shopify total — skip those (Daniela 2026-10-28).
+        _op = (i.get("order_part") or ono or "").strip()
+        if i.get("shopify_order_id") and isinstance(i.get("to_us"), (int, float)) and not re.search(r"-\d+$", _op):
+            tot_check[str(i.get("shopify_order_id"))] = {"order": _op or ono, "to_us": float(i.get("to_us"))}
         m = i.get("order_margin_live")
         if high_margin_only and not (m is None or (isinstance(m, (int, float)) and m >= margin_floor)):
             continue
@@ -4465,8 +4505,25 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
             orders_fixed += 1
             filled += n
             items.append({"order": ono, "margin_before": m, "filled": n, "cleared_total_cost": cleared})
+    # Double-check Monday's '£ to us' (numbers48) against the live Shopify order total on NON-SPLIT
+    # orders — a mismatch means the recorded sell (and so the margin) is wrong. FLAGGED only, never
+    # auto-overwritten (revenue is sensitive; a part-refund or edited order could be a real difference).
+    total_mismatches = []
+    if tot_check and not dry_run:
+        try:
+            shop = fetch_order_totals(list(tot_check.keys()))
+        except Exception:  # noqa: BLE001
+            shop = {}
+        for sid, info in tot_check.items():
+            st = shop.get(sid)
+            if isinstance(st, (int, float)) and abs(st - info["to_us"]) > 0.50:
+                total_mismatches.append({"order": info["order"], "monday_to_us": round(info["to_us"], 2),
+                                         "shopify_total": round(st, 2), "diff": round(st - info["to_us"], 2)})
+        total_mismatches.sort(key=lambda x: -abs(x["diff"]))
     return {"ok": True, "orders_checked": len(seen), "orders_fixed": orders_fixed,
-            "filled": filled, "cleared_total_cost": cleared_tc, "items": items[:60]}
+            "filled": filled, "cleared_total_cost": cleared_tc,
+            "total_mismatches": total_mismatches[:60], "n_total_mismatches": len(total_mismatches),
+            "items": items[:60]}
 
 
 def delete_subitem(sub_id, token: str | None = None, attempts: int = 6) -> bool:

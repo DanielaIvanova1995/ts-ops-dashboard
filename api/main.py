@@ -2630,6 +2630,8 @@ def invoice_fix_margins_all(dry_run: bool = False):
             _save_status("fix_margins_status", {
                 "running": False, "ok": r.get("ok"), "orders_checked": r.get("orders_checked"),
                 "orders_fixed": r.get("orders_fixed"), "filled": r.get("filled"),
+                "total_mismatches": (r.get("total_mismatches") or [])[:40],
+                "n_total_mismatches": r.get("n_total_mismatches"),
                 "items": (r.get("items") or [])[:40], "reason": "manual", "dry_run": dry_run})
         except Exception as e:  # noqa: BLE001
             _save_status("fix_margins_status", {"running": False, "ok": False, "error": str(e)[:200], "reason": "manual"})

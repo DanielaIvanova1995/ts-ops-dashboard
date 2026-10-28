@@ -232,6 +232,8 @@ def loop():
                         _write_status("fix_margins", {
                             "ok": r.get("ok"), "orders_checked": r.get("orders_checked"),
                             "orders_fixed": r.get("orders_fixed"), "filled": r.get("filled"),
+                            "total_mismatches": (r.get("total_mismatches") or [])[:40],
+                            "n_total_mismatches": r.get("n_total_mismatches"),
                             "items": (r.get("items") or [])[:40], "reason": "auto"})
                         if r.get("filled") and supabase_db:
                             try:

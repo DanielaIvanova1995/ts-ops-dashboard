@@ -158,6 +158,7 @@ export default function Invoices() {
   const [supFilter, setSupFilter] = useState("");
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]); // server-side matches across ALL statuses
+  const [fmMismatch, setFmMismatch] = useState([]); // fix-margins: orders where Monday £-to-us != Shopify
   const [sortBy, setSortBy] = useState("");
   const [onlyDup, setOnlyDup] = useState(false);
   const [tab, setTab] = useState("review");       // "review" | "disc"
@@ -224,6 +225,15 @@ export default function Invoices() {
     } catch (e) { if (String(e.message) !== "unauthorised") setDiscStatus("error"); }
   }, [accessKey, jsonFetch]);
   useEffect(() => { if (accessKey && (tab === "disc" || tab === "aging")) loadDisc(); }, [accessKey, tab, loadDisc]);
+
+  // Fix-margins health: orders where Monday's '£ to us' doesn't match the live Shopify total (flagged
+  // by the daily fix-margins check). Read-only alert so the wrong sell figures can be corrected.
+  useEffect(() => {
+    if (!accessKey) return;
+    jsonFetch("/invoices/fix-margins-status").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      setFmMismatch((d && d.status && d.status.total_mismatches) || []);
+    }).catch(() => {});
+  }, [accessKey, jsonFetch]);
 
   // Search ALL invoices (any status) server-side so the box finds a matched/approved/discrepancy one
   // that isn't in the open tab. Debounced; cleared when the query is short or on the Discrepancies tab.
@@ -778,6 +788,28 @@ export default function Invoices() {
         </div>
         {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 8 }}>{notice.text}</div>}
       </div>
+
+      {tab === "review" && fmMismatch.length > 0 && (
+        <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+          <div className="inv-controls" style={{ flexWrap: "wrap" }}>
+            <span className="pill amber">{fmMismatch.length} total mismatch{fmMismatch.length === 1 ? "" : "es"}</span>
+            <span className="sub">Monday “£ to us” doesn’t match the live Shopify total on these (non-split) orders — the margin is wrong. Correct the sell figure.</span>
+          </div>
+          <table className="mini" style={{ marginTop: 8 }}>
+            <thead><tr><th>Order</th><th className="num">Monday £ to us</th><th className="num">Shopify total</th><th className="num">Diff</th></tr></thead>
+            <tbody>
+              {fmMismatch.slice(0, 25).map((m, i) => (
+                <tr key={i}>
+                  <td className="ono">{m.order}</td>
+                  <td className="num">{money(m.monday_to_us)}</td>
+                  <td className="num">{money(m.shopify_total)}</td>
+                  <td className="num" style={{ color: m.diff < 0 ? "#c0392b" : "#1a9d57" }}>{m.diff > 0 ? "+" : ""}{money(m.diff)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {query.trim().length >= 2 && (() => {
         // Invoices matching the search that AREN'T in the current tab — found across all statuses.
