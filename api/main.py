@@ -1883,6 +1883,71 @@ def invoice_discrepancies():
     return {"count": len(out), "invoices": out}
 
 
+class ChaseDiscIn(BaseModel):
+    sub_ids: list[str] = []
+
+
+@app.post("/invoices/chase-discrepancies", dependencies=[Depends(require_key)])
+def invoices_chase_discrepancies(body: ChaseDiscIn):
+    """Draft a supplier query email for the selected discrepancy invoices — ONE Outlook draft per
+    supplier (grouping that supplier's discrepancies into a single email to their accounts address),
+    in the Accounts mailbox for review. Human-gated: never auto-sent, and Monday is NOT marked
+    'queried' here (that only happens when the draft is actually sent). Returns a per-supplier result
+    so the UI can show which drafted and which had no email on file."""
+    import invoice_core as core
+    want = {str(s) for s in (body.sub_ids or [])}
+    if not want:
+        return {"ok": False, "detail": "No discrepancies selected."}
+    try:
+        data = ds.fetch_invoices_by_status([_DISCREPANCY_LABEL], limit=500)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    invs = [i for i in (data.get("invoices") or []) if str(i.get("sub_id")) in want]
+    if not invs:
+        return {"ok": False, "detail": "None of the selected invoices are still in Discrepancy."}
+    try:
+        emails = ds.list_supplier_emails() or {}
+    except Exception:  # noqa: BLE001
+        emails = {}
+    groups: dict[str, list] = {}
+    for i in invs:
+        groups.setdefault((i.get("supplier") or "").strip(), []).append(i)
+    results = []
+    for sup, items in groups.items():
+        email = (emails.get(core.norm_code(sup)) or "") if sup else ""
+        lines = ["Hi,", "",
+                 "Having checked the following invoice(s) against our orders, there are discrepancies "
+                 "we need resolving:", ""]
+        for i in items:
+            inv = i.get("invoice_no") or "?"
+            on = i.get("order_no")
+            reason = (i.get("query_note") or "").strip()
+            lines.append(f"Invoice {inv}" + (f" (our order {on})" if on else "") + ":")
+            lines.append(reason if reason else "(discrepancy — details to follow)")
+            lines.append("")
+        lines += [
+            "For each, please EITHER credit the invoice in full and reinvoice at the corrected amount, "
+            "OR issue a credit note for the difference — whichever is easier your end.", "",
+            "Once we have the corrected invoice / credit note we'll process payment on the right figure.",
+            "", "Many thanks,", "Trade Superstore Online", "Accounts"]
+        body_txt = "\n".join(lines)
+        n = len(items)
+        subject = f"Invoice query — Trade Superstore Online ({n} invoice{'s' if n != 1 else ''})"
+        draft_link = None
+        if email:
+            try:
+                draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            except Exception:  # noqa: BLE001
+                draft_link = None
+        results.append({"supplier": sup or "(no supplier)", "email": email, "count": n,
+                        "draft_link": draft_link, "drafted": bool(draft_link),
+                        "no_email": not email, "subject": subject, "body": body_txt,
+                        "invoices": [i.get("invoice_no") for i in items]})
+    results.sort(key=lambda r: r["supplier"].lower())
+    return {"ok": True, "drafted": sum(1 for r in results if r["drafted"]),
+            "suppliers": results}
+
+
 @app.post("/invoices/{sub_id}/check", dependencies=[Depends(require_key)])
 def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None):
     """Run the SAME 3-way check the live app/runner uses (invoice_core.check_invoice): invoice PDF vs

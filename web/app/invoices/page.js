@@ -158,6 +158,10 @@ export default function Invoices() {
   const [discStatus, setDiscStatus] = useState("idle");
   const [unflagging, setUnflagging] = useState({}); // sub_id -> bool
   const [discCopied, setDiscCopied] = useState({}); // sub_id -> bool
+  const [discSel, setDiscSel] = useState(() => new Set()); // sub_ids selected for bulk chase
+  const [chasing, setChasing] = useState(false);
+  const [chaseResult, setChaseResult] = useState(null); // {drafted, suppliers:[...]}
+  function toggleDiscSel(id) { setDiscSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const [orderOpen, setOrderOpen] = useState(() => new Set()); // sub_ids with the Monday order panel open
   function toggleOrder(id) { setOrderOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const [accepted, setAccepted] = useState({}); // sub_id -> Set(line keys the user has accepted as OK)
@@ -235,6 +239,27 @@ export default function Invoices() {
       setDiscCopied((s) => ({ ...s, [iv.sub_id]: true }));
       setTimeout(() => setDiscCopied((s) => ({ ...s, [iv.sub_id]: false })), 2000);
     } catch { window.prompt("Copy the query email:", discEmailText(iv)); }
+  }
+
+  // Draft supplier query emails for the given discrepancies — ONE Outlook draft per supplier
+  // (grouped), in the Accounts mailbox, for review. Never auto-sent.
+  async function chaseDiscrepancies(subIds) {
+    const ids = [...subIds];
+    if (!ids.length) return;
+    const n = ids.length;
+    if (!window.confirm(`Draft supplier query email${n === 1 ? "" : "s"} for ${n} discrepanc${n === 1 ? "y" : "ies"}? One draft per supplier is created in the Accounts mailbox for you to review and send — nothing is sent automatically.`)) return;
+    setChasing(true); setChaseResult(null);
+    try {
+      const res = await jsonFetch("/invoices/chase-discrepancies", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setChaseResult(d);
+        const noEmail = (d.suppliers || []).filter((s) => s.no_email);
+        setNotice({ kind: noEmail.length ? "warn" : "ok", text: `Drafted ${d.drafted} supplier email${d.drafted === 1 ? "" : "s"} in Accounts for review${noEmail.length ? ` — ${noEmail.length} supplier(s) had no email on file` : ""}.` });
+        setDiscSel(new Set());
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t draft the chasers." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setChasing(false); }
   }
 
   async function doUnflag(iv) {
@@ -539,10 +564,47 @@ export default function Invoices() {
         <>
           {discStatus === "error" && <div className="card"><div className="state err">Couldn’t load discrepancies.</div></div>}
           {discStatus === "ok" && disc.length === 0 && <div className="card"><div className="state">No invoices flagged as discrepancies. 🎉</div></div>}
+          {discStatus === "ok" && disc.length > 0 && (() => {
+            // Summary: total, by-supplier tally, how many already chased — plus bulk chase controls.
+            const bySup = {};
+            disc.forEach((iv) => { const s = iv.supplier || "—"; bySup[s] = (bySup[s] || 0) + 1; });
+            const supList = Object.entries(bySup).sort((a, b) => b[1] - a[1]);
+            const chased = disc.filter((iv) => iv.sent).length;
+            const allSel = disc.length > 0 && disc.every((iv) => discSel.has(iv.sub_id));
+            return (
+              <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+                <div className="inv-controls" style={{ flexWrap: "wrap" }}>
+                  <span className="pill red">{disc.length} discrepanc{disc.length === 1 ? "y" : "ies"}</span>
+                  <span className="pill grey">{supList.length} supplier{supList.length === 1 ? "" : "s"}</span>
+                  {chased > 0 && <span className="pill amber">{chased} already chased</span>}
+                  <span style={{ flex: 1 }} />
+                  <button className="btn" onClick={() => setDiscSel(allSel ? new Set() : new Set(disc.map((x) => x.sub_id)))}>{allSel ? "Clear" : "Select all"}</button>
+                  {discSel.size > 0 && <button className="btn primary" onClick={() => chaseDiscrepancies(discSel)} disabled={chasing}>{chasing ? "Drafting…" : `Chase selected (${discSel.size})`}</button>}
+                  <button className="btn" onClick={() => chaseDiscrepancies(new Set(disc.map((x) => x.sub_id)))} disabled={chasing} title="Draft one Outlook email per supplier for every discrepancy">{chasing ? "…" : "Chase all"}</button>
+                </div>
+                <div className="sub" style={{ marginTop: 8 }}>
+                  {supList.map(([s, n]) => <span key={s} className="pill grey" style={{ marginRight: 6, marginBottom: 4, display: "inline-block" }}>{s} · {n}</span>)}
+                </div>
+                {chaseResult && (
+                  <div className="route-msg ok" style={{ marginTop: 10 }}>
+                    <b>Drafted {chaseResult.drafted} email{chaseResult.drafted === 1 ? "" : "s"} in the Accounts mailbox</b> — open Outlook to review and send.
+                    <div style={{ marginTop: 6 }}>
+                      {(chaseResult.suppliers || []).map((r, i) => (
+                        <div key={i} className="sub">{r.drafted ? "✓" : "⚠️"} {r.supplier} · {r.count} invoice{r.count === 1 ? "" : "s"} {r.no_email ? "— no email on file, draft not created" : `→ ${r.email}`}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div className="inv-list">
             {disc.map((iv) => (
-              <div className="card inv-card" key={iv.sub_id}>
+              <div className={`card inv-card${discSel.has(iv.sub_id) ? " sel" : ""}`} key={iv.sub_id}>
                 <div className="inv-head">
+                  <label style={{ display: "flex", alignItems: "center", marginRight: 8 }} title="Select for bulk chase">
+                    <input type="checkbox" checked={discSel.has(iv.sub_id)} onChange={() => toggleDiscSel(iv.sub_id)} />
+                  </label>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span className="ono">{iv.invoice_no}</span>
                     <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
@@ -551,6 +613,7 @@ export default function Invoices() {
                   </div>
                   <div className="inv-right">
                     {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer">Order ↗</a>}
+                    <button className="btn primary" onClick={() => chaseDiscrepancies(new Set([iv.sub_id]))} disabled={chasing} title="Draft an Outlook query email to this supplier for review">Chase</button>
                     <button className="btn" onClick={() => copyDiscEmail(iv)} title="Copy a query email to the supplier">{discCopied[iv.sub_id] ? "Copied ✓" : "Copy query email"}</button>
                     <button className="btn" onClick={() => doUnflag(iv)} disabled={unflagging[iv.sub_id]} title="Move back to Needs Review">{unflagging[iv.sub_id] ? "…" : "Move back to review"}</button>
                   </div>
