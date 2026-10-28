@@ -141,15 +141,21 @@ def loop():
         try:
             if hold_lease():                  # only the lease owner does the work
                 now = _time.time()
+                # Run AT MOST ONE job per tick (ticks are _POLL seconds apart, jobs are due every
+                # 15-30 min, so each still gets its turn quickly). This stops two heavy jobs' memory
+                # peaks stacking in the same tick, which was tripping Render's memory limit.
+                ran = False
                 et = _cfg("email_triage")
-                if et.get("auto_enabled") and now >= next_run["email_triage"]:
+                if not ran and et.get("auto_enabled") and now >= next_run["email_triage"]:
+                    ran = True
                     next_run["email_triage"] = now + max(300, int(et.get("interval_min") or 10) * 60)
                     import email_triage
                     _run("email_triage", lambda: email_triage.run_triage(
                         dry_run=False, since_days=et.get("since_days"),
                         max_total=int(et.get("max_total") or 40)))
                 qt = _cfg("quote_triage")
-                if qt.get("auto_enabled") and now >= next_run["quote_triage"]:
+                if not ran and qt.get("auto_enabled") and now >= next_run["quote_triage"]:
+                    ran = True
                     next_run["quote_triage"] = now + max(300, int(qt.get("interval_min") or 10) * 60)
                     import quote_triage
                     _run("quote_triage", lambda: quote_triage.run_triage(
@@ -164,8 +170,9 @@ def loop():
                 # 10 min) blew the Render memory limit — too many PDFs read + parsed per tick. Keep a
                 # modest batch and a gentle interval so memory stays bounded; daily volume is small.
                 _ii_int = max(int(ii.get("interval_min") or 15), 15)       # at least every 15 min
-                _ii_max = min(int(ii.get("max_total") or 25), 30)          # at most 30 PDFs/run
-                if ii.get("auto_enabled", True) and now >= next_run.get("invoice_import", 0.0):
+                _ii_max = min(int(ii.get("max_total") or 15), 15)          # at most 15 PDFs/run (memory)
+                if not ran and ii.get("auto_enabled", True) and now >= next_run.get("invoice_import", 0.0):
+                    ran = True
                     next_run["invoice_import"] = now + max(900, _ii_int * 60)
                     import invoice_import
                     def _imp():
@@ -184,9 +191,10 @@ def loop():
                 # Discrepancy. Set invoice_check config check_only=true to revert to mark-Matched-only.
                 ic = _cfg("invoice_check")
                 # CALM cadence (backlog cleared): modest batch + gentle interval to keep memory down.
-                _ic_int = max(int(ic.get("interval_min") or 20), 15)      # at least every 15 min
-                _ic_max = min(int(ic.get("max_total") or 25), 30)         # at most 30 checks/run
-                if ic.get("auto_enabled", True) and now >= next_run.get("invoice_check", 0.0):
+                _ic_int = max(int(ic.get("interval_min") or 20), 20)      # at least every 20 min
+                _ic_max = min(int(ic.get("max_total") or 20), 20)         # at most 20 checks/run
+                if not ran and ic.get("auto_enabled", True) and now >= next_run.get("invoice_check", 0.0):
+                    ran = True
                     next_run["invoice_check"] = now + max(1200, _ic_int * 60)
                     import run_invoice_check
                     _co = bool(ic.get("check_only", False))
@@ -205,7 +213,8 @@ def loop():
                 _rh = sr.get("run_hour", 6)
                 _sr_due = (_due_at_hour("statement_recon", int(_rh)) if _rh is not None
                            else _due("statement_recon", int(sr.get("interval_min") or 1440)))
-                if sr.get("auto_enabled", True) and _sr_due:
+                if not ran and sr.get("auto_enabled", True) and _sr_due:
+                    ran = True
                     try:
                         import statement_recon
                         statement_recon.run_auto(max_total=int(sr.get("max_total") or 40))  # writes its own status
@@ -215,7 +224,8 @@ def loop():
                 # Daily: repair ~98% margins by filling any invoice totals missing from the order's
                 # INV slots across the board (duplicate-safe; only touches high-margin/unknown ones).
                 fm = _cfg("fix_margins")
-                if fm.get("auto_enabled", True) and _due("fix_margins", int(fm.get("interval_min") or 1440)):
+                if not ran and fm.get("auto_enabled", True) and _due("fix_margins", int(fm.get("interval_min") or 1440)):
+                    ran = True
                     try:
                         import data_sources as _ds
                         r = _ds.fix_margins_sweep()
