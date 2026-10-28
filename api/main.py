@@ -219,15 +219,30 @@ def diag(sweep: int = 0):
                 recent = sdb.invoice_import_recent(limit=400) or []
                 by_status = Counter((r.get("status") or "?") for r in recent)
                 fail_reasons = Counter()
+                fail_suppliers = Counter()     # which suppliers the FAILED (no-order) invoices are from
+                fail_mode = Counter()          # no PO on invoice vs PO present but no Monday order
                 for r in recent:
                     if r.get("status") in ("failed", "ignored"):
                         d = (r.get("detail") or "").strip()
                         d = _re.sub(r"\b\d{4,}\b", "N", d)[:60]        # collapse ids so reasons group
                         fail_reasons[d or r.get("status")] += 1
+                    if r.get("status") == "failed":
+                        fail_suppliers[(r.get("supplier") or "?").strip() or "?"] += 1
+                        det = (r.get("detail") or "")
+                        if "no order on Monday for PO None" in det:
+                            fail_mode["no PO/order number on the invoice"] += 1
+                        elif "no order on Monday for PO" in det:
+                            fail_mode["PO on invoice didn't match a Monday order"] += 1
+                        elif "couldn't read" in det:
+                            fail_mode["couldn't read the PDF"] += 1
+                        else:
+                            fail_mode["other"] += 1
                 out["invoice_import_log"] = {
                     "sample": len(recent),
                     "by_status": dict(by_status),
                     "top_unimported_reasons": fail_reasons.most_common(12),
+                    "top_failed_suppliers": fail_suppliers.most_common(15),
+                    "failed_by_mode": dict(fail_mode),
                 }
             except Exception as e:  # noqa: BLE001
                 out["invoice_import_log_error"] = str(e)[:140]
