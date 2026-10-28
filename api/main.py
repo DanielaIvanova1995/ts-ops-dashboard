@@ -2425,22 +2425,78 @@ def invoice_suggest_order(total: float, supplier: str = ""):
 
 class FlagIn(BaseModel):
     reason: str = ""
+    email_accounts: bool = False     # also email the supplier's accounts the query (then record it)
+    supplier: str = ""
+    invoice_no: str = ""
+    order_no: str = ""
+    to_email: str = ""               # override the looked-up accounts email if given
 
 
 @app.post("/invoices/{sub_id}/flag", dependencies=[Depends(require_key)])
 def invoice_flag(sub_id: str, body: FlagIn):
     """Flag an invoice as a Discrepancy on Monday (Payment Status → 'Discrepancy') and save the
-    reason on the subitem, so it drops out of Needs Review into the discrepancy queue."""
+    reason on the subitem, so it drops out of Needs Review into the discrepancy queue. If
+    email_accounts is set, ALSO email the supplier's accounts team the query (sent from the Accounts
+    mailbox; falls back to a Drafts item if direct send is blocked) and record 'Emailed accounts
+    <date>' on the subitem so the discrepancy queue shows it's been chased."""
+    import invoice_core as core
     try:
         ds.set_invoice_status(sub_id, "Discrepancy")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't flag on Monday: {e}")
-    if (body.reason or "").strip():
+    reason = (body.reason or "").strip()
+    if reason:
         try:
-            ds.set_subitem_text(sub_id, "text_mm3gh2za", body.reason.strip()[:1500])
+            ds.set_subitem_text(sub_id, "text_mm3gh2za", reason[:1500])
         except Exception:  # noqa: BLE001
             pass
-    return {"ok": True}
+
+    emailed = drafted = False
+    email = (body.to_email or "").strip()
+    out = {"ok": True}
+    if body.email_accounts:
+        if not email and body.supplier:
+            try:
+                email = (ds.list_supplier_emails() or {}).get(core.norm_code(body.supplier)) or ""
+            except Exception:  # noqa: BLE001
+                email = ""
+        out["email"] = email
+        if not email:
+            out["detail"] = "flagged — but no accounts email on file for this supplier, so nothing was sent"
+            return out
+        inv = (body.invoice_no or "").strip() or "this invoice"
+        on = (body.order_no or "").strip()
+        subject = f"Invoice query — Trade Superstore Online ({body.invoice_no or 'invoice'})"
+        body_txt = "\n".join([
+            "Hi,", "",
+            f"Re invoice {inv}" + (f" (our order {on})" if on else "")
+            + (f" — {body.supplier}" if body.supplier else "") + ":", "",
+            "Having checked this invoice against our order, there's a discrepancy:", "",
+            reason or "(discrepancy — see invoice)", "",
+            "To put it right, please EITHER credit this invoice in full and reinvoice at the corrected "
+            "amount, OR issue a credit note for the difference — whichever is easier your end.", "",
+            "Once we have the corrected invoice / credit note we'll process payment on the right figure.",
+            "", "Many thanks,", "Trade Superstore Online", "Accounts"])
+        try:
+            ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            emailed = True
+        except Exception:  # noqa: BLE001 — direct send blocked/failed → leave a draft to send by hand
+            try:
+                ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                drafted = True
+            except Exception:  # noqa: BLE001
+                pass
+        if emailed or drafted:
+            try:
+                tag = "Emailed accounts" if emailed else "Drafted to accounts"
+                ds.set_subitem_text(sub_id, "text_mm3gjrap", f"{tag} {_dt.date.today().isoformat()}")
+            except Exception:  # noqa: BLE001
+                pass
+        out.update(emailed=emailed, drafted=drafted,
+                   detail=("emailed the supplier's accounts" if emailed else
+                           "couldn't send directly — left a draft in Accounts to send by hand" if drafted
+                           else "flagged, but the email could not be sent or drafted"))
+    return out
 
 
 @app.post("/invoices/{sub_id}/unflag", dependencies=[Depends(require_key)])

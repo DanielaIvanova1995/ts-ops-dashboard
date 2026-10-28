@@ -408,6 +408,35 @@ export default function Invoices() {
     }
   }
 
+  // Email the supplier's accounts the discrepancy query AND mark it Discrepancy in one go — the
+  // "email accounts" action Daniela wanted straight from the check screen. Sends from the Accounts
+  // mailbox (falls back to a draft if direct send is blocked).
+  async function doFlagEmail(iv) {
+    const sub_id = iv.sub_id;
+    const r = checks[sub_id];
+    const reason = (r && r.ok) ? discrepancyReason(iv, r) : ((r && r.discrepancy_reason) || "Discrepancy — see invoice");
+    if (!window.confirm(`Email ${iv.supplier || "the supplier"}'s accounts team the query for invoice ${iv.invoice_no} and mark it Discrepancy on Monday? The email is sent from the Accounts mailbox.`)) return;
+    setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    setApproveMsg((m) => ({ ...m, [sub_id]: null }));
+    try {
+      const res = await jsonFetch(`/invoices/${sub_id}/flag`, { method: "POST", body: JSON.stringify({ reason, email_accounts: true, supplier: iv.supplier, invoice_no: iv.invoice_no, order_no: iv.order_no }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setApproving((a) => ({ ...a, [sub_id]: "flagged" }));
+        const txt = d.emailed ? `Emailed ${d.email} and flagged as Discrepancy.` : d.drafted ? `Couldn’t send directly — left a draft in Accounts for ${d.email}. Flagged as Discrepancy.` : (d.detail || "Flagged as Discrepancy.");
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: d.emailed ? "ok" : "warn", text: txt } }));
+        setNotice({ kind: d.emailed ? "ok" : "warn", text: `${iv.invoice_no}: ${txt}` });
+        setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 1500);
+      } else {
+        setApproving((a) => ({ ...a, [sub_id]: "err" }));
+        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: d.detail || "Couldn’t email / flag." } }));
+      }
+    } catch (e) {
+      setApproving((a) => ({ ...a, [sub_id]: "err" }));
+      if (String(e.message) !== "unauthorised") setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: String(e.message || e) } }));
+    }
+  }
+
   async function doFindPdf(iv) {
     const sub_id = iv.sub_id;
     setFindingPdf((f) => ({ ...f, [sub_id]: true }));
@@ -780,7 +809,8 @@ export default function Invoices() {
                       {(r.matched || effMatched)
                         ? <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"} title={effMatched && !r.matched ? "All remaining issues accepted — approve to QuickBooks" : "Approve to QuickBooks"}>{approving[iv.sub_id] === "working" ? "…" : (effMatched && !r.matched ? "Approve → QB (accepted)" : "Approve → QB")}</button>
                         : <button className="btn" onClick={() => doApprove(iv, true)} disabled={approving[iv.sub_id] === "working"} title="Push to QuickBooks even though it isn't fully matched">{approving[iv.sub_id] === "working" ? "…" : "Push to QB anyway"}</button>}
-                      <button className="btn" onClick={() => doFlag(iv)} disabled={approving[iv.sub_id] === "working"} title="Flag as a discrepancy on Monday">Flag</button>
+                      <button className="btn" onClick={() => doFlag(iv)} disabled={approving[iv.sub_id] === "working"} title="Flag as a discrepancy on Monday (no email)">Flag</button>
+                      <button className="btn primary" onClick={() => doFlagEmail(iv)} disabled={approving[iv.sub_id] === "working"} title="Email the supplier's accounts the query and mark it Discrepancy">Email accounts &amp; flag</button>
                     </>
                   )}
                 </div>
