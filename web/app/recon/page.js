@@ -638,17 +638,44 @@ export default function Recon() {
   async function reconcile() {
     const f = picked || fileRef.current?.files?.[0];
     if (!f) { setNotice({ kind: "warn", text: "Choose a statement file first." }); return; }
-    setBusy(true); setNotice(null); setResult(null);
+    setBusy(true); setResult(null);
+    setNotice({ kind: "ok", text: "Reconciling… big statements (e.g. Travis Perkins) can take a minute — it runs in the background so it won't time out." });
+    const authHdr = { "X-TradeHub-Key": accessKey || "", "X-TradeHub-Statements-Key": pin || "" };
     try {
       const fd = new FormData();
       fd.append("file", f);
       if (supplier.trim()) fd.append("supplier", supplier.trim());
-      const res = await fetch(`${API}/recon`, { method: "POST", cache: "no-store", headers: { "X-TradeHub-Key": accessKey || "", "X-TradeHub-Statements-Key": pin || "" }, body: fd });
+      const res = await fetch(`${API}/recon`, { method: "POST", cache: "no-store", headers: authHdr, body: fd });
       if (res.status === 401 || res.status === 403) { try { localStorage.removeItem(PIN_STORE); } catch {} setPin(""); setNeedPin(true); setPinErr("That passcode didn’t work — try again."); return; }
       if (!res.ok) { const ed = await res.json().catch(() => ({})); throw new Error(ed.detail || `API ${res.status}`); }
-      const d = await res.json();
-      if (d.ok === false && d.need_vendor) { setNotice({ kind: "warn", text: d.detail || "No QuickBooks vendor match." }); }
-      else { setResult(d); loadSaved(); }
+      const start = await res.json();
+      // Older API returned the full result inline — handle that too.
+      if (!start.job) {
+        if (start.ok === false && start.need_vendor) setNotice({ kind: "warn", text: start.detail || "No QuickBooks vendor match." });
+        else { setResult(start); setNotice(null); loadSaved(); }
+        return;
+      }
+      // Poll the background job until it finishes (it also SAVES the result, so even a slow one shows
+      // up in the Statements list afterwards).
+      const deadline = Date.now() + 5 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2500));
+        let sd;
+        try {
+          const sr = await fetch(`${API}/recon/upload-status?job=${encodeURIComponent(start.job)}`, { cache: "no-store", headers: authHdr });
+          if (!sr.ok) continue;
+          sd = await sr.json();
+        } catch { continue; }
+        if (sd && sd.pending === false) {
+          const r = sd.result;
+          if (r && r.need_vendor) setNotice({ kind: "warn", text: r.detail || "No QuickBooks vendor match." });
+          else if (sd.ok === false || sd.error) setNotice({ kind: "warn", text: "Couldn’t reconcile — " + (sd.error || (r && r.detail) || "failed") });
+          else if (r) { setResult(r); setNotice(null); loadSaved(); }
+          return;
+        }
+      }
+      setNotice({ kind: "warn", text: "Still reconciling — it's taking a while. It saves when done, so check the Statements list in a moment." });
+      loadSaved();
     } catch (e) {
       setNotice({ kind: "warn", text: "Couldn’t reconcile — " + String(e.message || e) });
     } finally { setBusy(false); }

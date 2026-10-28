@@ -52,6 +52,15 @@ function discrepancyReason(iv, r) {
   return L.join("\n");
 }
 
+// How many days a discrepancy has been open (since it was flagged). null if no date on record.
+const AGING_DAYS = 7;   // a discrepancy older than this is "aging" and shows on the To-chase tab
+function discAgeDays(iv) {
+  if (!iv || !iv.flagged_on) return null;
+  const d = new Date(iv.flagged_on);
+  if (isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+}
+
 function ImportPanel({ jsonFetch, onNotice }) {
   const [open, setOpen] = useState(false);
   const [folder, setFolder] = useState("Travis Perkins");
@@ -190,7 +199,7 @@ export default function Invoices() {
   }, [accessKey]);
 
   const load = useCallback(async () => {
-    if (!accessKey || tab === "disc") return;
+    if (!accessKey || tab === "disc" || tab === "aging") return;
     setStatus("loading"); setErr("");
     try {
       const res = await jsonFetch(tab === "matched" ? "/invoices/matched" : "/invoices");
@@ -199,7 +208,7 @@ export default function Invoices() {
       setList(d.invoices || []); setStatus("ok");
     } catch (e) { if (String(e.message) !== "unauthorised") { setErr(String(e.message || e)); setStatus("error"); } }
   }, [accessKey, jsonFetch, tab]);
-  useEffect(() => { if (accessKey && tab !== "disc") load(); }, [accessKey, tab, load]);
+  useEffect(() => { if (accessKey && tab !== "disc" && tab !== "aging") load(); }, [accessKey, tab, load]);
 
   const loadDisc = useCallback(async () => {
     if (!accessKey) return;
@@ -211,13 +220,13 @@ export default function Invoices() {
       setDisc(d.invoices || []); setDiscStatus("ok");
     } catch (e) { if (String(e.message) !== "unauthorised") setDiscStatus("error"); }
   }, [accessKey, jsonFetch]);
-  useEffect(() => { if (accessKey && tab === "disc") loadDisc(); }, [accessKey, tab, loadDisc]);
+  useEffect(() => { if (accessKey && (tab === "disc" || tab === "aging")) loadDisc(); }, [accessKey, tab, loadDisc]);
 
   // Search ALL invoices (any status) server-side so the box finds a matched/approved/discrepancy one
   // that isn't in the open tab. Debounced; cleared when the query is short or on the Discrepancies tab.
   useEffect(() => {
     const qq = query.trim();
-    if (!accessKey || tab === "disc" || qq.length < 2) { setSearchResults([]); return; }
+    if (!accessKey || tab === "disc" || tab === "aging" || qq.length < 2) { setSearchResults([]); return; }
     const t = setTimeout(async () => {
       try {
         const res = await jsonFetch(`/invoices/search?q=${encodeURIComponent(qq)}`);
@@ -581,8 +590,13 @@ export default function Invoices() {
   }
 
   const suppliers = Array.from(new Set(list.map((i) => i.supplier).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  // Discrepancies tab: narrow to one supplier when a filter is set (pills are clickable too).
-  const discShown = discSupFilter ? disc.filter((d) => (d.supplier || "—") === discSupFilter) : disc;
+  // "To chase" tab: only discrepancies aging past AGING_DAYS, oldest first. Discrepancies tab: all.
+  const agingCount = disc.filter((iv) => (discAgeDays(iv) ?? 0) >= AGING_DAYS).length;
+  const discBase = tab === "aging"
+    ? disc.filter((iv) => (discAgeDays(iv) ?? 0) >= AGING_DAYS).sort((a, b) => (discAgeDays(b) ?? 0) - (discAgeDays(a) ?? 0))
+    : disc;
+  // Narrow to one supplier when a filter is set (pills are clickable too).
+  const discShown = discSupFilter ? discBase.filter((d) => (d.supplier || "—") === discSupFilter) : discBase;
   const shown = list.filter((iv) => {
     if (supFilter && (iv.supplier || "") !== supFilter) return false;
     if (onlyDup && !iv.possible_dup) return false;
@@ -606,9 +620,10 @@ export default function Invoices() {
           <div className="seg">
             <button className={`seg-btn ${tab === "review" ? "on" : ""}`} onClick={() => setTab("review")}>To review{tab === "review" && status === "ok" ? ` (${list.length})` : ""}</button>
             <button className={`seg-btn ${tab === "matched" ? "on" : ""}`} onClick={() => setTab("matched")}>Matched{tab === "matched" && status === "ok" ? ` (${list.length})` : ""}</button>
-            <button className={`seg-btn ${tab === "disc" ? "on" : ""}`} onClick={() => setTab("disc")}>Discrepancies{discStatus === "ok" ? ` (${disc.length})` : ""}</button>
+            <button className={`seg-btn ${tab === "disc" ? "on" : ""}`} onClick={() => { setTab("disc"); setDiscSupFilter(""); setDiscSel(new Set()); }}>Discrepancies{discStatus === "ok" ? ` (${disc.length})` : ""}</button>
+            <button className={`seg-btn ${tab === "aging" ? "on" : ""}`} onClick={() => { setTab("aging"); setDiscSupFilter(""); setDiscSel(new Set()); }} title={`Discrepancies open ${AGING_DAYS}+ days that need chasing`}>To chase{discStatus === "ok" ? ` (${agingCount})` : ""}</button>
           </div>
-          {tab !== "disc"
+          {tab !== "disc" && tab !== "aging"
             ? <>
                 <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} {tab === "matched" ? "matched" : "to review"}</> : status === "loading" ? "Loading…" : ""}</span>
                 <button className="btn primary" onClick={load} disabled={status === "loading"}>{status === "loading" ? "Refreshing…" : "Refresh"}</button>
@@ -617,17 +632,17 @@ export default function Invoices() {
         </div>
       </div>
 
-      {notice && tab === "disc" && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 8 }}>{notice.text}</div>}
+      {notice && (tab === "disc" || tab === "aging") && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 8 }}>{notice.text}</div>}
 
-      {tab === "disc" && (
+      {(tab === "disc" || tab === "aging") && (
         <>
           {discStatus === "error" && <div className="card"><div className="state err">Couldn’t load discrepancies.</div></div>}
-          {discStatus === "ok" && disc.length === 0 && <div className="card"><div className="state">No invoices flagged as discrepancies. 🎉</div></div>}
-          {discStatus === "ok" && disc.length > 0 && (() => {
+          {discStatus === "ok" && discBase.length === 0 && <div className="card"><div className="state">{tab === "aging" ? `No discrepancies older than ${AGING_DAYS} days to chase. 🎉` : "No invoices flagged as discrepancies. 🎉"}</div></div>}
+          {discStatus === "ok" && discBase.length > 0 && (() => {
             // Summary: total, by-supplier tally (click a supplier to filter), how many already
             // chased — plus bulk chase controls. Select all / Chase all act on the FILTERED set.
             const bySup = {};
-            disc.forEach((iv) => { const s = iv.supplier || "—"; bySup[s] = (bySup[s] || 0) + 1; });
+            discBase.forEach((iv) => { const s = iv.supplier || "—"; bySup[s] = (bySup[s] || 0) + 1; });
             const supList = Object.entries(bySup).sort((a, b) => b[1] - a[1]);
             const chased = discShown.filter((iv) => iv.sent).length;
             const allSel = discShown.length > 0 && discShown.every((iv) => discSel.has(iv.sub_id));
@@ -635,7 +650,8 @@ export default function Invoices() {
             return (
               <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
                 <div className="inv-controls" style={{ flexWrap: "wrap" }}>
-                  <span className="pill red">{discShown.length}{discSupFilter ? ` / ${disc.length}` : ""} discrepanc{discShown.length === 1 ? "y" : "ies"}</span>
+                  <span className="pill red">{discShown.length}{discSupFilter ? ` / ${discBase.length}` : ""} {tab === "aging" ? "to chase" : `discrepanc${discShown.length === 1 ? "y" : "ies"}`}</span>
+                  {tab === "aging" && <span className="pill grey">open {AGING_DAYS}+ days</span>}
                   {!discSupFilter && <span className="pill grey">{supList.length} supplier{supList.length === 1 ? "" : "s"}</span>}
                   {discSupFilter && <button className="btn ghost" onClick={() => { setDiscSupFilter(""); setDiscSel(new Set()); }}>✕ {discSupFilter}</button>}
                   {chased > 0 && <span className="pill amber">{chased} already chased</span>}
@@ -664,7 +680,7 @@ export default function Invoices() {
               </div>
             );
           })()}
-          {discStatus === "ok" && disc.length > 0 && discShown.length === 0 && <div className="card"><div className="state">No discrepancies for {discSupFilter}. <button className="btn ghost" onClick={() => setDiscSupFilter("")}>Show all</button></div></div>}
+          {discStatus === "ok" && discBase.length > 0 && discShown.length === 0 && <div className="card"><div className="state">No {tab === "aging" ? "aging discrepancies" : "discrepancies"} for {discSupFilter}. <button className="btn ghost" onClick={() => setDiscSupFilter("")}>Show all</button></div></div>}
           <div className="inv-list">
             {discShown.map((iv) => (
               <div className={`card inv-card${discSel.has(iv.sub_id) ? " sel" : ""}`} key={iv.sub_id}>
@@ -676,6 +692,8 @@ export default function Invoices() {
                     <span className="ono">{iv.invoice_no}</span>
                     <span className="sub"> · {iv.supplier || "—"} · order {iv.order_no || "—"} · {money(iv.total)}</span>
                     {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
+                    {(() => { const a = discAgeDays(iv); return a == null ? null : <span className={`pill ${a >= 14 ? "red" : a >= AGING_DAYS ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={`Flagged ${iv.flagged_on || ""} — ${a} day${a === 1 ? "" : "s"} ago`}>{a}d open</span>; })()}
+                    {iv.sent ? <span className="pill grey" style={{ marginLeft: 6 }} title={iv.sent}>chased</span> : <span className="pill amber" style={{ marginLeft: 6 }}>not chased</span>}
                     {iv.flagged_on ? <span className="sub" style={{ marginLeft: 8 }}>flagged {iv.flagged_on}</span> : null}
                   </div>
                   <div className="inv-right">

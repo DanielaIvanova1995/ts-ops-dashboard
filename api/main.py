@@ -1062,14 +1062,13 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
     return out
 
 
-@app.post("/recon", dependencies=[Depends(require_statements_key)])
-async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
-    """Upload a supplier statement (PDF, or text/CSV) → parse it (reuses read_statement_pdf) → match
-    every invoice line to the vendor's QuickBooks bills (recon_core.reconcile). Read-only: shows
-    outstanding / paid / missing, overdue flags and credit notes. No writes in this phase."""
+def _recon_from_bytes(by: bytes, filename: str, supplier: str = "") -> dict:
+    """Parse an uploaded statement, reconcile it against QuickBooks, enrich with Monday and save the
+    snapshot. The synchronous core of the upload flow — run in a BACKGROUND thread, because a big
+    statement (e.g. a 130-line Travis Perkins one) takes longer than a request can wait, so doing it
+    inline made the browser time out with 'Failed to fetch'. Returns the recon result dict."""
     import recon_core
-    by = await file.read()
-    name = (file.filename or "").lower()
+    name = (filename or "").lower()
     try:
         if name.endswith(".pdf"):
             stmt = ds.read_statement_pdf(pdf_bytes=by)
@@ -1078,7 +1077,7 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
         else:
             stmt = ds.read_statement_pdf(text=by.decode("utf-8", "ignore"))
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read the statement: {e}")
+        raise RuntimeError(f"Couldn't read the statement: {e}")
     sup = (supplier or "").strip() or (stmt.get("supplier") or "")
     # Resolve the QuickBooks vendor: learned mapping first, then auto-match by name.
     vid = vname = None
@@ -1109,7 +1108,7 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
         except Exception:  # noqa: BLE001
             paymap = {}
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read QuickBooks bills: {e}")
+        raise RuntimeError(f"Couldn't read QuickBooks bills: {e}")
     rec = recon_core.reconcile(stmt, bills, paymap, sup)
     # Enrich each row with Monday: stage, the parent order no (with any -1/-2 split), and margin.
     try:
@@ -1123,7 +1122,7 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
         pass
     rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
                statement_date=stmt.get("statement_date"), balance=stmt.get("balance"),
-               filename=file.filename)
+               filename=filename)
     # Flag any credit notes already used on a previous remittance so they aren't double-applied.
     try:
         rec["credits"] = ds.applied_credits_annotate(vid, rec.get("credits") or [])
@@ -1141,6 +1140,40 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
         except Exception:  # noqa: BLE001
             pass
     return rec
+
+
+@app.post("/recon", dependencies=[Depends(require_statements_key)])
+async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
+    """Upload a supplier statement and reconcile it IN THE BACKGROUND, returning a job id straight away
+    so the browser never waits (a big statement finished inline would time out → 'Failed to fetch').
+    Poll /recon/upload-status?job=<id> for the result."""
+    import threading
+    import uuid
+    by = await file.read()
+    fname = file.filename or "statement"
+    sup = supplier or ""
+    job = uuid.uuid4().hex[:12]
+    _save_status(f"recon_upload_{job}", {"pending": True, "filename": fname})
+
+    def _work():
+        try:
+            rec = _recon_from_bytes(by, fname, sup)
+            _save_status(f"recon_upload_{job}", {"pending": False, "ok": bool(rec.get("ok", True)),
+                                                 "result": rec, "filename": fname})
+        except Exception as e:  # noqa: BLE001
+            _save_status(f"recon_upload_{job}", {"pending": False, "ok": False,
+                                                 "error": f"Couldn't reconcile: {str(e)[:300]}",
+                                                 "filename": fname})
+
+    threading.Thread(target=_work, name=f"recon-upload-{job}", daemon=True).start()
+    return {"ok": True, "pending": True, "job": job}
+
+
+@app.get("/recon/upload-status", dependencies=[Depends(require_statements_key)])
+def recon_upload_status(job: str):
+    """Poll a background upload-reconcile job (POST /recon). {pending:true} while running; then
+    {pending:false, ok, result} on success or {pending:false, ok:false, error} on failure."""
+    return _get_status(f"recon_upload_{(job or '').strip()}") or {"pending": True}
 
 
 def _stmt_from_snap(snap: dict) -> dict:
