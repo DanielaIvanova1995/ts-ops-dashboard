@@ -267,7 +267,19 @@ def _parse_monday_items(txt):
     out = []
     for line in (txt or "").splitlines():
         line = line.strip()
-        if not line:
+        if not line or set(line) <= set("-—–_ "):      # skip blank + separator ('----') lines
+            continue
+        if "|" not in line:
+            # A trailing property line under an item — e.g. "RAL Colour: RAL280 40 30" (the tinted-
+            # paint colour the customer chose). Attach it to the preceding item so the PO keeps it,
+            # instead of turning it into a junk, price-less line. No preceding item → keep old
+            # behaviour and treat it as its own item.
+            if out and ":" in line:
+                k, v = line.split(":", 1)
+                if k.strip() and v.strip():
+                    out[-1].setdefault("Properties", []).append({"key": k.strip(), "value": v.strip()})
+                    continue
+            out.append({"Item": line, "SKU": "", "Qty": ""})
             continue
         parts = [p.strip() for p in line.split("|")]
         qty = sku = ""
@@ -657,7 +669,15 @@ def _po_desc(it):
     newline and wraps each line inside its box)."""
     base = (it.get("Item") or "").strip()
     v = (it.get("Variant") or "").strip()
-    return f"{base}\nVariant: {v}" if v and v.lower() not in base.lower() else base
+    out = f"{base}\nVariant: {v}" if v and v.lower() not in base.lower() else base
+    # Customer-set line-item properties (e.g. tinted-paint "RAL Colour: RAL280 40 30") each on their
+    # own line so the supplier can't miss the chosen colour. Skip any already shown in the name/variant.
+    for p in (it.get("Properties") or []):
+        k = (p.get("key") or "").strip()
+        val = (p.get("value") or "").strip()
+        if k and val and f"{k}: {val}".lower() not in out.lower() and val.lower() not in out.lower():
+            out += f"\n{k}: {val}"
+    return out
 
 
 def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
@@ -751,7 +771,8 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
             items = [{"Item": (l.get("base_title") or l.get("title") or "").strip(),
                       "Variant": (l.get("variant") or "").strip(),
                       "SKU": (l.get("sku") or "").strip(),
-                      "Qty": str(l.get("qty") or 1)} for l in shop_lines]
+                      "Qty": str(l.get("qty") or 1),
+                      "Properties": l.get("properties") or []} for l in shop_lines]
 
     # Safety net: if two lines share one Shopify SKU but are different variants/sizes (the 30247
     # trap — 2.5L & 5L both 402726), pricing can't tell them apart by SKU, so warn to check each.

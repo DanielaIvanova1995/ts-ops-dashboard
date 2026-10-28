@@ -458,7 +458,7 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title variantTitle quantity sku "
+             "title variantTitle quantity sku customAttributes { key value } "
              "originalUnitPriceSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
@@ -490,9 +490,19 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
                            .get("amount")))
         except (TypeError, ValueError):
             price = None
+        # Line-item PROPERTIES the customer set at checkout — for tinted paint this is the chosen
+        # colour ("RAL Colour: RAL280 40 30"), which is NOT the Shopify variant and was previously
+        # dropped when a PO was rebuilt here, so the supplier lost the colour. Keep customer-facing
+        # ones; drop Shopify's hidden/internal props (keys starting with "_") and any blanks.
+        props = []
+        for a in (n.get("customAttributes") or []):
+            k = (a.get("key") or "").strip()
+            v = (a.get("value") or "").strip()
+            if k and v and not k.startswith("_"):
+                props.append({"key": k, "value": v})
         out.append({"title": title, "base_title": base_title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
-                    "qty": n.get("quantity"), "price": price})
+                    "qty": n.get("quantity"), "price": price, "properties": props})
     return out
 
 

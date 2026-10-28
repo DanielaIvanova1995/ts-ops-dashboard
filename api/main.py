@@ -1128,6 +1128,44 @@ async def recon(file: UploadFile = File(...), supplier: str = Form(default="")):
     return rec
 
 
+def _stmt_from_snap(snap: dict) -> dict:
+    """Rebuild the parsed-statement shape recon_core.reconcile() expects from a SAVED snapshot's
+    rows + credits, so a refresh can re-match the whole statement against live QuickBooks (and pick
+    up invoices approved SINCE the statement was saved) instead of only pruning the old pay-list."""
+    lines = []
+    for r in (snap.get("rows") or []):
+        inv = str(r.get("invoice") or "").strip()
+        if not inv:
+            continue
+        lines.append({"type": "invoice", "invoice_no": inv, "amount": r.get("amount"),
+                      "unpaid": r.get("unpaid"), "date": r.get("inv_date"),
+                      "due_date": r.get("due_date"), "order_ref": r.get("order")})
+    for c in (snap.get("credits") or []):
+        lines.append({"type": "credit", "invoice_no": c.get("ref"), "amount": c.get("amount"),
+                      "date": c.get("date")})
+    return {"lines": lines, "balance": snap.get("stmt_total")}
+
+
+def _refresh_recon(snap: dict, vid: str, supplier: str, with_paymap: bool = False) -> dict | None:
+    """Re-reconcile a saved snapshot against LIVE QuickBooks bills. Returns recon_core.reconcile()'s
+    result (rows, pay_lines, to_pay, n_pay/n_paid/n_missing, credits) or None if QB can't be read or
+    the snapshot has no usable rows."""
+    import recon_core
+    if not vid or not (snap.get("rows")):
+        return None
+    try:
+        bills = ds.qbo_vendor_bills(vid)
+    except Exception:  # noqa: BLE001
+        return None
+    paymap = {}
+    if with_paymap:
+        try:
+            paymap = ds.qbo_vendor_payments(vid)
+        except Exception:  # noqa: BLE001
+            paymap = {}
+    return recon_core.reconcile(_stmt_from_snap(snap), bills, paymap, supplier)
+
+
 @app.get("/recon/saved", dependencies=[Depends(require_statements_key)])
 def recon_saved(live: int = 0):
     """The latest saved reconciliation per supplier. FAST by default — reads the stored summaries and
@@ -1147,13 +1185,22 @@ def recon_saved(live: int = 0):
         settled = False
         if live:
             try:
-                if vid and pay_lines:                    # live re-check: how much is still unpaid in QB
+                # Full re-reconcile against live QB (not just pruning the saved pay-list) so invoices
+                # approved SINCE the statement was saved join the to-pay total — the old prune could
+                # only ever shrink it, which is why a supplier stayed "stuck" on its original count.
+                sup = snap.get("vendor_name") or snap.get("supplier") or ""
+                res = _refresh_recon(snap, vid, sup)
+                if res is not None:
+                    to_pay = res.get("to_pay") or 0
+                    n_out = res.get("n_pay") or 0
+                    settled = n_out == 0                 # all paid now — but KEEP it (don't auto-delete)
+                elif pay_lines:                          # no rows to re-reconcile → fall back to prune
                     bills = ds.qbo_vendor_bills(vid)
                     open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
                     outstanding = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
                     to_pay = round(sum(float(pl.get("amt") or 0) for pl in outstanding), 2)
                     n_out = len(outstanding)
-                    settled = not outstanding            # all paid now — but KEEP it (don't auto-delete)
+                    settled = not outstanding
             except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
                 pass
         if not pay_lines and (snap.get("n_pay") or 0) == 0:
@@ -1266,22 +1313,20 @@ def recon_open(key: str, refresh: int = 0):
     # list). The live QuickBooks re-check + Monday re-enrich (slow, and it filters the pay list down
     # to still-open QB bills) only runs on an explicit Refresh (?refresh=1), via the ↻ Refresh button.
     if refresh and vid:
-        # Reflect LIVE QuickBooks: mark each row paid/ready by current bill status, keep only
-        # still-open bills in the pay list.
+        # Reflect LIVE QuickBooks by RE-RECONCILING the whole statement against current bills — not
+        # just pruning the saved pay-list. This is what lets invoices approved SINCE the statement was
+        # saved (they were 'missing' then, now they're QB bills) move to 'ready' and JOIN the to-pay
+        # list. The old code only ever removed now-paid lines, so newly-approved ones never appeared
+        # and a supplier stayed "stuck" on its original to-pay count.
         try:
-            bills = ds.qbo_vendor_bills(vid)
-            open_ids = {str(b["id"]) for b in bills if not b.get("paid")}
-            bmap = {recon_core.norm_inv_no(b.get("doc_no"), supplier): b
-                    for b in bills if b.get("doc_no")}
-            for r in rows:
-                b = bmap.get(recon_core.norm_inv_no(r.get("invoice"), supplier))
-                if b and b.get("paid"):
-                    r["status"] = "paid"
-                elif b and r.get("status") != "paid":
-                    r["status"] = "ready"
-                elif not b:
-                    r["status"] = r.get("status") or "missing"
-            pay_lines = [pl for pl in pay_lines if str(pl.get("bill_id")) in open_ids]
+            res = _refresh_recon(dict(snap, rows=rows), vid, supplier, with_paymap=True)
+            if res is not None:
+                rows = res.get("rows") or rows
+                pay_lines = res.get("pay_lines") or []
+                snap["to_pay"] = res.get("to_pay")
+                snap["n_pay"] = res.get("n_pay")
+                snap["n_paid"] = res.get("n_paid")
+                snap["n_missing"] = res.get("n_missing")
         except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
             pass
         # Re-enrich Monday stage/order/margin so older snapshots pick up matching fixes.
@@ -3331,3 +3376,61 @@ def quote_draft(body: QuoteDraftIn):
     return {"ok": True, "name": d.get("name"), "invoice_url": d.get("invoiceUrl"),
             "admin_url": d.get("admin_url"), "total": d.get("total"), "tax": d.get("tax"),
             "id": d.get("id")}
+
+
+# ----------------------------------------------------------------------------- Shopify Housekeeping
+# Tidy the Shopify Unfulfilled / Open tabs on demand: silently fulfil orders that are done being
+# worked (notifyCustomer ALWAYS false) and archive (orderClose) orders that need no more work. Always
+# PREVIEW-FIRST: /housekeeping/preview only reads + classifies; /housekeeping/run acts ONLY on the
+# exact order ids the preview returned and the UI approved. Never auto-scheduled.
+
+@app.get("/housekeeping/scopes", dependencies=[Depends(require_key)])
+def housekeeping_scopes():
+    """Which Shopify Admin API scopes the app has vs the ones Housekeeping needs (read_all_orders,
+    write_orders, fulfilment write scopes). Lets the UI warn before anything is attempted."""
+    import shopify_housekeeping as hk
+    try:
+        return hk.check_scopes()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't check Shopify scopes: {e}")
+
+
+@app.get("/housekeeping/preview", dependencies=[Depends(require_key)])
+def housekeeping_preview(cap: int = 2000):
+    """READ-ONLY. Scan open & unfulfilled/partial Shopify orders and classify each into fulfil /
+    archive / leave (per Monday group) / too-new / needs-review. Returns counts, samples and the
+    order ids per action so the UI can show the plan and send back an approved set. Writes nothing."""
+    import shopify_housekeeping as hk
+    try:
+        return hk.build_preview(cap=cap)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build the housekeeping preview: {e}")
+
+
+class HousekeepingRunIn(BaseModel):
+    fulfil_ids: list[str] = []
+    archive_ids: list[str] = []
+
+
+@app.post("/housekeeping/run", dependencies=[Depends(require_key)])
+def housekeeping_run(body: HousekeepingRunIn):
+    """Act on the EXACT order ids the preview returned and the user approved. Fulfils (notifyCustomer
+    false) then archives (orderClose). Returns a results log with any per-order failures. Only the ids
+    passed are touched — orders that arrived since the preview are never acted on."""
+    import shopify_housekeeping as hk
+    if not body.fulfil_ids and not body.archive_ids:
+        return {"ok": True, "fulfilled": 0, "archived": 0, "failed": 0, "items": [],
+                "detail": "Nothing approved to run."}
+    try:
+        log = hk.run(fulfil_ids=body.fulfil_ids, archive_ids=body.archive_ids)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Housekeeping run failed: {e}")
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            supabase_db.audit("housekeeping", "run",
+                              f"fulfilled {log.get('fulfilled')}, archived {log.get('archived')}, "
+                              f"failed {log.get('failed')}", "")
+    except Exception:  # noqa: BLE001
+        pass
+    return log
