@@ -155,6 +155,7 @@ export default function Invoices() {
   const [discSel, setDiscSel] = useState(() => new Set()); // sub_ids selected for bulk chase
   const [chasing, setChasing] = useState(false);
   const [chaseResult, setChaseResult] = useState(null); // {drafted, suppliers:[...]}
+  const [discSupFilter, setDiscSupFilter] = useState(""); // "" = all suppliers on the Discrepancies tab
   function toggleDiscSel(id) { setDiscSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const [orderOpen, setOrderOpen] = useState(() => new Set()); // sub_ids with the Monday order panel open
   function toggleOrder(id) { setOrderOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -542,6 +543,8 @@ export default function Invoices() {
   }
 
   const suppliers = Array.from(new Set(list.map((i) => i.supplier).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  // Discrepancies tab: narrow to one supplier when a filter is set (pills are clickable too).
+  const discShown = discSupFilter ? disc.filter((d) => (d.supplier || "—") === discSupFilter) : disc;
   const shown = list.filter((iv) => {
     if (supFilter && (iv.supplier || "") !== supFilter) return false;
     if (onlyDup && !iv.possible_dup) return false;
@@ -583,25 +586,32 @@ export default function Invoices() {
           {discStatus === "error" && <div className="card"><div className="state err">Couldn’t load discrepancies.</div></div>}
           {discStatus === "ok" && disc.length === 0 && <div className="card"><div className="state">No invoices flagged as discrepancies. 🎉</div></div>}
           {discStatus === "ok" && disc.length > 0 && (() => {
-            // Summary: total, by-supplier tally, how many already chased — plus bulk chase controls.
+            // Summary: total, by-supplier tally (click a supplier to filter), how many already
+            // chased — plus bulk chase controls. Select all / Chase all act on the FILTERED set.
             const bySup = {};
             disc.forEach((iv) => { const s = iv.supplier || "—"; bySup[s] = (bySup[s] || 0) + 1; });
             const supList = Object.entries(bySup).sort((a, b) => b[1] - a[1]);
-            const chased = disc.filter((iv) => iv.sent).length;
-            const allSel = disc.length > 0 && disc.every((iv) => discSel.has(iv.sub_id));
+            const chased = discShown.filter((iv) => iv.sent).length;
+            const allSel = discShown.length > 0 && discShown.every((iv) => discSel.has(iv.sub_id));
+            const chaseAllLabel = discSupFilter ? `Chase all ${discSupFilter}` : "Chase all";
             return (
               <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
                 <div className="inv-controls" style={{ flexWrap: "wrap" }}>
-                  <span className="pill red">{disc.length} discrepanc{disc.length === 1 ? "y" : "ies"}</span>
-                  <span className="pill grey">{supList.length} supplier{supList.length === 1 ? "" : "s"}</span>
+                  <span className="pill red">{discShown.length}{discSupFilter ? ` / ${disc.length}` : ""} discrepanc{discShown.length === 1 ? "y" : "ies"}</span>
+                  {!discSupFilter && <span className="pill grey">{supList.length} supplier{supList.length === 1 ? "" : "s"}</span>}
+                  {discSupFilter && <button className="btn ghost" onClick={() => { setDiscSupFilter(""); setDiscSel(new Set()); }}>✕ {discSupFilter}</button>}
                   {chased > 0 && <span className="pill amber">{chased} already chased</span>}
+                  <select className="filter" value={discSupFilter} onChange={(e) => { setDiscSupFilter(e.target.value); setDiscSel(new Set()); }} title="Filter by supplier">
+                    <option value="">All suppliers ({supList.length})</option>
+                    {supList.map(([s, n]) => <option key={s} value={s}>{s} ({n})</option>)}
+                  </select>
                   <span style={{ flex: 1 }} />
-                  <button className="btn" onClick={() => setDiscSel(allSel ? new Set() : new Set(disc.map((x) => x.sub_id)))}>{allSel ? "Clear" : "Select all"}</button>
+                  <button className="btn" onClick={() => setDiscSel(allSel ? new Set() : new Set(discShown.map((x) => x.sub_id)))}>{allSel ? "Clear" : "Select all"}</button>
                   {discSel.size > 0 && <button className="btn primary" onClick={() => chaseDiscrepancies(discSel)} disabled={chasing}>{chasing ? "Drafting…" : `Chase selected (${discSel.size})`}</button>}
-                  <button className="btn" onClick={() => chaseDiscrepancies(new Set(disc.map((x) => x.sub_id)))} disabled={chasing} title="Draft one Outlook email per supplier for every discrepancy">{chasing ? "…" : "Chase all"}</button>
+                  <button className="btn" onClick={() => chaseDiscrepancies(new Set(discShown.map((x) => x.sub_id)))} disabled={chasing} title="Draft one Outlook email per supplier for the discrepancies shown">{chasing ? "…" : chaseAllLabel}</button>
                 </div>
                 <div className="sub" style={{ marginTop: 8 }}>
-                  {supList.map(([s, n]) => <span key={s} className="pill grey" style={{ marginRight: 6, marginBottom: 4, display: "inline-block" }}>{s} · {n}</span>)}
+                  {supList.map(([s, n]) => <span key={s} className={`pill ${discSupFilter === s ? "amber" : "grey"}`} onClick={() => { setDiscSupFilter(discSupFilter === s ? "" : s); setDiscSel(new Set()); }} style={{ marginRight: 6, marginBottom: 4, display: "inline-block", cursor: "pointer" }} title="Click to filter by this supplier">{s} · {n}</span>)}
                 </div>
                 {chaseResult && (
                   <div className="route-msg ok" style={{ marginTop: 10 }}>
@@ -616,8 +626,9 @@ export default function Invoices() {
               </div>
             );
           })()}
+          {discStatus === "ok" && disc.length > 0 && discShown.length === 0 && <div className="card"><div className="state">No discrepancies for {discSupFilter}. <button className="btn ghost" onClick={() => setDiscSupFilter("")}>Show all</button></div></div>}
           <div className="inv-list">
-            {disc.map((iv) => (
+            {discShown.map((iv) => (
               <div className={`card inv-card${discSel.has(iv.sub_id) ? " sel" : ""}`} key={iv.sub_id}>
                 <div className="inv-head">
                   <label style={{ display: "flex", alignItems: "center", marginRight: 8 }} title="Select for bulk chase">
