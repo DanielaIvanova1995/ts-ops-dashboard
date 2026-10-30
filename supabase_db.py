@@ -118,22 +118,44 @@ def recon_latest(vid: str) -> dict | None:
 
 
 def recon_load_all() -> dict:
-    """{f"v{vendor_id}": latest snapshot} — the most recent saved reconciliation per vendor, read
-    from the database. Mirrors data_sources.recon_load_all()'s shape so the saved-list UI is
-    unchanged, just backed by durable storage."""
+    """{f"v{vendor_id}": latest snapshot} — the latest saved reconciliation PER vendor, regardless of
+    how much history the table holds. Finds the newest row per vendor from lightweight metadata (no
+    snapshot blob), then fetches ONLY those snapshots. This way a big history can't push older
+    suppliers off a row limit (what made UPB and others vanish), and we never pull ~1000 fat snapshots
+    into memory on every load (which was also feeding the OOMs). Mirrors the old return shape."""
     if not configured():
         return {}
     try:
-        r = (_client().table("reconciliations").select("vendor_id,snapshot")
-             .order("saved_at", desc=True).limit(1000).execute())
+        meta = (_client().table("reconciliations").select("id,vendor_id,saved_at")
+                .order("saved_at", desc=True).limit(50000).execute())
+        latest = {}
+        for row in (meta.data or []):
+            v = str(row.get("vendor_id") or "")
+            if v and v not in latest:        # newest-first → first seen is the latest for that vendor
+                latest[v] = row.get("id")
+        ids = [i for i in latest.values() if i is not None]
+        if not ids:
+            return {}
         out = {}
-        for row in (r.data or []):
-            key = f"v{row['vendor_id']}"
-            if key not in out:            # rows come newest-first, so the first seen is the latest
-                out[key] = row["snapshot"]
+        for j in range(0, len(ids), 200):    # fetch the (few, ~1 per supplier) latest snapshots only
+            snaps = (_client().table("reconciliations").select("vendor_id,snapshot")
+                     .in_("id", ids[j:j + 200]).execute())
+            for row in (snaps.data or []):
+                out[f"v{row['vendor_id']}"] = row["snapshot"]
         return out
     except Exception:  # noqa: BLE001
-        return {}
+        # Fall back to the old row-limited read if the schema/query doesn't support the above.
+        try:
+            r = (_client().table("reconciliations").select("vendor_id,snapshot")
+                 .order("saved_at", desc=True).limit(1000).execute())
+            out = {}
+            for row in (r.data or []):
+                key = f"v{row['vendor_id']}"
+                if key not in out:
+                    out[key] = row["snapshot"]
+            return out
+        except Exception:  # noqa: BLE001
+            return {}
 
 
 def recon_delete(vid: str) -> bool:
