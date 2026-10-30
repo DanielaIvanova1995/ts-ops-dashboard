@@ -367,7 +367,8 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
     const w = n.slice(0, Math.min(5, n.length));
     return savedNames.some((sn) => sn && (sn.includes(w) || n.includes(sn.slice(0, 5))));
   };
-  const missing = (cov?.suppliers || []).filter((s) => !covered(s)).sort((a, b) => String(a).localeCompare(String(b)));
+  const _exclNames = new Set((cov?.excluded || []).map((e) => String(e.name || "").toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean));
+  const missing = (cov?.suppliers || []).filter((s) => !covered(s) && !_exclNames.has(String(s).toLowerCase().replace(/[^a-z0-9]/g, ""))).sort((a, b) => String(a).localeCompare(String(b)));
   const stale = (cov?.saved || []).filter((x) => x.stale);
 
   async function chase(supplier, reason, lastDate) {

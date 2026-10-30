@@ -169,8 +169,8 @@ def loop():
                 # CALM cadence (backlog cleared 2026-10-28): the aggressive catch-up (80/run every
                 # 10 min) blew the Render memory limit — too many PDFs read + parsed per tick. Keep a
                 # modest batch and a gentle interval so memory stays bounded; daily volume is small.
-                _ii_int = max(int(ii.get("interval_min") or 60), 60)       # hourly (backlog cleared)
-                _ii_max = min(int(ii.get("max_total") or 15), 15)          # at most 15 PDFs/run (memory)
+                _ii_int = max(int(ii.get("interval_min") or 60), 60)       # hourly
+                _ii_max = min(int(ii.get("max_total") or 80), 80)          # up to 80 PDFs/run (2 GB headroom)
                 if not ran and ii.get("auto_enabled", True) and now >= next_run.get("invoice_import", 0.0):
                     ran = True
                     next_run["invoice_import"] = now + max(900, _ii_int * 60)
@@ -191,8 +191,8 @@ def loop():
                 # Discrepancy. Set invoice_check config check_only=true to revert to mark-Matched-only.
                 ic = _cfg("invoice_check")
                 # CALM cadence (backlog cleared): modest batch + gentle interval to keep memory down.
-                _ic_int = max(int(ic.get("interval_min") or 30), 30)      # every 30 min (eased for memory)
-                _ic_max = min(int(ic.get("max_total") or 20), 20)         # at most 20 checks/run
+                _ic_int = max(int(ic.get("interval_min") or 30), 30)      # every 30 min
+                _ic_max = min(int(ic.get("max_total") or 60), 60)         # up to 60 checks/run (2 GB headroom)
                 if not ran and ic.get("auto_enabled", True) and now >= next_run.get("invoice_check", 0.0):
                     ran = True
                     next_run["invoice_check"] = now + max(1200, _ic_int * 60)
