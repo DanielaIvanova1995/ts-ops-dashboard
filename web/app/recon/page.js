@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const KEY_STORE = "th_access_key";
@@ -113,7 +113,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     if (!window.confirm(`Record a £${invTotal.toFixed(2)} bill payment in QuickBooks, settling ${selLines.length} invoice(s), ref ${ref}? This marks them PAID in QuickBooks. You still move the money via the bank separately.`)) return;
     setPaying(true);
     try {
-      const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt, inv: l.inv })) }) });
+      const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, supplier: r.vendor_name || r.supplier || "", bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt, inv: l.inv })) }) });
       const d = await res.json();
       if (res.ok && d.ok) {
         const skips = [];
@@ -496,6 +496,15 @@ export default function Recon() {
   const fileRef = useRef(null);
   const [picked, setPicked] = useState(null);   // the chosen statement file (click or drag-drop)
   const [drag, setDrag] = useState(false);
+  // Recon-side invoice checking / fix-margins / flag (the same actions as the Invoice Checker, per row)
+  const [rChecks, setRChecks] = useState({});      // sub_id -> check result
+  const [rChecking, setRChecking] = useState({});  // sub_id -> bool
+  const [rFixing, setRFixing] = useState({});      // sub_id -> bool
+  const [rFlagging, setRFlagging] = useState({});  // sub_id -> "working" | "flagged" | "err"
+  const [rOpen, setROpen] = useState(() => new Set()); // sub_ids whose check detail is expanded
+  const [payLog, setPayLog] = useState(null);      // payments-made log (null = not loaded yet)
+  const [payLogOpen, setPayLogOpen] = useState(false);
+  function rToggle(id) { setROpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
 
   useEffect(() => {
     let k = null, p = "";
@@ -731,6 +740,70 @@ export default function Recon() {
     }
   }
 
+  // ---- Recon-side invoice checking / fix-margins / flag (reuse the checker's endpoints) ----
+  async function rowCheck(row) {
+    const id = row.sub_id; if (!id) return;
+    setRChecking((c) => ({ ...c, [id]: true }));
+    try {
+      const res = await jsonFetch(`/invoices/${id}/check`, { method: "POST" });
+      const d = await res.json().catch(() => ({ ok: false }));
+      if (res.ok && d && d.ok !== false) {
+        setRChecks((c) => ({ ...c, [id]: d }));
+        setROpen((s) => new Set(s).add(id));
+      } else {
+        const why = (d && d.detail) || "couldn’t check this invoice";
+        setNotice({ kind: "warn", text: /not found in needs review/i.test(why)
+          ? `${row.invoice} isn’t in the review queue (it’s already approved or paid), so there’s nothing to re-check.`
+          : `${row.invoice}: ${why}` });
+      }
+    } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setRChecking((c) => ({ ...c, [id]: false })); }
+  }
+
+  async function rowFixMargins(row) {
+    const id = row.sub_id; if (!id) return;
+    if (!window.confirm(`Fix the order margin for ${row.invoice}? This fills any invoice totals missing from the order on Monday (corrects a wrong ~98% margin). It won't double-count.`)) return;
+    setRFixing((f) => ({ ...f, [id]: true }));
+    try {
+      const fmBody = row.order_item_id ? { order_item_ids: [String(row.order_item_id)] } : { sub_ids: [id] };
+      const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify(fmBody) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setNotice({ kind: "ok", text: d.filled ? `Added ${d.filled} missing total(s) to ${row.invoice}’s order — refreshing margins…` : `${row.invoice}: margin already up to date.` });
+        if (d.filled) refreshResult();
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t fix the margin." });
+    } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setRFixing((f) => ({ ...f, [id]: false })); }
+  }
+
+  async function rowFlag(row, emailAccounts) {
+    const id = row.sub_id; if (!id) return;
+    const r = rChecks[id];
+    const reason = (r && r.discrepancy_reason) || "Discrepancy — see invoice";
+    const msg = emailAccounts
+      ? `Email ${row.supplier || (r && r.supplier) || "the supplier"}’s accounts the query for ${row.invoice} and mark it Discrepancy on Monday? It’s sent from the Accounts mailbox.`
+      : `Flag ${row.invoice} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue.`;
+    if (!window.confirm(msg)) return;
+    setRFlagging((f) => ({ ...f, [id]: "working" }));
+    try {
+      const body = emailAccounts
+        ? { reason, email_accounts: true, supplier: row.supplier || (r && r.supplier), invoice_no: row.invoice, order_no: row.order_no || row.order }
+        : { reason };
+      const res = await jsonFetch(`/invoices/${id}/flag`, { method: "POST", body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setRFlagging((f) => ({ ...f, [id]: "flagged" }));
+        const txt = d.emailed ? `Emailed ${d.email} and flagged ${row.invoice}.` : d.drafted ? `Draft left in Accounts for ${d.email}. Flagged ${row.invoice}.` : `Flagged ${row.invoice} as a Discrepancy.`;
+        setNotice({ kind: emailAccounts && !d.emailed ? "warn" : "ok", text: txt });
+      } else { setRFlagging((f) => ({ ...f, [id]: "err" })); setNotice({ kind: "warn", text: d.detail || "Couldn’t flag it." }); }
+    } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
+  const loadPayLog = useCallback(async () => {
+    try { const res = await jsonFetch("/recon/payments"); if (res.ok) { const d = await res.json(); setPayLog(d.payments || []); } }
+    catch {}
+  }, [jsonFetch]);
+
   if (needKey) {
     return (
       <div className="wrap">
@@ -835,6 +908,36 @@ export default function Recon() {
 
       {!needPin && <AutoReconcilePanel jsonFetch={jsonFetch} onNotice={setNotice} />}
 
+      <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+        <button className="linkish" onClick={() => { const o = !payLogOpen; setPayLogOpen(o); if (o && payLog == null) loadPayLog(); }} style={{ fontWeight: 600 }}>
+          {payLogOpen ? "▾" : "▸"} Payments made{payLog && payLog.length ? ` (${payLog.length})` : ""}
+        </button>
+        {payLogOpen && (
+          <div style={{ marginTop: 8 }}>
+            {payLog == null ? <div className="sub">Loading…</div>
+              : payLog.length === 0 ? <div className="sub">No payments recorded yet — every payment you mark paid here will be logged.</div>
+                : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="mini">
+                      <thead><tr><th>Date</th><th>Supplier</th><th>Paid</th><th>Reference</th></tr></thead>
+                      <tbody>
+                        {payLog.map((pmt, i) => (
+                          <tr key={i}>
+                            <td className="sub">{(pmt.at || "").slice(0, 16).replace("T", " ") || "—"}</td>
+                            <td>{pmt.supplier}</td>
+                            <td className="sub">{pmt.detail}</td>
+                            <td className="sub">{pmt.ref || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+            <div className="sub" style={{ marginTop: 6 }}>Every payment you record here (mark paid in QuickBooks) is logged with its date, supplier, invoices and reference. Payments made directly in QuickBooks aren’t shown. <button className="linkish" onClick={loadPayLog}>refresh</button></div>
+          </div>
+        )}
+      </div>
+
       {saved.length > 0 && (
         <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
           <div className="tool-label" style={{ marginBottom: 8 }}>Saved statements</div>
@@ -898,6 +1001,27 @@ export default function Recon() {
               <button className="btn ghost" onClick={() => { setResult(null); setOpenKey(null); }} title="Close this reconciliation">✕ Close</button>
             </div>
           </div>
+          {(() => {
+            // Neat status summary across this statement's invoices — from each row's Monday stage
+            // and QuickBooks state. "Need approving" = on Monday but no QuickBooks bill yet.
+            const t = { approve: 0, matched: 0, disc: 0 };
+            (r.rows || []).forEach((raw) => {
+              const ms = (raw.monday_status || "").toLowerCase();
+              if (raw.status === "missing" && (raw.monday_status || "").trim()) t.approve++;
+              if (ms.includes("matched")) t.matched++;
+              if (ms.includes("discrep")) t.disc++;
+            });
+            return (
+              <div className="recon-summary" style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "2px 0 12px", alignItems: "center" }}>
+                <span className="sub" style={{ fontWeight: 600 }}>Summary:</span>
+                <span className="chip amber"><b>{t.approve}</b> need approving</span>
+                <span className="chip grey"><b>{t.matched}</b> matched</span>
+                <span className={`chip ${t.disc ? "red" : "grey"}`}><b>{t.disc}</b> discrepanc{t.disc === 1 ? "y" : "ies"}</span>
+                <span className="chip green"><b>{r.n_pay || 0}</b> ready to pay</span>
+                {r.n_paid ? <span className="chip green"><b>{r.n_paid}</b> paid</span> : null}
+              </div>
+            );
+          })()}
           <div style={{ overflowX: "auto" }}>
           <table>
             <thead><tr>
@@ -922,8 +1046,11 @@ export default function Recon() {
                 const canApprove = row.status === "missing" && !!row.monday_status && st !== "done";
                 const mClass = row.margin == null ? "" : row.margin < 8 ? "mred" : row.margin < 15 ? "mamber" : "mgreen";
                 const overdue = row.overdue || isOverdue(row.inv_date);
+                const cr = row.sub_id ? rChecks[row.sub_id] : null;
+                const showDetail = row.sub_id && cr && rOpen.has(row.sub_id);
                 return (
-                  <tr key={i} className={overdue ? "od" : ""}>
+                  <Fragment key={i}>
+                  <tr className={overdue ? "od" : ""}>
                     <td className="ono">{row.invoice}{overdue ? <span className="pill red" style={{ marginLeft: 6 }}>overdue</span> : null}</td>
                     <td>{row.order_no || row.order || "—"}{row.is_split ? <span className="pill grey" style={{ marginLeft: 6 }}>split</span> : null}</td>
                     <td className="sub">{row.inv_date || "—"}</td>
@@ -933,12 +1060,48 @@ export default function Recon() {
                     <td className={`num ${mClass}`}>{row.margin == null ? "—" : `${row.margin}%`}</td>
                     <td className="sub">{row.monday_status || "—"}</td>
                     <td><span className={`pill ${p.cls}`}>{p.label}</span>{row.paid_ref ? <span className="sub"> {row.paid_ref}</span> : null}</td>
-                    <td>
+                    <td style={{ whiteSpace: "nowrap" }}>
                       {st === "done" ? <span className="pill green">approved ✓</span>
                         : canApprove ? <button className="btn" onClick={() => doApprove(row)} disabled={st === "working"}>{st === "working" ? "…" : "Approve → QB"}</button>
                           : null}
+                      {row.sub_id ? (
+                        <>
+                          <button className="btn ghost" onClick={() => (cr ? rToggle(row.sub_id) : rowCheck(row))} disabled={rChecking[row.sub_id]} title="Check this invoice against the order & pricelist">{rChecking[row.sub_id] ? "…" : cr ? (rOpen.has(row.sub_id) ? "Hide ▾" : "Check ▸") : "Check"}</button>
+                          <button className="btn ghost" onClick={() => rowFixMargins(row)} disabled={rFixing[row.sub_id]} title="Fill any missing invoice totals into the order so the margin is right">{rFixing[row.sub_id] ? "…" : "Fix margin"}</button>
+                          {rFlagging[row.sub_id] === "flagged" ? <span className="pill red" style={{ marginLeft: 4 }}>flagged</span> : null}
+                        </>
+                      ) : null}
                     </td>
                   </tr>
+                  {showDetail ? (
+                    <tr className="recon-check-row">
+                      <td colSpan={10} style={{ background: "rgba(127,127,127,0.05)" }}>
+                        {cr.ok === false ? <div className="sub">Couldn’t check: {cr.detail || "no result"}.</div> : (() => {
+                          const probs = [];
+                          (cr.lines || []).forEach((l) => (l.issues || []).filter((x) => x[0] !== "name").forEach((x) => probs.push(`${l.sku || l.desc || "line"}: ${x[1]}`)));
+                          (cr.missing || []).forEach((m) => probs.push(`On the order but not invoiced: ${m}`));
+                          return (
+                            <div style={{ padding: "4px 2px" }}>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: (probs.length || cr.over_invoiced) ? 6 : 0 }}>
+                                {cr.matched ? <span className="pill green">matches — ready to approve</span> : <span className="pill red">{(cr.n_issues || probs.length) || ""} issue{(cr.n_issues || probs.length) === 1 ? "" : "s"}</span>}
+                                {cr.margin != null ? <span className={`pill ${cr.margin < 8 ? "red" : cr.margin < 15 ? "amber" : "green"}`}>margin {cr.margin}%</span> : null}
+                                {cr.no_pdf ? <span className="pill grey">no PDF — checked on order margin</span> : null}
+                              </div>
+                              {cr.over_invoiced ? <div className="route-msg warn" style={{ marginBottom: 6 }}>Possible double-charge: {cr.over_invoiced.n} invoices total {money(cr.over_invoiced.billed)} vs a sell of {money(cr.over_invoiced.sell)} — only {cr.over_invoiced.projected_margin}% margin. Check them against each other before paying.</div> : null}
+                              {probs.length ? <ul style={{ margin: "0 0 6px 18px" }}>{probs.map((s, j) => <li key={j} className="sub">{s}</li>)}</ul> : <div className="sub">All lines match the order &amp; pricelist.</div>}
+                              {!cr.matched && rFlagging[row.sub_id] !== "flagged" ? (
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                                  <button className="btn" onClick={() => rowFlag(row, false)} disabled={rFlagging[row.sub_id] === "working"} title="Flag as a discrepancy on Monday (no email)">Flag</button>
+                                  <button className="btn primary" onClick={() => rowFlag(row, true)} disabled={rFlagging[row.sub_id] === "working"} title="Email the supplier’s accounts the query and mark it Discrepancy">Email accounts &amp; flag</button>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 );
               })}
               {(!r.rows || !r.rows.length) && <tr><td colSpan={10}><div className="state">No invoice lines found on the statement.</div></td></tr>}
@@ -952,7 +1115,7 @@ export default function Recon() {
           ) : null}
           <MissingPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice} />
           <PayPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice}
-            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
+            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); loadPayLog(); }} />
         </div>
       )}
     </div>

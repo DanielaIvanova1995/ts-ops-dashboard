@@ -242,6 +242,19 @@ def audit_recent(limit: int = 50) -> list:
         return []
 
 
+def payments_recent(limit: int = 200) -> list:
+    """Payments made through TradeHub (newest first) — the 'bill_payment' audit rows, each
+    [{at, actor=supplier, detail, ref}]. Powers the Statements 'Payments made' log."""
+    if not configured():
+        return []
+    try:
+        r = (_client().table("audit_log").select("at,actor,detail,ref")
+             .eq("action", "bill_payment").order("at", desc=True).limit(limit).execute())
+        return r.data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 # ---- Durable invoice-parse cache (so a checked invoice is never re-read by Claude = no re-pay) --
 def invoice_parse_get(key: str) -> dict | None:
     """A previously stored PDF parse for this key (asset id + parser version), or None. Lets a

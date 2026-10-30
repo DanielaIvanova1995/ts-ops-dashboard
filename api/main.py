@@ -1034,7 +1034,8 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
     q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
          'columns:[{column_id:"name",column_values:$vals}]){items{id name '
          'column_values(ids:["status7__1"]){id text} '
-         'parent_item{name column_values(ids:["text_mkv6z0nt","numbers48","numbers6"]){id text}}}}}')
+         'parent_item{id name column_values(ids:["text_mkv6z0nt","numbers48","numbers6","formula_mkn9918j"])'
+         '{id text ... on FormulaValue { display_value }}}}}}')
     out = {}
     tok = ds.get_token()
     for i in range(0, len(all_cands), 100):
@@ -1049,15 +1050,27 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
                 continue
             cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
             parent = it.get("parent_item") or {}
-            pcv = {c["id"]: (c.get("text") or "") for c in (parent.get("column_values") or [])}
-            sell, cost = _enrich_num(pcv.get("numbers48")), _enrich_num(pcv.get("numbers6"))
-            margin = round((sell - cost) / sell * 100, 1) if (sell and cost is not None and sell > 0) else None
+            pcols = parent.get("column_values") or []
+            pcv = {c["id"]: (c.get("text") or "") for c in pcols}
+            # Live order margin — read the SAME Monday formula column the invoice checker uses
+            # (formula_mkn9918j) so the recon margin always matches the checker. Fall back to the
+            # £-to-us / £-to-supplier calc only when the formula column returns no value.
+            margin = None
+            for c in pcols:
+                if c.get("id") == "formula_mkn9918j":
+                    mm = _re.search(r"-?\d+(?:\.\d+)?", c.get("display_value") or "")
+                    margin = float(mm.group()) if mm else None
+            if margin is None:
+                sell, cost = _enrich_num(pcv.get("numbers48")), _enrich_num(pcv.get("numbers6"))
+                margin = round((sell - cost) / sell * 100, 1) if (sell and cost is not None and sell > 0) else None
             pname = (parent.get("name") or "").strip()
             out[stmt_num] = {
                 "monday_status": cvs.get("status7__1") or "",
                 "order_no": pname or (pcv.get("text_mkv6z0nt") or ""),
                 "is_split": bool(_re.search(r"-\d+$", pname)),
                 "margin": margin,
+                "sub_id": it.get("id"),
+                "order_item_id": parent.get("id"),
             }
     return out
 
@@ -1117,7 +1130,8 @@ def _recon_from_bytes(by: bytes, filename: str, supplier: str = "") -> dict:
             e = enrich.get(str(r.get("invoice") or "").strip())
             if e:
                 r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
-                         is_split=e.get("is_split"), margin=e.get("margin"))
+                         is_split=e.get("is_split"), margin=e.get("margin"),
+                         sub_id=e.get("sub_id"), order_item_id=e.get("order_item_id"))
     except Exception:  # noqa: BLE001
         pass
     rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
@@ -1344,7 +1358,8 @@ def recon_open(key: str, refresh: int = 0):
                 e = enrich.get(r["invoice"])
                 if e:
                     r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
-                             is_split=e.get("is_split"), margin=e.get("margin"))
+                             is_split=e.get("is_split"), margin=e.get("margin"),
+                             sub_id=e.get("sub_id"), order_item_id=e.get("order_item_id"))
         except Exception:  # noqa: BLE001
             pass
         rows = rebuilt
@@ -1384,7 +1399,8 @@ def recon_open(key: str, refresh: int = 0):
                 e = enrich.get(str(r.get("invoice") or "").strip())
                 if e:
                     r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
-                             is_split=e.get("is_split"), margin=e.get("margin"))
+                             is_split=e.get("is_split"), margin=e.get("margin"),
+                             sub_id=e.get("sub_id"), order_item_id=e.get("order_item_id"))
         except Exception:  # noqa: BLE001
             pass
     snap["rows"] = rows
@@ -1649,6 +1665,7 @@ class PayIn(BaseModel):
     bank_id: str
     ref: str = ""
     lines: list[dict]   # [{bill_id, amount}]
+    supplier: str = ""  # vendor name, for the payments log (QB vendor_id is kept too)
 
 
 @app.post("/recon/pay", dependencies=[Depends(require_statements_key)])
@@ -1701,10 +1718,15 @@ def recon_pay(body: PayIn):
                          memo=ref, doc_no=ref, date=_dt.date.today().strftime("%Y-%m-%d"))
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "detail": str(e)[:220]}
+    # Payments log — record this payment in the audit log (actor = supplier) so the Statements
+    # "Payments made" list can show date · supplier · how much · which invoices · reference.
     try:
         import supabase_db
         if supabase_db.configured():
-            supabase_db.audit("", "bill_payment", f"{len(clean)} invoice(s) £{total:,.2f}", ref)
+            _invs = [str(l.get("inv")).strip() for l in clean if l.get("inv")]
+            invs_str = (", ".join(_invs[:12]) + ("…" if len(_invs) > 12 else "")) if _invs else ""
+            detail = f"{len(clean)} invoice(s) · £{total:,.2f}" + (f" · {invs_str}" if invs_str else "")
+            supabase_db.audit((body.supplier or body.vendor_id or "").strip(), "bill_payment", detail, ref)
     except Exception:  # noqa: BLE001
         pass
     # Now that the bills are paid, sync the two sides so the invoices don't keep re-appearing:
@@ -1743,6 +1765,24 @@ def recon_pay(body: PayIn):
         pass
     return {"ok": True, "paid": len(clean), "total": total, "ref": ref,
             "marked_on_monday": marked, "skipped_paid": skipped_paid, "missing": missing}
+
+
+@app.get("/recon/payments", dependencies=[Depends(require_key_or_statements)])
+def recon_payments(limit: int = 200):
+    """Log of every payment recorded through TradeHub (newest first): date, supplier, how much /
+    which invoices, and the reference. Reads the 'bill_payment' audit rows written by /recon/pay."""
+    try:
+        import supabase_db
+        rows = supabase_db.payments_recent(limit=max(1, min(int(limit or 200), 1000)))
+    except Exception:  # noqa: BLE001
+        rows = []
+    payments = [{
+        "at": (r.get("at") or ""),
+        "supplier": (r.get("actor") or "").strip() or "—",
+        "detail": (r.get("detail") or ""),
+        "ref": (r.get("ref") or ""),
+    } for r in (rows or [])]
+    return {"ok": True, "payments": payments}
 
 
 class RemitIn(BaseModel):
@@ -2067,7 +2107,7 @@ def invoices_chase_discrepancies(body: ChaseDiscIn):
             "suppliers": results}
 
 
-@app.post("/invoices/{sub_id}/check", dependencies=[Depends(require_key)])
+@app.post("/invoices/{sub_id}/check", dependencies=[Depends(require_key_or_statements)])
 def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None):
     """Run the SAME 3-way check the live app/runner uses (invoice_core.check_invoice): invoice PDF vs
     the supplier's pricelist cost vs the order's SKUs/quantities. Read-only — returns the verdict,
@@ -2554,7 +2594,7 @@ class FlagIn(BaseModel):
     to_email: str = ""               # override the looked-up accounts email if given
 
 
-@app.post("/invoices/{sub_id}/flag", dependencies=[Depends(require_key)])
+@app.post("/invoices/{sub_id}/flag", dependencies=[Depends(require_key_or_statements)])
 def invoice_flag(sub_id: str, body: FlagIn):
     """Flag an invoice as a Discrepancy on Monday (Payment Status → 'Discrepancy') and save the
     reason on the subitem, so it drops out of Needs Review into the discrepancy queue. If
@@ -2632,23 +2672,37 @@ def invoice_unflag(sub_id: str):
 
 
 class FixMarginsIn(BaseModel):
-    sub_ids: list[str]
+    sub_ids: list[str] = []
+    order_item_ids: list[str] = []   # fix by parent order id directly (recon side — any invoice status)
 
 
-@app.post("/invoices/fix-margins", dependencies=[Depends(require_key)])
+@app.post("/invoices/fix-margins", dependencies=[Depends(require_key_or_statements)])
 def invoice_fix_margins(body: FixMarginsIn):
     """Fix the order margin for the selected invoices: add any invoice totals that never made it into
     the order's INV columns on Monday (the cause of a bogus 98%-type margin). Duplicate-safe and
     deduped by order. Returns how many orders were touched and how many totals were filled in."""
     ids = {str(s) for s in (body.sub_ids or []) if s}
-    if not ids:
+    direct_oids = [str(o) for o in (body.order_item_ids or []) if o]
+    if not ids and not direct_oids:
         return {"ok": False, "detail": "No invoices selected."}
-    try:
-        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=500)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
-    sel = [i for i in (data.get("invoices") or []) if str(i.get("sub_id")) in ids]
+    sel = []
+    if ids:
+        try:
+            data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=500)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+        sel = [i for i in (data.get("invoices") or []) if str(i.get("sub_id")) in ids]
     done, filled = set(), 0
+    # Fix by parent order id directly (the recon side passes these, so it works for an invoice in ANY
+    # status — approved/paid included — not just Needs Review).
+    for oid in direct_oids:
+        if oid in done:
+            continue
+        done.add(oid)
+        try:
+            filled += ds.reconcile_order_inv_slots(oid)
+        except Exception:  # noqa: BLE001
+            pass
     for i in sel:
         oid = i.get("order_item_id")
         ono = (i.get("order_no") or "").strip()

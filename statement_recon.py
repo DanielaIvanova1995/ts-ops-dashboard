@@ -151,7 +151,8 @@ def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do
             e = enrich.get(str(r.get("invoice") or "").strip())
             if e:
                 r.update(monday_status=e.get("monday_status"), order_no=e.get("order_no"),
-                         is_split=e.get("is_split"), margin=e.get("margin"))
+                         is_split=e.get("is_split"), margin=e.get("margin"),
+                         sub_id=e.get("sub_id"), order_item_id=e.get("order_item_id"))
     except Exception:  # noqa: BLE001
         pass
     rec.update(ok=True, supplier=sup, vendor_id=vid, vendor_name=vname,
