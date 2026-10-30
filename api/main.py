@@ -1684,7 +1684,7 @@ def recon_pay(body: PayIn):
         else:
             amt = round(l["amount"], 2)
         if amt > 0:
-            clean.append({"bill_id": l["bill_id"], "amount": amt})
+            clean.append({"bill_id": l["bill_id"], "amount": amt, "inv": l.get("inv")})
     if not clean:
         note = []
         if skipped_paid:
@@ -1693,22 +1693,56 @@ def recon_pay(body: PayIn):
             note.append(f"{missing} no longer in QuickBooks")
         return {"ok": False, "detail": "Nothing to pay — " + (", ".join(note) or "no open bills") +
                 ". Reopen the statement to refresh it."}
-    lines = clean
     ref = (body.ref or "").strip() or "REM"
-    total = round(sum(l["amount"] for l in lines), 2)
+    total = round(sum(l["amount"] for l in clean), 2)
     try:
-        ds.qbo_pay_bills(body.vendor_id, body.bank_id, lines, memo=ref, doc_no=ref,
-                         date=_dt.date.today().strftime("%Y-%m-%d"))
+        ds.qbo_pay_bills(body.vendor_id, body.bank_id,
+                         [{"bill_id": l["bill_id"], "amount": l["amount"]} for l in clean],
+                         memo=ref, doc_no=ref, date=_dt.date.today().strftime("%Y-%m-%d"))
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "detail": str(e)[:220]}
     try:
         import supabase_db
         if supabase_db.configured():
-            supabase_db.audit("", "bill_payment", f"{len(lines)} invoice(s) £{total:,.2f}", ref)
+            supabase_db.audit("", "bill_payment", f"{len(clean)} invoice(s) £{total:,.2f}", ref)
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "paid": len(lines), "total": total, "ref": ref,
-            "skipped_paid": skipped_paid, "missing": missing}
+    # Now that the bills are paid, sync the two sides so the invoices don't keep re-appearing:
+    #  (1) mark each paid invoice done on Monday (out of 'Needs Review' → 'Approved (To QB)'), and
+    #  (2) drop them from the SAVED recon snapshot so the to-pay list clears without a manual refresh.
+    paid_bill_ids = {str(l["bill_id"]) for l in clean}
+    invs = [str(l.get("inv")).strip() for l in clean if l.get("inv")]
+    marked = 0
+    if invs:
+        try:
+            det = ds.subitems_bill_details(invs) or {}
+            for _no, d in det.items():
+                sid = (d or {}).get("sub_id")
+                if sid:
+                    try:
+                        ds.set_invoice_status(sid, "Approved (To QB)", create_missing=False)
+                        marked += 1
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        snap = (ds.recon_load_all() or {}).get(f"v{body.vendor_id}")
+        if snap:
+            snap = dict(snap)
+            snap["pay_lines"] = [pl for pl in (snap.get("pay_lines") or [])
+                                 if str(pl.get("bill_id")) not in paid_bill_ids]
+            snap["to_pay"] = round(sum(float(pl.get("amt") or 0) for pl in snap["pay_lines"]), 2)
+            snap["n_pay"] = len(snap["pay_lines"])
+            paid_invs = {s for s in invs}
+            for r in (snap.get("rows") or []):
+                if str(r.get("invoice") or "").strip() in paid_invs:
+                    r["status"] = "paid"
+            ds.recon_save(f"v{body.vendor_id}", snap)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "paid": len(clean), "total": total, "ref": ref,
+            "marked_on_monday": marked, "skipped_paid": skipped_paid, "missing": missing}
 
 
 class RemitIn(BaseModel):
