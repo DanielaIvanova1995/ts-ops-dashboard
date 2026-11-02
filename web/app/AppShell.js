@@ -13,6 +13,7 @@ const Ico = {
   triage: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>),
   pricing: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M20 12V7a1 1 0 0 0-1-1h-5L3 17l4 4L18 10" /><path d="M7.5 7.5h.01" /></svg>),
   quotes: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6M9 17h6M9 9h2" /></svg>),
+  payments: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><path d="M6 15h4" /></svg>),
   dot: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...p}><circle cx="12" cy="12" r="3" /></svg>),
 };
 
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/", label: "Home", icon: "home" },
   { href: "/orders", label: "Orders", icon: "orders" },
   { href: "/recon", label: "Statements", icon: "statements" },
+  { href: "/payments", label: "Payments", icon: "payments" },
   { href: "/invoices", label: "Invoices", icon: "invoices" },
   { href: "/triage", label: "Triage", icon: "triage" },
   { href: "/pricing", label: "Pricing", icon: "pricing" },

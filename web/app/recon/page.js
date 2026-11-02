@@ -502,8 +502,6 @@ export default function Recon() {
   const [rFixing, setRFixing] = useState({});      // sub_id -> bool
   const [rFlagging, setRFlagging] = useState({});  // sub_id -> "working" | "flagged" | "err"
   const [rOpen, setROpen] = useState(() => new Set()); // sub_ids whose check detail is expanded
-  const [payLog, setPayLog] = useState(null);      // payments-made log (null = not loaded yet)
-  const [payLogOpen, setPayLogOpen] = useState(false);
   function rToggle(id) { setROpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
 
   useEffect(() => {
@@ -799,11 +797,6 @@ export default function Recon() {
     } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
   }
 
-  const loadPayLog = useCallback(async () => {
-    try { const res = await jsonFetch("/recon/payments"); if (res.ok) { const d = await res.json(); setPayLog(d.payments || []); } }
-    catch {}
-  }, [jsonFetch]);
-
   if (needKey) {
     return (
       <div className="wrap">
@@ -907,36 +900,6 @@ export default function Recon() {
       </div>
 
       {!needPin && <AutoReconcilePanel jsonFetch={jsonFetch} onNotice={setNotice} />}
-
-      <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
-        <button className="linkish" onClick={() => { const o = !payLogOpen; setPayLogOpen(o); if (o && payLog == null) loadPayLog(); }} style={{ fontWeight: 600 }}>
-          {payLogOpen ? "▾" : "▸"} Payments made{payLog && payLog.length ? ` (${payLog.length})` : ""}
-        </button>
-        {payLogOpen && (
-          <div style={{ marginTop: 8 }}>
-            {payLog == null ? <div className="sub">Loading…</div>
-              : payLog.length === 0 ? <div className="sub">No payments recorded yet — every payment you mark paid here will be logged.</div>
-                : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="mini">
-                      <thead><tr><th>Date</th><th>Supplier</th><th>Paid</th><th>Reference</th></tr></thead>
-                      <tbody>
-                        {payLog.map((pmt, i) => (
-                          <tr key={i}>
-                            <td className="sub">{(pmt.at || "").slice(0, 16).replace("T", " ") || "—"}</td>
-                            <td>{pmt.supplier}</td>
-                            <td className="sub">{pmt.detail}</td>
-                            <td className="sub">{pmt.ref || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-            <div className="sub" style={{ marginTop: 6 }}>Every payment you record here (mark paid in QuickBooks) is logged with its date, supplier, invoices and reference. Payments made directly in QuickBooks aren’t shown. <button className="linkish" onClick={loadPayLog}>refresh</button></div>
-          </div>
-        )}
-      </div>
 
       {saved.length > 0 && (
         <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
@@ -1115,7 +1078,7 @@ export default function Recon() {
           ) : null}
           <MissingPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice} />
           <PayPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice}
-            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); loadPayLog(); }} />
+            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
         </div>
       )}
     </div>
