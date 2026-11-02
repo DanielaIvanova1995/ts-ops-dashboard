@@ -2594,7 +2594,22 @@ def assistant_brief():
     except Exception:  # noqa: BLE001
         status = {}
     return {"brief": assistant.get_brief(), "config": assistant.get_config(), "status": status,
-            "running": _assistant_running}
+            "ticked": assistant.get_ticked(), "running": _assistant_running}
+
+
+class AssistantTickIn(BaseModel):
+    key: str
+    done: bool = True
+
+
+@app.post("/assistant/tick", dependencies=[Depends(require_assistant_key)])
+def assistant_tick(body: AssistantTickIn):
+    """Tick an item off the brief (it stays ticked across page loads and later runs)."""
+    import assistant
+    try:
+        return {"ok": True, "ticked": assistant.set_ticked(body.key[:500], bool(body.done))}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.post("/assistant/run", dependencies=[Depends(require_assistant_key)])

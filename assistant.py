@@ -37,6 +37,7 @@ DRAFT_MODEL = "claude-sonnet-4-6"       # better writing for the drafts themselv
 CONFIG_KEY = "assistant"
 BRIEF_KEY = "assistant_brief"
 DONE_KEY = "assistant_done"              # internet ids already drafted/chased/tidied (de-dup)
+TICKED_KEY = "assistant_ticked"          # items Daniela ticked off on the page (item "key"s)
 TIDY_FOLDERS = {"newsletter": "Tidied - Newsletters",
                 "notification": "Tidied - Notifications",
                 "receipt": "Tidied - Receipts"}
@@ -61,6 +62,27 @@ def get_brief() -> dict:
         return supabase_db.config_get(BRIEF_KEY) or {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def get_ticked() -> list:
+    if not supabase_db:
+        return []
+    try:
+        return list((supabase_db.config_get(TICKED_KEY) or {}).get("keys") or [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def set_ticked(key: str, done: bool) -> list:
+    """Tick (or untick) one brief item. Keyed by the email's internet id, so a NEW message in the
+    same thread gets a new key and shows up again un-ticked."""
+    keys = [k for k in get_ticked() if k != key]
+    if done:
+        keys.append(key)
+    keys = keys[-1000:]
+    if not (supabase_db and supabase_db.config_set(TICKED_KEY, {"keys": keys})):
+        raise RuntimeError("Couldn't save (Supabase not configured).")
+    return keys
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +337,7 @@ def run_morning(dry_run: bool = False, reason: str = "manual") -> dict:
             errors.append(f"Couldn't sort “{(m.get('subject') or '')[:50]}”: {str(e)[:100]}")
             continue
         bucket = c.get("bucket") or "fyi"
-        item = {"title": (c.get("title") or m.get("subject") or "")[:90],
+        item = {"key": iid, "title": (c.get("title") or m.get("subject") or "")[:90],
                 "summary": c.get("summary") or "", "today": bool(c.get("today")),
                 "from": _name(m.get("from")), "from_addr": frm,
                 "received": (m.get("receivedDateTime") or "")[:16], "link": m.get("webLink")}
@@ -388,7 +410,7 @@ def run_morning(dry_run: bool = False, reason: str = "manual") -> dict:
                 continue
             if not c.get("awaiting"):
                 continue
-            item = {"title": (c.get("title") or s.get("subject") or "")[:90],
+            item = {"key": iid, "title": (c.get("title") or s.get("subject") or "")[:90],
                     "to": ", ".join(_name(x) for x in to), "sent": (s.get("sentDateTime") or "")[:10],
                     "days": (now - t).days, "draft_text": c.get("chaser") or "", "link": s.get("webLink")}
             if item["draft_text"] and not dry_run:
