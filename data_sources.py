@@ -228,7 +228,7 @@ def fetch_shopify_chargebacks(token: str | None = None, domain: str | None = Non
 # app's client-credentials grant: SHOPIFY_STORE / SHOPIFY_CLIENT_ID /
 # SHOPIFY_CLIENT_SECRET in Secrets.
 # ---------------------------------------------------------------------------
-_SHOP_TOK = {"token": None}
+_SHOP_TOK = {"token": None, "exp": 0.0}
 
 
 def shopify_configured() -> bool:
@@ -238,14 +238,21 @@ def shopify_configured() -> bool:
     return bool(store and (has_static or has_oauth))
 
 
-def shopify_products_token() -> str:
-    if _SHOP_TOK["token"]:
+def shopify_products_token(force_refresh: bool = False) -> str:
+    import time as _time
+    # Serve the cached token only while it's still valid. The client-credentials token Shopify
+    # issues EXPIRES (expires_in, ~24h); the old code cached it forever, so once the process had
+    # been up longer than the token's life EVERY Shopify call 401'd (what broke order routing /
+    # Shopify reads a few days after a deploy). Now we track expiry and re-fetch automatically.
+    now = _time.time()
+    if not force_refresh and _SHOP_TOK["token"] and now < _SHOP_TOK.get("exp", 0):
         return _SHOP_TOK["token"]
     # Prefer a static Admin API token (e.g. the app's automation token) if provided —
     # it carries the app's granted scopes directly, sidestepping client-credentials.
     static = get_secret("SHOPIFY_ADMIN_TOKEN")
     if static:
         _SHOP_TOK["token"] = static
+        _SHOP_TOK["exp"] = now + 365 * 24 * 3600   # static token never expires (only revocation fails it)
         return static
     store = get_secret("SHOPIFY_STORE")
     cid = get_secret("SHOPIFY_CLIENT_ID")
@@ -258,10 +265,17 @@ def shopify_products_token() -> str:
         timeout=20,
     )
     r.raise_for_status()
-    tok = r.json().get("access_token")
+    body = r.json()
+    tok = body.get("access_token")
     if not tok:
         raise RuntimeError("Shopify client-credentials returned no access_token")
+    try:
+        ttl = float(body.get("expires_in") or 0)
+    except (TypeError, ValueError):
+        ttl = 0.0
+    # Refresh ~2 min before the real expiry; fall back to a safe 1h if no expires_in was returned.
     _SHOP_TOK["token"] = tok
+    _SHOP_TOK["exp"] = now + (ttl - 120 if ttl > 240 else 3600)
     return tok
 
 
