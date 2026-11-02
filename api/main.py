@@ -1666,6 +1666,7 @@ class PayIn(BaseModel):
     ref: str = ""
     lines: list[dict]   # [{bill_id, amount}]
     supplier: str = ""  # vendor name, for the payments log (QB vendor_id is kept too)
+    credits: list[dict] = []  # credit notes netted off this payment — marked used only now (on pay)
 
 
 @app.post("/recon/pay", dependencies=[Depends(require_statements_key)])
@@ -1763,8 +1764,19 @@ def recon_pay(body: PayIn):
             ds.recon_save(f"v{body.vendor_id}", snap)
     except Exception:  # noqa: BLE001
         pass
+    # Now — and ONLY now that the bills are actually paid in QuickBooks — record the credit notes
+    # netted off this payment as used, so they aren't offered again on the next statement. (Drafting
+    # a remittance no longer consumes credits.) QuickBooks has no vendor-credit API, so this ledger
+    # is the only guard against double-counting; undo with /recon/credit-unapply.
+    credits_applied = 0
+    if body.vendor_id and (body.credits or []):
+        try:
+            credits_applied = ds.applied_credits_mark(body.vendor_id, body.credits, remit_ref=ref)
+        except Exception:  # noqa: BLE001
+            credits_applied = 0
     return {"ok": True, "paid": len(clean), "total": total, "ref": ref,
-            "marked_on_monday": marked, "skipped_paid": skipped_paid, "missing": missing}
+            "marked_on_monday": marked, "skipped_paid": skipped_paid, "missing": missing,
+            "credits_applied": credits_applied}
 
 
 @app.get("/recon/payments", dependencies=[Depends(require_key_or_statements)])
@@ -1827,18 +1839,12 @@ def recon_remittance(body: RemitIn):
                                                   pdf_bytes=pdf, pdf_name=pdf_name)
         except Exception:  # noqa: BLE001
             draft_link = None     # still return the PDF so it can be downloaded/sent manually
-    # Remember the credit notes used on this remittance so they aren't offered again on the next
-    # statement (QuickBooks has no vendor-credit API, so this ledger is the only guard against
-    # double-counting). Can be undone with /recon/credit-unapply.
-    credits_applied = 0
-    if body.vendor_id and (body.credits or []):
-        try:
-            credits_applied = ds.applied_credits_mark(body.vendor_id, body.credits, remit_ref=ref)
-        except Exception:  # noqa: BLE001
-            credits_applied = 0
+    # NOTE: drafting a remittance deliberately does NOT mark credit notes as used. The PDF shows the
+    # credits netted off, but they're only recorded as used when the payment is actually recorded in
+    # QuickBooks (/recon/pay), so a draft that's edited or never sent doesn't consume a credit.
     return {"ok": True, "pdf_b64": base64.b64encode(pdf).decode(), "pdf_name": pdf_name,
             "draft_link": draft_link, "to_email": (body.to_email or "").strip(),
-            "credits_applied": credits_applied}
+            "credits_applied": 0}
 
 
 class CreditApplyIn(BaseModel):
@@ -2543,6 +2549,89 @@ def triage_config(body: TriageCfgIn):
     if not ok:
         raise HTTPException(status_code=502, detail="Couldn't save (Supabase not configured).")
     return {"ok": True, "config": cfg}
+
+
+# ---- Daniela's personal assistant (daniela@ morning brief + drafts) -----------------------------
+# Private: gated by TRADEHUB_ASSISTANT_KEY (her own passcode, NOT the shared access code). Unlike the
+# Statements lock this FAILS CLOSED — with no passcode set on the host, the endpoints refuse, because
+# they expose a personal mailbox.
+_ASSISTANT_KEY = (os.environ.get("TRADEHUB_ASSISTANT_KEY") or "").strip()
+_assistant_running = {"on": False, "started": None, "error": None}
+
+
+def require_assistant_key(x_tradehub_assistant_key: str | None = Header(default=None)):
+    if not _ASSISTANT_KEY:
+        raise HTTPException(status_code=503, detail="Assistant not set up — add TRADEHUB_ASSISTANT_KEY on the host.")
+    if not x_tradehub_assistant_key or not hmac.compare_digest(x_tradehub_assistant_key, _ASSISTANT_KEY):
+        raise HTTPException(status_code=403, detail="Invalid or missing Assistant passcode")
+
+
+class AssistantRunIn(BaseModel):
+    dry_run: bool = False
+
+
+class AssistantCfgIn(BaseModel):
+    auto_enabled: bool | None = None
+    run_hour: int | None = None
+    drafts_enabled: bool | None = None
+    chasers_enabled: bool | None = None
+    tidy_enabled: bool | None = None
+    chase_days: int | None = None
+
+
+@app.get("/assistant/lock-status")
+def assistant_lock_status():
+    return {"configured": bool(_ASSISTANT_KEY)}
+
+
+@app.get("/assistant/brief", dependencies=[Depends(require_assistant_key)])
+def assistant_brief():
+    """The latest saved brief + settings + whether a run is in progress."""
+    import assistant
+    try:
+        import supabase_db
+        status = supabase_db.config_get("assistant_status") or {}
+    except Exception:  # noqa: BLE001
+        status = {}
+    return {"brief": assistant.get_brief(), "config": assistant.get_config(), "status": status,
+            "running": _assistant_running}
+
+
+@app.post("/assistant/run", dependencies=[Depends(require_assistant_key)])
+def assistant_run(body: AssistantRunIn):
+    """Start a run in the background (it reads, sorts and drafts — can take a couple of minutes).
+    The page polls /assistant/brief until `running.on` is false."""
+    import threading
+    import assistant
+    if _assistant_running["on"]:
+        return {"started": False, "detail": "Already running"}
+
+    def _go():
+        _assistant_running.update(on=True, started=_dt.datetime.now(_dt.timezone.utc).isoformat(), error=None)
+        try:
+            assistant.run_morning(dry_run=bool(body.dry_run), reason="manual")
+        except Exception as e:  # noqa: BLE001
+            _assistant_running["error"] = str(e)[:300]
+        finally:
+            _assistant_running["on"] = False
+
+    threading.Thread(target=_go, name="assistant-run", daemon=True).start()
+    return {"started": True}
+
+
+@app.post("/assistant/config", dependencies=[Depends(require_assistant_key)])
+def assistant_config(body: AssistantCfgIn):
+    import assistant
+    import supabase_db
+    cfg = supabase_db.config_get(assistant.CONFIG_KEY) or {}
+    for k, v in body.dict().items():
+        if v is not None:
+            cfg[k] = v
+    if "run_hour" in cfg:
+        cfg["run_hour"] = max(5, min(11, int(cfg["run_hour"])))
+    if not supabase_db.config_set(assistant.CONFIG_KEY, cfg):
+        raise HTTPException(status_code=502, detail="Couldn't save (Supabase not configured).")
+    return {"ok": True, "config": assistant.get_config()}
 
 
 class FindPdfIn(BaseModel):

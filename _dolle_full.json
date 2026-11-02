@@ -1,0 +1,782 @@
+{
+  "1009008": {
+    "desc": "Mezzanine, 8 Treads",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009010": {
+    "desc": "Mezzanine, 10 Treads",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009012": {
+    "desc": "Mezzanine, 12 Treads",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009018": {
+    "desc": "Mezzanine, 8 Treads   WHITE",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009020": {
+    "desc": "Mezzanine, 10 Treads WHITE",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009022": {
+    "desc": "Mezzanine, 12 Treads WHITE",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009028": {
+    "desc": "Mezzanine, 8 Treads   BLACK",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009030": {
+    "desc": "Mezzanine, 10 Treads BLACK",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009032": {
+    "desc": "Mezzanine, 12 Treads BLACK",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1009000-0100": {
+    "desc": "Slidesystem for mezzanine ladder BLACK",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "MEZZANINE"
+  },
+  "1009001-0100": {
+    "desc": "Slidesystem for mezzanine ladder WHITE",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "MEZZANINE"
+  },
+  "1009002-0100": {
+    "desc": "Slidesystem for mezzanine ladder GREY",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "MEZZANINE"
+  },
+  "1059012": {
+    "desc": "Arundel, 12 treads + strings/handrail.",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1059112": {
+    "desc": "MADRID  12 steps + strings",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1059212": {
+    "desc": "AMSTERDAM   12 treads,  handrail",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1059412": {
+    "desc": "LISBON 12 x treads and handrail",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1059101": {
+    "desc": "MADRID Handrail  system",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1059432": {
+    "desc": "Normandie Handrail system",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "5059300": {
+    "desc": "Normandie 14 tread space saving staircase open risers with handrail",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "508101": {
+    "desc": "Normandie 14 tread space saving staircase closed risers with handrail",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "5059320": {
+    "desc": "Normandie right quarter turn open risers",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "5059321": {
+    "desc": "Normandie left quarter turn open risers",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "5081003": {
+    "desc": "Normandie right quarter turn closed risers",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "5081005": {
+    "desc": "Normandie right quarter turn closed risers",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1061540": {
+    "desc": "Normandie risers for straight flight staircase",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1061544": {
+    "desc": "Normandie risers for quarter turn",
+    "deliv": 28,
+    "courier": "DX",
+    "sheet": "MEZZANINE"
+  },
+  "1008990": {
+    "desc": "Handrail Red - for sw40 all models - Rei and CF76 70 wide only",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "LOFT LADDERS"
+  },
+  "2000130": {
+    "desc": "Operating Pole for sw40 model",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "LOFT LADDERS"
+  },
+  "1008923": {
+    "desc": "Plastic feet + screws 3\" ladder grey for Click Fix Models",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "LOFT LADDERS"
+  },
+  "1008924": {
+    "desc": "Plastic feet + screws 4\" ladder black for Sw40 models",
+    "deliv": 5,
+    "courier": "EVRI",
+    "sheet": "LOFT LADDERS"
+  },
+  "1008907": {
+    "desc": "Timber loft ladder Balustrade, 60/70 cm",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1009253": {
+    "desc": "70 CM  Extension kit for sw40 ladder 3 treads 115x 55 + 120 x 60",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1009251": {
+    "desc": "70 CM  Extension kit for sw40 ladder 3 treads 120 x 70 cm",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1044544-0144": {
+    "desc": "SW40-5 : 1130 x 540",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1044565-0100": {
+    "desc": "SW40-5 : 1175 x 576",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1044575-0144": {
+    "desc": "SW40-5 : 1175 x 676",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1009260": {
+    "desc": "70 CM Extension kit for clickFIX 76 G/REI 45  - 70 wide model",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1042544-0100": {
+    "desc": "CF76G V2 : 1130x540",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1042575-0100": {
+    "desc": "CF76G V2 : 1175x676",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1038861": {
+    "desc": "CLICK FIX 36 GOLD MINI\n92,5 X 60 CM",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1038871": {
+    "desc": "CLICK FIX 36 GOLD MINI\n92,5 X 70 CM",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "2-3 DAYS": {
+    "desc": "",
+    "deliv": null,
+    "courier": "",
+    "sheet": "LOFT LADDERS"
+  },
+  "1010644": {
+    "desc": "DOLLE REI45 Fire resitant 45 mins \n115 x 55 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1010675": {
+    "desc": "DOLLE REI45 Fire resitant 45 mins \n120 x 70cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "4 WEEKS DELIVERY": {
+    "desc": "",
+    "deliv": null,
+    "courier": "",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029044": {
+    "desc": "DOLLE REI45 Fire resitant 60 MINS \n115 X 55 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029075": {
+    "desc": "DOLLE REI45 Fire resitant 60 MINS \n120 x 70cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1010700": {
+    "desc": "DOLLE REI 45 COMFORT  STEEL LADDER \nFIRE RATED",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1040975": {
+    "desc": "CF76 Thermo Comfort  steel folding ladder \n1175 x 676 mm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1010809": {
+    "desc": "Alufix concertina ladder - 9 treads",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1010810": {
+    "desc": "Alufix concertina ladder - 10 treads",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1010811": {
+    "desc": "Alufix concertina ladder - 11 treads",
+    "deliv": 19,
+    "courier": "APC",
+    "sheet": "LOFT LADDERS"
+  },
+  "1043064A": {
+    "desc": "MINI FLEX 70 X 60cm OPENING",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1043064B": {
+    "desc": "MINI FLEX 70 X 70cm  OPENING",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010969": {
+    "desc": "CLICK FIX VARIO 90 X 60 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010979": {
+    "desc": "CLICK FIX VARIO 90 X 70 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010169": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010160": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010161": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010162": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010163": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010164": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010179": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010170": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010171": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010172": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010173": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010174": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010269": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010260": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010261": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010262": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010263": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010264": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010279": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010270": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010271": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010272": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010273": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010274": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010379": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010370": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010371": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010372": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010373": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010374": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010479": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010470": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010471": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010472": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010473": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "5010474": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500A": {
+    "desc": "REI 60     CLICK FIX VARIO 90 X 60 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500B": {
+    "desc": "REI 60 CLICK FIX VARIO 90 X 70 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500C": {
+    "desc": "REI 60 CLICK FIX VARIO 110 X 60 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500D": {
+    "desc": "REI 60  CLICK FIX VARIO 110 X 60 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500E": {
+    "desc": "REI  60  CLICK FIX VARIO 110 X 60 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500F": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500G": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500H": {
+    "desc": "CLICK FIX VARIO 110 X 60 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500I": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500J": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500K": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500L": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500M": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500N": {
+    "desc": "CLICK FIX VARIO 110 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500O": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500P": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500Q": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500R": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500S": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500T": {
+    "desc": "CLICK FIX VARIO 120 X 60 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500U": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500V": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500W": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500X": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500Y": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500Z": {
+    "desc": "CLICK FIX VARIO 120 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AA": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AB": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AC": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AD": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AE": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AF": {
+    "desc": "CLICK FIX VARIO 130 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AG": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          239-266 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AH": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          266-295 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AI": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm         295 -325 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AJ": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          320- 355 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AK": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm          347-386 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  },
+  "1029500AL": {
+    "desc": "CLICK FIX VARIO 140 X 70 cm         386- 415 cm",
+    "deliv": 40,
+    "courier": "PALLETWAYS",
+    "sheet": "LOFT LADDERS"
+  }
+}

@@ -243,6 +243,23 @@ def loop():
                                 pass
                     except Exception as e:  # noqa: BLE001
                         _write_status("fix_margins", {"ok": False, "error": str(e)[:200], "reason": "auto"})
+
+                # Weekdays: Daniela's morning brief (daniela@ inbox sort, reply drafts, chasers,
+                # tidy, calendar) at run_hour UK time. Drafts only — never sends. See assistant.py.
+                try:
+                    import assistant
+                    ac = assistant.get_config()
+                except Exception:  # noqa: BLE001
+                    ac = {}
+                _weekday = _now().weekday() < 5
+                if (not ran and ac.get("auto_enabled") and _weekday
+                        and _due_at_hour("assistant", int(ac.get("run_hour") or 7))):
+                    ran = True
+                    try:
+                        b = assistant.run_morning(dry_run=False, reason="auto")
+                        _write_status("assistant", {"ok": True, **(b.get("counts") or {}), "reason": "auto"})
+                    except Exception as e:  # noqa: BLE001
+                        _write_status("assistant", {"ok": False, "error": str(e)[:200], "reason": "auto"})
         except Exception:  # noqa: BLE001 — a bad tick must never kill the loop
             pass
         _time.sleep(_POLL)

@@ -113,7 +113,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
     if (!window.confirm(`Record a £${invTotal.toFixed(2)} bill payment in QuickBooks, settling ${selLines.length} invoice(s), ref ${ref}? This marks them PAID in QuickBooks. You still move the money via the bank separately.`)) return;
     setPaying(true);
     try {
-      const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, supplier: r.vendor_name || r.supplier || "", bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt, inv: l.inv })) }) });
+      const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, supplier: r.vendor_name || r.supplier || "", bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt, inv: l.inv })), credits: selCredits.map((c) => ({ ref: c.ref, amount: c.amount, date: c.date })) }) });
       const d = await res.json();
       if (res.ok && d.ok) {
         const skips = [];
@@ -121,7 +121,14 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
         if (d.missing) skips.push(`${d.missing} no longer in QuickBooks`);
         const skipMsg = skips.length ? ` Skipped ${skips.join(" and ")}.` : "";
         const payAmt = round2((Number(d.total != null ? d.total : invTotal) || 0) + creditTotal);
-        onNotice({ kind: skips.length ? "warn" : "ok", text: `Marked ${d.paid} paid in QuickBooks (ref ${d.ref}).${skipMsg} Pay £${payAmt.toFixed(2)} by bank.` });
+        // Only NOW (paid in QuickBooks) are the netted credits recorded as used — untick them too.
+        if (d.credits_applied) {
+          const usedKeys = new Set(selCredits.map((c) => `${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`));
+          setCredits((cs) => cs.map((c) => usedKeys.has(`${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`) ? { ...c, applied: true, remit_ref: ref } : c));
+          setCredSel((s) => { const n = new Set(s); credits.forEach((c, i) => { if (usedKeys.has(`${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`)) n.delete(i); }); return n; });
+        }
+        const credMsg = d.credits_applied ? ` ${d.credits_applied} credit(s) marked used.` : "";
+        onNotice({ kind: skips.length ? "warn" : "ok", text: `Marked ${d.paid} paid in QuickBooks (ref ${d.ref}).${skipMsg} Pay £${payAmt.toFixed(2)} by bank.${credMsg}` });
         onPaid(selLines.map((l) => l.inv));
       }
       else onNotice({ kind: "warn", text: d.detail || "Couldn’t mark paid." });
@@ -142,14 +149,9 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
           const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" }));
           const a = document.createElement("a"); a.href = url; a.download = d.pdf_name; a.click(); URL.revokeObjectURL(url);
         } catch {}
-        // Mark the credits just used as applied so they're not offered again, and untick them.
-        if (d.credits_applied) {
-          const usedKeys = new Set(selCredits.map((c) => `${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`));
-          setCredits((cs) => cs.map((c) => usedKeys.has(`${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`) ? { ...c, applied: true, remit_ref: ref } : c));
-          setCredSel((s) => { const n = new Set(s); credits.forEach((c, i) => { if (usedKeys.has(`${(c.ref || "").toLowerCase()}|${Math.abs(Number(c.amount) || 0).toFixed(2)}`)) n.delete(i); }); return n; });
-        }
-        const credMsg = d.credits_applied ? ` ${d.credits_applied} credit(s) marked used.` : "";
-        onNotice({ kind: "ok", text: (d.draft_link ? `Remittance drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t create the Outlook draft — send it manually)" : ""}`) + credMsg });
+        // Drafting does NOT consume credits — they stay in play until the payment is recorded in
+        // QuickBooks (Mark paid). The PDF shows them netted off; the ticks are left as they are.
+        onNotice({ kind: "ok", text: (d.draft_link ? `Remittance drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t create the Outlook draft — send it manually)" : ""}`) });
       } else onNotice({ kind: "warn", text: d.detail || "Couldn’t build the remittance." });
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setRemitting(false); }
@@ -215,7 +217,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
         <input className="search" style={{ maxWidth: 300, flex: "none" }} value={remitTo} onChange={(e) => setRemitTo(e.target.value)} placeholder="Supplier accounts email (for the remittance)" />
         <button className="btn" onClick={draftRemit} disabled={remitting}>{remitting ? "…" : "Draft remittance"}</button>
       </div>
-      <div className="sub" style={{ marginTop: 6 }}>Credit notes aren’t written to QuickBooks (no API) — apply them against the bill in QuickBooks by hand. The remittance is drafted in Outlook for you to review & send.</div>
+      <div className="sub" style={{ marginTop: 6 }}>Credit notes aren’t written to QuickBooks (no API) — apply them against the bill in QuickBooks by hand. They’re only marked “used” here when you Mark paid in QuickBooks, so drafting a remittance leaves them in play. The remittance is drafted in Outlook for you to review & send.</div>
     </div>
   );
 }
