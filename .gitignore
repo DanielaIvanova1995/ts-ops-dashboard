@@ -5,3 +5,8 @@ venv/
 .env
 .DS_Store
 .streamlit/secrets.toml
+
+# Local working data (supplier price dumps) — keep out of the repo
+_dolle_full.json
+southern_sheeting_*.csv
+southern_sheeting_*.md
