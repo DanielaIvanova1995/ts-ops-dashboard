@@ -35,7 +35,11 @@ body {
   flex: 0 0 212px; width: 212px; background: var(--card); border-right: 1px solid var(--line);
   padding: 12px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
   transition: flex-basis .14s ease, width .14s ease;
+  display: flex; flex-direction: column;
 }
+.side-foot { margin-top: auto; padding-top: 10px; }
+.side-item.logout { width: 100%; background: none; border: none; cursor: pointer; font-family: inherit; color: var(--muted); }
+.side-item.logout:hover { background: #F5F6F8; color: var(--ink); }
 .shell.collapsed .sidebar { flex-basis: 58px; width: 58px; }
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 14px; min-height: 34px; }
 .side-logo { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--ink); }
@@ -44,7 +48,7 @@ body {
 .shell.collapsed .side-head { flex-direction: column; gap: 10px; align-items: center; }
 .side-toggle { appearance: none; border: 1px solid var(--line); background: #fff; color: var(--muted); width: 28px; height: 28px; border-radius: 7px; cursor: pointer; font-size: 14px; line-height: 1; }
 .side-toggle:hover { background: #F5F6F8; color: var(--ink); }
-.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .side-item { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 8px; text-decoration: none; color: var(--ink); font-weight: 600; font-size: 14px; white-space: nowrap; }
 .side-item:hover { background: #F5F6F8; }
 .side-item.active { background: rgba(242,106,33,.10); color: var(--brand-dark); }

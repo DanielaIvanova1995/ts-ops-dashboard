@@ -16,6 +16,7 @@ const Ico = {
   payments: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /><path d="M6 15h4" /></svg>),
   assistant: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><rect x="3" y="11" width="18" height="10" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>),
   dot: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...p}><circle cx="12" cy="12" r="3" /></svg>),
+  logout: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>),
 };
 
 const NAV = [
@@ -49,6 +50,16 @@ export default function AppShell({ children }) {
     });
   }
 
+  // Clear the stored access code + section passcodes, then reload → every module re-prompts.
+  function logout() {
+    try {
+      localStorage.removeItem("th_access_key");
+      localStorage.removeItem("th_statements_pin");
+      localStorage.removeItem("th_assistant_pin");
+    } catch {}
+    window.location.href = "/";
+  }
+
   return (
     <div className={`shell${collapsed ? " collapsed" : ""}${ready ? "" : " preload"}`}>
       <aside className="sidebar">
@@ -77,6 +88,11 @@ export default function AppShell({ children }) {
               <span className="side-ico"><Ico.dot /></span>{!collapsed && <span className="side-label">{l}</span>}
             </span>
           ))}
+          <div className="side-foot">
+            <button type="button" className="side-item logout" onClick={logout} title="Log out">
+              <span className="side-ico"><Ico.logout /></span>{!collapsed && <span className="side-label">Log out</span>}
+            </button>
+          </div>
         </nav>
       </aside>
       <main className="main">
