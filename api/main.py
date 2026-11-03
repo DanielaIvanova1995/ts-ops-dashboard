@@ -2320,6 +2320,27 @@ def recon_approve(body: ApproveIn):
                 ds.set_invoice_status(det["sub_id"], _APPROVED_QB_LABEL, create_missing=True)
             except Exception:  # noqa: BLE001
                 pass
+        # Persist the approval into the SAVED recon snapshot so a plain reopen (or refresh) shows it
+        # as approved/ready without a full statement re-upload. The invoice is now an unpaid QB bill,
+        # so its row moves 'Not in QuickBooks' → 'Ready to pay'. Mirrors what /recon/pay does for paid
+        # invoices; the exact to-pay/pay-lines totals re-sync on the next live ↻ Refresh.
+        try:
+            core = _inv_core(name)
+            snap = (ds.recon_load_all() or {}).get(f"v{vid}") if (core and vid) else None
+            if snap:
+                snap = dict(snap)
+                changed = False
+                for r in (snap.get("rows") or []):
+                    if _inv_core(r.get("invoice")) == core and r.get("status") == "missing":
+                        r["status"] = "ready"
+                        r["monday_status"] = _APPROVED_QB_LABEL
+                        changed = True
+                if changed:
+                    snap["n_missing"] = sum(1 for r in (snap.get("rows") or [])
+                                            if r.get("status") == "missing")
+                    ds.recon_save(f"v{vid}", snap)
+        except Exception:  # noqa: BLE001
+            pass
         note = " · invoice date defaulted to today — check it" if date_source == "today" else (
             f" · dated {inv_date} from the invoice PDF" if date_source == "pdf" else "")
         return {"ok": True, "detail": created + note, "inv_date": inv_date, "date_source": date_source}
