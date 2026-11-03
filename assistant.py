@@ -42,7 +42,10 @@ TIDY_FOLDERS = {"newsletter": "Tidied - Newsletters",
                 "notification": "Tidied - Notifications",
                 "receipt": "Tidied - Receipts"}
 DEFAULTS = {"auto_enabled": True, "run_hour": 7, "since_days": 2, "max_emails": 40,
-            "drafts_enabled": True, "chasers_enabled": True, "chase_days": 3, "tidy_enabled": True}
+            "drafts_enabled": False, "chasers_enabled": False, "chase_days": 3, "tidy_enabled": True}
+# Daniela 2026-11-03: stop drafting emails. Hard off — overrides any saved setting — so the
+# assistant only sorts, lists and tidies. Flip to True to bring reply/chaser drafts back.
+DRAFTING = False
 
 
 def get_config() -> dict:
@@ -52,6 +55,8 @@ def get_config() -> dict:
             cfg.update(supabase_db.config_get(CONFIG_KEY) or {})
         except Exception:  # noqa: BLE001
             pass
+    if not DRAFTING:
+        cfg["drafts_enabled"] = cfg["chasers_enabled"] = False
     return cfg
 
 
@@ -380,8 +385,9 @@ def run_morning(dry_run: bool = False, reason: str = "manual") -> dict:
             fyi.append(item)
 
     # Chasers: her last word in a thread, 3–14 days ago, to someone outside TSO, nothing back since.
+    # Always LISTED; a nudge is only drafted when chasers_enabled.
     chasers = []
-    if cfg.get("chasers_enabled"):
+    if True:
         cutoff = now - _dt.timedelta(days=int(cfg.get("chase_days") or 3))
         seen_convs = set()
         for s in sent_recent:
@@ -412,7 +418,8 @@ def run_morning(dry_run: bool = False, reason: str = "manual") -> dict:
                 continue
             item = {"key": iid, "title": (c.get("title") or s.get("subject") or "")[:90],
                     "to": ", ".join(_name(x) for x in to), "sent": (s.get("sentDateTime") or "")[:10],
-                    "days": (now - t).days, "draft_text": c.get("chaser") or "", "link": s.get("webLink")}
+                    "days": (now - t).days, "link": s.get("webLink"),
+                    "draft_text": (c.get("chaser") or "") if cfg.get("chasers_enabled") else ""}
             if item["draft_text"] and not dry_run:
                 try:
                     item["draft_link"] = _reply_draft(s["id"], item["draft_text"], token,

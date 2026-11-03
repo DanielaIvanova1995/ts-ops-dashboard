@@ -263,6 +263,7 @@ export default function Assistant() {
   else line = `${openNeeds.length} email${openNeeds.length > 1 ? "s" : ""} waiting on you`
     + (urgent ? `, ${urgent} worth doing today` : "")
     + (drafts ? ` — ${drafts} draft${drafts > 1 ? "s are" : " is"} already written in Outlook for you to check and send.` : ".");
+  // (drafts is only non-zero for briefs made before drafting was switched off)
 
   return (
     <div className="as"><style>{CSS}</style>
@@ -311,7 +312,7 @@ export default function Assistant() {
             render={(it) => <Draft it={it} />} />
 
           <TickList title="Waiting to hear back" emoji="⏳" items={chasers} ticked={ticked} onTick={tick}
-            hint="Emails you sent that haven’t had an answer — a friendly nudge is drafted for each."
+            hint="Emails you sent that haven’t had an answer yet."
             meta={(it) => `To ${it.to} · ${it.days} days ago`}
             render={(it) => <Draft it={it} />} />
 
@@ -370,10 +371,8 @@ export default function Assistant() {
                 {[5, 6, 7, 8, 9, 10].map((h) => <option key={h} value={h}>{h}:00</option>)}
               </select>
             </label>
-            <label><input type="checkbox" checked={!!cfg.drafts_enabled} disabled={saving} onChange={(e) => saveCfg({ drafts_enabled: e.target.checked })} />Write reply drafts</label>
-            <label><input type="checkbox" checked={!!cfg.chasers_enabled} disabled={saving} onChange={(e) => saveCfg({ chasers_enabled: e.target.checked })} />Draft a nudge when no reply after {cfg.chase_days || 3} days</label>
             <label><input type="checkbox" checked={!!cfg.tidy_enabled} disabled={saving} onChange={(e) => saveCfg({ tidy_enabled: e.target.checked })} />Tidy newsletters, notifications &amp; receipts into folders</label>
-            <div className="as-meta">Drafts wait in your Outlook Drafts folder — nothing is ever sent or deleted.</div>
+            <div className="as-meta">Your assistant only sorts, lists and tidies — it doesn’t write, send or delete any emails.</div>
           </div>
         </details>
       </section>
