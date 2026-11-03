@@ -17,21 +17,29 @@ const Ico = {
 };
 
 const LIVE = [
-  { href: "/orders", icon: "orders", title: "Order Processing", sub: "Route, raise & send POs, auto-split multi-supplier orders" },
-  { href: "/quotes", icon: "quotes", title: "Quotes", sub: "Price Cedral, Hardie, Molan, Storm & EZ Glaze → draft & email" },
-  { href: "/invoices", icon: "invoices", title: "Invoice Checker", sub: "3-way check, fix margins, approve to QuickBooks" },
-  { href: "/recon", icon: "statements", title: "Statements", sub: "Reconcile supplier statements, pay & remit" },
-  { href: "/pricing", icon: "pricing", title: "Pricing", sub: "Supplier pricelists & delivery charges" },
-  { href: "/triage", icon: "triage", title: "Triage", sub: "Sort the inbox into action folders" },
+  { href: "/orders", icon: "orders", module: "orders", title: "Order Processing", sub: "Route, raise & send POs, auto-split multi-supplier orders" },
+  { href: "/quotes", icon: "quotes", module: "quotes", title: "Quotes", sub: "Price Cedral, Hardie, Molan, Storm & EZ Glaze → draft & email" },
+  { href: "/invoices", icon: "invoices", module: "invoices", title: "Invoice Checker", sub: "3-way check, fix margins, approve to QuickBooks" },
+  { href: "/recon", icon: "statements", module: "recon", title: "Statements", sub: "Reconcile supplier statements, pay & remit" },
+  { href: "/pricing", icon: "pricing", module: "pricing", title: "Pricing", sub: "Supplier pricelists & delivery charges" },
+  { href: "/triage", icon: "triage", module: "triage", title: "Triage", sub: "Sort the inbox into action folders" },
 ];
 const SOON = [];
 
 export default function Home() {
   const [greeting, setGreeting] = useState("Welcome back");
+  // When per-user logins are on, show only the tiles this person can open (admins & shared-code
+  // mode see everything). mods === null means "show all".
+  const [mods, setMods] = useState(null);
   useEffect(() => {
     const h = new Date().getHours();
     setGreeting(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
+    try {
+      const raw = localStorage.getItem("th_user");
+      if (raw) { const u = JSON.parse(raw); if (u && u.role !== "admin") setMods(u.modules || []); }
+    } catch {}
   }, []);
+  const tiles = mods ? LIVE.filter((t) => mods.includes(t.module)) : LIVE;
 
   return (
     <div className="wrap home">
@@ -45,7 +53,7 @@ export default function Home() {
       </div>
 
       <div className="home-grid">
-        {LIVE.map((t) => {
+        {tiles.map((t) => {
           const I = Ico[t.icon];
           return (
             <Link key={t.href} href={t.href} className="home-tile">

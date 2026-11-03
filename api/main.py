@@ -62,11 +62,14 @@ _SHOP_STORE = (ds.get_secret("SHOPIFY_STORE") or "").strip()  # e.g. xxx.myshopi
 
 
 def _bearer_user(request: Request):
-    """The logged-in user from the Authorization: Bearer <token> header, or None. Only meaningful
-    when per-user auth is enabled."""
+    """The logged-in user from the session token, or None. Only meaningful when per-user auth is
+    enabled. Accepts the token from Authorization: Bearer <token>, or from the X-TradeHub-Key header
+    (so the hub pages that already send that header carry the login token with no per-page change)."""
     import auth_core
     hdr = request.headers.get("authorization") or ""
     tok = hdr[7:].strip() if hdr[:7].lower() == "bearer " else ""
+    if not tok:
+        tok = (request.headers.get("x-tradehub-key") or "").strip()
     return auth_core.user_from_token(tok)
 
 
