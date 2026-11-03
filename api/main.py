@@ -20,7 +20,7 @@ import requests                                        # noqa: E402 (reused — 
 # Make the repo root importable so we reuse the existing TradeHub modules as-is.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile  # noqa: E402
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware            # noqa: E402
 from fastapi.responses import RedirectResponse               # noqa: E402
 from pydantic import BaseModel                                # noqa: E402
@@ -61,7 +61,24 @@ _ACCESS_KEY = (os.environ.get("TRADEHUB_ACCESS_KEY") or "").strip()
 _SHOP_STORE = (ds.get_secret("SHOPIFY_STORE") or "").strip()  # e.g. xxx.myshopify.com — for admin links
 
 
-def require_key(x_tradehub_key: str | None = Header(default=None)):
+def _bearer_user(request: Request):
+    """The logged-in user from the Authorization: Bearer <token> header, or None. Only meaningful
+    when per-user auth is enabled."""
+    import auth_core
+    hdr = request.headers.get("authorization") or ""
+    tok = hdr[7:].strip() if hdr[:7].lower() == "bearer " else ""
+    return auth_core.user_from_token(tok)
+
+
+def require_key(request: Request, x_tradehub_key: str | None = Header(default=None)):
+    import auth_core
+    if auth_core.enabled():                     # per-user mode: check the signed-in user + module
+        user = _bearer_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Please sign in")
+        if not auth_core.user_can(user, auth_core.module_for_path(request.url.path)):
+            raise HTTPException(status_code=403, detail="You don't have access to this section")
+        return
     if not _ACCESS_KEY:
         return  # no code configured → open (set TRADEHUB_ACCESS_KEY on the host to lock it)
     if not x_tradehub_key or not hmac.compare_digest(x_tradehub_key, _ACCESS_KEY):
@@ -75,20 +92,35 @@ def require_key(x_tradehub_key: str | None = Header(default=None)):
 _STATEMENTS_KEY = (os.environ.get("TRADEHUB_STATEMENTS_KEY") or "").strip()
 
 
-def require_statements_key(x_tradehub_statements_key: str | None = Header(default=None)):
+def require_statements_key(request: Request, x_tradehub_statements_key: str | None = Header(default=None)):
     """Guard the Statements section. The 6-digit statements passcode gets you in on its OWN — the
     shared access code is NOT required here (Daniela 2026-10-27). 403 (not 401) on a bad PIN so the
-    front-end re-prompts for the statements passcode only."""
+    front-end re-prompts for the statements passcode only. In per-user mode the 6-digit passcode is
+    retired — access to Statements is the 'recon' module permission instead."""
+    import auth_core
+    if auth_core.enabled():
+        user = _bearer_user(request)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Please sign in")
+        if not auth_core.user_can(user, auth_core.module_for_path(request.url.path)):
+            raise HTTPException(status_code=403, detail="You don't have access to this section")
+        return
     if not _STATEMENTS_KEY:
         return  # no statements PIN configured → section open until TRADEHUB_STATEMENTS_KEY is set
     if not x_tradehub_statements_key or not hmac.compare_digest(x_tradehub_statements_key, _STATEMENTS_KEY):
         raise HTTPException(status_code=403, detail="Invalid or missing Statements passcode")
 
 
-def require_key_or_statements(x_tradehub_key: str | None = Header(default=None),
+def require_key_or_statements(request: Request, x_tradehub_key: str | None = Header(default=None),
                               x_tradehub_statements_key: str | None = Header(default=None)):
     """Pass if EITHER the shared access code OR the Statements passcode is valid. For actions reached
-    from both the main hub (access code) and the Statements section (6-digit), e.g. approving a bill."""
+    from both the main hub (access code) and the Statements section (6-digit), e.g. approving a bill.
+    In per-user mode, any signed-in active user may call these cross-section actions."""
+    import auth_core
+    if auth_core.enabled():
+        if _bearer_user(request) is not None:
+            return
+        raise HTTPException(status_code=401, detail="Please sign in")
     if not _ACCESS_KEY and not _STATEMENTS_KEY:
         return
     if _ACCESS_KEY and x_tradehub_key and hmac.compare_digest(x_tradehub_key, _ACCESS_KEY):
@@ -102,6 +134,155 @@ def require_key_or_statements(x_tradehub_key: str | None = Header(default=None),
 def recon_lock_status():
     """Whether the Statements section has a passcode configured — so the front-end knows to prompt."""
     return {"locked": bool(_STATEMENTS_KEY)}
+
+
+# ---- Per-user auth (Platform Phase 2) ------------------------------------------------------------
+def require_admin(request: Request):
+    import auth_core
+    if not auth_core.enabled():
+        raise HTTPException(status_code=503, detail="Per-user logins are not enabled")
+    user = _bearer_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Please sign in")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
+@app.get("/auth/status")
+def auth_status():
+    """Open: tells the hub which sign-in mode to show (per-user logins vs the shared access code),
+    and whether a first admin still needs creating."""
+    import auth_core
+    on = auth_core.enabled()
+    return {"enabled": on, "has_users": (auth_core.count_users() > 0 if on else False),
+            "locked": bool(_ACCESS_KEY)}
+
+
+@app.get("/auth/modules")
+def auth_modules():
+    import auth_core
+    return {"modules": auth_core.MODULES}
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/login")
+def auth_login(body: LoginIn):
+    import auth_core
+    if not auth_core.enabled():
+        raise HTTPException(status_code=503, detail="Per-user logins are not enabled")
+    res = auth_core.authenticate(body.email, body.password)
+    if not res:
+        raise HTTPException(status_code=401, detail="Wrong email or password (or the account is inactive)")
+    return {"ok": True, **res}
+
+
+@app.get("/auth/me")
+def auth_me(request: Request):
+    import auth_core
+    if not auth_core.enabled():
+        raise HTTPException(status_code=503, detail="Per-user logins are not enabled")
+    user = _bearer_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Please sign in")
+    return {"ok": True, "user": user}
+
+
+class BootstrapIn(BaseModel):
+    email: str
+    name: str = ""
+    password: str
+
+
+@app.post("/auth/bootstrap")
+def auth_bootstrap(body: BootstrapIn, x_tradehub_key: str | None = Header(default=None)):
+    """Create the FIRST admin — allowed only while no users exist, and only for someone who knows the
+    current shared access code. After this, user management is via the admin screen."""
+    import auth_core
+    if not auth_core.enabled():
+        raise HTTPException(status_code=503, detail="Set TRADEHUB_AUTH + TRADEHUB_AUTH_SECRET first")
+    if auth_core.count_users() > 0:
+        raise HTTPException(status_code=409, detail="An admin already exists — sign in instead")
+    if _ACCESS_KEY and not (x_tradehub_key and hmac.compare_digest(x_tradehub_key, _ACCESS_KEY)):
+        raise HTTPException(status_code=401, detail="The shared access code is required to create the first admin")
+    try:
+        user = auth_core.create_user(body.email, body.name or body.email, body.password,
+                                     role="admin", modules=list(auth_core.MODULES.keys()), active=True)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    res = auth_core.authenticate(body.email, body.password)
+    return {"ok": True, "user": user, "token": (res or {}).get("token")}
+
+
+@app.get("/auth/users")
+def auth_users(admin=Depends(require_admin)):
+    import auth_core
+    return {"ok": True, "users": auth_core.list_users()}
+
+
+class UserIn(BaseModel):
+    email: str
+    name: str = ""
+    password: str
+    role: str = "staff"
+    modules: list[str] = []
+    active: bool = True
+
+
+@app.post("/auth/users")
+def auth_create_user(body: UserIn, admin=Depends(require_admin)):
+    import auth_core
+    try:
+        user = auth_core.create_user(body.email, body.name, body.password, role=body.role,
+                                     modules=body.modules, active=body.active)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "user": user}
+
+
+class UserPatch(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    modules: list[str] | None = None
+    active: bool | None = None
+
+
+@app.patch("/auth/users/{uid}")
+def auth_update_user(uid: str, body: UserPatch, admin=Depends(require_admin)):
+    import auth_core
+    if str(uid) == str(admin.get("id")) and (body.role == "staff" or body.active is False):
+        raise HTTPException(status_code=400, detail="You can't demote or deactivate your own admin account")
+    user = auth_core.update_user(uid, name=body.name, role=body.role, modules=body.modules, active=body.active)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True, "user": user}
+
+
+class PasswordIn(BaseModel):
+    password: str
+
+
+@app.post("/auth/users/{uid}/password")
+def auth_set_password(uid: str, body: PasswordIn, admin=Depends(require_admin)):
+    import auth_core
+    try:
+        auth_core.set_password(uid, body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.delete("/auth/users/{uid}")
+def auth_delete_user(uid: str, admin=Depends(require_admin)):
+    import auth_core
+    if str(uid) == str(admin.get("id")):
+        raise HTTPException(status_code=400, detail="You can't delete your own account")
+    auth_core.delete_user(uid)
+    return {"ok": True}
 
 
 def _hub_url() -> str:
