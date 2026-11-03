@@ -63,9 +63,28 @@ tokens, saved reconciliations (real history, not one snapshot per supplier), ord
 learned statement→vendor mappings, and an **audit log** (who/what/when). Streamlit keeps working —
 it just reads/writes Supabase. *Good first slice: saved reconciliations.*
 
-### Phase 2 — Real logins & roles *(for the growing team)*
-**Supabase Auth** replaces the config.yaml bcrypt logins: per-person accounts, roles
-(admin / manager / office / processor), password resets, and a proper trail of who did what.
+### Phase 2 — Real logins & roles *(for the growing team)* — ⭐ DANIELA ASKED FOR THIS FIRST (2026-11-03)
+**Supabase Auth**: per-person accounts, roles (admin / manager / office / processor), password
+resets, and a proper trail of who did what.
+
+**Priority note (2026-11-03):** Daniela has asked that **per-user logins + access control be the
+FIRST Supabase feature built** — ahead of (or alongside) the DB backbone. Trigger: a colleague
+(Malyeka/Natasha) on another PC could see the hub home page but every module was "locked", and
+Daniela expected separate per-person logins. Today there are none — the **Next.js hub**
+(`hub.tradesuperstoreonline.co.uk`) uses a **single shared access code** in `localStorage`
+(`th_access_key`, + section passcodes `th_statements_pin` / `th_assistant_pin`); the home page is
+open and each module unlocks once the code is typed on that device. A temporary **Log out** button
+now clears those keys (commit 4f6679a).
+
+What the logins feature must do:
+- Per-person sign-in (email + password via Supabase Auth; the team is on M365, so SSO/Microsoft
+  login is a nice-to-have later).
+- **Per-module access control** — control who can open each module (Order Processing, Quotes,
+  Invoice Checker, Statements, Pricing, Triage, Payments, My Assistant). Replaces today's
+  all-or-nothing shared code and the per-section passcodes.
+- Replace the shared `th_access_key` gate in the Next.js hub (and retire the old config.yaml
+  bcrypt logins in the Streamlit app).
+- Keep the who-did-what audit trail.
 
 ### Phase 3 — The automation engine *(the main prize)*
 Stand up the always-on worker + scheduler and move the jobs you already run into it, server-side:
@@ -101,3 +120,8 @@ limits genuinely justify it. The engine + Supabase stay exactly as they are unde
 **Step A is ready now.** Follow `DEPLOY_HOSTING.md` to create the Render account and deploy — that's
 the only bit that needs Daniela. Once it's live and stable, say the word and Claude begins **Phase 1
 (Supabase DB backbone)** on a branch, no risk to the running app.
+
+**First Supabase feature Daniela wants (2026-11-03):** per-user logins + per-module access control
+(see Phase 2 ⭐). When she says "let's start the Supabase backend", stand up Supabase (the DB
+backbone is the natural base) and build **logins/roles first**, as that's the explicitly requested
+priority.
