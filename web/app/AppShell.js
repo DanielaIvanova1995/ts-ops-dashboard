@@ -129,7 +129,7 @@ export default function AppShell({ children }) {
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}><BrandMarkIcon size={44} /></div>
           <div className="wordmark">Trade<b>Hub</b></div>
           <p className="sub">{boot ? "Create the first admin account to switch on logins." : "Sign in to continue."}</p>
-          <form onSubmit={boot ? doBootstrap : doLogin} className="loginform">
+          <form onSubmit={boot ? doBootstrap : doLogin} className="loginform stack">
             {boot && <input className="input" type="password" value={bootCode} autoFocus placeholder="Current shared access code" onChange={(e) => setBootCode(e.target.value)} />}
             {boot && <input className="input" type="text" value={bootName} placeholder="Your name" onChange={(e) => setBootName(e.target.value)} />}
             <input className="input" type="email" value={email} autoFocus={!boot} placeholder="Work email" onChange={(e) => setEmail(e.target.value)} />
