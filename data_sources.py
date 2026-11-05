@@ -4553,6 +4553,84 @@ def find_duplicate_invoices(status_labels=None, token: str | None = None) -> dic
     return {"groups": out, "n_groups": len(out), "n_dupes": n_dupes}
 
 
+def parse_expected_credit(note: str):
+    """Pull the expected credit amount out of a discrepancy note, or None. Handles the two reliable
+    TradeHub formats: 'Awaiting credit note from <supplier> of £59.90 — …' and '… Overcharged by
+    £33.28.'. Free-text manual notes (no clear figure) return None."""
+    import re as _re
+    if not note:
+        return None
+    m = _re.search(r"credit note from .*? of £\s*([\d,]+(?:\.\d+)?)", note, _re.I)
+    if not m:
+        m = _re.search(r"overcharged by £\s*([\d,]+(?:\.\d+)?)", note, _re.I)
+    if not m:
+        return None
+    try:
+        return round(float(m.group(1).replace(",", "")), 2)
+    except ValueError:
+        return None
+
+
+def discrepancy_watch_report(token: str | None = None) -> dict:
+    """REPORT-ONLY (no writes) first slice of the discrepancy resolver. For every invoice in
+    Discrepancy: parse the expected credit from its note, then check whether a matching credit note
+    is ALREADY on the order (a subitem whose |total| ≈ the expected credit). Returns
+    {rows:[{sub_id, supplier, invoice_no, order_no, expected, cn_found, cn_amount, state}],
+    n_ready, n_waiting, n_no_expected}. state: ready (CN already there) | waiting (expected, none yet)
+    | no_expected (couldn't read a figure)."""
+    token = token or get_token()
+    data = fetch_invoices_by_status([4], limit=500, token=token)   # 4 = Discrepancy
+    invs = data.get("invoices") or []
+    rows = []
+    want = {}                                        # order_item_id -> list of row indexes needing a CN check
+    for iv in invs:
+        exp = parse_expected_credit(iv.get("query_note") or "")
+        row = {"sub_id": iv.get("sub_id"), "supplier": iv.get("supplier") or "—",
+               "invoice_no": iv.get("invoice_no"), "order_no": iv.get("order_part") or iv.get("order_no"),
+               "invoice_total": iv.get("total"), "expected": exp,
+               "cn_found": False, "cn_amount": None,
+               "state": "no_expected" if exp is None else "waiting"}
+        rows.append(row)
+        oid = iv.get("order_item_id")
+        if exp is not None and oid:
+            want.setdefault(str(oid), []).append(len(rows) - 1)
+    # Batch-read the subitem totals of every order that has an expected credit.
+    import json as _json
+    oids = list(want.keys())
+    sub_tot: dict = {}                               # oid -> [totals]
+    for i in range(0, len(oids), 40):
+        chunk = oids[i:i + 40]
+        try:
+            d = _monday_gql('query($ids:[ID!]){items(ids:$ids){id subitems{column_values(ids:["numbers4"]){text}}}}',
+                            {"ids": chunk}, token)
+        except Exception:  # noqa: BLE001
+            continue
+        for it in (d.get("items") or []):
+            tots = []
+            for s in (it.get("subitems") or []):
+                cv = s.get("column_values") or []
+                t = (cv[0].get("text") if cv else "") or ""
+                try:
+                    tots.append(round(float(t.replace(",", "")), 2))
+                except (ValueError, AttributeError):
+                    pass
+            sub_tot[str(it.get("id"))] = tots
+    for oid, idxs in want.items():
+        tots = sub_tot.get(oid, [])
+        for ix in idxs:
+            exp = rows[ix]["expected"]
+            tol = max(0.02, exp * 0.01)              # ±1p or ±1%
+            hit = next((t for t in tots if abs(abs(t) - exp) <= tol), None)
+            if hit is not None:
+                rows[ix]["cn_found"] = True
+                rows[ix]["cn_amount"] = hit
+                rows[ix]["state"] = "ready"
+    n_ready = sum(1 for r in rows if r["state"] == "ready")
+    n_waiting = sum(1 for r in rows if r["state"] == "waiting")
+    n_no_expected = sum(1 for r in rows if r["state"] == "no_expected")
+    return {"rows": rows, "n_ready": n_ready, "n_waiting": n_waiting, "n_no_expected": n_no_expected}
+
+
 def delete_duplicate_invoices(groups=None, status_labels=None, should_cancel=None,
                               token: str | None = None) -> dict:
     """Delete the duplicate invoice subitems (keeping one per group), then resync each affected

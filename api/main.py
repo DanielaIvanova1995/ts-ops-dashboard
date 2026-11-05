@@ -3105,6 +3105,17 @@ def invoice_cancel_run(which: str = "import"):
     return {"ok": True}
 
 
+@app.get("/invoices/discrepancy-watch", dependencies=[Depends(require_key)])
+def invoice_discrepancy_watch():
+    """Report-only (no writes): for every invoice in Discrepancy, the expected credit parsed from its
+    note and whether a matching credit note is ALREADY on the order — the first slice of the
+    discrepancy resolver, so you can see which ones are ready to close vs still waiting."""
+    try:
+        return ds.discrepancy_watch_report()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build the watch report: {str(e)[:180]}")
+
+
 @app.get("/invoices/duplicates", dependencies=[Depends(require_key)])
 def invoice_duplicates():
     """Find duplicate invoices across the board (same order + same invoice number + same total logged

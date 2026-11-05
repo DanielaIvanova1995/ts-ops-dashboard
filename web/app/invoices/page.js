@@ -281,6 +281,8 @@ export default function Invoices() {
   const [chasing, setChasing] = useState(false);
   const [chaseResult, setChaseResult] = useState(null); // {drafted, suppliers:[...]}
   const [discSupFilter, setDiscSupFilter] = useState(""); // "" = all suppliers on the Discrepancies tab
+  const [watch, setWatch] = useState(null);        // credit-note watch report (report-only): {map, n_ready,...}
+  const [watching, setWatching] = useState(false);
   const [progEdit, setProgEdit] = useState({}); // sub_id -> edited progress note text
   const [savingProg, setSavingProg] = useState({}); // sub_id -> bool
   function toggleDiscSel(id) { setDiscSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -402,6 +404,49 @@ export default function Invoices() {
       } else setNotice({ kind: "warn", text: d.detail || "Couldn’t draft the chasers." });
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setChasing(false); }
+  }
+
+  // Report-only credit-note watch: expected credit per discrepancy + whether a matching CN is already
+  // on the order (first slice of the discrepancy resolver — nothing is written).
+  async function loadWatch() {
+    setWatching(true);
+    try {
+      const r = await jsonFetch("/invoices/discrepancy-watch");
+      const d = await r.json();
+      if (!r.ok) { setNotice({ kind: "warn", text: d.detail || "Couldn’t run the credit-note check." }); return; }
+      const map = {}; (d.rows || []).forEach((x) => { if (x.sub_id) map[x.sub_id] = x; });
+      setWatch({ map, n_ready: d.n_ready || 0, n_waiting: d.n_waiting || 0, n_no_expected: d.n_no_expected || 0 });
+      setNotice({ kind: "ok", text: `Credit-note check: ${d.n_ready || 0} ready to close · ${d.n_waiting || 0} still waiting · ${d.n_no_expected || 0} with no figure on the note.` });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setWatching(false); }
+  }
+
+  // Download the shown discrepancies as CSV (respects the supplier filter). Enriched with the
+  // credit-note watch columns when that check has been run.
+  function downloadDiscCsv(rows, label) {
+    const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const wmap = (watch && watch.map) || {};
+    const header = ["Invoice", "Supplier", "Order", "Total", "Expected credit", "Credit note on order?", "CN amount", "Status", "Reason", "Progress", "Chaser sent", "Age (days)"];
+    const out = rows.map((iv) => {
+      const w = wmap[iv.sub_id] || {};
+      return [
+        iv.invoice_no || "", iv.supplier || "", iv.order_part || iv.order_no || "",
+        iv.total != null ? iv.total : "",
+        w.expected != null ? w.expected : "",
+        w.state === "ready" ? "yes" : (w.state === "waiting" ? "no" : ""),
+        w.cn_amount != null ? w.cn_amount : "",
+        w.state === "ready" ? "ready to close" : (w.state === "waiting" ? "waiting for CN" : ""),
+        iv.reason || iv.query_note || "", iv.progress || "", iv.sent || "",
+        discAgeDays(iv) ?? "",
+      ];
+    });
+    const csv = [header, ...out].map((row) => row.map(esc).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const a = document.createElement("a");
+    a.href = url; a.download = `Discrepancies_${(label || "all").replace(/[^A-Za-z0-9]+/g, "_")}_${stamp}.csv`; a.click();
+    URL.revokeObjectURL(url);
   }
 
   // Approve a flagged invoice straight to QuickBooks from the Discrepancies tab (when the query turns
@@ -813,6 +858,8 @@ export default function Invoices() {
                   {!discSupFilter && <span className="pill grey">{supList.length} supplier{supList.length === 1 ? "" : "s"}</span>}
                   {discSupFilter && <button className="btn ghost" onClick={() => { setDiscSupFilter(""); setDiscSel(new Set()); }}>✕ {discSupFilter}</button>}
                   {chased > 0 && <span className="pill amber">{chased} already chased</span>}
+                  {watch && <span className="pill green">{watch.n_ready} ready to close</span>}
+                  {watch && watch.n_waiting ? <span className="pill grey">{watch.n_waiting} awaiting CN</span> : null}
                   <select className="filter" value={discSupFilter} onChange={(e) => { setDiscSupFilter(e.target.value); setDiscSel(new Set()); }} title="Filter by supplier">
                     <option value="">All suppliers ({supList.length})</option>
                     {supList.map(([s, n]) => <option key={s} value={s}>{s} ({n})</option>)}
@@ -821,6 +868,8 @@ export default function Invoices() {
                   <button className="btn" onClick={() => setDiscSel(allSel ? new Set() : new Set(discShown.map((x) => x.sub_id)))}>{allSel ? "Clear" : "Select all"}</button>
                   {discSel.size > 0 && <button className="btn primary" onClick={() => chaseDiscrepancies(discSel)} disabled={chasing}>{chasing ? "Drafting…" : `Chase selected (${discSel.size})`}</button>}
                   <button className="btn" onClick={() => chaseDiscrepancies(new Set(discShown.map((x) => x.sub_id)))} disabled={chasing} title="Draft one Outlook email per supplier for the discrepancies shown">{chasing ? "…" : chaseAllLabel}</button>
+                  <button className="btn" onClick={() => downloadDiscCsv(discShown, discSupFilter || "all")} disabled={!discShown.length} title="Download these discrepancies as a CSV">Download CSV</button>
+                  <button className="btn" onClick={loadWatch} disabled={watching} title="Check which discrepancies already have a matching credit note on the order (report only)">{watching ? "Checking…" : "Credit-note check"}</button>
                 </div>
                 <div className="sub" style={{ marginTop: 8 }}>
                   {supList.map(([s, n]) => <span key={s} className={`pill ${discSupFilter === s ? "amber" : "grey"}`} onClick={() => { setDiscSupFilter(discSupFilter === s ? "" : s); setDiscSel(new Set()); }} style={{ marginRight: 6, marginBottom: 4, display: "inline-block", cursor: "pointer" }} title="Click to filter by this supplier">{s} · {n}</span>)}
