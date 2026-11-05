@@ -25,10 +25,16 @@ Decisions (Daniela, 2026‑11‑05):
 - Scheduler + Claude triage classifier + Monday writes + `qbo_create_bill` all exist.
 
 ## Inbox (where replies/CNs are read from)
-A dedicated Outlook folder the team **forwards** supplier replies (and credit‑note emails) into — proposed:
-**`accounts@tradesuperstoreonline.co.uk` → folder `Discrepancy Replies`**. The engine only reads this
-folder, so there's no guessing which thread is which and nothing else is touched. (Confirm the exact
-folder name before build.)
+**Primary — automatic, no forwarding.** Our discrepancy queries are sent from **accounts@**, so supplier
+replies come back **on the same thread in accounts@**. The engine records each query's Outlook
+`conversationId` when it sends it, then reads replies on those threads automatically — the team does
+nothing. (It can also match by invoice/order number in the subject/body as a backstop.)
+
+**Fallback — a forward folder for strays.** Only for replies that land somewhere else (a personal
+mailbox, or a query someone sent by hand outside TradeHub): the team forwards *those* into a dedicated
+folder, proposed **`accounts@ → Discrepancy Replies`**, which the engine also reads. So forwarding is
+the exception, not the routine. (Confirm the exact folder name before build; it only needs creating if
+we want the fallback.)
 
 ## State — Supabase table `discrepancy_watchers`
 One row per queried discrepancy:
