@@ -454,7 +454,11 @@ export default function Invoices() {
   // server-side (left for a vendor credit).
   async function doApproveDisc(iv) {
     const sub_id = iv.sub_id;
-    if (!window.confirm(`Invoice ${iv.invoice_no} is flagged as a discrepancy. Approve it to QuickBooks anyway? This creates its bill and clears it from the discrepancy queue.`)) return;
+    const isCredit = typeof iv.total === "number" && iv.total < 0;
+    const confirmMsg = isCredit
+      ? `Credit note ${iv.invoice_no} is flagged as a discrepancy. Approve it? It's marked “CN Approved (To QB)” on Monday and cleared from the queue — the vendor credit is applied in QuickBooks by hand (no bill is created).`
+      : `Invoice ${iv.invoice_no} is flagged as a discrepancy. Approve it to QuickBooks anyway? This creates its bill and clears it from the discrepancy queue.`;
+    if (!window.confirm(confirmMsg)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     // QuickBooks (vendor lookup + create bill) can take a while; give it up to 90s, but never let the
     // button spin forever — a timeout, a dropped request or any error always resets it with a message.
@@ -599,9 +603,12 @@ export default function Invoices() {
 
   async function doApprove(iv, force = false) {
     const sub_id = iv.sub_id;
-    const msg = force
-      ? `⚠️ Invoice ${iv.invoice_no} is NOT fully matched (it has discrepancies). Push it to QuickBooks anyway? This creates its bill.`
-      : `Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`;
+    const isCredit = typeof iv.total === "number" && iv.total < 0;
+    const msg = isCredit
+      ? `Approve credit note ${iv.invoice_no}? It's marked “CN Approved (To QB)” on Monday — the vendor credit is applied in QuickBooks by hand (no bill is created).`
+      : force
+        ? `⚠️ Invoice ${iv.invoice_no} is NOT fully matched (it has discrepancies). Push it to QuickBooks anyway? This creates its bill.`
+        : `Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`;
     if (!window.confirm(msg)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));

@@ -2407,6 +2407,7 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
 
 
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
+_CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
 
 
 def _invoice_date_from_pdf(det: dict) -> str | None:
@@ -2475,6 +2476,18 @@ def recon_approve(body: ApproveIn):
     total = det.get("total")
     if not isinstance(total, (int, float)) or total == 0:
         return {"ok": False, "detail": "no invoice total on Monday"}
+    # Credit notes (negative total) are NOT created in QuickBooks via the API — there's no VendorCredit
+    # endpoint here, so vendor credits are applied in QB by hand (/ by Make). Mirror the legacy app's
+    # _grid_push: just mark the Monday subitem "CN Approved (To QB)" and clear it from the queue. Never
+    # try to create a (negative) bill for a credit note.
+    if total < 0:
+        if det.get("sub_id"):
+            try:
+                ds.set_invoice_status(det["sub_id"], _CN_APPROVED_QB_LABEL, create_missing=True)
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "detail": f"couldn't set the credit-note status on Monday: {str(e)[:140]}"}
+        return {"ok": True, "detail": f"credit note marked “{_CN_APPROVED_QB_LABEL}” "
+                f"(£{abs(total):,.2f}) — apply the vendor credit in QuickBooks by hand"}
     supplier = det.get("supplier") or ""
     try:
         vinfo = (ds.qbo_vendor_map_load() or {}).get(recon_core.norm_code(supplier))
