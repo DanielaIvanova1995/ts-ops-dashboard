@@ -470,6 +470,159 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
   );
 }
 
+// Upcoming Payments planner — reads /recon/upcoming (live QB open bills + credit limits) and shows
+// what's due, the credit headroom per supplier, a prepared oldest-first pay plan, and a nudge to
+// approve invoices that are already due but not yet in QuickBooks. Read-only radar; paying still
+// goes through the saved-statement pay flow (the "Open to pay" button jumps to it).
+function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [openV, setOpenV] = useState(() => new Set());   // vendor_ids whose bills are expanded
+  const toggleV = (v) => setOpenV((s) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; });
+
+  const load = useCallback(async () => {
+    if (needPin) return;
+    setLoading(true); setErr("");
+    try {
+      const res = await jsonFetch("/recon/upcoming");
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) setData(d);
+      else setErr(d.detail || `Couldn’t load the plan (API ${res.status}).`);
+    } catch (e) { if (String(e.message) !== "locked") setErr(String(e.message || e)); }
+    finally { setLoading(false); }
+  }, [jsonFetch, needPin]);
+  useEffect(() => { load(); }, [load]);
+
+  const savedByVid = {};
+  (saved || []).forEach((s) => { if (s.vid) savedByVid[String(s.vid)] = s; });
+
+  if (needPin) return null;
+  const t = data?.totals;
+  const suppliers = data?.suppliers || [];
+  const urgent = suppliers.filter((s) => s.over_limit || s.overdue_total > 0 || s.due_window_total > 0);
+  const shown = showAll ? suppliers : urgent;
+
+  const tile = (label, val, cls) => (
+    <div style={{ flex: "1 1 140px", minWidth: 140, background: "rgba(127,127,127,0.05)",
+      border: "1px solid rgba(127,127,127,0.18)", borderRadius: 10, padding: "10px 12px" }}>
+      <div className="sub" style={{ fontSize: 12 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }} className={cls}>{val}</div>
+    </div>
+  );
+
+  return (
+    <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div className="tool-label" style={{ margin: 0 }}>💷 Upcoming payments</div>
+        <span className="sub" style={{ flex: 1 }}>{data ? `prepared ${String(data.generated_at || "").slice(0, 16).replace("T", " ")} · due within ${data.due_window} days` : ""}</span>
+        <button className="btn" onClick={load} disabled={loading}>{loading ? "Loading…" : "↻ Refresh"}</button>
+      </div>
+
+      {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
+      {!data && !err && <div className="sub" style={{ marginTop: 10 }}>{loading ? "Building the plan from QuickBooks…" : ""}</div>}
+
+      {t && (
+        <>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {tile("Overdue now", money(t.overdue_total), t.overdue_total > 0 ? "th-red" : "")}
+            {tile("Due this week", money(t.due7_total), "")}
+            {tile(`Due in ${data.due_window} days`, money(t.due_window_total), "")}
+            {tile("Total owed (QB)", money(t.open_total), "")}
+            {tile("Over credit limit", `${t.n_over_limit} supplier${t.n_over_limit === 1 ? "" : "s"}`, t.n_over_limit > 0 ? "th-red" : "")}
+          </div>
+
+          {t.n_to_approve > 0 && (
+            <div className="route-msg warn" style={{ marginTop: 12 }}>
+              <div><b>{t.n_to_approve} invoice{t.n_to_approve === 1 ? "" : "s"}</b> ({money(t.to_approve_total)}) are already due but <b>not yet approved to QuickBooks</b> — approve them so they join the pay run.</div>
+              <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {(data.to_approve || []).slice(0, 8).map((a) => (
+                  <span key={a.sub_id} className="chip amber" title={`${a.supplier || ""} · order ${a.order_no || ""}${a.invoice_date ? ` · ${a.invoice_date}` : (a.logged ? ` · logged ${String(a.logged).slice(0,10)}` : "")}`}>{a.invoice_no} · {money(a.total)}</span>
+                ))}
+                {data.to_approve && data.to_approve.length > 8 ? <span className="sub">+{data.to_approve.length - 8} more</span> : null}
+              </div>
+              <div style={{ marginTop: 8 }}><a className="btn" href="/invoices">Open the invoice checker →</a></div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+            <div className="tool-label" style={{ margin: 0 }}>{showAll ? "All suppliers with a balance" : "Needs attention"}</div>
+            <span className="sub" style={{ flex: 1 }}>{shown.length} supplier{shown.length === 1 ? "" : "s"}{!showAll && suppliers.length > urgent.length ? ` · ${suppliers.length - urgent.length} more settled/not urgent` : ""}</span>
+            <button className="btn ghost" onClick={() => setShowAll((v) => !v)}>{showAll ? "Show urgent only" : "Show all"}</button>
+          </div>
+
+          {shown.length === 0 && <div className="sub" style={{ marginTop: 10 }}>Nothing urgent — no overdue bills and nothing due within {data.due_window} days. 🎉</div>}
+
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+            {shown.map((s) => {
+              const limit = typeof s.credit_limit === "number" ? s.credit_limit : null;
+              const used = limit ? Math.min(1, s.outstanding / limit) : 0;
+              const srow = savedByVid[String(s.vendor_id)];
+              const p = s.plan || {};
+              return (
+                <div key={s.vendor_id} style={{ border: "1px solid rgba(127,127,127,0.2)", borderRadius: 10, padding: "10px 12px",
+                  background: s.over_limit ? "rgba(224,90,0,0.06)" : "transparent" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <b style={{ fontSize: 15 }}>{s.vendor_name || "—"}</b>
+                    {s.overdue_total > 0 && <span className="chip red">{money(s.overdue_total)} overdue</span>}
+                    {s.due7_total > 0 && <span className="chip amber">{money(s.due7_total)} due ≤7d</span>}
+                    {s.over_limit && <span className="chip red">OVER LIMIT</span>}
+                    {!s.over_limit && s.near_limit && <span className="chip amber">near limit</span>}
+                    <span style={{ flex: 1 }} />
+                    <span className="sub">{s.n_bills} bill{s.n_bills === 1 ? "" : "s"} · owed <b>{money(s.outstanding)}</b></span>
+                    <button className="btn ghost" onClick={() => toggleV(s.vendor_id)}>{openV.has(s.vendor_id) ? "Hide bills" : "Bills"}</button>
+                    {srow
+                      ? <button className="btn primary" onClick={() => openSaved(srow.key)} title="Open this supplier's statement to pay">Open to pay</button>
+                      : <span className="sub" title="No statement reconciled yet — drop one above to pay off">no statement yet</span>}
+                  </div>
+
+                  {/* Credit headroom bar */}
+                  {limit != null ? (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ height: 8, borderRadius: 6, background: "rgba(127,127,127,0.18)", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.round(used * 100)}%`, height: "100%",
+                          background: s.over_limit ? "#d64545" : (s.near_limit ? "#e6a400" : "#1a9d57") }} />
+                      </div>
+                      <div className="sub" style={{ marginTop: 3, fontSize: 12 }}>
+                        Credit limit {money(limit)} · {s.over_limit ? <span className="th-red"><b>{money(Math.abs(s.available))} OVER</b> — orders may be blocked until paid down</span> : <>headroom <b>{money(s.available)}</b></>}
+                      </div>
+                    </div>
+                  ) : <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>No credit limit on file (Suppliers board)</div>}
+
+                  {/* Suggested plan */}
+                  <div className="sub" style={{ marginTop: 8, fontSize: 13 }}>
+                    {p.need_under_limit > 0
+                      ? <><b className="th-red">Pay {money(p.need_under_limit)}</b> to get back under the limit — suggested <b>{money(p.suggested_total)}</b> ({(p.suggested_ids || []).length} oldest bill{(p.suggested_ids || []).length === 1 ? "" : "s"})</>
+                      : <>Suggested this week: <b>{money(p.suggested_total)}</b> ({(p.suggested_ids || []).length} bill{(p.suggested_ids || []).length === 1 ? "" : "s"}, oldest first)</>}
+                  </div>
+
+                  {openV.has(s.vendor_id) && (
+                    <table className="mini" style={{ marginTop: 8 }}>
+                      <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th className="num">Balance</th><th></th></tr></thead>
+                      <tbody>
+                        {s.bills.map((b) => (
+                          <tr key={b.id}>
+                            <td className="ono">{b.doc_no || "—"}</td>
+                            <td className="sub">{(b.date || "").slice(0, 10) || "—"}</td>
+                            <td className="sub">{(b.due || "").slice(0, 10) || "—"}{b.days_to_due != null && !b.overdue && b.days_to_due <= 14 ? ` (${b.days_to_due}d)` : ""}</td>
+                            <td className="num">{money(b.balance)}</td>
+                            <td>{b.overdue ? <span className="chip red">overdue</span> : (b.bucket === "due7" ? <span className="chip amber">this week</span> : (b.bucket === "due_window" ? <span className="chip grey">soon</span> : null))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Recon() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -855,6 +1008,10 @@ export default function Recon() {
       )}
       {qb && qb.qbo_connected && qb.company && (
         <div className="route-msg ok" style={{ marginBottom: 12 }}>QuickBooks connected — <b>{qb.company}</b>.</div>
+      )}
+
+      {!needPin && qb && qb.qbo_connected !== false && (
+        <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={openSaved} onNotice={setNotice} needPin={needPin} />
       )}
 
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>

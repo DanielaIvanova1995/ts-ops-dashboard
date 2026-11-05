@@ -5589,6 +5589,27 @@ def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
     return out
 
 
+def qbo_open_bills(limit: int = 1000):
+    """EVERY unpaid QuickBooks Bill across ALL vendors in one query → the payables backbone for the
+    Upcoming Payments planner. Returns [{id, doc_no, vendor_id, vendor_name, date, due, total,
+    balance}] (balance > 0 = still owed). Read-only."""
+    rows = qbo_query("select Id, DocNumber, TxnDate, DueDate, TotalAmt, Balance, VendorRef "
+                     f"from Bill where Balance > '0' MAXRESULTS {int(limit)}")
+    out = []
+    for b in (rows.get("Bill") or []):
+        bal = b.get("Balance")
+        if not isinstance(bal, (int, float)) or abs(bal) < 0.005:
+            continue
+        vr = b.get("VendorRef") or {}
+        out.append({
+            "id": b.get("Id"), "doc_no": (b.get("DocNumber") or "").strip(),
+            "vendor_id": str(vr.get("value") or ""), "vendor_name": (vr.get("name") or "").strip(),
+            "date": b.get("TxnDate"), "due": b.get("DueDate"),
+            "total": b.get("TotalAmt"), "balance": bal,
+        })
+    return out
+
+
 def qbo_vendor_payments(vendor_id: str, limit: int = 1000):
     """Map each PAID Bill id → the remittance/payment it was settled under:
     {bill_id: {"ref": "<payment reference e.g. Storm B100826>", "date": "YYYY-MM-DD"}}.

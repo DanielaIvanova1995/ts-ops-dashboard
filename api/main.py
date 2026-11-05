@@ -1981,6 +1981,171 @@ def recon_payments(limit: int = 200):
     return {"ok": True, "payments": payments}
 
 
+# Weekly pay thresholds (how much to clear per supplier in a routine run), keyed by normalised vendor
+# name; "_default" is the catch-all. Daniela's figures (2026-10): default £5k/wk, UPB £10k, Decor8 £3k.
+# A credit-limit breach overrides this — we always suggest clearing enough to get back under the limit.
+_PAY_THRESHOLDS = {"_default": 5000.0, "upb": 10000.0, "decor8": 3000.0}
+
+
+def _month_overdue(date_str: str) -> bool:
+    """Daniela's overdue rule: the INVOICE date is 2+ whole calendar months before this month
+    (pay-by-end-of-the-following-month terms). Used when a bill has no explicit due date."""
+    s = (date_str or "")[:10]
+    try:
+        d = _dt.date.fromisoformat(s)
+    except (ValueError, TypeError):
+        return False
+    today = _dt.date.today()
+    return (today.year - d.year) * 12 + (today.month - d.month) >= 2
+
+
+@app.get("/recon/upcoming", dependencies=[Depends(require_key_or_statements)])
+def recon_upcoming(due_window: int = 14):
+    """Upcoming-payments planner. Reads every UNPAID QuickBooks bill, groups by supplier, and against
+    each supplier's credit limit (Monday Suppliers board) works out: what's overdue, what's due within
+    `due_window` days, the credit headroom left, and an oldest-first suggested pay plan (all overdue
+    first, then topped up to the weekly threshold — or enough to get back under the credit limit,
+    whichever is more). Also nudges: invoices sitting un-approved on Monday that are already due.
+    Read-only — it prepares the plan; paying still goes through the normal, confirmed pay flow."""
+    import invoice_core as core
+    today = _dt.date.today()
+
+    def _days_to(due):
+        try:
+            return (_dt.date.fromisoformat((due or "")[:10]) - today).days
+        except (ValueError, TypeError):
+            return None
+
+    # 1) Every open bill from QuickBooks (one query), grouped by vendor.
+    try:
+        bills = ds.qbo_open_bills()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read bills from QuickBooks: {e}")
+    # 2) Credit limits (Monday Suppliers board), normalised for name matching.
+    try:
+        lim_raw = ds.fetch_supplier_credit_limits() or {}
+    except Exception:  # noqa: BLE001
+        lim_raw = {}
+    lim_by_norm = {}
+    for nm, lim in lim_raw.items():
+        nk = core.norm_code(nm)
+        if nk:
+            lim_by_norm.setdefault(nk, lim)
+
+    def _credit_limit(vendor_name):
+        nk = core.norm_code(vendor_name)
+        if not nk:
+            return None
+        if nk in lim_by_norm:
+            return lim_by_norm[nk]
+        # fall back to first-word / substring match (QB name vs Monday name differ slightly)
+        for k, v in lim_by_norm.items():
+            if k and (nk.startswith(k) or k.startswith(nk)):
+                return v
+        return None
+
+    groups: dict[str, dict] = {}
+    for b in bills:
+        vid = b.get("vendor_id") or ""
+        g = groups.setdefault(vid, {"vendor_id": vid, "vendor_name": b.get("vendor_name") or "",
+                                    "bills": []})
+        bal = float(b.get("balance") or 0)
+        due = b.get("due")
+        d2 = _days_to(due)
+        overdue = (d2 is not None and d2 < 0) or (d2 is None and _month_overdue(b.get("date")))
+        bucket = "overdue" if overdue else ("due7" if (d2 is not None and d2 <= 7) else (
+            "due_window" if (d2 is not None and d2 <= due_window) else "later"))
+        g["bills"].append({"id": str(b.get("id")), "doc_no": b.get("doc_no"),
+                           "date": b.get("date"), "due": due, "balance": round(bal, 2),
+                           "overdue": overdue, "days_to_due": d2, "bucket": bucket})
+
+    suppliers = []
+    tot_overdue = tot_due7 = tot_duewin = tot_open = 0.0
+    n_bills = 0
+    for vid, g in groups.items():
+        gb = g["bills"]
+        gb.sort(key=lambda x: (0 if x["overdue"] else 1,
+                               x["due"] or x["date"] or "9999"))   # overdue first, then earliest due
+        outstanding = round(sum(x["balance"] for x in gb), 2)
+        limit = _credit_limit(g["vendor_name"])
+        available = round(limit - outstanding, 2) if isinstance(limit, (int, float)) else None
+        over_limit = bool(available is not None and available < 0)
+        near_limit = bool(available is not None and 0 <= available <= (limit * 0.1 if limit else 0))
+        overdue_total = round(sum(x["balance"] for x in gb if x["overdue"]), 2)
+        due7_total = round(sum(x["balance"] for x in gb if x["bucket"] == "due7"), 2)
+        duewin_total = round(sum(x["balance"] for x in gb if x["bucket"] in ("due7", "due_window")), 2)
+        # Suggested plan: all overdue, then oldest others up to the threshold — or enough to clear a
+        # credit-limit breach, whichever is larger. Capped at what's actually outstanding.
+        nk = core.norm_code(g["vendor_name"])
+        threshold = _PAY_THRESHOLDS.get(nk, _PAY_THRESHOLDS["_default"])
+        need_under_limit = round(max(0.0, outstanding - limit), 2) if isinstance(limit, (int, float)) else 0.0
+        target = max(threshold, need_under_limit)
+        plan_ids, plan_total = [], 0.0
+        for x in gb:
+            if x["overdue"] or plan_total < target:
+                plan_ids.append(x["id"])
+                plan_total += x["balance"]
+        plan_total = round(plan_total, 2)
+        suppliers.append({
+            "vendor_id": vid, "vendor_name": g["vendor_name"],
+            "outstanding": outstanding, "credit_limit": limit, "available": available,
+            "over_limit": over_limit, "near_limit": near_limit,
+            "overdue_total": overdue_total, "due7_total": due7_total, "due_window_total": duewin_total,
+            "n_bills": len(gb), "bills": gb,
+            "plan": {"threshold": threshold, "need_under_limit": need_under_limit,
+                     "suggested_total": plan_total, "suggested_ids": plan_ids,
+                     "clears_limit_breach": need_under_limit > 0 and plan_total + 0.005 >= need_under_limit},
+        })
+        tot_overdue += overdue_total
+        tot_due7 += due7_total
+        tot_duewin += duewin_total
+        tot_open += outstanding
+        n_bills += len(gb)
+
+    # Rank suppliers: over-limit first, then most overdue £, then soonest due.
+    def _soonest(s):
+        ds_ = [b["days_to_due"] for b in s["bills"] if b["days_to_due"] is not None]
+        return min(ds_) if ds_ else 9999
+    suppliers.sort(key=lambda s: (0 if s["over_limit"] else 1, -s["overdue_total"], _soonest(s)))
+
+    # 3) Approve-nudge: invoices still on Monday (Needs Review / Matched) that are NOT yet QB bills but
+    # are already overdue — approve them so they join the pay run. Oldest first; capped for display.
+    to_approve, to_approve_total = [], 0.0
+    try:
+        nr = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL, _MATCHED_LABEL], limit=500)
+        for i in (nr.get("invoices") or []):
+            if core.is_excluded_supplier(i.get("supplier")):
+                continue
+            idate = (i.get("invoice_date") or "")[:10] or (i.get("created") or "")[:10]
+            if not _month_overdue(idate):
+                continue
+            amt = i.get("total")
+            to_approve.append({"sub_id": str(i.get("sub_id")), "invoice_no": i.get("invoice_no"),
+                               "supplier": i.get("supplier"), "order_no": i.get("order_part") or i.get("order_no"),
+                               "total": amt, "invoice_date": i.get("invoice_date") or None,
+                               "logged": i.get("created") or None})
+            if isinstance(amt, (int, float)):
+                to_approve_total += amt
+    except Exception:  # noqa: BLE001
+        to_approve = []
+    to_approve.sort(key=lambda r: (r.get("invoice_date") or r.get("logged") or "9999"))
+
+    return {
+        "ok": True, "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "due_window": due_window,
+        "totals": {
+            "open_total": round(tot_open, 2), "overdue_total": round(tot_overdue, 2),
+            "due7_total": round(tot_due7, 2), "due_window_total": round(tot_duewin, 2),
+            "n_bills": n_bills, "n_suppliers": len(suppliers),
+            "n_over_limit": sum(1 for s in suppliers if s["over_limit"]),
+            "n_near_limit": sum(1 for s in suppliers if s["near_limit"]),
+            "to_approve_total": round(to_approve_total, 2), "n_to_approve": len(to_approve),
+        },
+        "suppliers": suppliers,
+        "to_approve": to_approve[:60],
+    }
+
+
 class RemitIn(BaseModel):
     supplier: str = ""
     vendor_id: str = ""          # QB vendor id — so applied credits are remembered against it
