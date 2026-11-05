@@ -2206,6 +2206,7 @@ def invoice_discrepancies():
             "reason": (i.get("query_note") or "").strip(),
             "sent": (i.get("action_note") or "").strip(),
             "progress": (i.get("progress") or "").strip(),
+            "invoice_date": i.get("invoice_date") or None, "logged": i.get("created") or None,
             "flagged_on": i.get("date"), "order_url": i.get("order_url")} for i in invs]
     # Most recently flagged first (status change date).
     out.sort(key=lambda r: r.get("flagged_on") or "", reverse=True)

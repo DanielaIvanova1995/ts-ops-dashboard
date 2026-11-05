@@ -441,12 +441,14 @@ export default function Invoices() {
   function downloadDiscCsv(rows, label) {
     const esc = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const wmap = (watch && watch.map) || {};
-    const header = ["Invoice", "Supplier", "Order", "Total", "Expected credit", "Credit note on order?", "CN amount", "Status", "Reason", "Progress", "Chaser sent", "Age (days)"];
+    const header = ["Invoice", "Supplier", "Order", "Total", "Invoice date", "Expected credit", "Credit note on order?", "CN amount", "Status", "Reason", "Progress", "Chaser sent", "Age (days)"];
     const out = rows.map((iv) => {
       const w = wmap[iv.sub_id] || {};
+      const d = invDate(iv);
       return [
         iv.invoice_no || "", iv.supplier || "", iv.order_part || iv.order_no || "",
         iv.total != null ? iv.total : "",
+        d ? (d.logged ? "logged " : "") + d.text : "",
         w.expected != null ? w.expected : "",
         w.state === "ready" ? "yes" : (w.state === "waiting" ? "no" : ""),
         w.cn_amount != null ? w.cn_amount : "",
@@ -998,7 +1000,7 @@ export default function Invoices() {
                       {iv.sent ? <span className="pill grey" title={iv.sent}>chased</span> : <span className="pill amber">not chased</span>}
                     </div>
                     <div className="sub" style={{ marginTop: 3 }}>
-                      {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}{iv.flagged_on ? ` · flagged ${iv.flagged_on}` : ""}
+                      {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}{(() => { const d = invDate(iv); return d ? <> · <span title={d.logged ? "Date this invoice was logged (no invoice date on Monday)" : "Invoice date"}>{d.logged ? "logged " : ""}{d.text}</span></> : null; })()}{iv.flagged_on ? ` · flagged ${iv.flagged_on}` : ""}
                     </div>
                   </div>
                   <div className="inv-right">
@@ -1108,7 +1110,7 @@ export default function Invoices() {
           <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
             <div className="sub" style={{ marginBottom: 8 }}>Also found matching <b>“{query.trim()}”</b> (any status, not in this tab):</div>
             <table className="mini">
-              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order</th><th className="num">Total</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Supplier</th><th>Order</th><th className="num">Total</th><th>Date</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {extra.map((r) => (
                   <tr key={r.sub_id}>
@@ -1116,6 +1118,7 @@ export default function Invoices() {
                     <td className="sub">{r.supplier || "—"}</td>
                     <td className="sub">{ordNo(r)}</td>
                     <td className="num">{r.total != null ? money(r.total) : "—"}</td>
+                    <td className="sub">{(() => { const d = invDate(r); return d ? <span title={d.logged ? "Date logged (no invoice date on Monday)" : "Invoice date"}>{d.logged ? "logged " : ""}{d.text}</span> : "—"; })()}</td>
                     <td><span className="pill grey">{r.status || "—"}</span></td>
                     <td style={{ whiteSpace: "nowrap" }}>{r.order_url && <a className="btn ghost" href={r.order_url} target="_blank" rel="noreferrer">Order ↗</a>}</td>
                   </tr>
