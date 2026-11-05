@@ -68,7 +68,17 @@ function ImportPanel({ jsonFetch, onNotice }) {
   const [open, setOpen] = useState(false);
   const [folder, setFolder] = useState("Travis Perkins");
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [status, setStatus] = useState(null);
+
+  async function stop() {
+    setStopping(true);
+    try {
+      const r = await jsonFetch("/invoices/cancel-run?which=import", { method: "POST" });
+      if (r.ok) onNotice({ kind: "ok", text: "Stopping… it finishes the invoice it's on, then halts." });
+      else { const d = await r.json().catch(() => ({})); onNotice({ kind: "warn", text: d.detail || "Couldn’t send the stop." }); }
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
 
   async function run(dry) {
     if (!dry && !window.confirm(`Import for real from "${folder}"? This creates invoice subitems on Monday.`)) return;
@@ -86,8 +96,8 @@ function ImportPanel({ jsonFetch, onNotice }) {
           const st = sd.status || {};
           setStatus(st);
           if (st.running && tries < 80) setTimeout(poll, 3000);
-          else setRunning(false);
-        } catch { setRunning(false); }
+          else { setRunning(false); setStopping(false); }
+        } catch { setRunning(false); setStopping(false); }
       };
       setTimeout(poll, 2500);
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); setRunning(false); }
@@ -108,6 +118,7 @@ function ImportPanel({ jsonFetch, onNotice }) {
           <div className="inv-controls">
             <input className="search" style={{ maxWidth: 240, flex: "none" }} value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Supplier folder (e.g. Travis Perkins)" />
             <button className="btn primary" onClick={() => run(true)} disabled={running}>{running ? "Working…" : "Preview (dry run)"}</button>
+            {running && <button className="btn op-del" onClick={stop} disabled={stopping} title="Stop this run — it halts after the invoice it's on">{stopping ? "Stopping…" : "Stop"}</button>}
           </div>
           {running && <div className="sub" style={{ marginTop: 8 }}>Reading &amp; matching invoices… each PDF is parsed, so give it a moment.</div>}
           {status && !status.running && (
@@ -115,7 +126,7 @@ function ImportPanel({ jsonFetch, onNotice }) {
               ? <div className="route-msg warn" style={{ marginTop: 10 }}>{status.error}</div>
               : (
                 <div style={{ marginTop: 10 }}>
-                  <div className="sub">Scanned {status.scanned ?? 0} · <b>{status.dry_run ? "would match" : "imported"} {status.imported ?? 0}</b>{byAddr.length ? <> · <b>{byAddr.length}</b> by address</> : null} · failed {status.failed ?? 0} · skipped {status.skipped ?? 0}{status.capped ? " · (capped — run again for more)" : ""}</div>
+                  <div className="sub">Scanned {status.scanned ?? 0} · <b>{status.dry_run ? "would match" : "imported"} {status.imported ?? 0}</b>{byAddr.length ? <> · <b>{byAddr.length}</b> by address</> : null} · failed {status.failed ?? 0} · skipped {status.skipped ?? 0}{status.capped ? " · (capped — run again for more)" : ""}{status.cancelled ? " · stopped" : ""}</div>
                   {would.length > 0 && (
                     <table className="mini" style={{ marginTop: 8 }}>
                       <thead><tr><th>Invoice</th><th>Supplier</th><th>Order</th><th>How it matched</th></tr></thead>

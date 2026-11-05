@@ -3047,6 +3047,63 @@ def _get_status(key: str) -> dict:
         return {}
 
 
+# ---- Stop / cancel for long background jobs (invoice import, fix-margins sweep) ------------------
+# Cooperative cancel: a job's inner loop calls should_cancel() each iteration and stops. The signal
+# is an in-process Event (instant, for the normal single-worker case) PLUS a throttled read of the
+# job's 'cancel' flag in the status store (so a Stop that lands on another worker still gets through).
+import threading as _threading
+
+_CANCEL_EVENTS: dict[str, "_threading.Event"] = {}
+
+
+def _cancel_event(job_key: str):
+    ev = _CANCEL_EVENTS.get(job_key)
+    if ev is None:
+        ev = _threading.Event()
+        _CANCEL_EVENTS[job_key] = ev
+    return ev
+
+
+def _make_should_cancel(job_key: str):
+    """A fresh should_cancel() for a job starting now (clears any previous signal)."""
+    ev = _cancel_event(job_key)
+    ev.clear()
+    import time as _t
+    state = {"next_db": 0.0}
+
+    def _should():
+        if ev.is_set():
+            return True
+        now = _t.time()
+        if now >= state["next_db"]:          # don't hit the store more than ~once every 2.5s
+            state["next_db"] = now + 2.5
+            try:
+                if _get_status(job_key).get("cancel"):
+                    ev.set()
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        return False
+
+    return _should
+
+
+@app.post("/invoices/cancel-run", dependencies=[Depends(require_key)])
+def invoice_cancel_run(which: str = "import"):
+    """Stop a running background job the hub started. which=import (invoice importer) or
+    margins (fix-margins sweep). Signals the job to stop at its next step (it finishes the item it's on)."""
+    key = {"import": "invoice_import_run_status", "margins": "fix_margins_status"}.get(which)
+    if not key:
+        raise HTTPException(status_code=400, detail="unknown job")
+    _cancel_event(key).set()
+    try:
+        cur = _get_status(key) or {}
+        _save_status(key, {**cur, "cancel": True, "stopping": True})
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True}
+
+
 @app.post("/invoices/fix-margins-all", dependencies=[Depends(require_key)])
 def invoice_fix_margins_all(dry_run: bool = False):
     """Fix the ~98% margins across the WHOLE board in one go: fill any invoice totals missing from the
@@ -3055,12 +3112,14 @@ def invoice_fix_margins_all(dry_run: bool = False):
     import threading
 
     def _work():
+        should = _make_should_cancel("fix_margins_status")
         _save_status("fix_margins_status", {"running": True, "reason": "manual"})
         try:
-            r = ds.fix_margins_sweep(dry_run=dry_run)
+            r = ds.fix_margins_sweep(dry_run=dry_run, should_cancel=should)
             _save_status("fix_margins_status", {
                 "running": False, "ok": r.get("ok"), "orders_checked": r.get("orders_checked"),
                 "orders_fixed": r.get("orders_fixed"), "filled": r.get("filled"),
+                "cancelled": bool(r.get("cancelled")),
                 "total_mismatches": (r.get("total_mismatches") or [])[:40],
                 "n_total_mismatches": r.get("n_total_mismatches"),
                 "items": (r.get("items") or [])[:40], "reason": "manual", "dry_run": dry_run})
@@ -3124,15 +3183,18 @@ def invoice_import_run(body: ImportRunIn):
     lim = max(1, min(int(body.limit or 15), 60))
 
     def _work():
+        should = _make_should_cancel("invoice_import_run_status")
         _save_status("invoice_import_run_status", {"running": True, "dry_run": body.dry_run,
                                                    "folders": folders})
         try:
             r = invoice_import.run_import(folders=folders, dry_run=body.dry_run,
-                                          limit_per_folder=lim, max_total=lim, since_days=body.since_days)
+                                          limit_per_folder=lim, max_total=lim, since_days=body.since_days,
+                                          should_cancel=should)
             _save_status("invoice_import_run_status", {
                 "running": False, "dry_run": body.dry_run, "folders": folders,
                 **{k: r.get(k) for k in ("ok", "scanned", "imported", "skipped", "failed",
                                          "ignored", "archived", "capped", "error")},
+                "cancelled": bool(r.get("cancelled")),
                 "items": (r.get("items") or [])[:60]})
         except Exception as e:  # noqa: BLE001
             _save_status("invoice_import_run_status", {"running": False, "ok": False, "error": str(e)[:200]})

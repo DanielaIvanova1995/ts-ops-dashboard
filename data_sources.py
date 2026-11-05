@@ -4538,7 +4538,7 @@ def clear_total_cost_if_inv(order_item_id, token: str | None = None) -> bool:
 
 
 def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_floor: float = 90.0,
-                      dry_run: bool = False, token: str | None = None) -> dict:
+                      dry_run: bool = False, token: str | None = None, should_cancel=None) -> dict:
     """Board-wide repair of the ~98% margin bug: fill any invoice totals missing from the order's INV
     slots so the Monday margin formula is right. Scans invoices in the given Payment-Status labels
     (default Needs Review + Matched), dedupes by order, and runs reconcile_order_inv_slots on each.
@@ -4549,7 +4549,11 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
     data = fetch_invoices_by_status(status_labels, limit=500, token=token)
     invs = data.get("invoices") or []
     seen, orders_fixed, filled, items, cleared_tc, tot_check = set(), 0, 0, [], 0, {}
+    cancelled = False
     for i in invs:
+        if should_cancel and should_cancel():          # cooperative stop from the hub
+            cancelled = True
+            break
         oid = i.get("order_item_id")
         ono = (i.get("order_no") or "").strip()
         okey = str(oid or ono)
@@ -4599,7 +4603,7 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
     # orders — a mismatch means the recorded sell (and so the margin) is wrong. FLAGGED only, never
     # auto-overwritten (revenue is sensitive; a part-refund or edited order could be a real difference).
     total_mismatches = []
-    if tot_check and not dry_run:
+    if tot_check and not dry_run and not cancelled:
         try:
             shop = fetch_order_totals(list(tot_check.keys()))
         except Exception:  # noqa: BLE001
@@ -4611,7 +4615,7 @@ def fix_margins_sweep(status_labels=None, high_margin_only: bool = True, margin_
                                          "shopify_total": round(st, 2), "diff": round(st - info["to_us"], 2)})
         total_mismatches.sort(key=lambda x: -abs(x["diff"]))
     return {"ok": True, "orders_checked": len(seen), "orders_fixed": orders_fixed,
-            "filled": filled, "cleared_total_cost": cleared_tc,
+            "filled": filled, "cleared_total_cost": cleared_tc, "cancelled": cancelled,
             "total_mismatches": total_mismatches[:60], "n_total_mismatches": len(total_mismatches),
             "items": items[:60]}
 

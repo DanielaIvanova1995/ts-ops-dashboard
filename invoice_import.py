@@ -266,7 +266,7 @@ def _norm_no(s: str) -> str:
 def run_import(folders: list[str] | None = None, dry_run: bool = False,
                limit_per_folder: int = 40, mailbox: str | None = None,
                archive_folder_id: str | None = None, since_days: int | None = None,
-               max_total: int | None = None) -> dict:
+               max_total: int | None = None, should_cancel=None) -> dict:
     """Scan the invoice folders and import each new invoice as a Monday subitem.
 
     folders: folder NAMES to scan (defaults to all Inbox/Suppliers subfolders).
@@ -315,6 +315,9 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
         if max_total and handled >= max_total:
             summary["capped"] = True
             break
+        if should_cancel and should_cancel():          # cooperative stop from the hub
+            summary["cancelled"] = True
+            break
         try:
             msgs = ds.list_folder_invoice_messages(mailbox, fol["id"], limit=limit_per_folder,
                                                    token=token, since_days=since_days)
@@ -326,8 +329,13 @@ def run_import(folders: list[str] | None = None, dry_run: bool = False,
             if max_total and handled >= max_total:
                 summary["capped"] = True
                 break
+            if should_cancel and should_cancel():
+                summary["cancelled"] = True
+                break
             _handle_message(mailbox, m, fol["name"], dry_run, summary, token, archive_folder_id)
             handled += 1
+        if summary.get("cancelled"):
+            break
     return summary
 
 
