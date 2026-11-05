@@ -746,6 +746,7 @@ export default function Recon() {
   const [openKey, setOpenKey] = useState(null);  // key of the currently-open saved reconciliation
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [tab, setTab] = useState("upcoming");   // "upcoming" (payments planner) | "reconcile" (statements & pay)
   const [approving, setApproving] = useState({});
   const [saved, setSaved] = useState([]);
   const [excluded, setExcluded] = useState([]);   // never-reconcile skip-list [{vid, name}]
@@ -1113,10 +1114,23 @@ export default function Recon() {
         <div className="route-msg ok" style={{ marginBottom: 12 }}>QuickBooks connected — <b>{qb.company}</b>.</div>
       )}
 
-      {!needPin && qb && qb.qbo_connected !== false && (
-        <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={openSaved} onNotice={setNotice} needPin={needPin} vendors={vendors} />
+      {/* Sub-nav for the Statements section: the payments planner vs reconcile & pay */}
+      {!needPin && (
+        <div className="subnav" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <button className={`btn ${tab === "upcoming" ? "primary" : "ghost"}`} onClick={() => setTab("upcoming")}>💷 Upcoming payments</button>
+          <button className={`btn ${tab === "reconcile" ? "primary" : "ghost"}`} onClick={() => setTab("reconcile")}>📄 Reconcile &amp; pay</button>
+        </div>
       )}
 
+      {notice && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 12 }}>{notice.text}</div>}
+
+      {tab === "upcoming" && (
+        !needPin && qb && qb.qbo_connected !== false
+          ? <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={(key) => { setTab("reconcile"); openSaved(key); }} onNotice={setNotice} needPin={needPin} vendors={vendors} />
+          : <div className="sub">{qb && qb.qbo_connected === false ? "Connect QuickBooks above to see the payments plan." : "Loading…"}</div>
+      )}
+
+      {tab === "reconcile" && <>
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
         <input ref={fileRef} type="file" accept=".pdf,.csv,.txt,.xlsx,.xlsm,.xls" style={{ display: "none" }}
           onChange={(e) => setPicked(e.target.files?.[0] || null)} />
@@ -1158,7 +1172,6 @@ export default function Recon() {
           <button className="btn primary" onClick={reconcile} disabled={busy}>{busy ? "Reconciling…" : "Reconcile"}</button>
         </div>
         <div className="sub" style={{ marginTop: 8 }}>It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
-        {notice && <div className={`route-msg ${notice.kind}`} style={{ marginTop: 10 }}>{notice.text}</div>}
       </div>
 
       {!needPin && <AutoReconcilePanel jsonFetch={jsonFetch} onNotice={setNotice} />}
@@ -1343,6 +1356,7 @@ export default function Recon() {
             onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
         </div>
       )}
+      </>}
     </div>
   );
 }
