@@ -1981,10 +1981,51 @@ def recon_payments(limit: int = 200):
     return {"ok": True, "payments": payments}
 
 
-# Weekly pay thresholds (how much to clear per supplier in a routine run), keyed by normalised vendor
-# name; "_default" is the catch-all. Daniela's figures (2026-10): default £5k/wk, UPB £10k, Decor8 £3k.
-# A credit-limit breach overrides this — we always suggest clearing enough to get back under the limit.
-_PAY_THRESHOLDS = {"_default": 5000.0, "upb": 10000.0, "decor8": 3000.0}
+# Payment-plan config. Threshold = how much to clear per supplier in a routine run; cadence = how
+# often we pay them (weekly pays down to the threshold each run; monthly only covers what's actually
+# overdue/due-this-week, no routine top-up). Daniela's seed figures (2026-10): default £5k/wk, UPB
+# £10k, Decor8 £3k, Rexel monthly. Editable in the Statements "Payment plan settings" box, stored in
+# the Supabase `payment_plan` config. A credit-limit breach always overrides the threshold.
+_PAY_PLAN_KEY = "payment_plan"
+_PAY_PLAN_DEFAULT = {
+    "default_threshold": 5000.0,
+    "suppliers": {
+        "upb": {"name": "UPB", "threshold": 10000.0, "cadence": "weekly"},
+        "decor8": {"name": "Decor8", "threshold": 3000.0, "cadence": "weekly"},
+        "rexel": {"name": "Rexel", "threshold": 5000.0, "cadence": "monthly"},
+    },
+}
+
+
+def _pay_plan_config() -> dict:
+    """The payment-plan settings (default threshold + per-supplier threshold/cadence). Reads the saved
+    Supabase config, falling back to the seed defaults when nothing's saved / no store. Supplier keys
+    are normalised vendor names."""
+    import invoice_core as core
+    cfg = None
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            cfg = supabase_db.config_get(_PAY_PLAN_KEY)
+    except Exception:  # noqa: BLE001
+        cfg = None
+    if not cfg:
+        return {k: (dict(v) if isinstance(v, dict) else v) for k, v in _PAY_PLAN_DEFAULT.items()}
+    out = {"default_threshold": float(cfg.get("default_threshold") or 5000.0), "suppliers": {}}
+    for k, v in (cfg.get("suppliers") or {}).items():
+        if not isinstance(v, dict):
+            continue
+        nk = core.norm_code(k) or core.norm_code(v.get("name"))
+        if not nk:
+            continue
+        try:
+            thr = float(v.get("threshold"))
+        except (TypeError, ValueError):
+            thr = out["default_threshold"]
+        out["suppliers"][nk] = {"name": v.get("name") or k,
+                                "threshold": thr,
+                                "cadence": "monthly" if str(v.get("cadence")).lower() == "monthly" else "weekly"}
+    return out
 
 
 def _month_overdue(date_str: str) -> bool:
@@ -2009,6 +2050,7 @@ def recon_upcoming(due_window: int = 14):
     Read-only — it prepares the plan; paying still goes through the normal, confirmed pay flow."""
     import invoice_core as core
     today = _dt.date.today()
+    plan_cfg = _pay_plan_config()
 
     def _days_to(due):
         try:
@@ -2074,15 +2116,19 @@ def recon_upcoming(due_window: int = 14):
         overdue_total = round(sum(x["balance"] for x in gb if x["overdue"]), 2)
         due7_total = round(sum(x["balance"] for x in gb if x["bucket"] == "due7"), 2)
         duewin_total = round(sum(x["balance"] for x in gb if x["bucket"] in ("due7", "due_window")), 2)
-        # Suggested plan: all overdue, then oldest others up to the threshold — or enough to clear a
-        # credit-limit breach, whichever is larger. Capped at what's actually outstanding.
+        # Suggested plan: always cover everything overdue + anything due this week; for a WEEKLY
+        # supplier also top up to its threshold; a MONTHLY supplier gets no routine top-up (just the
+        # due/overdue). A credit-limit breach overrides — clear enough to get back under the limit.
         nk = core.norm_code(g["vendor_name"])
-        threshold = _PAY_THRESHOLDS.get(nk, _PAY_THRESHOLDS["_default"])
+        sup_cfg = plan_cfg["suppliers"].get(nk)
+        threshold = float(sup_cfg["threshold"]) if sup_cfg else plan_cfg["default_threshold"]
+        cadence = sup_cfg["cadence"] if sup_cfg else "weekly"
         need_under_limit = round(max(0.0, outstanding - limit), 2) if isinstance(limit, (int, float)) else 0.0
-        target = max(threshold, need_under_limit)
+        routine = threshold if cadence == "weekly" else 0.0
+        target = max(routine, need_under_limit)
         plan_ids, plan_total = [], 0.0
         for x in gb:
-            if x["overdue"] or plan_total < target:
+            if x["overdue"] or x["bucket"] == "due7" or plan_total < target:
                 plan_ids.append(x["id"])
                 plan_total += x["balance"]
         plan_total = round(plan_total, 2)
@@ -2091,8 +2137,8 @@ def recon_upcoming(due_window: int = 14):
             "outstanding": outstanding, "credit_limit": limit, "available": available,
             "over_limit": over_limit, "near_limit": near_limit,
             "overdue_total": overdue_total, "due7_total": due7_total, "due_window_total": duewin_total,
-            "n_bills": len(gb), "bills": gb,
-            "plan": {"threshold": threshold, "need_under_limit": need_under_limit,
+            "n_bills": len(gb), "bills": gb, "cadence": cadence,
+            "plan": {"threshold": threshold, "cadence": cadence, "need_under_limit": need_under_limit,
                      "suggested_total": plan_total, "suggested_ids": plan_ids,
                      "clears_limit_breach": need_under_limit > 0 and plan_total + 0.005 >= need_under_limit},
         })
@@ -2144,6 +2190,52 @@ def recon_upcoming(due_window: int = 14):
         "suppliers": suppliers,
         "to_approve": to_approve[:60],
     }
+
+
+@app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
+def recon_pay_plan_config_get():
+    """The payment-plan settings for the editor: the default weekly threshold + the per-supplier
+    overrides (threshold + weekly/monthly cadence)."""
+    cfg = _pay_plan_config()
+    sup = [{"name": v.get("name"), "threshold": v.get("threshold"), "cadence": v.get("cadence")}
+           for v in cfg["suppliers"].values()]
+    sup.sort(key=lambda s: str(s.get("name") or "").lower())
+    return {"ok": True, "default_threshold": cfg["default_threshold"], "suppliers": sup}
+
+
+class PayPlanCfgIn(BaseModel):
+    default_threshold: float = 5000.0
+    suppliers: list[dict] = []   # [{name, threshold, cadence}]
+
+
+@app.post("/recon/pay-plan-config", dependencies=[Depends(require_statements_key)])
+def recon_pay_plan_config_set(body: PayPlanCfgIn):
+    """Save the payment-plan settings. Replaces the whole supplier list (each {name, threshold,
+    cadence}); blank-named or non-numeric rows are dropped. Needs the Supabase config store."""
+    import invoice_core as core
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Settings store not available.")
+        default_threshold = max(0.0, float(body.default_threshold or 5000.0))
+        suppliers = {}
+        for row in (body.suppliers or []):
+            name = (row.get("name") or "").strip()
+            nk = core.norm_code(name)
+            if not nk:
+                continue
+            try:
+                thr = max(0.0, float(row.get("threshold")))
+            except (TypeError, ValueError):
+                continue
+            cadence = "monthly" if str(row.get("cadence")).lower() == "monthly" else "weekly"
+            suppliers[nk] = {"name": name, "threshold": thr, "cadence": cadence}
+        supabase_db.config_set(_PAY_PLAN_KEY, {"default_threshold": default_threshold, "suppliers": suppliers})
+        return {"ok": True, "default_threshold": default_threshold, "n_suppliers": len(suppliers)}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save the settings: {e}")
 
 
 class RemitIn(BaseModel):

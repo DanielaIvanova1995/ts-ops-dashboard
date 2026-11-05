@@ -470,15 +470,115 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
   );
 }
 
+// Payment-plan settings: the default weekly amount + per-supplier threshold (how much to pay in one
+// run) and cadence (weekly tops up to the threshold; monthly only covers what's actually due/overdue).
+function PayPlanSettings({ jsonFetch, vendors, onSaved, onNotice }) {
+  const [def_, setDef] = useState(5000);
+  const [rows, setRows] = useState([]);           // [{name, threshold, cadence}]
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [pick, setPick] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await jsonFetch("/recon/pay-plan-config");
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setDef(d.default_threshold ?? 5000); setRows((d.suppliers || []).map((s) => ({ name: s.name || "", threshold: s.threshold ?? d.default_threshold ?? 5000, cadence: s.cadence || "weekly" }))); }
+    } catch (e) { if (String(e.message) !== "locked") onNotice?.({ kind: "warn", text: String(e.message || e) }); }
+    finally { setLoading(false); }
+  }, [jsonFetch, onNotice]);
+  useEffect(() => { load(); }, [load]);
+
+  const setRow = (i, patch) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const removeRow = (i) => setRows((rs) => rs.filter((_, j) => j !== i));
+  const addRow = () => {
+    const name = (pick || "").trim();
+    if (!name) return;
+    if (rows.some((r) => r.name.toLowerCase() === name.toLowerCase())) { onNotice?.({ kind: "warn", text: `${name} is already in the list.` }); return; }
+    setRows((rs) => [...rs, { name, threshold: def_, cadence: "weekly" }]);
+    setPick("");
+  };
+
+  async function save() {
+    setSaving(true);
+    try {
+      const suppliers = rows.filter((r) => (r.name || "").trim()).map((r) => ({ name: r.name.trim(), threshold: Number(r.threshold) || 0, cadence: r.cadence === "monthly" ? "monthly" : "weekly" }));
+      const res = await jsonFetch("/recon/pay-plan-config", { method: "POST", body: JSON.stringify({ default_threshold: Number(def_) || 0, suppliers }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { onNotice?.({ kind: "ok", text: `Saved — default £${(Number(def_) || 0).toLocaleString("en-GB")}, ${d.n_suppliers} supplier override${d.n_suppliers === 1 ? "" : "s"}.` }); onSaved?.(); }
+      else onNotice?.({ kind: "warn", text: d.detail || `Couldn’t save (API ${res.status}).` });
+    } catch (e) { if (String(e.message) !== "locked") onNotice?.({ kind: "warn", text: String(e.message || e) }); }
+    finally { setSaving(false); }
+  }
+
+  // Suppliers not already overridden, for the add dropdown.
+  const have = new Set(rows.map((r) => (r.name || "").toLowerCase()));
+  const addable = (vendors || []).map((v) => v.name).filter((n) => n && !have.has(n.toLowerCase()));
+
+  return (
+    <div style={{ marginTop: 12, border: "1px solid rgba(127,127,127,0.25)", borderRadius: 10, padding: "12px 14px", background: "rgba(127,127,127,0.04)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <b>Payment plan settings</b>
+        <span className="sub" style={{ flex: 1 }}>How much to pay each supplier per run, and how often.</span>
+      </div>
+      {loading ? <div className="sub" style={{ marginTop: 10 }}>Loading…</div> : (
+        <>
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <label className="sub">Default weekly amount (all other suppliers): £</label>
+            <input className="search" type="number" min="0" step="100" style={{ maxWidth: 140, flex: "none" }} value={def_} onChange={(e) => setDef(e.target.value)} />
+          </div>
+
+          <table className="mini" style={{ marginTop: 10 }}>
+            <thead><tr><th>Supplier</th><th className="num">Amount per run (£)</th><th>How often</th><th></th></tr></thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={4} className="sub">No overrides — every supplier uses the default above.</td></tr>}
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td className="ono">{r.name}</td>
+                  <td className="num"><input className="search" type="number" min="0" step="100" style={{ maxWidth: 120 }} value={r.threshold} onChange={(e) => setRow(i, { threshold: e.target.value })} /></td>
+                  <td>
+                    <select className="filter" style={{ maxWidth: 130, flex: "none" }} value={r.cadence} onChange={(e) => setRow(i, { cadence: e.target.value })}>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </td>
+                  <td><button className="btn ghost" onClick={() => removeRow(i)} title="Remove this override (back to the default)">Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {addable.length ? (
+              <select className="filter" style={{ maxWidth: 240, flex: "none" }} value={pick} onChange={(e) => setPick(e.target.value)}>
+                <option value="">Add a supplier override…</option>
+                {addable.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            ) : (
+              <input className="search" style={{ maxWidth: 240, flex: "none" }} placeholder="Supplier name" value={pick} onChange={(e) => setPick(e.target.value)} />
+            )}
+            <button className="btn" onClick={addRow} disabled={!pick.trim()}>Add</button>
+            <span style={{ flex: 1 }} />
+            <button className="btn primary" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
+          </div>
+          <div className="sub" style={{ marginTop: 8, fontSize: 12 }}>Weekly = pays down to that amount each run. Monthly = only covers what’s overdue or due this week (no routine top-up). A credit-limit breach always overrides and pays enough to get back under.</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Upcoming Payments planner — reads /recon/upcoming (live QB open bills + credit limits) and shows
 // what's due, the credit headroom per supplier, a prepared oldest-first pay plan, and a nudge to
 // approve invoices that are already due but not yet in QuickBooks. Read-only radar; paying still
 // goes through the saved-statement pay flow (the "Open to pay" button jumps to it).
-function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin }) {
+function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vendors }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [openV, setOpenV] = useState(() => new Set());   // vendor_ids whose bills are expanded
   const toggleV = (v) => setOpenV((s) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; });
 
@@ -517,8 +617,11 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div className="tool-label" style={{ margin: 0 }}>💷 Upcoming payments</div>
         <span className="sub" style={{ flex: 1 }}>{data ? `prepared ${String(data.generated_at || "").slice(0, 16).replace("T", " ")} · due within ${data.due_window} days` : ""}</span>
+        <button className="btn ghost" onClick={() => setShowSettings((v) => !v)} title="Set how much to pay each supplier per run, and how often">⚙ Settings</button>
         <button className="btn" onClick={load} disabled={loading}>{loading ? "Loading…" : "↻ Refresh"}</button>
       </div>
+
+      {showSettings && <PayPlanSettings jsonFetch={jsonFetch} vendors={vendors} onNotice={onNotice} onSaved={() => { setShowSettings(false); load(); }} />}
 
       {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
       {!data && !err && <div className="sub" style={{ marginTop: 10 }}>{loading ? "Building the plan from QuickBooks…" : ""}</div>}
@@ -1011,7 +1114,7 @@ export default function Recon() {
       )}
 
       {!needPin && qb && qb.qbo_connected !== false && (
-        <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={openSaved} onNotice={setNotice} needPin={needPin} />
+        <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={openSaved} onNotice={setNotice} needPin={needPin} vendors={vendors} />
       )}
 
       <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
