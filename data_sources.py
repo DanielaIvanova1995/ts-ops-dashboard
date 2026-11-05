@@ -1561,6 +1561,117 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
     return {"invoices": out[:limit], "more": bool(cursor)}
 
 
+def fetch_invoice_by_sub_id(sub_id, token: str | None = None) -> dict | None:
+    """Fetch ONE invoice/credit-note subitem directly by its Monday item id, with the same enrichment
+    fetch_invoices_by_status gives each row (supplier, Shopify order id, order margin, totals, PDF asset,
+    etc.). Returns the parsed dict, or None if the id doesn't exist. Status-agnostic — unlike the list
+    fetch it finds the subitem whatever its Payment Status and however large the queue, so the invoice
+    checker can never 404 on an invoice the user can see. Raises on token/API failure."""
+    import json as _json
+    import re
+    token = token or get_token()
+    if not token:
+        raise RuntimeError("No MONDAY_API_TOKEN configured")
+    sid_s = str(sub_id).strip()
+    if not sid_s:
+        return None
+    store = get_secret("SHOPIFY_STORE")
+    headers = {"Authorization": token, "API-Version": "2024-10"}
+    item_fields = """
+            id name created_at
+            column_values(ids: ["file_mm38gx3j", "numbers4", "status7__1",
+              "text_mm3gh2za", "text_mm3gjrap", "date_mm3d1ear", "long_text_mm8jcvz3"]) { id value text }
+            parent_item { id name subitems { id }
+              column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
+                "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
+                "numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+                "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c"]) {
+                id text ... on FormulaValue { display_value } } }
+    """
+    q = "query ($ids: [ID!]) { items(ids: $ids) { %s } }" % item_fields
+
+    def _num(v):
+        if v in (None, ""):
+            return None
+        s = re.sub(r"[^0-9.\-]", "", str(v))
+        try:
+            return float(s) if s not in ("", "-", ".", "-.") else None
+        except (TypeError, ValueError):
+            return None
+
+    r = requests.post(MONDAY_API, json={"query": q, "variables": {"ids": [sid_s]}},
+                      headers=headers, timeout=60)
+    r.raise_for_status()
+    payload = r.json()
+    if "errors" in payload:
+        raise RuntimeError(f"Monday API error: {payload['errors']}")
+    items = (payload.get("data") or {}).get("items") or []
+    if not items:
+        return None
+    it = items[0]
+    cv = {c["id"]: c for c in it.get("column_values", [])}
+    asset_id = file_name = None
+    fv = cv.get("file_mm38gx3j", {}) or {}
+    if fv.get("value"):
+        try:
+            files = _json.loads(fv["value"]).get("files", [])
+            if files:
+                asset_id, file_name = files[0].get("assetId"), files[0].get("name")
+        except Exception:  # noqa: BLE001
+            pass
+    total = _num((cv.get("numbers4", {}) or {}).get("text"))
+    date = actioned_at = None
+    sv = cv.get("status7__1", {}) or {}
+    if sv.get("value"):
+        try:
+            ca = _json.loads(sv["value"]).get("changed_at")
+            if ca:
+                actioned_at = ca
+                date = ca[:10]
+        except Exception:  # noqa: BLE001
+            pass
+    parent = it.get("parent_item") or {}
+    pcv, margin_live = {}, None
+    for c in (parent.get("column_values") or []):
+        if c.get("id") == "formula_mkn9918j":
+            m = re.search(r"-?\d+(?:\.\d+)?", c.get("display_value") or "")
+            margin_live = float(m.group()) if m else None
+        else:
+            pcv[c["id"]] = c.get("text")
+    sid = (pcv.get("text_mm04tmac") or "").strip() or None
+    agreed_cost = _num(pcv.get("numbers6"))
+    to_us = _num(pcv.get("numbers48"))
+    inv_col_ids = ("numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
+                   "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c")
+    inv_columns = {cid: _num(pcv.get(cid)) for cid in inv_col_ids}
+    invoiced_parts = [inv_columns[c] for c in inv_col_ids if inv_columns[c] is not None]
+    order_invoiced_total = round(sum(invoiced_parts), 2) if invoiced_parts else None
+    return {
+        "order_item_id": parent.get("id"),
+        "inv_columns": inv_columns,
+        "sub_id": it["id"], "invoice_no": it.get("name"), "total": total,
+        "to_us": to_us, "order_invoiced_total": order_invoiced_total,
+        "asset_id": asset_id, "file_name": file_name,
+        "file_url": (cv.get("file_mm38gx3j", {}) or {}).get("text") or None,
+        "order_no": pcv.get("text_mkv6z0nt") or parent.get("name"),
+        "order_part": (parent.get("name") or "").strip() or None,
+        "supplier": pcv.get("dropdown_mkyqdeqd"),
+        "order_items": pcv.get("order_items0") or "",
+        "query_note": (cv.get("text_mm3gh2za", {}) or {}).get("text") or "",
+        "action_note": (cv.get("text_mm3gjrap", {}) or {}).get("text") or "",
+        "progress": (cv.get("long_text_mm8jcvz3", {}) or {}).get("text") or "",
+        "invoice_date": (cv.get("date_mm3d1ear", {}) or {}).get("text") or "",
+        "order_margin_live": margin_live,
+        "agreed_cost": agreed_cost,
+        "shopify_order_id": sid,
+        "order_url": f"https://{store}/admin/orders/{sid}" if (store and sid) else None,
+        "supplier_email": (pcv.get("email") or "").strip() or None,
+        "status": sv.get("text"), "date": date, "actioned_at": actioned_at,
+        "n_invoices": len(parent.get("subitems") or []),
+        "created": (it.get("created_at") or "")[:10],
+    }
+
+
 def fetch_finance_orders(token: str | None = None, group_keywords=("paid",),
                          page_size: int = 500, max_pages: int = 30) -> dict:
     """Every order in the Orders board's 'Paid & Delivered' group(s), for the Finance

@@ -2304,14 +2304,23 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
     line-by-line issues, margin and the suggested action. Parse is cached (Supabase) to avoid re-
     reading the PDF with Claude each time."""
     import invoice_core as core
+    # Fetch THIS subitem directly by its id — status-agnostic and not capped by any list limit, so the
+    # check never 404s on an invoice the user can see (older bug: the invoice fell outside the first 500
+    # of a combined Needs-Review+Matched fetch, or had since moved to Discrepancy). Fall back to the list
+    # scan only if the direct fetch errors.
+    inv = None
     try:
-        # Look in Needs Review AND Matched (TradeHub) so a matched invoice can be re-checked too.
-        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL, _MATCHED_LABEL], limit=500)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
-    inv = next((i for i in (data.get("invoices") or []) if str(i.get("sub_id")) == str(sub_id)), None)
+        inv = ds.fetch_invoice_by_sub_id(sub_id)
+    except Exception:  # noqa: BLE001
+        inv = None
     if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found in Needs Review or Matched")
+        try:
+            data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL, _MATCHED_LABEL, _DISCREPANCY_LABEL], limit=500)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+        inv = next((i for i in (data.get("invoices") or []) if str(i.get("sub_id")) == str(sub_id)), None)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found on Monday (it may have been deleted or moved)")
     if not inv.get("asset_id"):
         # No PDF: for a supplier we hold no pricelist for (e.g. MB Decor, interim), there's nothing to
         # line-check against — the ORDER MARGIN is the safeguard. Return a margin-only verdict so it's
