@@ -108,6 +108,11 @@ PRODUCT_EQUIV = [
     # (5300303/5300319/5300448/…), all our single 'VL… Coloured Fixing Screws' line — so match ANY
     # UPB invoice line described as 'fixing screws' to the order's fixing-screws line.
     {"supplier": "upb", "inv_name_has": ["fixing", "screws"], "order_name_has": ["fixing", "screws"]},
+    # UPB bills the HardiePlank starter strip / starter profile under its own codes (e.g. 5300184,
+    # described 'HardiePlank Starter Vent / 50mm Starter Profile') = our 'Starter Strip and Ventilation
+    # Profile' order line (SKU JHPROFP…). The names share only 'starter' (7 chars) so the name-scorer
+    # just misses it — pin it: any UPB line saying 'starter' → the order's 'starter' line.
+    {"supplier": "upb", "inv_name_has": ["starter"], "order_name_has": ["starter"]},
 ]
 
 _TOK_ABBREV = {
