@@ -2150,6 +2150,7 @@ def invoices():
             "supplier": i.get("supplier"), "order_no": i.get("order_no"), "order_part": i.get("order_part"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "order_url": i.get("order_url"), "order_item_id": i.get("order_item_id"),
+            "invoice_date": i.get("invoice_date") or None, "logged": i.get("created") or None,
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
     return {"count": len(out), "invoices": out}
 
@@ -2170,6 +2171,7 @@ def invoices_matched():
             "supplier": i.get("supplier"), "order_no": i.get("order_no"), "order_part": i.get("order_part"), "total": i.get("total"),
             "margin": i.get("order_margin_live"), "has_pdf": bool(i.get("asset_id")),
             "order_url": i.get("order_url"), "order_item_id": i.get("order_item_id"),
+            "invoice_date": i.get("invoice_date") or None, "logged": i.get("created") or None,
             "possible_dup": amt_dups.get(str(i.get("sub_id")))} for i in invs]
     return {"count": len(out), "invoices": out}
 

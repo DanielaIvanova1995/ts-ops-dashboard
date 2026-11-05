@@ -12,6 +12,21 @@ function money(v) {
 // Order number for display — prefers the Monday item name (order_part), which carries the split
 // suffix like "31824-2", so split orders show -1/-2 instead of just the base number.
 function ordNo(iv) { return (iv?.order_part || iv?.order_no || "").toString().trim() || "—"; }
+// A Monday date like "2026-10-15" → "15 Oct 2026" (UK). Returns "" for blanks.
+function ukDate(s) {
+  if (!s) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+  if (!m) return String(s);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${Number(m[3])} ${months[Number(m[2]) - 1]} ${m[1]}`;
+}
+// The date to show for an invoice: the invoice's own date when we have it, else the date it was
+// logged (flagged as "logged" so it's not mistaken for the invoice date).
+function invDate(iv) {
+  if (iv?.invoice_date) return { text: ukDate(iv.invoice_date), logged: false };
+  if (iv?.logged) return { text: ukDate(iv.logged), logged: true };
+  return null;
+}
 function actionLabel(a, matched) {
   if (!matched) return { cls: "red", text: "Discrepancy — needs review" };
   if (a === "push") return { cls: "green", text: "Matches — ready to approve" };
@@ -1199,7 +1214,7 @@ export default function Invoices() {
                 <label className="inv-chk"><input type="checkbox" checked={sel.has(iv.sub_id)} onChange={() => toggleSel(iv.sub_id)} /></label>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span className="ono">{iv.invoice_no}</span>
-                  <span className="sub"> · {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}</span>
+                  <span className="sub"> · {iv.supplier || "—"} · order {ordNo(iv)} · {money(iv.total)}{(() => { const d = invDate(iv); return d ? <> · <span title={d.logged ? "Date this invoice was logged (no invoice date on Monday)" : "Invoice date"}>{d.logged ? "logged " : ""}{d.text}</span></> : null; })()}</span>
                   {iv.possible_dup ? <span className="pill red" style={{ marginLeft: 8 }}>possible duplicate of {iv.possible_dup}</span> : null}
                   {iv.margin != null ? <span className={`pill ${iv.margin < 0 ? "red" : iv.margin < floor ? "amber" : "green"}`} style={{ marginLeft: 8 }} title={iv.margin < 0 ? "Losing money" : iv.margin < floor ? `Under the ${floor}% threshold` : "Healthy margin"}>margin {iv.margin}%</span> : null}
                 </div>
