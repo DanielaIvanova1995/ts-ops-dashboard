@@ -456,18 +456,40 @@ export default function Invoices() {
     const sub_id = iv.sub_id;
     if (!window.confirm(`Invoice ${iv.invoice_no} is flagged as a discrepancy. Approve it to QuickBooks anyway? This creates its bill and clears it from the discrepancy queue.`)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    // QuickBooks (vendor lookup + create bill) can take a while; give it up to 90s, but never let the
+    // button spin forever — a timeout, a dropped request or any error always resets it with a message.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    let settled = false; // true once we've shown a result, so finally doesn't overwrite "done"
     try {
-      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
+      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }), signal: ctrl.signal });
       const d = await res.json().catch(() => ({ ok: false, detail: `API ${res.status}` }));
       if (res.ok && d.ok) {
+        settled = true;
         setApproving((a) => ({ ...a, [sub_id]: "done" }));
         setNotice({ kind: "ok", text: `${iv.invoice_no}: ${d.detail || "approved to QuickBooks"}` });
         setTimeout(() => setDisc((l) => l.filter((x) => x.sub_id !== sub_id)), 1200);
       } else {
+        settled = true;
         setApproving((a) => ({ ...a, [sub_id]: "err" }));
-        setNotice({ kind: "warn", text: `${iv.invoice_no}: ${d.detail || "couldn’t approve"}` });
+        setNotice({ kind: "warn", text: `${iv.invoice_no}: ${d.detail || `couldn’t approve (API ${res.status})`}` });
       }
-    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (msg === "unauthorised") {
+        settled = true;
+        setNotice({ kind: "warn", text: "Your sign-in expired — enter the access code again, then retry Approve." });
+      } else if (e?.name === "AbortError") {
+        setNotice({ kind: "warn", text: `${iv.invoice_no}: QuickBooks didn’t respond in time. It may still have gone through — ↻ Refresh in a moment to check before retrying.` });
+      } else {
+        setNotice({ kind: "warn", text: `${iv.invoice_no}: ${msg}` });
+      }
+    } finally {
+      clearTimeout(timer);
+      // Always stop the spinner unless we already flipped it to "done".
+      if (!settled) setApproving((a) => ({ ...a, [sub_id]: "err" }));
+      else setApproving((a) => (a[sub_id] === "working" ? { ...a, [sub_id]: "err" } : a));
+    }
   }
 
   async function saveProgress(iv) {
@@ -583,26 +605,37 @@ export default function Invoices() {
     if (!window.confirm(msg)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    let settled = false;
     try {
-      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }) });
+      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }), signal: ctrl.signal });
       const d = await res.json().catch(() => ({ ok: false, detail: `API ${res.status}` }));
       if (res.ok && d.ok) {
+        settled = true;
         setApproving((a) => ({ ...a, [sub_id]: "done" }));
         setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "ok", text: d.detail || "approved" } }));
         setNotice({ kind: "ok", text: `${iv.invoice_no}: ${d.detail}` });
         setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 1500);
       } else {
+        settled = true;
         setApproving((a) => ({ ...a, [sub_id]: "err" }));
-        const text = d.detail || "couldn’t approve";
+        const text = d.detail || `couldn’t approve (API ${res.status})`;
         setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text } }));
         setNotice({ kind: "warn", text: `${iv.invoice_no}: ${text}` });
       }
     } catch (e) {
-      setApproving((a) => ({ ...a, [sub_id]: "err" }));
-      if (String(e.message) !== "unauthorised") {
-        setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text: String(e.message || e) } }));
-        setNotice({ kind: "warn", text: String(e.message || e) });
-      }
+      const em = String(e?.message || e);
+      const text = em === "unauthorised"
+        ? "Your sign-in expired — enter the access code again, then retry Approve."
+        : e?.name === "AbortError"
+          ? `QuickBooks didn’t respond in time. It may still have gone through — ↻ Refresh before retrying.`
+          : em;
+      setApproveMsg((m) => ({ ...m, [sub_id]: { kind: "warn", text } }));
+      setNotice({ kind: "warn", text: `${iv.invoice_no}: ${text}` });
+    } finally {
+      clearTimeout(timer);
+      setApproving((a) => (a[sub_id] === "working" ? { ...a, [sub_id]: "err" } : a));
     }
   }
 
