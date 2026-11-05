@@ -601,6 +601,46 @@ export default function Invoices() {
     } finally { setChecking((c) => ({ ...c, [sub_id]: false })); }
   }, [jsonFetch, floor, ceil]);
 
+  // Single Check button: run the check, then — if it comes back a CLEAN match with the margin in band
+  // (suggested_action "push") — approve it straight to QuickBooks with no extra click or confirm
+  // (Daniela's call: "when it matches, approve straight away"). A discrepancy, or a match held for a
+  // low/high margin, still stops for review. Mirrors the bulk "Check & approve" gate exactly.
+  async function checkThenMaybeApprove(iv) {
+    const sub_id = iv.sub_id;
+    const d = await doCheck(sub_id);
+    if (!d || !d.ok) return;                                   // check failed / unauthorised (already handled)
+    if (!d.matched || d.suggested_action !== "push") return;   // discrepancy or margin-held → leave for her
+    // Clean, in-band match → approve now (no confirm). Same robust path as doApprove.
+    setApproving((a) => ({ ...a, [sub_id]: "working" }));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    let settled = false;
+    try {
+      const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: iv.invoice_no }), signal: ctrl.signal });
+      const ad = await res.json().catch(() => ({ ok: false, detail: `API ${res.status}` }));
+      if (res.ok && ad.ok) {
+        settled = true;
+        setApproving((a) => ({ ...a, [sub_id]: "done" }));
+        setNotice({ kind: "ok", text: `${iv.invoice_no}: matched — ${ad.detail || "approved to QuickBooks"}` });
+        setTimeout(() => setList((l) => l.filter((x) => x.sub_id !== sub_id)), 1500);
+      } else {
+        settled = true;
+        setApproving((a) => ({ ...a, [sub_id]: "err" }));
+        setNotice({ kind: "warn", text: `${iv.invoice_no}: matched but couldn’t approve — ${ad.detail || `API ${res.status}`}` });
+      }
+    } catch (e) {
+      const em = String(e?.message || e);
+      if (em !== "unauthorised") {
+        setNotice({ kind: "warn", text: e?.name === "AbortError"
+          ? `${iv.invoice_no}: matched, but QuickBooks didn’t respond in time — ↻ Refresh to check before retrying.`
+          : `${iv.invoice_no}: ${em}` });
+      }
+    } finally {
+      clearTimeout(timer);
+      setApproving((a) => (a[sub_id] === "working" ? { ...a, [sub_id]: "err" } : a));
+    }
+  }
+
   async function doApprove(iv, force = false) {
     const sub_id = iv.sub_id;
     const isCredit = typeof iv.total === "number" && iv.total < 0;
@@ -1168,7 +1208,7 @@ export default function Invoices() {
                   <button className={`btn ghost ${orderOpen.has(iv.sub_id) ? "on" : ""}`} onClick={() => toggleOrder(iv.sub_id)} title="See & edit this order on Monday">Monday {orderOpen.has(iv.sub_id) ? "▾" : "▸"}</button>
                   {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer" title="Open this order in Shopify">Shopify ↗</a>}
                   {!iv.has_pdf && <button className="btn" onClick={() => doFindPdf(iv)} disabled={findingPdf[iv.sub_id]}>{findingPdf[iv.sub_id] ? "Searching…" : "Find PDF in Outlook"}</button>}
-                  <button className="btn" onClick={() => doCheck(iv.sub_id)} disabled={busy} title={!iv.has_pdf ? "No PDF — for no-pricelist suppliers this checks on the order margin alone" : "Check this invoice"}>{busy ? "Checking…" : r ? "Re-check" : "Check"}</button>
+                  <button className="btn" onClick={() => checkThenMaybeApprove(iv)} disabled={busy || approving[iv.sub_id] === "working"} title={!iv.has_pdf ? "No PDF — for no-pricelist suppliers this checks on the order margin alone" : "Check — a clean, in-band match is approved to QuickBooks straight away"}>{busy ? "Checking…" : approving[iv.sub_id] === "working" ? "Approving…" : r ? "Re-check" : "Check"}</button>
                   {!r && approving[iv.sub_id] === "done" && <span className="pill green">pushed ✓</span>}
                   {!r && approving[iv.sub_id] !== "done" && <button className="btn primary" onClick={() => doApprove(iv)} disabled={approving[iv.sub_id] === "working"} title="Create the QB bill now without running the check">{approving[iv.sub_id] === "working" ? "…" : "Push to QB"}</button>}
                   {r && r.ok && approving[iv.sub_id] === "done" && <span className="pill green">approved ✓</span>}
