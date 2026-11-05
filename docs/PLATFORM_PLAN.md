@@ -93,6 +93,13 @@ refund/ETA chasers. They run on a timer, log to Supabase, push to Monday, and on
 for review** — the team stops doing them by hand. (Replaces the Make.com / Cowork / scheduled-task
 patchwork with one owned engine.)
 
+**Named component — Discrepancy Resolver** (spec in `docs/DISCREPANCY_RESOLVER.md`, agreed 2026‑11‑05):
+reads supplier **replies** to our discrepancy queries (from a dedicated forwarded folder) and updates
+the record via Claude, and **watches for the credit note** — when one arrives matching what we should
+have been charged it settles the invoice+CN, **auto‑approving to QuickBooks only on a clean match AND
+in‑band margin**, otherwise a one‑click human approval. Reuses the existing "Awaiting credit note from
+X of £Y" notes as the match target, the CN import, and push_decision's margin bands.
+
 ### Phase 4 — Event-driven *(the hands-off endgame)*
 **Webhooks** from Shopify/Monday hit the engine so things react **instantly** instead of polling:
 e.g. new order → auto-route + draft PO → lands in the review queue; supplier statement arrives →
