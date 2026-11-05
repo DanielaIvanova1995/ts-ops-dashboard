@@ -4507,6 +4507,94 @@ def resync_order_inv_slots(order_item_id, token: str | None = None) -> dict:
     return {"changed": changed, "slots": [t for _, t in target]}
 
 
+def find_duplicate_invoices(status_labels=None, token: str | None = None) -> dict:
+    """Find duplicate invoice subitems across the board: the SAME invoice number + SAME total (to the
+    penny) logged MORE THAN ONCE on the SAME order. One is kept (a matched/approved copy over a Needs
+    Review one, then the earliest-logged), the rest are flagged for deletion. Scans the active checker
+    statuses by default (Needs Review + Matched). Returns {groups, n_groups, n_dupes}."""
+    import re as _re
+    status_labels = status_labels or [3, 9]            # Needs Review + Matched (TradeHub)
+    data = fetch_invoices_by_status(status_labels, limit=1000, token=token)
+    invs = data.get("invoices") or []
+    norm = lambda s: _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+    groups: dict = {}
+    for i in invs:
+        oid = i.get("order_item_id")
+        num = norm(i.get("invoice_no"))
+        sid = i.get("sub_id")
+        if not oid or not num or not sid:
+            continue
+        tot = i.get("total")
+        tkey = f"{round(float(tot), 2):.2f}" if isinstance(tot, (int, float)) else "na"
+        groups.setdefault((str(oid), num, tkey), []).append(i)
+
+    def _keeprank(x):
+        st = (x.get("status") or "").strip().lower()
+        progressed = 0 if any(w in st for w in ("match", "approv", "paid")) else 1   # 0 = keep-worthy
+        return (progressed, x.get("created") or "9999-99-99", str(x.get("sub_id")))
+
+    out, n_dupes = [], 0
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        ms = sorted(members, key=_keeprank)
+        keep, dels = ms[0], ms[1:]
+        n_dupes += len(dels)
+        out.append({
+            "order_no": keep.get("order_part") or keep.get("order_no"),
+            "order_item_id": keep.get("order_item_id"),
+            "invoice_no": keep.get("invoice_no"), "total": keep.get("total"),
+            "supplier": keep.get("supplier"),
+            "keep": {"sub_id": keep.get("sub_id"), "status": keep.get("status"), "created": keep.get("created")},
+            "delete": [{"sub_id": d.get("sub_id"), "status": d.get("status"), "created": d.get("created")}
+                       for d in dels],
+        })
+    out.sort(key=lambda g: str(g.get("order_no")))
+    return {"groups": out, "n_groups": len(out), "n_dupes": n_dupes}
+
+
+def delete_duplicate_invoices(groups=None, status_labels=None, should_cancel=None,
+                              token: str | None = None) -> dict:
+    """Delete the duplicate invoice subitems (keeping one per group), then resync each affected
+    order's INV slots so the columns + margin are right. Finds the duplicates first if `groups` isn't
+    given. Cooperative-cancel via should_cancel() — stops between deletions, leaving nothing
+    half-done. Returns {ok, deleted, orders_touched, cancelled, errors}."""
+    token = token or get_token()
+    if groups is None:
+        groups = find_duplicate_invoices(status_labels, token=token).get("groups") or []
+    deleted, errors, cancelled, affected = 0, [], False, {}
+    for g in groups:
+        if should_cancel and should_cancel():
+            cancelled = True
+            break
+        oid = g.get("order_item_id")
+        for d in (g.get("delete") or []):
+            if should_cancel and should_cancel():
+                cancelled = True
+                break
+            sid = d.get("sub_id")
+            if not sid:
+                continue
+            try:
+                delete_subitem(sid, token=token)
+                deleted += 1
+                if oid:
+                    affected[str(oid)] = True
+            except Exception as e:  # noqa: BLE001
+                errors.append({"sub_id": sid, "error": str(e)[:120]})
+        if cancelled:
+            break
+    orders_touched = 0
+    for oid in affected:                               # fix the INV slots on every order we touched
+        try:
+            resync_order_inv_slots(oid, token=token)
+            orders_touched += 1
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "deleted": deleted, "orders_touched": orders_touched,
+            "cancelled": cancelled, "errors": errors[:40]}
+
+
 # Legacy 'Total Cost' column on the Orders board. It's still ADDED in the Total Profit / Margin
 # formula ({numbers48} - (fees + {numeric} + INV1..INV5)), so if it holds a value AND the INV slots
 # are filled, the cost is DOUBLE-counted and the margin reads too low. Cost now lives in the INV slots.

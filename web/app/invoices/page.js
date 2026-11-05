@@ -149,6 +149,106 @@ function ImportPanel({ jsonFetch, onNotice }) {
   );
 }
 
+function DuplicatesPanel({ jsonFetch, onNotice }) {
+  const [open, setOpen] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [found, setFound] = useState(null);      // { groups, n_groups, n_dupes }
+  const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  async function scan() {
+    setScanning(true); setFound(null); setStatus(null);
+    try {
+      const r = await jsonFetch("/invoices/duplicates");
+      const d = await r.json();
+      if (r.ok) setFound(d);
+      else onNotice({ kind: "warn", text: d.detail || "Couldn’t scan for duplicates." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setScanning(false); }
+  }
+
+  async function del() {
+    const n = found?.n_dupes || 0;
+    if (!n) return;
+    if (!window.confirm(`Delete ${n} duplicate invoice${n === 1 ? "" : "s"} from Monday (keeping one of each)?\n\nThis also fixes the affected orders' INV slots + margin. It can't be undone from here.`)) return;
+    setRunning(true); setStatus(null);
+    try {
+      const r = await jsonFetch("/invoices/duplicates/delete", { method: "POST" });
+      const d = await r.json();
+      if (!(r.ok && d.started)) { onNotice({ kind: "warn", text: d.detail || "Couldn’t start the delete." }); setRunning(false); return; }
+      let tries = 0;
+      const poll = async () => {
+        tries++;
+        try {
+          const sr = await jsonFetch("/invoices/duplicates/status");
+          const sd = await sr.json();
+          const st = sd.status || {};
+          setStatus(st);
+          if (st.running && tries < 120) setTimeout(poll, 3000);
+          else { setRunning(false); setStopping(false); scan(); }
+        } catch { setRunning(false); setStopping(false); }
+      };
+      setTimeout(poll, 2500);
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); setRunning(false); }
+  }
+
+  async function stop() {
+    setStopping(true);
+    try {
+      const r = await jsonFetch("/invoices/cancel-run?which=dupes", { method: "POST" });
+      if (r.ok) onNotice({ kind: "ok", text: "Stopping… it halts after the invoice it's on." });
+      else { const d = await r.json().catch(() => ({})); onNotice({ kind: "warn", text: d.detail || "Couldn’t send the stop." }); }
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+  }
+
+  const groups = found?.groups || [];
+  return (
+    <div className="card" style={{ padding: "10px 14px", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button className="btn ghost" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} Duplicate invoices</button>
+        <span className="sub">Find &amp; remove invoices logged more than once (same order, same number &amp; amount).</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          <div className="inv-controls">
+            <button className="btn" onClick={scan} disabled={scanning || running}>{scanning ? "Scanning…" : "Find duplicates"}</button>
+            {found && found.n_dupes > 0 && !running && <button className="btn primary op-del" onClick={del}>Delete {found.n_dupes} duplicate{found.n_dupes === 1 ? "" : "s"}</button>}
+            {running && <button className="btn op-del" onClick={stop} disabled={stopping} title="Stop — halts after the invoice it's on">{stopping ? "Stopping…" : "Stop"}</button>}
+          </div>
+          {running && <div className="sub" style={{ marginTop: 8 }}>Deleting duplicates on Monday… {status?.deleted != null ? `${status.deleted} removed so far.` : ""}</div>}
+          {status && !status.running && (status.error
+            ? <div className="route-msg warn" style={{ marginTop: 10 }}>{status.error}</div>
+            : <div className="sub" style={{ marginTop: 10 }}><b>{status.deleted ?? 0}</b> deleted · {status.orders_touched ?? 0} order{(status.orders_touched ?? 0) === 1 ? "" : "s"} updated{status.cancelled ? " · stopped" : ""}{(status.errors && status.errors.length) ? ` · ${status.errors.length} error(s)` : ""}</div>)}
+          {found && !running && (
+            found.n_dupes === 0
+              ? <div className="sub" style={{ marginTop: 10 }}>No duplicates found.</div>
+              : (
+                <div style={{ marginTop: 10 }}>
+                  <div className="sub"><b>{found.n_dupes}</b> duplicate{found.n_dupes === 1 ? "" : "s"} across <b>{found.n_groups}</b> order{found.n_groups === 1 ? "" : "s"} — one of each is kept:</div>
+                  <table className="mini" style={{ marginTop: 8 }}>
+                    <thead><tr><th>Order</th><th>Invoice</th><th className="num">Total</th><th className="num">Copies</th><th>Keeping</th></tr></thead>
+                    <tbody>
+                      {groups.map((g, i) => (
+                        <tr key={i}>
+                          <td>{g.order_no || "—"}</td>
+                          <td className="ono">{g.invoice_no || "—"}</td>
+                          <td className="num">{g.total != null ? money(g.total) : "—"}</td>
+                          <td className="num">{(g.delete?.length || 0) + 1}</td>
+                          <td className="sub">{g.keep?.status || "—"}{g.keep?.created ? ` · ${g.keep.created}` : ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Invoices() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -800,6 +900,7 @@ export default function Invoices() {
       {(tab === "review" || tab === "matched") && (<>
 
       {tab === "review" && <ImportPanel jsonFetch={jsonFetch} onNotice={setNotice} />}
+      {tab === "review" && <DuplicatesPanel jsonFetch={jsonFetch} onNotice={setNotice} />}
 
       {tab === "matched" && (
         <div className="route-msg ok" style={{ marginBottom: 8 }}>

@@ -3092,7 +3092,8 @@ def _make_should_cancel(job_key: str):
 def invoice_cancel_run(which: str = "import"):
     """Stop a running background job the hub started. which=import (invoice importer) or
     margins (fix-margins sweep). Signals the job to stop at its next step (it finishes the item it's on)."""
-    key = {"import": "invoice_import_run_status", "margins": "fix_margins_status"}.get(which)
+    key = {"import": "invoice_import_run_status", "margins": "fix_margins_status",
+           "dupes": "delete_dupes_status"}.get(which)
     if not key:
         raise HTTPException(status_code=400, detail="unknown job")
     _cancel_event(key).set()
@@ -3102,6 +3103,44 @@ def invoice_cancel_run(which: str = "import"):
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True}
+
+
+@app.get("/invoices/duplicates", dependencies=[Depends(require_key)])
+def invoice_duplicates():
+    """Find duplicate invoices across the board (same order + same invoice number + same total logged
+    more than once) — a preview of what the bulk delete would remove. Read-only."""
+    try:
+        return ds.find_duplicate_invoices()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't scan for duplicates: {str(e)[:180]}")
+
+
+@app.post("/invoices/duplicates/delete", dependencies=[Depends(require_key)])
+def invoice_duplicates_delete():
+    """Delete all duplicate invoices board-wide (keeping one per group) and resync each affected
+    order's INV slots. Runs in the background so it can be stopped — poll /invoices/duplicates/status,
+    stop with /invoices/cancel-run?which=dupes. DESTRUCTIVE: the front-end confirms first."""
+    import threading
+
+    def _work():
+        should = _make_should_cancel("delete_dupes_status")
+        _save_status("delete_dupes_status", {"running": True})
+        try:
+            r = ds.delete_duplicate_invoices(should_cancel=should)
+            _save_status("delete_dupes_status", {
+                "running": False, "ok": r.get("ok"), "deleted": r.get("deleted"),
+                "orders_touched": r.get("orders_touched"), "cancelled": bool(r.get("cancelled")),
+                "errors": (r.get("errors") or [])[:20]})
+        except Exception as e:  # noqa: BLE001
+            _save_status("delete_dupes_status", {"running": False, "ok": False, "error": str(e)[:200]})
+
+    threading.Thread(target=_work, name="delete-dupes", daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.get("/invoices/duplicates/status", dependencies=[Depends(require_key)])
+def invoice_duplicates_status():
+    return {"status": _get_status("delete_dupes_status")}
 
 
 @app.post("/invoices/fix-margins-all", dependencies=[Depends(require_key)])
