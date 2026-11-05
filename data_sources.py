@@ -4454,6 +4454,59 @@ def reconcile_order_inv_slots(order_item_id, token: str | None = None) -> int:
     return n_filled
 
 
+def resync_order_inv_slots(order_item_id, token: str | None = None) -> dict:
+    """Make the order's INV1..INV6 slots EXACTLY match its remaining invoice subitems' totals — both
+    FILLING missing ones AND CLEARING any slot no longer backed by an invoice. Use after DELETING or
+    removing an invoice so the INV columns (and the Monday margin) are right. Unlike
+    reconcile_order_inv_slots (fill-only, safe to sweep board-wide), this also clears extras, so only
+    call it for a deliberate single-order repair. Multiset-preserving: keeps slots that are still
+    valid in place and only clears/fills the difference, so it writes as little as possible. Returns
+    {changed, slots}."""
+    import json as _json
+    from collections import Counter
+    token = token or get_token()
+    remaining = Counter(order_subitem_totals(order_item_id, token))   # remaining invoice totals
+    ids = _json.dumps(INV_TOTAL_COLS)
+    data = _monday_gql("query($i:[ID!]){items(ids:$i){column_values(ids:%s){id text}}}" % ids,
+                       {"i": [str(order_item_id)]}, token)
+    by_id = {c["id"]: (c.get("text") or "").strip()
+             for c in (((data.get("items") or [{}])[0]).get("column_values") or [])}
+
+    def _curval(col):
+        t = by_id.get(col, "")
+        try:
+            return round(float(t.replace(",", "")), 2) if t else None
+        except ValueError:
+            return None
+
+    current = [(col, _curval(col)) for col in INV_TOTAL_COLS]
+    # Pass 1: keep each current slot value that's still needed (decrement the multiset); mark the rest empty.
+    kept = []
+    for col, cur in current:
+        if cur is not None and remaining.get(cur, 0) > 0:
+            remaining[cur] -= 1
+            kept.append((col, cur))
+        else:
+            kept.append((col, None))
+    # Pass 2: drop any leftover needed totals into the now-empty slots.
+    leftovers = [v for v, n in remaining.items() for _ in range(n)]
+    li = 0
+    target = []
+    for col, val in kept:
+        if val is None and li < len(leftovers):
+            val = leftovers[li]
+            li += 1
+        target.append((col, val))
+    changed = 0
+    for (col, tgt), (_, cur) in zip(target, current):
+        same = (cur is None and tgt is None) or (
+            cur is not None and tgt is not None and abs(cur - tgt) <= 0.01)
+        if not same:
+            set_order_number(order_item_id, col, (round(tgt, 2) if tgt is not None else None), token)
+            changed += 1
+    return {"changed": changed, "slots": [t for _, t in target]}
+
+
 # Legacy 'Total Cost' column on the Orders board. It's still ADDED in the Total Profit / Margin
 # formula ({numbers48} - (fees + {numeric} + INV1..INV5)), so if it holds a value AND the INV slots
 # are filled, the cost is DOUBLE-counted and the margin reads too low. Cost now lives in the INV slots.

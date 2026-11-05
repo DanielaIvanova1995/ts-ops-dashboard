@@ -3198,6 +3198,35 @@ def invoice_order_set(body: OrderFieldIn):
     return {"ok": True}
 
 
+class DeleteInvoiceIn(BaseModel):
+    order_item_id: str = ""     # parent order, so its INV slots can be resynced after the deletion
+
+
+@app.post("/invoices/{sub_id}/delete", dependencies=[Depends(require_key)])
+def invoice_delete(sub_id: str, body: DeleteInvoiceIn):
+    """Delete a duplicated/incorrect invoice (a Monday subitem) and then resync the parent ORDER's
+    INV1..INV6 slots so the columns — and the Monday margin — are right again. DESTRUCTIVE: the
+    front-end confirms first. If order_item_id isn't supplied it's resolved from the subitem before
+    deletion (it's needed afterwards to repair the slots)."""
+    oid = (body.order_item_id or "").strip()
+    if not oid:
+        try:
+            oid = ds._resolve_parent_order_id(sub_id, ds.get_token()) or ""
+        except Exception:  # noqa: BLE001
+            oid = ""
+    try:
+        ds.delete_subitem(sub_id)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't delete the invoice on Monday: {str(e)[:180]}")
+    resynced = None
+    if oid:
+        try:
+            resynced = ds.resync_order_inv_slots(oid)
+        except Exception:  # noqa: BLE001
+            resynced = None
+    return {"ok": True, "order_item_id": oid, "resynced": resynced}
+
+
 @app.get("/invoices/import-issues", dependencies=[Depends(require_key)])
 def invoice_import_issues(limit: int = 100):
     """Invoices that DIDN'T import as Monday subitems (newest first) — the 'no matching order' and

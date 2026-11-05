@@ -1059,6 +1059,7 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   const [inv, setInv] = useState([]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState("");
+  const [deleting, setDeleting] = useState("");   // sub_id being deleted
 
   const load = useCallback(async () => {
     setLoading(true); setErr("");
@@ -1102,6 +1103,22 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
       else onNotice({ kind: "warn", text: dd.detail || "Couldn’t save the note." });
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setSaving(""); }
+  }
+  // Delete a duplicated/wrong invoice on Monday, then the order's INV slots are resynced server-side.
+  async function delInvoice(s) {
+    const amt = s.total != null ? money(s.total) : "no total";
+    if (!window.confirm(`Delete invoice "${s.name}" (${amt}) from Monday?\n\nThis removes the subitem and updates the order's INV slots + margin. It can't be undone from here.`)) return;
+    setDeleting(s.sub_id);
+    try {
+      const r = await jsonFetch(`/invoices/${s.sub_id}/delete`, { method: "POST", body: JSON.stringify({ order_item_id: data.order.order_item_id }) });
+      const dd = await r.json().catch(() => ({}));
+      if (r.ok && dd.ok) {
+        const ch = dd.resynced && typeof dd.resynced.changed === "number" ? ` INV slots updated (${dd.resynced.changed} changed).` : "";
+        onNotice({ kind: "ok", text: `Deleted ${s.name} on Monday.${ch}` });
+        load();
+      } else onNotice({ kind: "warn", text: dd.detail || "Couldn’t delete the invoice." });
+    } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setDeleting(""); }
   }
 
   if (loading) return <div className="inv-body"><div className="state"><span className="spinner" />Reading the order from Monday…</div></div>;
@@ -1166,7 +1183,7 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
       <div className="op-card">
         <div className="op-card-head"><span>Invoices &amp; credits on this order ({sibs.length})</span></div>
         <table className="mini op-sibs">
-          <thead><tr><th>Invoice</th><th className="num">Total</th><th>Status</th><th>Date</th></tr></thead>
+          <thead><tr><th>Invoice</th><th className="num">Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
           <tbody>
             {sibs.map((s, i) => (
               <tr key={i} className={`${s.is_current ? "od " : ""}${isCN(s) ? "cn" : ""}`}>
@@ -1174,6 +1191,7 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
                 <td className="num">{s.total != null ? money(s.total) : "—"}</td>
                 <td className="sub">{s.status || "—"}</td>
                 <td className="sub">{s.date || "—"}</td>
+                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>{s.sub_id ? <button className="btn ghost sm op-del" onClick={() => delInvoice(s)} disabled={deleting === s.sub_id} title="Delete this invoice on Monday & fix the INV slots">{deleting === s.sub_id ? "Deleting…" : "Delete"}</button> : null}</td>
               </tr>
             ))}
           </tbody>
