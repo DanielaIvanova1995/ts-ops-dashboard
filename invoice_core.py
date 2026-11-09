@@ -256,6 +256,43 @@ def name_pair_score(dt, ot, common):
     return float(sum(len(t) for t in distinctive)) + 12.0 * overlap
 
 
+# Suppliers that re-code / re-name products, where a final product-TYPE leftover match is appropriate.
+_TYPE_MATCH_SUPPLIERS = ("squaredeal", "eurocell", "gap", "jbkind", "molan")
+
+
+def product_type(s):
+    """Coarse product family for a cladding line, from its description/name. Lets us pair an invoice
+    line to its order line by TYPE when the colour words are shared across several same-colour order
+    lines (board + corner), which the distinctive-word scorer wipes out. Order matters — the first
+    keyword hit wins (a 'Hardie Plank External Corner' is a corner, not a board)."""
+    t = (s or "").lower()
+    if "corner" in t:
+        return "corner"
+    if any(w in t for w in ("starter", "vent", "profile", "trim", "reveal", "window head")):
+        return "trim"
+    if any(w in t for w in ("screw", "fixing", "nail")):
+        return "fixing"
+    if "tape" in t:
+        return "tape"
+    if any(w in t for w in ("paint", "touch up", "touch-up", "edge coat", "seal edge", "silicone", "sealant")):
+        return "paint"
+    if any(w in t for w in ("blade", "saw", "guillotine", "gauge", "jigsaw", "cutter")):
+        return "tool"
+    if "backer" in t:
+        return "backer"
+    if "panel" in t:
+        return "panel"
+    if any(w in t for w in ("cill", "sill")):
+        return "cill"
+    if any(w in t for w in ("felt", "membrane", "breathable")):
+        return "membrane"
+    if any(w in t for w in ("block", "batten")):
+        return "batten"
+    if any(w in t for w in ("plank", "cladding", "board", "weatherboard")):
+        return "board"
+    return "other"
+
+
 def is_code(tok):
     has_d = any(c.isdigit() for c in tok)
     has_a = any(c.isalpha() for c in tok)
@@ -758,6 +795,35 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
             _hit(pending[idx], k)
             pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} by "
                                                    "name (Decor8 — no SKU, so name-matched)"))
+    # Product-TYPE leftover (re-coded suppliers). When an order has several lines of the SAME colour
+    # (e.g. a Monterey Taupe BOARD and a Monterey Taupe CORNER), the colour words become "common" and
+    # the distinctive-word scorer wipes them out, so the board line scores 0 everywhere → false "not on
+    # the order". Pair each still-unmatched invoice line to the remaining order line of the SAME product
+    # TYPE, confirmed by a shared real word (the colour) OR an exact quantity match. High-confidence:
+    # only fires on leftovers, never steals a scored match, and needs type + (colour or qty) to agree.
+    if supplier in _TYPE_MATCH_SUPPLIERS:
+        for idx, rec in enumerate(pending):
+            if idx in done:
+                continue
+            itype = product_type(rec.get("desc"))
+            dt = {t for t in title_tokens(rec.get("desc")) if len(t) >= 4 and not t.isdigit()}
+            best, best_key = (-1, -1), None
+            for k, v in order.items():
+                if k in hit or product_type(v.get("name")) != itype:
+                    continue
+                real_shared = len(dt & {t for t in title_tokens(v.get("name")) if len(t) >= 4 and not t.isdigit()})
+                qty_m = 1 if (rec.get("qty") is not None and rec.get("qty") == v.get("qty")) else 0
+                if real_shared == 0 and qty_m == 0:
+                    continue                       # same type but nothing confirms it — skip
+                score = (qty_m, real_shared)
+                if score > best:
+                    best, best_key = score, k
+            if best_key is not None:
+                done.add(idx)
+                _hit(pending[idx], best_key)
+                pending[idx]["issues"].append(("name", f"matched to order line {order[best_key]['sku']} "
+                                               "by product type + colour (invoice code differs)"))
+
     for idx, rec in enumerate(pending):
         if idx not in done:
             rec["issues"].append(("notorder", "not on the order"))
