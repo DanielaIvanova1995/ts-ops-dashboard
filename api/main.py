@@ -2684,6 +2684,34 @@ def _reviews_raw(refresh=False):
     return _REVIEWS_CACHE["raw"]
 
 
+def _reviews_apply_update_filter(res, max_updates):
+    """Apply the manual-updates filter to the shortlist only. The bulk pull omits updates (Monday
+    flakes on that field at scale), so we fetch them here for just the qualifying rows and drop any
+    with >max_updates manual (human) updates. Tolerant — if Monday can't return updates, nobody is
+    excluded on that basis rather than failing the whole list."""
+    import review_requests as rr
+    rows = res.get("rows") or []
+    if not rows:
+        return res
+    try:
+        counts = rr.fetch_updates([r["item_id"] for r in rows])
+    except Exception:  # noqa: BLE001
+        return res
+    kept = []
+    for r in rows:
+        n = counts.get(str(r["item_id"]))
+        if n is not None:
+            r["n_updates"] = n
+        if n is not None and n > max_updates:
+            res["excluded"]["updates_4plus"] = res["excluded"].get("updates_4plus", 0) + 1
+            continue
+        kept.append(r)
+    res["rows"] = kept
+    res["counts"] = {"A": sum(1 for r in kept if r["tier"] == "A"),
+                     "B": sum(1 for r in kept if r["tier"] == "B"), "total": len(kept)}
+    return res
+
+
 @app.get("/reviews", dependencies=[Depends(require_key)])
 def reviews_get(window_days: int = 60, max_gap: int = 5, max_updates: int = 3,
                 include_b: bool = True, refresh: int = 0, delivered: str = ""):
@@ -2699,6 +2727,7 @@ def reviews_get(window_days: int = 60, max_gap: int = 5, max_updates: int = 3,
     res = rr.build(window_days=window_days, max_gap=max_gap, max_updates=max_updates,
                    include_b=include_b, suppression=_reviews_suppression(), raw=raw,
                    delivered_statuses=delivered_statuses)
+    res = _reviews_apply_update_filter(res, max_updates)   # manual-updates filter on the shortlist only
     # How many times each customer has ALREADY been sent a review email (from the send log) — so we
     # can show it and let her deselect anyone who's had one before (even for a different order).
     try:
@@ -2806,6 +2835,7 @@ def reviews_send(body: ReviewsSendIn):
     res = rr.build(window_days=body.window_days, max_gap=body.max_gap, max_updates=body.max_updates,
                    include_b=body.include_b, suppression=_reviews_suppression(), raw=raw,
                    delivered_statuses=([s.strip() for s in body.delivered if s.strip()] or None))
+    res = _reviews_apply_update_filter(res, body.max_updates)   # re-check manual updates on the shortlist
     rows = [r for r in res["rows"] if str(r.get("item_id")) in want]
     cap = int(cfg.get("batch_cap") or 100)
     capped = len(rows) > cap

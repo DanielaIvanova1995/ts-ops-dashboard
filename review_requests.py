@@ -29,10 +29,10 @@ COL = {
     "review": "status_18",
 }
 _COL_IDS = list(COL.values())
-# updates(limit:10): we only need enough recent updates to spot a human chase (>max_updates, default
-# 3). 10 keeps Monday API complexity down vs 25; the stage/aftersales/review columns are the primary
-# problem-catchers, so a rare undercount on a very high-activity order is still caught by those.
-_FIELDS = ('id name updates(limit:10){id creator{id}} column_values(ids:[%s]){id text}'
+# NB: updates are NOT fetched in the bulk pull. Monday throws INTERNAL_SERVER_ERROR on the nested
+# `updates` field across big item pages (and it's expensive). Instead we fetch updates lazily, only
+# for the final shortlist, via fetch_updates() — cheaper and avoids the flaky large-page failure.
+_FIELDS = ('id name column_values(ids:[%s]){id text}'
            % ",".join(f'"{c}"' for c in _COL_IDS))
 
 # Update creators that are NOT a real person — automations post with a null creator (TradeHub's
@@ -41,13 +41,34 @@ _FIELDS = ('id name updates(limit:10){id creator{id}} column_values(ids:[%s]){id
 _AUTOMATION_CREATORS = {None, "", "-4", -4}
 
 
-def _manual_updates(it):
+def _manual_updates_from(updates):
+    """Count updates whose creator is a REAL person (not an automation) — automations post with a
+    null creator or Monday's -4 user."""
     n = 0
-    for u in (it.get("updates") or []):
+    for u in (updates or []):
         cid = (u.get("creator") or {}).get("id")
         if cid not in _AUTOMATION_CREATORS:
             n += 1
     return n
+
+
+def fetch_updates(item_ids, token=None):
+    """{item_id(str): manual_update_count} for just the given items — fetched lazily in small chunks
+    (the big pull omits updates because Monday flakes on that field at scale). Tolerant: a failed
+    chunk is skipped (those items stay unknown, so they're not excluded on update count)."""
+    token = token or ds.get_token()
+    ids = [str(i) for i in item_ids if i]
+    out = {}
+    q = 'query($ids:[ID!]){items(ids:$ids){id updates(limit:10){id creator{id}}}}'
+    for i in range(0, len(ids), 40):
+        chunk = ids[i:i + 40]
+        try:
+            data = ds._monday_gql(q, {"ids": chunk}, token)
+        except Exception:  # noqa: BLE001 — leave this chunk unknown rather than fail the whole list
+            continue
+        for it in (data.get("items") or []):
+            out[str(it.get("id"))] = _manual_updates_from(it.get("updates"))
+    return out
 
 # Review labels that mean "don't ask again" (already asked, or unhappy).
 _REVIEW_SKIP = {"sent", "bad experience", "apology"}
@@ -119,8 +140,8 @@ def fetch_raw(token=None):
                 "stage": cv.get(COL["stage"]),
                 "aftersales": cv.get(COL["aftersales"]),
                 "review": cv.get(COL["review"]),
-                "n_updates": _manual_updates(it),              # MANUAL updates only (ignore automations)
-                "n_updates_all": len(it.get("updates") or []),
+                "n_updates": None,     # filled later for the shortlist by fetch_updates()
+                "n_updates_all": None,
             })
     return out
 
@@ -147,7 +168,7 @@ def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=
         if delivered_ok is not None and _norm_label(r["delivery"]) not in delivered_ok:
             excl["not_delivered"] += 1
             continue
-        if r["n_updates"] > max_updates:                      # 4+ updates = there was an issue
+        if r["n_updates"] is not None and r["n_updates"] > max_updates:   # 4+ manual updates = an issue
             excl["updates_4plus"] += 1
             continue
         if (r["stage"] or "").strip():                        # any stage = return/refund/chargeback

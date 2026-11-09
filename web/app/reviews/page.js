@@ -71,7 +71,8 @@ export default function Reviews() {
       setSel(new Set((d.rows || []).map((r) => r.item_id)));   // default: all selected
     } catch (e) { if (String(e.message) !== "unauthorised") { setErr(String(e.message || e)); setStatus("error"); } }
   }, [accessKey, jsonFetch, f, delivered]);
-  useEffect(() => { load(); }, [load]);
+  // Deliberately NO auto-load: the Monday pull is expensive, so the list loads only when you click
+  // "Load list" / "Refresh". Changing a filter doesn't re-pull until you ask.
 
   // Load settings ONCE on sign-in, independent of the list. Only Save changes them after this, so a
   // list refresh can never wipe the review link (which was re-triggering the "set review link" banner).
@@ -167,13 +168,21 @@ export default function Reviews() {
         <div className="pagetitle">Review Requests</div>
         <div className="right">
           <button className="btn ghost" onClick={() => setShowCfg((v) => !v)}>⚙ Settings</button>
-          <button className="btn" onClick={() => load(1)} disabled={status === "loading"}>{status === "loading" ? "…" : "↻ Refresh"}</button>
+          <button className="btn primary" onClick={() => load(1)} disabled={status === "loading"}>{status === "loading" ? "Loading…" : (data ? "↻ Refresh" : "Load list")}</button>
         </div>
       </div>
 
       {notice && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 12 }}>{notice.text}</div>}
       {err && <div className="route-msg warn" style={{ marginBottom: 12 }}>{err}</div>}
       {!(cfg.review_link || "").trim() && <div className="route-msg warn" style={{ marginBottom: 12 }}>⚠ Set your <b>review link</b> in ⚙ Settings before sending — that's the page the button points customers to.</div>}
+
+      {!data && status !== "loading" && !err && (
+        <div className="card" style={{ padding: "18px 16px", marginBottom: 12, textAlign: "center" }}>
+          <div className="sub" style={{ marginBottom: 10 }}>The list isn’t loaded automatically (it reads a lot from Monday). Set your filters, then load it when you’re ready.</div>
+          <button className="btn primary" onClick={() => load(1)}>Load review list</button>
+        </div>
+      )}
+      {status === "loading" && !data && <div className="sub" style={{ marginBottom: 12 }}>Reading delivered orders from Monday…</div>}
 
       {showCfg && (
         <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
