@@ -276,8 +276,12 @@ def product_type(s):
         return "tape"
     if any(w in t for w in ("paint", "touch up", "touch-up", "edge coat", "seal edge", "silicone", "sealant")):
         return "paint"
-    if any(w in t for w in ("blade", "saw", "guillotine", "gauge", "jigsaw", "cutter")):
-        return "tool"
+    if "guillotine" in t or "roughneck" in t:
+        return "guillotine"
+    if "gauge" in t or "gecko" in t:
+        return "gauge"
+    if any(w in t for w in ("blade", "saw", "jigsaw")):
+        return "blade"
     if "backer" in t:
         return "backer"
     if "panel" in t:
@@ -762,11 +766,20 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                       "unit": carriage, "cost": known, "issues": cissues})
 
     scored = []
+    type_guard = supplier in _TYPE_MATCH_SUPPLIERS
     for idx, rec in enumerate(pending):
         dt = title_tokens(rec["desc"])
+        rtype = product_type(rec.get("desc")) if type_guard else None
         for k, v in order.items():
             if k in hit:
                 continue
+            # Re-coded suppliers: don't let a shared generic word pull a line onto the wrong PRODUCT
+            # (a "fibre cement SAW BLADE" matching a "fibre cement GUILLOTINE"). When both sides have a
+            # definite, different product type, they can't be the same line.
+            if type_guard:
+                vtype = product_type(v.get("name"))
+                if rtype != "other" and vtype != "other" and rtype != vtype:
+                    continue
             s = name_pair_score(dt, title_tokens(v.get("name")), common)
             if s > 0:
                 scored.append((s, idx, k))
