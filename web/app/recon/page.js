@@ -751,7 +751,7 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
 
           {shown.length === 0 && <div className="sub" style={{ marginTop: 10 }}>Nothing urgent — no overdue bills and nothing due within {data.due_window} days. 🎉</div>}
 
-          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 }}>
+          <div className="pay-grid" style={{ marginTop: 10 }}>
             {shown.map((s) => {
               const limit = typeof s.credit_limit === "number" ? s.credit_limit : null;
               const used = limit ? Math.min(1, s.outstanding / limit) : 0;
