@@ -2073,6 +2073,21 @@ def recon_upcoming(due_window: int = 14):
         nk = core.norm_code(nm)
         if nk:
             lim_by_norm.setdefault(nk, lim)
+    # Manual ("on account") payments awaiting a remittance — reduce what each supplier is shown as owed.
+    onacct_by_vid, onacct_by_name = {}, {}
+    manual_open_total = 0.0
+    for r in _manual_payments_load():
+        if (r.get("status") or "open") != "open":
+            continue
+        amt = float(r.get("amount") or 0)
+        manual_open_total += amt
+        vid_ = str(r.get("vendor_id") or "")
+        if vid_:
+            onacct_by_vid[vid_] = onacct_by_vid.get(vid_, 0.0) + amt
+        nk_ = core.norm_code(r.get("vendor_name"))
+        if nk_:
+            onacct_by_name[nk_] = onacct_by_name.get(nk_, 0.0) + amt
+    manual_open_total = round(manual_open_total, 2)
 
     def _credit_limit(vendor_name):
         nk = core.norm_code(vendor_name)
@@ -2108,7 +2123,11 @@ def recon_upcoming(due_window: int = 14):
         gb = g["bills"]
         gb.sort(key=lambda x: (0 if x["overdue"] else 1,
                                x["due"] or x["date"] or "9999"))   # overdue first, then earliest due
-        outstanding = round(sum(x["balance"] for x in gb), 2)
+        gross_outstanding = round(sum(x["balance"] for x in gb), 2)
+        # Subtract any ad-hoc payments logged against this supplier (paid but not yet remitted) — the
+        # account is really down by that much even though the QB bills are still open.
+        on_account = round(onacct_by_vid.get(vid, 0.0) or onacct_by_name.get(core.norm_code(g["vendor_name"]), 0.0), 2)
+        outstanding = round(max(0.0, gross_outstanding - on_account), 2)
         limit = _credit_limit(g["vendor_name"])
         available = round(limit - outstanding, 2) if isinstance(limit, (int, float)) else None
         over_limit = bool(available is not None and available < 0)
@@ -2134,7 +2153,8 @@ def recon_upcoming(due_window: int = 14):
         plan_total = round(plan_total, 2)
         suppliers.append({
             "vendor_id": vid, "vendor_name": g["vendor_name"],
-            "outstanding": outstanding, "credit_limit": limit, "available": available,
+            "outstanding": outstanding, "gross_outstanding": gross_outstanding,
+            "paid_on_account": on_account, "credit_limit": limit, "available": available,
             "over_limit": over_limit, "near_limit": near_limit,
             "overdue_total": overdue_total, "due7_total": due7_total, "due_window_total": duewin_total,
             "n_bills": len(gb), "bills": gb, "cadence": cadence,
@@ -2186,6 +2206,7 @@ def recon_upcoming(due_window: int = 14):
             "n_over_limit": sum(1 for s in suppliers if s["over_limit"]),
             "n_near_limit": sum(1 for s in suppliers if s["near_limit"]),
             "to_approve_total": round(to_approve_total, 2), "n_to_approve": len(to_approve),
+            "manual_open_total": manual_open_total,
         },
         "suppliers": suppliers,
         "to_approve": to_approve[:60],
@@ -2236,6 +2257,110 @@ def recon_pay_plan_config_set(body: PayPlanCfgIn):
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't save the settings: {e}")
+
+
+# ---- Manual ("on account") payments ----------------------------------------------------------
+# Quick payments Daniela makes to a supplier on the go WITHOUT a remittance. They bring the supplier's
+# balance down in the planner straight away, and sit on a "to remit" list until she's sent accounts the
+# remittance for them (then she clears them). Stored as a Supabase config blob (small, cleared often).
+_MANUAL_PAY_KEY = "manual_payments"
+
+
+def _manual_payments_load() -> list:
+    try:
+        import supabase_db
+        cfg = supabase_db.config_get(_MANUAL_PAY_KEY) if supabase_db.configured() else None
+    except Exception:  # noqa: BLE001
+        cfg = None
+    return list((cfg or {}).get("rows") or [])
+
+
+def _manual_payments_save(rows) -> None:
+    import supabase_db
+    supabase_db.config_set(_MANUAL_PAY_KEY, {"rows": rows})
+
+
+class ManualPayIn(BaseModel):
+    vendor_id: str = ""
+    vendor_name: str = ""
+    amount: float = 0.0
+    date: str = ""
+    reference: str = ""
+    note: str = ""
+
+
+@app.get("/recon/manual-payments", dependencies=[Depends(require_key_or_statements)])
+def manual_payments_list(status: str = "open"):
+    """Ad-hoc payments logged by hand. status=open (awaiting a remittance), remitted, or all."""
+    rows = _manual_payments_load()
+    if status in ("open", "remitted"):
+        rows = [r for r in rows if (r.get("status") or "open") == status]
+    rows.sort(key=lambda r: str(r.get("date") or r.get("created_at") or ""), reverse=True)
+    total_open = round(sum(float(r.get("amount") or 0) for r in _manual_payments_load()
+                           if (r.get("status") or "open") == "open"), 2)
+    return {"ok": True, "payments": rows, "total_open": total_open}
+
+
+@app.post("/recon/manual-payment", dependencies=[Depends(require_statements_key)])
+def manual_payment_add(body: ManualPayIn):
+    """Log a quick payment made outside the remittance flow. It immediately reduces what the planner
+    shows as owed to that supplier, and lands on the 'to remit' list."""
+    import uuid
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Store not available.")
+        amt = round(float(body.amount or 0), 2)
+        if amt <= 0:
+            raise HTTPException(status_code=400, detail="Enter an amount greater than £0.")
+        name = (body.vendor_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Pick a supplier.")
+        row = {"id": uuid.uuid4().hex[:12], "vendor_id": str(body.vendor_id or "").strip(),
+               "vendor_name": name, "amount": amt,
+               "date": (body.date or _dt.date.today().isoformat())[:10],
+               "reference": (body.reference or "").strip(), "note": (body.note or "").strip(),
+               "status": "open", "created_at": _dt.datetime.now().isoformat(timespec="seconds")}
+        rows = _manual_payments_load()
+        rows.append(row)
+        _manual_payments_save(rows)
+        return {"ok": True, "payment": row}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't log the payment: {e}")
+
+
+class ManualPayIdIn(BaseModel):
+    id: str
+
+
+@app.post("/recon/manual-payment/clear", dependencies=[Depends(require_statements_key)])
+def manual_payment_clear(body: ManualPayIdIn):
+    """Mark a logged payment as remitted (remittance sent to accounts) — removes it from the owed/to-remit
+    figures but keeps it in history."""
+    rows = _manual_payments_load()
+    hit = False
+    for r in rows:
+        if r.get("id") == body.id:
+            r["status"] = "remitted"
+            r["cleared_at"] = _dt.datetime.now().isoformat(timespec="seconds")
+            hit = True
+    if not hit:
+        raise HTTPException(status_code=404, detail="Payment not found.")
+    _manual_payments_save(rows)
+    return {"ok": True}
+
+
+@app.post("/recon/manual-payment/delete", dependencies=[Depends(require_statements_key)])
+def manual_payment_delete(body: ManualPayIdIn):
+    """Delete a logged payment (entered by mistake)."""
+    rows = _manual_payments_load()
+    new = [r for r in rows if r.get("id") != body.id]
+    if len(new) == len(rows):
+        raise HTTPException(status_code=404, detail="Payment not found.")
+    _manual_payments_save(new)
+    return {"ok": True}
 
 
 class RemitIn(BaseModel):

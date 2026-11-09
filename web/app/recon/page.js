@@ -569,6 +569,55 @@ function PayPlanSettings({ jsonFetch, vendors, onSaved, onNotice }) {
   );
 }
 
+// Payments awaiting a remittance — the ad-hoc payments logged on the planner. Shown on the remit side
+// so Daniela can see what she still owes accounts a remittance for, and clear each once it's sent.
+function ManualPaymentsToRemit({ jsonFetch, onNotice }) {
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState({});
+  const load = useCallback(async () => {
+    try {
+      const res = await jsonFetch("/recon/manual-payments?status=open");
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) setRows(d.payments || []);
+    } catch (e) { if (String(e.message) !== "locked") onNotice?.({ kind: "warn", text: String(e.message || e) }); }
+  }, [jsonFetch, onNotice]);
+  useEffect(() => { load(); }, [load]);
+
+  async function act(id, path, okText) {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const res = await jsonFetch(path, { method: "POST", body: JSON.stringify({ id }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setRows((xs) => xs.filter((x) => x.id !== id)); onNotice?.({ kind: "ok", text: okText }); }
+      else onNotice?.({ kind: "warn", text: d.detail || `API ${res.status}` });
+    } catch (e) { if (String(e.message) !== "locked") onNotice?.({ kind: "warn", text: String(e.message || e) }); }
+    finally { setBusy((b) => { const n = { ...b }; delete n[id]; return n; }); }
+  }
+
+  if (!rows.length) return null;
+  const total = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  return (
+    <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <div className="tool-label" style={{ margin: 0 }}>🧾 Payments to remit</div>
+        <span className="sub" style={{ flex: 1 }}>Quick payments you’ve made — still owe accounts a remittance for these.</span>
+        <span className="chip amber"><b>{rows.length}</b> · {money(total)}</span>
+      </div>
+      <div className="saved-list">
+        {rows.map((r) => (
+          <div key={r.id} className="saved-row">
+            <div><b>{r.vendor_name}</b> <span className="sub">· {money(r.amount)}{r.date ? ` · ${String(r.date).slice(0, 10)}` : ""}{r.reference ? ` · ${r.reference}` : ""}{r.note ? ` · ${r.note}` : ""}</span></div>
+            <div className="saved-right">
+              <button className="btn" disabled={busy[r.id]} onClick={() => act(r.id, "/recon/manual-payment/clear", `Marked ${r.vendor_name}'s ${money(r.amount)} as remitted.`)} title="Remittance sent to accounts — remove it from the owed/to-remit figures">Mark remitted</button>
+              <button className="btn ghost" disabled={busy[r.id]} onClick={() => { if (window.confirm(`Delete this logged payment (${r.vendor_name} ${money(r.amount)})? Use this only if it was entered by mistake.`)) act(r.id, "/recon/manual-payment/delete", "Deleted."); }} title="Entered by mistake — delete it">Delete</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Upcoming Payments planner — reads /recon/upcoming (live QB open bills + credit limits) and shows
 // what's due, the credit headroom per supplier, a prepared oldest-first pay plan, and a nudge to
 // approve invoices that are already due but not yet in QuickBooks. Read-only radar; paying still
@@ -581,6 +630,9 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
   const [showSettings, setShowSettings] = useState(false);
   const [openV, setOpenV] = useState(() => new Set());   // vendor_ids whose bills are expanded
   const toggleV = (v) => setOpenV((s) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; });
+  const [showLog, setShowLog] = useState(false);          // the "log a quick payment" form
+  const [logForm, setLogForm] = useState({ vendor_name: "", vendor_id: "", amount: "", date: "", reference: "", note: "" });
+  const [logging, setLogging] = useState(false);
 
   const load = useCallback(async () => {
     if (needPin) return;
@@ -595,6 +647,24 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
   }, [jsonFetch, needPin]);
   useEffect(() => { load(); }, [load]);
 
+  async function logPayment() {
+    const amt = Number(logForm.amount);
+    if (!logForm.vendor_name.trim()) { onNotice?.({ kind: "warn", text: "Pick a supplier for the payment." }); return; }
+    if (!(amt > 0)) { onNotice?.({ kind: "warn", text: "Enter an amount greater than £0." }); return; }
+    setLogging(true);
+    try {
+      const res = await jsonFetch("/recon/manual-payment", { method: "POST", body: JSON.stringify({ ...logForm, amount: amt }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        onNotice?.({ kind: "ok", text: `Logged ${money(amt)} to ${logForm.vendor_name} — ${logForm.vendor_name}'s balance is down; it's on the "to remit" list.` });
+        setLogForm({ vendor_name: "", vendor_id: "", amount: "", date: "", reference: "", note: "" });
+        setShowLog(false);
+        load();
+      } else onNotice?.({ kind: "warn", text: d.detail || `Couldn’t log it (API ${res.status}).` });
+    } catch (e) { if (String(e.message) !== "locked") onNotice?.({ kind: "warn", text: String(e.message || e) }); }
+    finally { setLogging(false); }
+  }
+
   const savedByVid = {};
   (saved || []).forEach((s) => { if (s.vid) savedByVid[String(s.vid)] = s; });
 
@@ -604,11 +674,11 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
   const urgent = suppliers.filter((s) => s.over_limit || s.overdue_total > 0 || s.due_window_total > 0);
   const shown = showAll ? suppliers : urgent;
 
-  const tile = (label, val, cls) => (
-    <div style={{ flex: "1 1 140px", minWidth: 140, background: "rgba(127,127,127,0.05)",
-      border: "1px solid rgba(127,127,127,0.18)", borderRadius: 10, padding: "10px 12px" }}>
-      <div className="sub" style={{ fontSize: 12 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }} className={cls}>{val}</div>
+  // Concise stat: a small label + value, inline.
+  const stat = (label, val, cls) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "2px 14px 2px 0", borderRight: "1px solid rgba(127,127,127,0.18)" }}>
+      <span className="sub" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</span>
+      <span style={{ fontSize: 16, fontWeight: 700 }} className={cls}>{val}</span>
     </div>
   );
 
@@ -617,23 +687,47 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div className="tool-label" style={{ margin: 0 }}>💷 Upcoming payments</div>
         <span className="sub" style={{ flex: 1 }}>{data ? `prepared ${String(data.generated_at || "").slice(0, 16).replace("T", " ")} · due within ${data.due_window} days` : ""}</span>
+        <button className="btn" onClick={() => setShowLog((v) => !v)} title="Record a quick payment you made outside the remittance flow">＋ Log a payment</button>
         <button className="btn ghost" onClick={() => setShowSettings((v) => !v)} title="Set how much to pay each supplier per run, and how often">⚙ Settings</button>
-        <button className="btn" onClick={load} disabled={loading}>{loading ? "Loading…" : "↻ Refresh"}</button>
+        <button className="btn ghost" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
       </div>
 
       {showSettings && <PayPlanSettings jsonFetch={jsonFetch} vendors={vendors} onNotice={onNotice} onSaved={() => { setShowSettings(false); load(); }} />}
+
+      {showLog && (
+        <div style={{ marginTop: 12, border: "1px solid rgba(127,127,127,0.25)", borderRadius: 10, padding: "12px 14px", background: "rgba(127,127,127,0.04)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <b>Log a quick payment</b>
+            <span className="sub" style={{ flex: 1 }}>A payment you made on the go (no remittance yet). It brings the account down now and lands on the “to remit” list.</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+            <select className="filter" style={{ maxWidth: 220, flex: "none" }} value={logForm.vendor_id}
+              onChange={(e) => { const v = (vendors || []).find((x) => String(x.id) === e.target.value); setLogForm((f) => ({ ...f, vendor_id: e.target.value, vendor_name: v ? v.name : f.vendor_name })); }}>
+              <option value="">Supplier…</option>
+              {(vendors || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>£<input className="search" type="number" min="0" step="0.01" style={{ maxWidth: 110 }} placeholder="Amount" value={logForm.amount} onChange={(e) => setLogForm((f) => ({ ...f, amount: e.target.value }))} /></span>
+            <input className="search" type="date" style={{ maxWidth: 150, flex: "none" }} value={logForm.date} onChange={(e) => setLogForm((f) => ({ ...f, date: e.target.value }))} title="Payment date (defaults to today)" />
+            <input className="search" style={{ maxWidth: 160, flex: "none" }} placeholder="Reference (optional)" value={logForm.reference} onChange={(e) => setLogForm((f) => ({ ...f, reference: e.target.value }))} />
+            <input className="search" style={{ flex: 1, minWidth: 140 }} placeholder="Note (optional)" value={logForm.note} onChange={(e) => setLogForm((f) => ({ ...f, note: e.target.value }))} />
+            <button className="btn primary" onClick={logPayment} disabled={logging}>{logging ? "Saving…" : "Log payment"}</button>
+          </div>
+        </div>
+      )}
 
       {err && <div className="route-msg warn" style={{ marginTop: 10 }}>{err}</div>}
       {!data && !err && <div className="sub" style={{ marginTop: 10 }}>{loading ? "Building the plan from QuickBooks…" : ""}</div>}
 
       {t && (
         <>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-            {tile("Overdue now", money(t.overdue_total), t.overdue_total > 0 ? "th-red" : "")}
-            {tile("Due this week", money(t.due7_total), "")}
-            {tile(`Due in ${data.due_window} days`, money(t.due_window_total), "")}
-            {tile("Total owed (QB)", money(t.open_total), "")}
-            {tile("Over credit limit", `${t.n_over_limit} supplier${t.n_over_limit === 1 ? "" : "s"}`, t.n_over_limit > 0 ? "th-red" : "")}
+          <div style={{ display: "flex", gap: 0, flexWrap: "wrap", marginTop: 12, alignItems: "center",
+            background: "rgba(127,127,127,0.05)", border: "1px solid rgba(127,127,127,0.18)", borderRadius: 10, padding: "8px 14px" }}>
+            {stat("Overdue", money(t.overdue_total), t.overdue_total > 0 ? "th-red" : "")}
+            {stat("Due 7d", money(t.due7_total), "")}
+            {stat(`Due ${data.due_window}d`, money(t.due_window_total), "")}
+            {stat("Owed", money(t.open_total), "")}
+            {stat("Over limit", `${t.n_over_limit}`, t.n_over_limit > 0 ? "th-red" : "")}
+            {t.manual_open_total > 0 ? <div style={{ paddingLeft: 14 }}>{stat("On account", money(t.manual_open_total), "")}</div> : null}
           </div>
 
           {t.n_to_approve > 0 && (
@@ -673,6 +767,7 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
                     {s.over_limit && <span className="chip red">OVER LIMIT</span>}
                     {!s.over_limit && s.near_limit && <span className="chip amber">near limit</span>}
                     <span style={{ flex: 1 }} />
+                    {s.paid_on_account > 0 && <span className="chip green" title={`${money(s.paid_on_account)} paid on account (awaiting a remittance) — already taken off what's owed`}>{money(s.paid_on_account)} on account</span>}
                     <span className="sub">{s.n_bills} bill{s.n_bills === 1 ? "" : "s"} · owed <b>{money(s.outstanding)}</b></span>
                     <button className="btn ghost" onClick={() => toggleV(s.vendor_id)}>{openV.has(s.vendor_id) ? "Hide bills" : "Bills"}</button>
                     {srow
@@ -1173,6 +1268,8 @@ export default function Recon() {
         </div>
         <div className="sub" style={{ marginTop: 8 }}>It’s parsed and matched against QuickBooks — read-only for now (no payments).</div>
       </div>
+
+      {!needPin && <ManualPaymentsToRemit jsonFetch={jsonFetch} onNotice={setNotice} />}
 
       {!needPin && <AutoReconcilePanel jsonFetch={jsonFetch} onNotice={setNotice} />}
 
