@@ -113,8 +113,8 @@ export default function Reviews() {
   const rows = data?.rows || [];
   const shownSel = rows.filter((r) => sel.has(r.item_id));
   function exportCsv() {
-    const head = ["Tier", "Order", "Customer", "Order date", "ETA", "Gap (days)", "Updates", "Email", "Phone"];
-    const out = shownSel.map((r) => [r.tier, r.order_no, r.name, r.order_date, r.eta || "", r.gap ?? "", r.n_updates, r.email, r.phone || ""]);
+    const head = ["Tier", "Order", "Customer", "Order date", "ETA", "Gap (days)", "Manual updates", "Times emailed", "Email", "Phone"];
+    const out = shownSel.map((r) => [r.tier, r.order_no, r.name, r.order_date, r.eta || "", r.gap ?? "", r.n_updates, r.times_emailed || 0, r.email, r.phone || ""]);
     download(`review_requests_${new Date().toISOString().slice(0, 10)}.csv`, [head, ...out].map((row) => row.map(csvCell).join(",")).join("\r\n"));
   }
   function exportCallList() {
@@ -175,7 +175,7 @@ export default function Reviews() {
       <div className="card" style={{ padding: "10px 14px", marginBottom: 12, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
         <label className="sub">Last <input className="input" type="number" min="0" style={{ width: 64 }} value={f.window_days} onChange={(e) => setF((x) => ({ ...x, window_days: Number(e.target.value) }))} /> days</label>
         <label className="sub">Max ETA gap <input className="input" type="number" min="0" style={{ width: 56 }} value={f.max_gap} onChange={(e) => setF((x) => ({ ...x, max_gap: Number(e.target.value) }))} /> days</label>
-        <label className="sub">Max updates <input className="input" type="number" min="0" style={{ width: 56 }} value={f.max_updates} onChange={(e) => setF((x) => ({ ...x, max_updates: Number(e.target.value) }))} /></label>
+        <label className="sub" title="Counts MANUAL updates only — automated updates (ETA emails, order-processing notes) are ignored.">Max manual updates <input className="input" type="number" min="0" style={{ width: 56 }} value={f.max_updates} onChange={(e) => setF((x) => ({ ...x, max_updates: Number(e.target.value) }))} /></label>
         <label className="sub"><input type="checkbox" checked={f.include_b} onChange={(e) => setF((x) => ({ ...x, include_b: e.target.checked }))} /> Include Tier B (no ETA)</label>
       </div>
 
@@ -207,6 +207,9 @@ export default function Reviews() {
         {send?.running
           ? <><span className="spinner" /> <b>Sending {send.done}/{send.total}</b> <span className="sub">({send.ok} ok, {send.failed} failed)</span> <button className="btn ghost" onClick={stopSend}>Stop</button></>
           : <button className="btn primary" onClick={doSend} disabled={!sel.size || !(cfg.review_link || "").trim()}>Send to selected ({sel.size})</button>}
+        {(() => { const n = rows.filter((r) => r.times_emailed > 0).length; return n > 0 && !send?.running
+          ? <button className="btn ghost" onClick={() => setSel(new Set(rows.filter((r) => !r.times_emailed).map((r) => r.item_id)))} title="Untick anyone who has already had a review email (even for a different order)">Deselect already-emailed ({n})</button>
+          : null; })()}
         {send && !send.running && send.total ? <span className="sub">Last run: {send.ok} sent, {send.failed} failed.</span> : null}
       </div>
 
@@ -215,7 +218,7 @@ export default function Reviews() {
         <table className="mini">
           <thead><tr>
             <th style={{ width: 24 }}><input type="checkbox" title="Select all / none" checked={allSel} ref={(el) => { if (el) el.indeterminate = sel.size > 0 && sel.size < rows.length; }} onChange={() => setSel(allSel ? new Set() : new Set(rows.map((r) => r.item_id)))} /></th>
-            <th>Tier</th><th>Order</th><th>Customer</th><th>Order date</th><th>ETA</th><th className="num">Gap</th><th className="num">Upd</th><th>Email</th><th>Phone</th>
+            <th>Tier</th><th>Order</th><th>Customer</th><th>Order date</th><th>ETA</th><th className="num">Gap</th><th className="num" title="Manual updates (automations ignored)">Upd</th><th className="num" title="Times this customer has already had a review email">Emailed</th><th>Email</th><th>Phone</th>
           </tr></thead>
           <tbody>
             {rows.map((r) => (
@@ -228,11 +231,12 @@ export default function Reviews() {
                 <td className="sub">{r.eta || "—"}</td>
                 <td className="num">{r.gap ?? "—"}</td>
                 <td className="num">{r.n_updates}</td>
+                <td className="num">{r.times_emailed ? <span className="chip amber">{r.times_emailed}×</span> : "—"}</td>
                 <td className="sub">{r.email}</td>
                 <td className="sub">{r.phone || "—"}</td>
               </tr>
             ))}
-            {status === "ok" && rows.length === 0 && <tr><td colSpan={10}><div className="state">No orders qualify with these filters.</div></td></tr>}
+            {status === "ok" && rows.length === 0 && <tr><td colSpan={11}><div className="state">No orders qualify with these filters.</div></td></tr>}
           </tbody>
         </table>
       </div>

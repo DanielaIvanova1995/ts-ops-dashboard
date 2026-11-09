@@ -29,8 +29,22 @@ COL = {
     "review": "status_18",
 }
 _COL_IDS = list(COL.values())
-_FIELDS = ('id name updates(limit:25){id} column_values(ids:[%s]){id text}'
+_FIELDS = ('id name updates(limit:25){id creator{id}} column_values(ids:[%s]){id text}'
            % ",".join(f'"{c}"' for c in _COL_IDS))
+
+# Update creators that are NOT a real person — automations post with a null creator (TradeHub's
+# order-processing / ETA emails logged to the item), and Monday's own automation user is -4. Only
+# updates from a real team member count as "manual" (i.e. a human chased / there was an issue).
+_AUTOMATION_CREATORS = {None, "", "-4", -4}
+
+
+def _manual_updates(it):
+    n = 0
+    for u in (it.get("updates") or []):
+        cid = (u.get("creator") or {}).get("id")
+        if cid not in _AUTOMATION_CREATORS:
+            n += 1
+    return n
 
 # Review labels that mean "don't ask again" (already asked, or unhappy).
 _REVIEW_SKIP = {"sent", "bad experience", "apology"}
@@ -102,7 +116,8 @@ def fetch_raw(token=None):
                 "stage": cv.get(COL["stage"]),
                 "aftersales": cv.get(COL["aftersales"]),
                 "review": cv.get(COL["review"]),
-                "n_updates": len(it.get("updates") or []),
+                "n_updates": _manual_updates(it),              # MANUAL updates only (ignore automations)
+                "n_updates_all": len(it.get("updates") or []),
             })
     return out
 

@@ -2634,6 +2634,21 @@ def reviews_get(window_days: int = 60, max_gap: int = 5, max_updates: int = 3,
         raise HTTPException(status_code=502, detail=f"Couldn't read the Orders board: {e}")
     res = rr.build(window_days=window_days, max_gap=max_gap, max_updates=max_updates,
                    include_b=include_b, suppression=_reviews_suppression(), raw=raw)
+    # How many times each customer has ALREADY been sent a review email (from the send log) — so we
+    # can show it and let her deselect anyone who's had one before (even for a different order).
+    try:
+        import supabase_db
+        log = (supabase_db.config_get(_REVIEWS_LOG_KEY) or {}).get("rows") or [] if supabase_db.configured() else []
+    except Exception:  # noqa: BLE001
+        log = []
+    sent_count = {}
+    for e in log:
+        if (e.get("status") == "sent"):
+            k = (e.get("email") or "").strip().lower()
+            if k:
+                sent_count[k] = sent_count.get(k, 0) + 1
+    for row in res["rows"]:
+        row["times_emailed"] = sent_count.get((row.get("email") or "").strip().lower(), 0)
     return {"ok": True, **res, "config": _reviews_cfg(),
             "cached_at": _REVIEWS_CACHE["at"].isoformat() if _REVIEWS_CACHE["at"] else None}
 
