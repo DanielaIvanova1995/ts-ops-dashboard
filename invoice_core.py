@@ -382,6 +382,48 @@ def order_sku_cost(order_sku, supplier, pidx):
     return None
 
 
+def _persection_rates():
+    """{supplier_norm: {leg_code_norm: {finish: £/section}}} from price_overrides.json '_persection'
+    (Carron cast-iron radiators are priced PER SECTION, one Shopify SKU per range × 4–18 sections)."""
+    ov = _price_overrides()
+    return {norm_code(sup): {norm_code(k): fin for k, fin in (rules or {}).items() if isinstance(fin, dict)}
+            for sup, rules in (ov.get("_persection") or {}).items()}
+
+
+_SECTIONS_RE = re.compile(r"(\d{1,3})\s*sections?\b", re.I)
+# Carron finish needles (as on the Shopify variant / invoice description) → the pricelist finish key.
+# Order matters (first match wins). "gilded" → None on purpose (Carron's +£50 gilding note is
+# ambiguous per-section vs per-radiator), so a gilded line stays unpriced rather than guessed.
+_CARRON_FINISH = [("gilded", None), ("burnish", "SATIN-POLISHED"), ("satin", "SATIN-POLISHED"),
+                  ("antiqu", "ANTIQUED"), ("highlight", "ANTIQUED"), ("baremetal", "ANTIQUED"),
+                  ("powdercoat", "ANTIQUED"), ("copper", "VINTAGE-COPPER"),
+                  ("metallic", "PAINTED"), ("paint", "PAINTED"), ("primer", "PRIMER")]
+
+
+def persection_cost(sku, supplier, *texts):
+    """Per-section cost = section count × the range's £/section for the chosen finish (Carron bespoke
+    radiators). The count and finish are read from the texts (invoice description / Shopify variant),
+    because every finish+size of a range shares ONE SKU. `sku` should be the LEG-coded SKU (our order
+    SKU, e.g. 'LD013/LD014'). None if not per-section, or the leg/finish/count can't be read."""
+    rates = _persection_rates().get(norm_code(supplier))
+    if not rates:
+        return None
+    key = norm_code(sku)
+    leg = next((b for b in sorted(rates, key=len, reverse=True) if b and key.startswith(b)), None)
+    if not leg:
+        return None
+    blob = " ".join(str(t or "") for t in texts)
+    m = _SECTIONS_RE.search(blob)
+    if not m:
+        return None
+    n = int(m.group(1))
+    fin = next((f for needle, f in _CARRON_FINISH if needle in norm_code(blob)), None)
+    if not fin or not 1 <= n <= 40:
+        return None
+    rate = rates[leg].get(fin)
+    return round(n * rate, 2) if isinstance(rate, (int, float)) else None
+
+
 def pricelist_index(lookup):
     """{norm_sku: {norm_supplier: cost}} from the lookup offers PLUS the durable overrides in
     price_overrides.json. The overrides must be applied here too: the scheduled runner
@@ -846,9 +888,38 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                 pending[idx]["issues"].append(("name", f"matched to order line {order[best_key]['sku']} "
                                                "by product type + colour (invoice code differs)"))
 
+    # Carron radiators: one order line per SECTION COUNT of a range, and the Shopify names are near
+    # identical except the count (a 7-section and a 10-section Victorian 4 Col 810mm). The distinctive-
+    # word scorer can't tell them apart, so match each remaining Carron line to the order line with the
+    # SAME section count (Carron's invoice uses its own CFG codes, which carry no cost of their own).
+    if is_carron(supplier):
+        def _sec(t):
+            m = _SECTIONS_RE.search(str(t or ""))
+            return int(m.group(1)) if m else None
+        for idx, rec in enumerate(pending):
+            if idx in done:
+                continue
+            isec = _sec(rec.get("desc"))
+            if isec is None:
+                continue
+            for k, v in order.items():
+                if k in hit or _sec(v.get("name")) != isec:
+                    continue
+                done.add(idx)
+                _hit(pending[idx], k)
+                pending[idx]["issues"].append(("name", f"matched to order line {order[k]['sku']} "
+                                               f"by section count ({isec})"))
+                break
+
     for idx, rec in enumerate(pending):
         if idx not in done:
-            rec["issues"].append(("notorder", "not on the order"))
+            # A line with no charge (unit and line-total both blank/0) is an INCLUDED item (e.g. the
+            # free bleed/blank valves on a Carron radiator) — not on the Shopify order, but not a
+            # discrepancy either.
+            if rec.get("unit") in (None, 0) and rec.get("line_total") in (None, 0):
+                rec["issues"].append(("name", "no charge — included item, not on the Shopify order"))
+            else:
+                rec["issues"].append(("notorder", "not on the order"))
 
     for k in hit:
         exp, tot = order[k]["qty"], inv_qty.get(k)
@@ -898,7 +969,12 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
             if not okey:
                 continue
             osku = order[okey].get("sku")
-            c = order_sku_cost(osku, supplier, pidx)
+            # Carron radiators price PER SECTION off the matched order's leg-coded SKU, reading the
+            # section count + finish from the invoice description / order variant (the invoice uses
+            # Carron's own CFG codes which carry no cost of their own).
+            c = persection_cost(osku, supplier, order[okey].get("name"), rec.get("desc"))
+            if c is None:
+                c = order_sku_cost(osku, supplier, pidx)
             if c is None:
                 continue
             rec["cost"] = c
