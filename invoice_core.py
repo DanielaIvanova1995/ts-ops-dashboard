@@ -371,7 +371,9 @@ def order_sku_cost(order_sku, supplier, pidx):
             cost = r.get("cost")
             pref = norm_code(r.get("prefix"))
             suf = norm_code(r.get("suffix") or "")
-            if isinstance(cost, (int, float)) and pref and nk.startswith(pref) and (not suf or nk.endswith(suf)):
+            ok_pref = (not pref) or nk.startswith(pref)
+            ok_suf = (not suf) or nk.endswith(suf)
+            if isinstance(cost, (int, float)) and (pref or suf) and ok_pref and ok_suf:
                 return cost
     return None
 
@@ -689,6 +691,13 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                 c2, mt = supplier_title_cost(desc, supplier, tidx)
                 if c2 is not None:
                     cost, title_note = c2, mt
+            if cost is None and not no_pl:
+                # Re-coded suppliers (Squaredeal) print their own codes — resolve the cost from those
+                # via the durable overrides, including code patterns (e.g. any colour's ext corner
+                # 'KB571859' → suffix 859 → £25.20). Still only this supplier's own price.
+                c2 = order_sku_cost(sku_raw, supplier, pidx)
+                if c2 is not None:
+                    cost = c2
             if not no_pl:
                 if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                     sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
