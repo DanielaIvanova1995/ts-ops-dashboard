@@ -2536,24 +2536,28 @@ _REVIEWS_CFG_DEFAULT = {
     "window_days": 60, "max_gap": 5, "max_updates": 3, "include_b": True,
 }
 
-_REVIEW_EMAIL_HTML = """<!doctype html><html><body style="margin:0;padding:0;background:#f4f4f5;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;"><tr><td align="center" style="padding:24px 12px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e6e6e8;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-<tr><td style="height:5px;background:#ff6a00;"></td></tr>
-<tr><td style="padding:28px 34px 6px;"><div style="font-size:15px;color:#21242b;line-height:1.6;">
-<p style="margin:0 0 16px;font-size:18px;font-weight:700;">Hi {{first_name}},</p>
+_REVIEW_EMAIL_HTML = """<!doctype html><html><body style="margin:0;padding:0;background:#f4f5f7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f5f7;"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:560px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">
+<tr><td style="background:#ff6a00;padding:18px 32px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">Trade Superstore Online</span></td></tr>
+<tr><td style="padding:30px 32px 6px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
+<p style="margin:0 0 16px;font-size:18px;font-weight:bold;color:#111111;">Hi {{first_name}},</p>
 <p style="margin:0 0 16px;">I hope everything arrived safely with order <b>{{order_no}}</b> and you're pleased with it.</p>
-<p style="margin:0 0 16px;">We're a small, hands-on team here at Trade Superstore Online, and honestly &mdash; a quick review makes a <b>real</b> difference to us. It helps other customers shop with confidence, and it means the world to the person who personally looked after your order: our team are <b>recognised and rewarded</b> for the great feedback they earn, so your few kind words genuinely go a long way for someone here.</p>
-<p style="margin:0 0 22px;">If you've got 30 seconds, we'd be so grateful if you'd share how we did:</p>
-<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 24px;"><tr><td align="center" bgcolor="#ff6a00" style="border-radius:10px;"><a href="{{review_link}}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">&#11088; Leave a quick review</a></td></tr></table>
-<p style="margin:0 0 6px;">Thank you so much &mdash; it really does help, and it won't take long.</p>
-<p style="margin:0 0 4px;">With thanks,</p>
-<p style="margin:0 0 20px;font-weight:700;">The Trade Superstore Online team</p>
-<p style="margin:0 0 20px;padding:12px 14px;background:#fff6f0;border:1px solid #ffd9bf;border-radius:10px;font-size:14px;color:#5a3b22;"><b>Was anything not quite right?</b> Please just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</p>
-</div></td></tr>
-<tr><td style="padding:18px 34px 26px;border-top:1px solid #eeeeef;">
+<p style="margin:0 0 16px;">We're a small, hands-on team here at Trade Superstore Online, and a quick review makes a <b>real</b> difference to us. It helps other customers shop with confidence &mdash; and it means a lot to the person who personally looked after your order, as our team are recognised and rewarded for the feedback they earn. So a few kind words genuinely go a long way for someone here.</p>
+<p style="margin:0 0 4px;">If you've got 30 seconds, we'd be really grateful if you'd share how we did:</p>
+</td></tr>
+<tr><td align="center" style="padding:20px 32px 26px 32px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#ff6a00" style="border-radius:8px;"><a href="{{review_link}}" target="_blank" style="display:inline-block;padding:14px 34px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">Leave a quick review</a></td></tr></table>
+</td></tr>
+<tr><td style="padding:0 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
+<p style="margin:0 0 4px;">Thank you &mdash; it really does help, and it won't take long.</p>
+<p style="margin:0 0 2px;">With thanks,</p>
+<p style="margin:0 0 22px;font-weight:bold;">The Trade Superstore Online team</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;"><tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#444444;"><b style="color:#222222;">Was anything not quite right?</b> Just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</td></tr></table>
+</td></tr>
+<tr><td style="padding:20px 32px 26px 32px;border-top:1px solid #eeeeee;font-family:Arial,Helvetica,sans-serif;">
 <p style="margin:0 0 8px;font-size:12px;color:#8a8a8f;line-height:1.5;">Trade Superstore Online &middot; TSO UK Ltd, Unit 8, Tomlinson Industrial Estate, Alfreton Road, Derby, DE21 4ED &middot; <a href="mailto:hello@tradesuperstoreonline.co.uk" style="color:#8a8a8f;">hello@tradesuperstoreonline.co.uk</a> &middot; 0333 090 9217</p>
-<p style="margin:0;font-size:12px;color:#a7a7ac;">You're receiving this because you recently ordered from us. <a href="{{unsubscribe_link}}" style="color:#a7a7ac;text-decoration:underline;">Unsubscribe</a>.</p>
+<p style="margin:0;font-size:12px;color:#a7a7ac;line-height:1.5;">You're receiving this because you recently ordered from us. <a href="{{unsubscribe_link}}" style="color:#a7a7ac;text-decoration:underline;">Unsubscribe</a>.</p>
 </td></tr></table></td></tr></table></body></html>"""
 
 
