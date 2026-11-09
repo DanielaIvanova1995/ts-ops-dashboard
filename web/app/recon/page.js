@@ -167,7 +167,12 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
         <span className="sub" style={{ marginLeft: "auto" }}>{selLines.length} of {lines.length} selected</span>
       </div>
       <table className="mini">
-        <thead><tr><th></th><th>Invoice</th><th>Inv date</th><th>Due</th><th className="num">Amount</th></tr></thead>
+        <thead><tr>
+          <th style={{ width: 24 }}><input type="checkbox" title="Select all / none"
+            checked={lines.length > 0 && sel.size === lines.length}
+            ref={(el) => { if (el) el.indeterminate = sel.size > 0 && sel.size < lines.length; }}
+            onChange={() => setSel(sel.size === lines.length ? new Set() : new Set(lines.map((l) => l.bill_id)))} /></th>
+          <th>Invoice</th><th>Inv date</th><th>Due</th><th className="num">Amount</th></tr></thead>
         <tbody>
           {lines.map((l) => (
             <tr key={l.bill_id} className={l._od ? "od" : ""}>
@@ -184,7 +189,12 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
         <div style={{ marginTop: 10 }}>
           <div className="tool-label">Credit notes — tick the ones to apply</div>
           <table className="mini">
-            <thead><tr><th></th><th>Credit</th><th>Date</th><th className="num">Amount</th><th></th></tr></thead>
+            <thead><tr>
+              <th style={{ width: 24 }}><input type="checkbox" title="Select all / none"
+                checked={(() => { const s2 = credits.map((_, i) => i).filter((i) => !credits[i].applied); return s2.length > 0 && s2.every((i) => credSel.has(i)); })()}
+                ref={(el) => { if (el) { const s2 = credits.map((_, i) => i).filter((i) => !credits[i].applied); const n = s2.filter((i) => credSel.has(i)).length; el.indeterminate = n > 0 && n < s2.length; } }}
+                onChange={() => { const s2 = credits.map((_, i) => i).filter((i) => !credits[i].applied); const all = s2.length > 0 && s2.every((i) => credSel.has(i)); setCredSel(all ? new Set() : new Set(s2)); }} /></th>
+              <th>Credit</th><th>Date</th><th className="num">Amount</th><th></th></tr></thead>
             <tbody>
               {credits.map((c, i) => (
                 <tr key={i} style={c.applied ? { opacity: 0.6 } : undefined}>
@@ -276,7 +286,12 @@ function MissingPanel({ r, jsonFetch, onNotice }) {
         <span className="sub" style={{ marginLeft: "auto" }}>{chosen.length} selected · {money(total)}</span>
       </div>
       <table className="mini">
-        <thead><tr><th></th><th>Invoice</th><th>Order</th><th>Date</th><th className="num">Amount</th></tr></thead>
+        <thead><tr>
+          <th style={{ width: 24 }}><input type="checkbox" title="Select all / none"
+            checked={missing.length > 0 && sel.size === missing.length}
+            ref={(el) => { if (el) el.indeterminate = sel.size > 0 && sel.size < missing.length; }}
+            onChange={() => setSel(sel.size === missing.length ? new Set() : new Set(missing.map((_, i) => i)))} /></th>
+          <th>Invoice</th><th>Order</th><th>Date</th><th className="num">Amount</th></tr></thead>
         <tbody>
           {missing.map((x, i) => (
             <tr key={i}>
