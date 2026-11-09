@@ -5630,6 +5630,19 @@ def qbo_open_bills(limit: int = 1000):
     return out
 
 
+def qbo_last_payment_dates(limit: int = 1000):
+    """One query → {vendor_id: 'YYYY-MM-DD'} of each supplier's MOST RECENT bill-payment date.
+    Ordered newest-first, so the first date seen per vendor is their latest payment."""
+    rows = qbo_query(f"select * from BillPayment order by TxnDate desc MAXRESULTS {int(limit)}")
+    out = {}
+    for p in (rows.get("BillPayment") or []):
+        vid = str((p.get("VendorRef") or {}).get("value") or "")
+        date = (p.get("TxnDate") or "")[:10]
+        if vid and date and vid not in out:
+            out[vid] = date
+    return out
+
+
 def qbo_vendor_payments(vendor_id: str, limit: int = 1000):
     """Map each PAID Bill id → the remittance/payment it was settled under:
     {bill_id: {"ref": "<payment reference e.g. Storm B100826>", "date": "YYYY-MM-DD"}}.

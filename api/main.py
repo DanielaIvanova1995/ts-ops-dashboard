@@ -2094,6 +2094,25 @@ def recon_upcoming(due_window: int = 14):
         hidden_ids = set(str(v) for v in ((supabase_db.config_get(_UPCOMING_HIDDEN_KEY) or {}).get("ids") or [])) if supabase_db.configured() else set()
     except Exception:  # noqa: BLE001
         hidden_ids = set()
+    # When each supplier's statement was last reconciled (+ the statement's own date), from the saved
+    # reconciliations — so the planner can show how current our picture of this supplier is.
+    recon_by_vid, recon_by_name = {}, {}
+    try:
+        for s in (ds.recon_load_all() or {}).values():
+            info = {"reconciled_at": (s.get("saved_at") or "")[:10] or None,
+                    "statement_date": (s.get("statement_date") or "")[:10] or None}
+            if s.get("vid"):
+                recon_by_vid[str(s["vid"])] = info
+            nkey = core.norm_code(s.get("vendor_name") or s.get("supplier"))
+            if nkey:
+                recon_by_name.setdefault(nkey, info)
+    except Exception:  # noqa: BLE001
+        pass
+    # Last time we actually paid each supplier (one QuickBooks query).
+    try:
+        last_pay = ds.qbo_last_payment_dates()
+    except Exception:  # noqa: BLE001
+        last_pay = {}
 
     def _credit_limit(vendor_name):
         nk = core.norm_code(vendor_name)
@@ -2157,11 +2176,14 @@ def recon_upcoming(due_window: int = 14):
                 plan_ids.append(x["id"])
                 plan_total += x["balance"]
         plan_total = round(plan_total, 2)
+        rec = recon_by_vid.get(str(vid)) or recon_by_name.get(nk) or {}
         suppliers.append({
             "vendor_id": vid, "vendor_name": g["vendor_name"],
             "outstanding": outstanding, "gross_outstanding": gross_outstanding,
             "paid_on_account": on_account, "credit_limit": limit, "available": available,
             "over_limit": over_limit, "near_limit": near_limit,
+            "reconciled_at": rec.get("reconciled_at"), "statement_date": rec.get("statement_date"),
+            "last_payment_date": last_pay.get(str(vid)) or None,
             "overdue_total": overdue_total, "due7_total": due7_total, "due_window_total": duewin_total,
             "n_bills": len(gb), "bills": gb, "cadence": cadence,
             "plan": {"threshold": threshold, "cadence": cadence, "need_under_limit": need_under_limit,

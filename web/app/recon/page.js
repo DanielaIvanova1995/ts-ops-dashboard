@@ -700,11 +700,13 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
 
   // Concise stat: a small label + value, inline.
   const stat = (label, val, cls) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "2px 14px 2px 0", borderRight: "1px solid rgba(127,127,127,0.18)" }}>
-      <span className="sub" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</span>
-      <span style={{ fontSize: 16, fontWeight: 700 }} className={cls}>{val}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 12px",
+      background: "rgba(127,127,127,0.05)", border: "1px solid rgba(127,127,127,0.16)", borderRadius: 9 }}>
+      <span className="sub" style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontSize: 17, fontWeight: 700 }} className={cls}>{val}</span>
     </div>
   );
+  const fmtD = (d) => { if (!d) return ""; const x = new Date(String(d).slice(0, 10) + "T00:00:00"); return isNaN(x) ? String(d) : x.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); };
 
   return (
     <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
@@ -744,14 +746,13 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
 
       {t && (
         <>
-          <div style={{ display: "flex", gap: 0, flexWrap: "wrap", marginTop: 12, alignItems: "center",
-            background: "rgba(127,127,127,0.05)", border: "1px solid rgba(127,127,127,0.18)", borderRadius: 10, padding: "8px 14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", gap: 8, marginTop: 12 }}>
             {stat("Overdue", money(t.overdue_total), t.overdue_total > 0 ? "th-red" : "")}
             {stat("Due 7d", money(t.due7_total), "")}
             {stat(`Due ${data.due_window}d`, money(t.due_window_total), "")}
             {stat("Owed", money(t.open_total), "")}
             {stat("Over limit", `${t.n_over_limit}`, t.n_over_limit > 0 ? "th-red" : "")}
-            {t.manual_open_total > 0 ? <div style={{ paddingLeft: 14 }}>{stat("On account", money(t.manual_open_total), "")}</div> : null}
+            {t.manual_open_total > 0 ? stat("On account", money(t.manual_open_total), "") : null}
           </div>
 
           {t.n_to_approve > 0 && (
@@ -793,6 +794,16 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
                     <button className="linkish" style={{ fontSize: 15, lineHeight: 1, color: "#999", padding: "0 2px" }} title="Hide this supplier from the planner" onClick={() => hide(s.vendor_id, true)}>✕</button>
                   </div>
                   <div className="sub" style={{ fontSize: 11, marginTop: -4 }}>owed · {s.n_bills} bill{s.n_bills === 1 ? "" : "s"}{s.cadence === "monthly" ? " · monthly" : ""}</div>
+
+                  {/* reconciled + last paid dates */}
+                  <div className="sub" style={{ fontSize: 11, display: "flex", gap: 12, flexWrap: "wrap", marginTop: -2 }}>
+                    <span title={s.reconciled_at ? `Statement reconciled ${s.reconciled_at}${s.statement_date ? ` · statement dated ${s.statement_date}` : ""}` : "No statement reconciled yet"}>
+                      📋 {s.reconciled_at ? <>recon <b>{fmtD(s.reconciled_at)}</b>{s.statement_date ? ` (stmt ${fmtD(s.statement_date)})` : ""}</> : <span style={{ color: "#c0392b" }}>not reconciled</span>}
+                    </span>
+                    <span title={s.last_payment_date ? `Last payment to this supplier ${s.last_payment_date}` : "No payment to this supplier on record"}>
+                      💷 {s.last_payment_date ? <>paid <b>{fmtD(s.last_payment_date)}</b></> : "—"}
+                    </span>
+                  </div>
 
                   {/* status chips */}
                   {(s.overdue_total > 0 || s.due7_total > 0 || s.over_limit || s.near_limit || s.paid_on_account > 0) && (
