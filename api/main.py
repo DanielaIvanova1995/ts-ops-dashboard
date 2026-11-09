@@ -2555,6 +2555,7 @@ _REVIEW_EMAIL_HTML = """<!doctype html><html><body style="margin:0;padding:0;bac
 <p style="margin:0 0 22px;font-weight:bold;">The Trade Superstore Online team</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;"><tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#444444;"><b style="color:#222222;">Was anything not quite right?</b> Just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</td></tr></table>
 </td></tr>
+<tr><td style="padding:20px 0 0 0;"><img src="https://cdn.shopify.com/s/files/1/0444/8675/4460/files/AVI06394.jpg?v=1794232582" width="560" alt="The Trade Superstore Online team" style="display:block;width:100%;max-width:560px;height:auto;border:0;"></td></tr>
 <tr><td style="padding:20px 32px 26px 32px;border-top:1px solid #eeeeee;font-family:Arial,Helvetica,sans-serif;">
 <p style="margin:0 0 8px;font-size:12px;color:#8a8a8f;line-height:1.5;">Trade Superstore Online &middot; TSO UK Ltd, Unit 8, Tomlinson Industrial Estate, Alfreton Road, Derby, DE21 4ED &middot; <a href="mailto:hello@tradesuperstoreonline.co.uk" style="color:#8a8a8f;">hello@tradesuperstoreonline.co.uk</a> &middot; 0333 090 9217</p>
 <p style="margin:0;font-size:12px;color:#a7a7ac;line-height:1.5;">You're receiving this because you recently ordered from us. <a href="{{unsubscribe_link}}" style="color:#a7a7ac;text-decoration:underline;">Unsubscribe</a>.</p>
