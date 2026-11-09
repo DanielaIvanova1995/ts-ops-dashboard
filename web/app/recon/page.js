@@ -665,6 +665,15 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
     finally { setLogging(false); }
   }
 
+  async function hide(vendorId, hidden) {
+    try {
+      const res = await jsonFetch("/recon/upcoming-hide", { method: "POST", body: JSON.stringify({ vendor_id: vendorId, hidden }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) load();
+      else onNotice?.({ kind: "warn", text: d.detail || `API ${res.status}` });
+    } catch (e) { if (String(e.message) !== "locked") onNotice?.({ kind: "warn", text: String(e.message || e) }); }
+  }
+
   const savedByVid = {};
   (saved || []).forEach((s) => { if (s.vid) savedByVid[String(s.vid)] = s; });
 
@@ -766,6 +775,7 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                     <b style={{ fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.vendor_name}>{s.vendor_name || "—"}</b>
                     <span style={{ fontSize: 16, fontWeight: 700 }} className={s.over_limit ? "th-red" : ""}>{money(s.outstanding)}</span>
+                    <button className="linkish" style={{ fontSize: 15, lineHeight: 1, color: "#999", padding: "0 2px" }} title="Hide this supplier from the planner" onClick={() => hide(s.vendor_id, true)}>✕</button>
                   </div>
                   <div className="sub" style={{ fontSize: 11, marginTop: -4 }}>owed · {s.n_bills} bill{s.n_bills === 1 ? "" : "s"}{s.cadence === "monthly" ? " · monthly" : ""}</div>
 
@@ -823,6 +833,17 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
               );
             })}
           </div>
+
+          {(data.hidden || []).length > 0 && (
+            <div style={{ marginTop: 12, borderTop: "1px solid rgba(127,127,127,0.18)", paddingTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span className="sub" style={{ fontSize: 12 }}>Hidden ({data.hidden.length}):</span>
+              {data.hidden.map((h) => (
+                <span key={h.vendor_id} className="pill grey" style={{ fontSize: 11 }}>{h.vendor_name || "—"}
+                  <button className="linkish" style={{ marginLeft: 5 }} title="Show this supplier again" onClick={() => hide(h.vendor_id, false)}>show</button>
+                </span>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>

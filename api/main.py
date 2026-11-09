@@ -2088,6 +2088,12 @@ def recon_upcoming(due_window: int = 14):
         if nk_:
             onacct_by_name[nk_] = onacct_by_name.get(nk_, 0.0) + amt
     manual_open_total = round(manual_open_total, 2)
+    # Suppliers Daniela has hidden (X'd) from the planner.
+    try:
+        import supabase_db
+        hidden_ids = set(str(v) for v in ((supabase_db.config_get(_UPCOMING_HIDDEN_KEY) or {}).get("ids") or [])) if supabase_db.configured() else set()
+    except Exception:  # noqa: BLE001
+        hidden_ids = set()
 
     def _credit_limit(vendor_name):
         nk = core.norm_code(vendor_name)
@@ -2162,17 +2168,21 @@ def recon_upcoming(due_window: int = 14):
                      "suggested_total": plan_total, "suggested_ids": plan_ids,
                      "clears_limit_breach": need_under_limit > 0 and plan_total + 0.005 >= need_under_limit},
         })
-        tot_overdue += overdue_total
-        tot_due7 += due7_total
-        tot_duewin += duewin_total
-        tot_open += outstanding
-        n_bills += len(gb)
 
     # Rank suppliers: over-limit first, then most overdue £, then soonest due.
     def _soonest(s):
         ds_ = [b["days_to_due"] for b in s["bills"] if b["days_to_due"] is not None]
         return min(ds_) if ds_ else 9999
     suppliers.sort(key=lambda s: (0 if s["over_limit"] else 1, -s["overdue_total"], _soonest(s)))
+    # Pull out the hidden ones; totals are over the VISIBLE suppliers only.
+    hidden_rows = [{"vendor_id": s["vendor_id"], "vendor_name": s["vendor_name"], "outstanding": s["outstanding"]}
+                   for s in suppliers if s["vendor_id"] in hidden_ids]
+    suppliers = [s for s in suppliers if s["vendor_id"] not in hidden_ids]
+    tot_overdue = sum(s["overdue_total"] for s in suppliers)
+    tot_due7 = sum(s["due7_total"] for s in suppliers)
+    tot_duewin = sum(s["due_window_total"] for s in suppliers)
+    tot_open = sum(s["outstanding"] for s in suppliers)
+    n_bills = sum(s["n_bills"] for s in suppliers)
 
     # 3) Approve-nudge: invoices still on Monday (Needs Review / Matched) that are NOT yet QB bills but
     # are already overdue — approve them so they join the pay run. Oldest first; capped for display.
@@ -2206,11 +2216,45 @@ def recon_upcoming(due_window: int = 14):
             "n_over_limit": sum(1 for s in suppliers if s["over_limit"]),
             "n_near_limit": sum(1 for s in suppliers if s["near_limit"]),
             "to_approve_total": round(to_approve_total, 2), "n_to_approve": len(to_approve),
-            "manual_open_total": manual_open_total,
+            "manual_open_total": manual_open_total, "n_hidden": len(hidden_rows),
         },
         "suppliers": suppliers,
+        "hidden": hidden_rows,
         "to_approve": to_approve[:60],
     }
+
+
+_UPCOMING_HIDDEN_KEY = "upcoming_hidden"
+
+
+class UpcomingHideIn(BaseModel):
+    vendor_id: str
+    hidden: bool = True
+
+
+@app.post("/recon/upcoming-hide", dependencies=[Depends(require_key_or_statements)])
+def recon_upcoming_hide(body: UpcomingHideIn):
+    """Hide (X) or un-hide a supplier tile on the Upcoming Payments planner. Stored shared so it sticks
+    across devices and the whole team sees the same view."""
+    vid = str(body.vendor_id or "").strip()
+    if not vid:
+        raise HTTPException(status_code=400, detail="vendor_id required")
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Store not available.")
+        cur = supabase_db.config_get(_UPCOMING_HIDDEN_KEY) or {}
+        ids = set(str(v) for v in (cur.get("ids") or []))
+        if body.hidden:
+            ids.add(vid)
+        else:
+            ids.discard(vid)
+        supabase_db.config_set(_UPCOMING_HIDDEN_KEY, {"ids": sorted(ids)})
+        return {"ok": True, "n_hidden": len(ids)}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't update: {e}")
 
 
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
