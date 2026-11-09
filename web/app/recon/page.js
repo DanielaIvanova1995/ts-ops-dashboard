@@ -751,65 +751,73 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
 
           {shown.length === 0 && <div className="sub" style={{ marginTop: 10 }}>Nothing urgent — no overdue bills and nothing due within {data.due_window} days. 🎉</div>}
 
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 }}>
             {shown.map((s) => {
               const limit = typeof s.credit_limit === "number" ? s.credit_limit : null;
               const used = limit ? Math.min(1, s.outstanding / limit) : 0;
               const srow = savedByVid[String(s.vendor_id)];
               const p = s.plan || {};
+              const open = openV.has(s.vendor_id);
               return (
-                <div key={s.vendor_id} style={{ border: "1px solid rgba(127,127,127,0.2)", borderRadius: 10, padding: "10px 12px",
-                  background: s.over_limit ? "rgba(224,90,0,0.06)" : "transparent" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <b style={{ fontSize: 15 }}>{s.vendor_name || "—"}</b>
-                    {s.overdue_total > 0 && <span className="chip red">{money(s.overdue_total)} overdue</span>}
-                    {s.due7_total > 0 && <span className="chip amber">{money(s.due7_total)} due ≤7d</span>}
-                    {s.over_limit && <span className="chip red">OVER LIMIT</span>}
-                    {!s.over_limit && s.near_limit && <span className="chip amber">near limit</span>}
-                    <span style={{ flex: 1 }} />
-                    {s.paid_on_account > 0 && <span className="chip green" title={`${money(s.paid_on_account)} paid on account (awaiting a remittance) — already taken off what's owed`}>{money(s.paid_on_account)} on account</span>}
-                    <span className="sub">{s.n_bills} bill{s.n_bills === 1 ? "" : "s"} · owed <b>{money(s.outstanding)}</b></span>
-                    <button className="btn ghost" onClick={() => toggleV(s.vendor_id)}>{openV.has(s.vendor_id) ? "Hide bills" : "Bills"}</button>
-                    {srow
-                      ? <button className="btn primary" onClick={() => openSaved(srow.key)} title="Open this supplier's statement to pay">Open to pay</button>
-                      : <span className="sub" title="No statement reconciled yet — drop one above to pay off">no statement yet</span>}
+                <div key={s.vendor_id} style={{ border: `1px solid ${s.over_limit ? "rgba(214,69,69,0.5)" : "rgba(127,127,127,0.2)"}`, borderRadius: 12,
+                  padding: "10px 12px", background: s.over_limit ? "rgba(224,90,0,0.06)" : "rgba(127,127,127,0.03)",
+                  display: "flex", flexDirection: "column", gap: 6 }}>
+                  {/* name + owed */}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <b style={{ fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.vendor_name}>{s.vendor_name || "—"}</b>
+                    <span style={{ fontSize: 16, fontWeight: 700 }} className={s.over_limit ? "th-red" : ""}>{money(s.outstanding)}</span>
                   </div>
+                  <div className="sub" style={{ fontSize: 11, marginTop: -4 }}>owed · {s.n_bills} bill{s.n_bills === 1 ? "" : "s"}{s.cadence === "monthly" ? " · monthly" : ""}</div>
 
-                  {/* Credit headroom bar */}
+                  {/* status chips */}
+                  {(s.overdue_total > 0 || s.due7_total > 0 || s.over_limit || s.near_limit || s.paid_on_account > 0) && (
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      {s.overdue_total > 0 && <span className="chip red">{money(s.overdue_total)} overdue</span>}
+                      {s.due7_total > 0 && <span className="chip amber">{money(s.due7_total)} ≤7d</span>}
+                      {s.over_limit && <span className="chip red">over limit</span>}
+                      {!s.over_limit && s.near_limit && <span className="chip amber">near limit</span>}
+                      {s.paid_on_account > 0 && <span className="chip green" title={`${money(s.paid_on_account)} paid on account, awaiting a remittance`}>{money(s.paid_on_account)} on acct</span>}
+                    </div>
+                  )}
+
+                  {/* credit headroom bar */}
                   {limit != null ? (
-                    <div style={{ marginTop: 8 }}>
-                      <div style={{ height: 8, borderRadius: 6, background: "rgba(127,127,127,0.18)", overflow: "hidden" }}>
-                        <div style={{ width: `${Math.round(used * 100)}%`, height: "100%",
-                          background: s.over_limit ? "#d64545" : (s.near_limit ? "#e6a400" : "#1a9d57") }} />
+                    <div>
+                      <div style={{ height: 6, borderRadius: 4, background: "rgba(127,127,127,0.18)", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.round(used * 100)}%`, height: "100%", background: s.over_limit ? "#d64545" : (s.near_limit ? "#e6a400" : "#1a9d57") }} />
                       </div>
-                      <div className="sub" style={{ marginTop: 3, fontSize: 12 }}>
-                        Credit limit {money(limit)} · {s.over_limit ? <span className="th-red"><b>{money(Math.abs(s.available))} OVER</b> — orders may be blocked until paid down</span> : <>headroom <b>{money(s.available)}</b></>}
+                      <div className="sub" style={{ marginTop: 2, fontSize: 11 }}>
+                        {s.over_limit ? <span className="th-red"><b>{money(Math.abs(s.available))}</b> over {money(limit)} limit</span> : <>{money(s.available)} left of {money(limit)}</>}
                       </div>
                     </div>
-                  ) : <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>No credit limit on file (Suppliers board)</div>}
+                  ) : <div className="sub" style={{ fontSize: 11 }}>No credit limit on file</div>}
 
-                  {/* Suggested plan */}
-                  <div className="sub" style={{ marginTop: 8, fontSize: 13 }}>
+                  {/* suggested plan */}
+                  <div className="sub" style={{ fontSize: 12 }}>
                     {p.need_under_limit > 0
-                      ? <><b className="th-red">Pay {money(p.need_under_limit)}</b> to get back under the limit — suggested <b>{money(p.suggested_total)}</b> ({(p.suggested_ids || []).length} oldest bill{(p.suggested_ids || []).length === 1 ? "" : "s"})</>
-                      : <>Suggested this week: <b>{money(p.suggested_total)}</b> ({(p.suggested_ids || []).length} bill{(p.suggested_ids || []).length === 1 ? "" : "s"}, oldest first)</>}
+                      ? <><span className="th-red">Pay <b>{money(p.need_under_limit)}</b> to clear limit</span> · plan {money(p.suggested_total)}</>
+                      : <>Plan: <b>{money(p.suggested_total)}</b> ({(p.suggested_ids || []).length})</>}
                   </div>
 
-                  {openV.has(s.vendor_id) && (
-                    <table className="mini" style={{ marginTop: 8 }}>
-                      <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th className="num">Balance</th><th></th></tr></thead>
-                      <tbody>
-                        {s.bills.map((b) => (
-                          <tr key={b.id}>
-                            <td className="ono">{b.doc_no || "—"}</td>
-                            <td className="sub">{(b.date || "").slice(0, 10) || "—"}</td>
-                            <td className="sub">{(b.due || "").slice(0, 10) || "—"}{b.days_to_due != null && !b.overdue && b.days_to_due <= 14 ? ` (${b.days_to_due}d)` : ""}</td>
-                            <td className="num">{money(b.balance)}</td>
-                            <td>{b.overdue ? <span className="chip red">overdue</span> : (b.bucket === "due7" ? <span className="chip amber">this week</span> : (b.bucket === "due_window" ? <span className="chip grey">soon</span> : null))}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  {/* actions */}
+                  <div style={{ display: "flex", gap: 6, marginTop: 2, alignItems: "center" }}>
+                    <button className="btn ghost" style={{ padding: "3px 8px", fontSize: 12 }} onClick={() => toggleV(s.vendor_id)}>{open ? "Hide" : "Bills"}</button>
+                    <span style={{ flex: 1 }} />
+                    {srow
+                      ? <button className="btn primary" style={{ padding: "3px 10px", fontSize: 12 }} onClick={() => openSaved(srow.key)} title="Open this supplier's statement to pay">Pay →</button>
+                      : <span className="sub" style={{ fontSize: 11 }} title="No statement reconciled yet">no statement</span>}
+                  </div>
+
+                  {open && (
+                    <div style={{ marginTop: 2, borderTop: "1px solid rgba(127,127,127,0.18)", paddingTop: 6, display: "flex", flexDirection: "column", gap: 3, maxHeight: 190, overflowY: "auto" }}>
+                      {s.bills.map((b) => (
+                        <div key={b.id} style={{ display: "flex", gap: 6, alignItems: "baseline", fontSize: 12 }}>
+                          <span className="ono" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.doc_no || "—"}</span>
+                          <span className="sub" style={{ fontSize: 11 }} title={`due ${(b.due || "").slice(0, 10) || "—"}`}>{b.overdue ? <span className="th-red">overdue</span> : ((b.due || "").slice(0, 10) || "—")}</span>
+                          <span style={{ fontWeight: 600 }}>{money(b.balance)}</span>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               );
