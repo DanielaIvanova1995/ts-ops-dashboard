@@ -1856,9 +1856,13 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
 
 
 def send_html_email(mailbox: str, to_email: str, subject: str, html: str,
-                    reply_to: str | None = None, token: str | None = None) -> bool:
+                    reply_to: str | None = None, token: str | None = None,
+                    inline_images: list | None = None) -> bool:
     """Send an HTML email from `mailbox` (saved to Sent Items), with an optional reply-to. Used for
-    customer review-request emails. Needs Mail.Send. Raises on failure."""
+    customer review-request emails. Needs Mail.Send. Raises on failure.
+
+    `inline_images`: list of {cid, name, contentType, content_b64} embedded INLINE (isInline) so they
+    display on mobile without 'load remote images'. Reference them in the HTML as src="cid:<cid>"."""
     token = token or ms_token()
     if not (to_email or "").strip():
         raise RuntimeError("No recipient email address.")
@@ -1866,6 +1870,12 @@ def send_html_email(mailbox: str, to_email: str, subject: str, html: str,
            "toRecipients": _to_recipients(to_email)}
     if reply_to:
         msg["replyTo"] = _to_recipients(reply_to)
+    if inline_images:
+        msg["attachments"] = [{
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": im["name"], "contentType": im["contentType"],
+            "contentBytes": im["content_b64"], "isInline": True, "contentId": im["cid"],
+        } for im in inline_images]
     r = requests.post(
         f"{GRAPH}/users/{mailbox}/sendMail",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},

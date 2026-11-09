@@ -2562,7 +2562,7 @@ _REVIEW_EMAIL_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta n
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;background:#f4f5f7;"><tr><td style="padding:24px 12px;text-align:center;">
 <table role="presentation" width="620" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:620px;max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;text-align:left;">
 <tr><td style="height:4px;background:#ff6a00;font-size:0;line-height:4px;">&nbsp;</td></tr>
-<tr><td style="background:#ffffff;padding:22px 28px 4px 28px;text-align:right;"><img src="https://www.tradesuperstoreonline.co.uk/cdn/shop/files/TSO_Logo_224x126.png?v=1767471702" width="130" alt="Trade Superstore Online" style="display:inline-block;width:130px;max-width:130px;height:auto;border:0;"></td></tr>
+<tr><td style="background:#ffffff;padding:22px 28px 4px 28px;text-align:right;"><img src="cid:tsologo" width="130" alt="Trade Superstore Online" style="display:inline-block;width:130px;max-width:130px;height:auto;border:0;"></td></tr>
 <tr><td style="padding:14px 32px 6px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
 <p style="margin:0 0 16px;font-size:18px;font-weight:bold;color:#111111;">Hi {{first_name}},</p>
 <p style="margin:0 0 16px;">I hope everything arrived safely with order <b>{{order_no}}</b> and you're pleased with it.</p>
@@ -2578,7 +2578,7 @@ _REVIEW_EMAIL_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta n
 <p style="margin:0 0 22px;font-weight:bold;">The Trade Superstore Online team</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;"><tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#444444;"><b style="color:#222222;">Was anything not quite right?</b> Just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</td></tr></table>
 </td></tr>
-<tr><td style="padding:20px 0 0 0;"><img src="https://cdn.shopify.com/s/files/1/0444/8675/4460/files/AVI06394.jpg?v=1794232582" width="620" alt="The Trade Superstore Online team" style="display:block;width:100%;max-width:620px;height:auto;border:0;"></td></tr>
+<tr><td style="padding:20px 0 0 0;"><img src="cid:tsoteam" width="620" alt="The Trade Superstore Online team" style="display:block;width:100%;max-width:620px;height:auto;border:0;"></td></tr>
 <tr><td style="padding:20px 32px 26px 32px;border-top:1px solid #eeeeee;font-family:Arial,Helvetica,sans-serif;">
 <p style="margin:0 0 8px;font-size:12px;color:#8a8a8f;line-height:1.5;">Trade Superstore Online &middot; TSO UK Ltd, Unit 8, Tomlinson Industrial Estate, Alfreton Road, Derby, DE21 4ED &middot; <a href="mailto:hello@tradesuperstoreonline.co.uk" style="color:#8a8a8f;">hello@tradesuperstoreonline.co.uk</a> &middot; 0333 090 9217</p>
 <p style="margin:0;font-size:12px;color:#a7a7ac;line-height:1.5;">You're receiving this because you recently ordered from us. <a href="{{unsubscribe_link}}" style="color:#a7a7ac;text-decoration:underline;">Unsubscribe</a>.</p>
@@ -2626,6 +2626,37 @@ def _reviews_log_add(entries: list):
         pass
 
 
+_REVIEW_LOGO_URL = "https://www.tradesuperstoreonline.co.uk/cdn/shop/files/TSO_Logo_224x126.png?v=1767471702"
+_REVIEW_TEAM_URL = "https://cdn.shopify.com/s/files/1/0444/8675/4460/files/AVI06394.jpg?v=1794232582&width=1240"
+_REVIEW_IMG_SOURCES = [
+    {"cid": "tsologo", "name": "logo.png", "url": _REVIEW_LOGO_URL},
+    {"cid": "tsoteam", "name": "team.jpg", "url": _REVIEW_TEAM_URL},
+]
+_REVIEW_IMAGES_CACHE = {"imgs": None}
+
+
+def _review_inline_images():
+    """Fetch the logo + team photo once, base64, so every review email can EMBED them inline (they
+    then show on mobile without 'load remote images'). All-or-nothing: returns [] if either fetch
+    fails, and the caller falls back to remote <img> URLs."""
+    if _REVIEW_IMAGES_CACHE["imgs"] is not None:
+        return _REVIEW_IMAGES_CACHE["imgs"]
+    import base64 as _b64
+    import requests as _rq
+    out = []
+    for s in _REVIEW_IMG_SOURCES:
+        try:
+            r = _rq.get(s["url"], timeout=20)
+            r.raise_for_status()
+            ct = (r.headers.get("Content-Type") or "image/png").split(";")[0].strip()
+            out.append({"cid": s["cid"], "name": s["name"], "contentType": ct,
+                        "content_b64": _b64.b64encode(r.content).decode()})
+        except Exception:  # noqa: BLE001
+            return []            # incomplete set — don't embed a partial lot; use remote URLs instead
+    _REVIEW_IMAGES_CACHE["imgs"] = out
+    return out
+
+
 def _review_render(row, cfg):
     import review_requests as rr
     import urllib.parse as _up
@@ -2636,7 +2667,10 @@ def _review_render(row, cfg):
     subject = (cfg.get("subject") or "How did we do, {{first_name}}?").replace("{{first_name}}", fn).replace("{{order_no}}", ono)
     html = (_REVIEW_EMAIL_HTML.replace("{{first_name}}", fn).replace("{{order_no}}", ono)
             .replace("{{review_link}}", link).replace("{{unsubscribe_link}}", unsub))
-    return subject, html
+    imgs = _review_inline_images()
+    if not imgs:    # embedding unavailable — point the <img>s at the remote URLs so they still resolve
+        html = html.replace("cid:tsologo", _REVIEW_LOGO_URL).replace("cid:tsoteam", _REVIEW_TEAM_URL)
+    return subject, html, imgs
 
 
 def _reviews_raw(refresh=False):
@@ -2699,9 +2733,9 @@ def reviews_send_test(body: ReviewsTestIn):
         raise HTTPException(status_code=400, detail="Enter at least one test address.")
     sent, errs = [], []
     for a in addrs:
-        subject, html = _review_render({"name": "Alex Sample", "order_no": "TEST-1234", "email": a}, cfg)
+        subject, html, imgs = _review_render({"name": "Alex Sample", "order_no": "TEST-1234", "email": a}, cfg)
         try:
-            ds.send_html_email(cfg["from_mailbox"], a, "[TEST] " + subject, html, reply_to=cfg.get("reply_to"))
+            ds.send_html_email(cfg["from_mailbox"], a, "[TEST] " + subject, html, reply_to=cfg.get("reply_to"), inline_images=imgs)
             sent.append(a)
         except Exception as e:  # noqa: BLE001
             errs.append(f"{a}: {str(e)[:120]}")
@@ -2728,8 +2762,8 @@ def _reviews_send_worker(rows, cfg):
             email = (row.get("email") or "").strip()
             ts = _dt.datetime.now().isoformat(timespec="seconds")
             try:
-                subject, html = _review_render(row, cfg)
-                ds.send_html_email(cfg["from_mailbox"], email, subject, html, reply_to=cfg.get("reply_to"))
+                subject, html, imgs = _review_render(row, cfg)
+                ds.send_html_email(cfg["from_mailbox"], email, subject, html, reply_to=cfg.get("reply_to"), inline_images=imgs)
                 try:
                     rr.mark_sent(row.get("item_id"))
                 except Exception:  # noqa: BLE001 — email sent; Monday write-back is best-effort
