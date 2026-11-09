@@ -40,6 +40,7 @@ MODULES = {
     "triage": "Triage",
     "payments": "Payments",
     "assistant": "My Assistant",
+    "aftersales": "Aftersales",
 }
 
 
@@ -293,4 +294,6 @@ def module_for_path(path: str) -> str | None:
         return "triage"
     if p.startswith("/assistant"):
         return "assistant"
+    if p.startswith("/aftersales"):
+        return "aftersales"
     return None                            # /meta, /updates-counts, /auth/*, etc.

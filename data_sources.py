@@ -5781,6 +5781,52 @@ def fetch_supplier_credit_limits(token=None):
     return out
 
 
+def fetch_supplier_directory(token=None) -> list:
+    """Active suppliers from the 'Suppliers and Contacts' board (9826930125), ONE entry per GROUP
+    (supplier), aggregated: account number, Cash/Credit, credit limit, delivery charges, payment terms,
+    and every contact (role/name/email/phone) from the group's items + their subitems. Powers the
+    Aftersales booklet's read-only reference panel. Returns [] on failure."""
+    import re as _re
+    token = token or get_token()
+    try:
+        data = _monday_gql(
+            'query { boards(ids: 9826930125) { groups { title } items_page(limit: 300) { items { '
+            'name group { title } column_values(ids: ["text_mktv3twq","color_mktvz51q",'
+            '"numeric_mkxckems","text_mkwsfsm3","text_mkwsg4yn"]) { id text } '
+            'subitems { name column_values(ids: ["text_mkws3sgb","text_mkwsxa5n"]) { id text } } } } } }',
+            {}, token)
+    except Exception:  # noqa: BLE001
+        return []
+    board = (data.get("boards") or [{}])[0]
+    order = [g.get("title") for g in (board.get("groups") or []) if (g.get("title") or "").strip()]
+    items = ((board.get("items_page") or {}).get("items") or [])
+    by_group = {}
+    for it in items:
+        g = ((it.get("group") or {}).get("title") or "").strip()
+        if not g:
+            continue
+        e = by_group.setdefault(g, {"supplier": g, "account_number": "", "account_type": "",
+                                    "credit_limit": "", "delivery": "", "payment_terms": "", "contacts": []})
+        cv = {c["id"]: (c.get("text") or "").strip() for c in (it.get("column_values") or [])}
+        for col, key in (("text_mktv3twq", "account_number"), ("color_mktvz51q", "account_type"),
+                         ("numeric_mkxckems", "credit_limit"), ("text_mkwsfsm3", "delivery"),
+                         ("text_mkwsg4yn", "payment_terms")):
+            if cv.get(col) and not e[key]:
+                e[key] = cv[col]
+        for sub in (it.get("subitems") or []):
+            scv = {c["id"]: (c.get("text") or "").strip() for c in (sub.get("column_values") or [])}
+            email = _re.sub(r"^mailto:", "", scv.get("text_mkws3sgb", ""))
+            phone = scv.get("text_mkwsxa5n", "")
+            if "@" in phone and "@" not in email:          # columns occasionally swapped on the board
+                email, phone = phone, email
+            role = (sub.get("name") or "").strip()
+            if role or email or phone:
+                e["contacts"].append({"role": role, "email": email, "phone": phone})
+    out = [by_group[g] for g in order if g in by_group]
+    out += [e for g, e in by_group.items() if g not in order]
+    return out
+
+
 # ---- Saved statement reconciliations (latest per supplier), shown on login. Stored (base64) on
 # a Monday "Statement Reconciliations" config item. ----
 QBO_RECON_ITEM = "Statement Reconciliations"

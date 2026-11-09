@@ -2363,6 +2363,88 @@ def manual_payment_delete(body: ManualPayIdIn):
     return {"ok": True}
 
 
+# ---- Aftersales booklet ----------------------------------------------------------------------
+# A training reference for aftersales: every active supplier (from the Suppliers & Contacts board)
+# with its account/contact details (read-only) PLUS editable aftersales fields the team fills in
+# (return period, restocking fee, how to raise a return, who to contact…), and general training
+# sections. Editable content is stored in the Supabase config `aftersales_booklet`.
+_AFTERSALES_KEY = "aftersales_booklet"
+
+
+def _aftersales_load() -> dict:
+    try:
+        import supabase_db
+        return (supabase_db.config_get(_AFTERSALES_KEY) if supabase_db.configured() else None) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.get("/aftersales", dependencies=[Depends(require_key)])
+def aftersales_get():
+    """The aftersales booklet: active suppliers (live from the Suppliers board) merged with the saved
+    editable fields, plus the general training sections."""
+    import invoice_core as core
+    try:
+        directory = ds.fetch_supplier_directory()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the suppliers board: {e}")
+    saved = _aftersales_load()
+    sfields = saved.get("suppliers") or {}
+    for d in directory:
+        d["fields"] = sfields.get(core.norm_code(d.get("supplier")), {})
+    return {"ok": True, "suppliers": directory, "general": saved.get("general") or {},
+            "updated_at": saved.get("updated_at")}
+
+
+class AftersalesSupplierIn(BaseModel):
+    supplier: str
+    fields: dict = {}
+
+
+@app.post("/aftersales/supplier", dependencies=[Depends(require_key)])
+def aftersales_save_supplier(body: AftersalesSupplierIn):
+    """Save the editable aftersales fields for one supplier."""
+    import invoice_core as core
+    nk = core.norm_code(body.supplier)
+    if not nk:
+        raise HTTPException(status_code=400, detail="supplier required")
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Store not available.")
+        cfg = _aftersales_load()
+        cfg.setdefault("suppliers", {})[nk] = {k: str(v) for k, v in (body.fields or {}).items()}
+        cfg["updated_at"] = _dt.datetime.now().isoformat(timespec="seconds")
+        supabase_db.config_set(_AFTERSALES_KEY, cfg)
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
+
+
+class AftersalesGeneralIn(BaseModel):
+    general: dict = {}
+
+
+@app.post("/aftersales/general", dependencies=[Depends(require_key)])
+def aftersales_save_general(body: AftersalesGeneralIn):
+    """Save the general aftersales training sections."""
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Store not available.")
+        cfg = _aftersales_load()
+        cfg["general"] = {k: str(v) for k, v in (body.general or {}).items()}
+        cfg["updated_at"] = _dt.datetime.now().isoformat(timespec="seconds")
+        supabase_db.config_set(_AFTERSALES_KEY, cfg)
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
+
+
 class RemitIn(BaseModel):
     supplier: str = ""
     vendor_id: str = ""          # QB vendor id — so applied credits are remembered against it
