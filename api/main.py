@@ -2624,16 +2624,19 @@ def _reviews_raw(refresh=False):
 
 @app.get("/reviews", dependencies=[Depends(require_key)])
 def reviews_get(window_days: int = 60, max_gap: int = 5, max_updates: int = 3,
-                include_b: bool = True, refresh: int = 0):
+                include_b: bool = True, refresh: int = 0, delivered: str = ""):
     """The qualifying review-request list for the given filters (Tier A/B) + exclusion-reason counts.
-    The Monday pull is cached 10 minutes (pass refresh=1 to force a fresh pull)."""
+    The Monday pull is cached 10 minutes (pass refresh=1 to force a fresh pull). `delivered` is an
+    optional comma list of Delivery-status labels that count as delivered (default 'Delivered')."""
     import review_requests as rr
     try:
         raw = _reviews_raw(refresh=bool(refresh))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the Orders board: {e}")
+    delivered_statuses = [s.strip() for s in delivered.split(",") if s.strip()] or None
     res = rr.build(window_days=window_days, max_gap=max_gap, max_updates=max_updates,
-                   include_b=include_b, suppression=_reviews_suppression(), raw=raw)
+                   include_b=include_b, suppression=_reviews_suppression(), raw=raw,
+                   delivered_statuses=delivered_statuses)
     # How many times each customer has ALREADY been sent a review email (from the send log) — so we
     # can show it and let her deselect anyone who's had one before (even for a different order).
     try:
@@ -2683,6 +2686,7 @@ class ReviewsSendIn(BaseModel):
     max_gap: int = 5
     max_updates: int = 3
     include_b: bool = True
+    delivered: list[str] = []
 
 
 def _reviews_send_worker(rows, cfg):
@@ -2735,7 +2739,8 @@ def reviews_send(body: ReviewsSendIn):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the Orders board: {e}")
     res = rr.build(window_days=body.window_days, max_gap=body.max_gap, max_updates=body.max_updates,
-                   include_b=body.include_b, suppression=_reviews_suppression(), raw=raw)
+                   include_b=body.include_b, suppression=_reviews_suppression(), raw=raw,
+                   delivered_statuses=([s.strip() for s in body.delivered if s.strip()] or None))
     rows = [r for r in res["rows"] if str(r.get("item_id")) in want]
     cap = int(cfg.get("batch_cap") or 100)
     capped = len(rows) > cap

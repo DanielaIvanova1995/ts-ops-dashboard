@@ -122,17 +122,23 @@ def fetch_raw(token=None):
     return out
 
 
-def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=None, raw=None):
+def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=None, raw=None,
+          delivered_statuses=None):
     """Decide who qualifies, assign Tier A/B, dedupe, and count every exclusion reason. `raw` lets a
-    caller reuse a cached pull. Returns {rows, counts, excluded, total}."""
+    caller reuse a cached pull. `delivered_statuses` = the Delivery-status labels that count as
+    delivered (default just 'Delivered'). Returns {rows, counts, excluded, delivery_dist, total}."""
     raw = raw if raw is not None else fetch_raw()
     supp = {(e or "").strip().lower() for e in (suppression or set())}
+    delivered_ok = {_norm_label(s) for s in (delivered_statuses or ["Delivered"])}
     today = _dt.date.today()
     cutoff = today - _dt.timedelta(days=int(window_days)) if window_days else None
     excl = Counter()
+    delivery_dist = {}            # {display label: count} across everything scanned — for the UI picker
     cand = []
     for r in raw:
-        if _norm_label(r["delivery"]) != "delivered":
+        lbl = (r["delivery"] or "").strip() or "(blank)"
+        delivery_dist[lbl] = delivery_dist.get(lbl, 0) + 1
+        if _norm_label(r["delivery"]) not in delivered_ok:
             excl["not_delivered"] += 1
             continue
         if r["n_updates"] > max_updates:                      # 4+ updates = there was an issue
@@ -191,7 +197,10 @@ def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=
     counts = {"A": sum(1 for r in rows if r["tier"] == "A"),
               "B": sum(1 for r in rows if r["tier"] == "B"),
               "total": len(rows)}
-    return {"rows": rows, "counts": counts, "excluded": dict(excl), "total_scanned": len(raw)}
+    dist = dict(sorted(delivery_dist.items(), key=lambda kv: kv[1], reverse=True))
+    return {"rows": rows, "counts": counts, "excluded": dict(excl),
+            "delivery_dist": dist, "delivered_statuses": sorted(delivered_ok),
+            "total_scanned": len(raw)}
 
 
 def first_name(full):
