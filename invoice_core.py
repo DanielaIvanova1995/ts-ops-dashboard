@@ -307,6 +307,38 @@ def _price_overrides():
         return {}
 
 
+def order_sku_cost(order_sku, supplier, pidx):
+    """THIS supplier's own cost for one of OUR order-line SKUs. For re-coded suppliers (Squaredeal,
+    GAP, Eurocell…) the invoice prints the supplier's OWN product code, so pricing by the invoice SKU
+    fails — but the line gets matched to an order line whose SKU does carry this supplier's cost.
+    Checks the prebuilt index first, then the durable overrides directly, INCLUDING the _patterns (so
+    an order SKU that isn't in the feed, e.g. a Smooth board or a colour corner, still resolves).
+    NEVER returns another supplier's price — only `supplier`'s own. `supplier` is the normalised name."""
+    nk = norm_code(order_sku)
+    if not nk:
+        return None
+    c = (pidx.get(nk) or {}).get(supplier)
+    if isinstance(c, (int, float)):
+        return c
+    ov = _price_overrides()
+    for sup, skus in ov.items():
+        if sup.startswith("_") or not isinstance(skus, dict) or norm_code(sup) != supplier:
+            continue
+        for sk2, cost in skus.items():
+            if isinstance(cost, (int, float)) and norm_code(sk2) == nk:
+                return cost
+    for sup, rules in (ov.get("_patterns") or {}).items():
+        if norm_code(sup) != supplier:
+            continue
+        for r in (rules or []):
+            cost = r.get("cost")
+            pref = norm_code(r.get("prefix"))
+            suf = norm_code(r.get("suffix") or "")
+            if isinstance(cost, (int, float)) and pref and nk.startswith(pref) and (not suf or nk.endswith(suf)):
+                return cost
+    return None
+
+
 def pricelist_index(lookup):
     """{norm_sku: {norm_supplier: cost}} from the lookup offers PLUS the durable overrides in
     price_overrides.json. The overrides must be applied here too: the scheduled runner
@@ -764,6 +796,35 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
             elif isinstance(paid, (int, float)):
                 rec["issues"].append(("noprice", "matched by name, but that Shopify order line "
                                                  "has no price to compare"))
+
+    # Re-coded suppliers (Squaredeal, GAP, Eurocell…) print their OWN product codes on the invoice, so
+    # the cost lookup by the invoice SKU above returned nothing ("no pricelist cost"). Each such line
+    # has since been matched to one of OUR order lines whose SKU DOES carry this supplier's cost —
+    # reprice against that order SKU (still this supplier's own price, never another's). Mirrors the
+    # Streamlit app's _price_issues, which the web/runner checker never had.
+    if not no_pl and not is_decor8(supplier):
+        for rec in lines:
+            if rec.get("cost") is not None:
+                continue
+            okey = rec.get("_okey")
+            if not okey:
+                continue
+            osku = order[okey].get("sku")
+            c = order_sku_cost(osku, supplier, pidx)
+            if c is None:
+                continue
+            rec["cost"] = c
+            rec["issues"] = [i for i in rec["issues"] if i[0] != "noprice"]
+            unit = rec.get("unit")
+            if isinstance(unit, (int, float)):
+                sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
+                allowed = c * (1 + sur)
+                if unit > allowed + tol:
+                    rec["issues"].append(("price", f"£{unit:,.2f} vs pricelist £{c:,.2f} "
+                                                   f"(+£{unit - c:,.2f}) — priced on our SKU {osku}"))
+                else:
+                    rec["issues"].append(("name", f"priced on our SKU {osku} — £{c:,.2f} "
+                                                  "(invoice code differs)"))
 
     missing = [order[s]["sku"] for s in order if s not in hit]
     n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name")
