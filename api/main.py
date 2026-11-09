@@ -2748,10 +2748,21 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
         return {"ok": False, "detail": "couldn't read the invoice PDF: " + str((parsed or {}).get("error") or "")[:140]}
     sup = inv.get("supplier")
     sid = inv.get("shopify_order_id")
-    try:
-        lines = ds.fetch_order_line_items(sid) if sid else None
-    except Exception:  # noqa: BLE001
+    # A SPLIT order (Monday part named like "31986-2") is shared between suppliers — this invoice only
+    # covers THIS supplier's part. Checking it against the WHOLE Shopify order would flag the OTHER
+    # supplier's lines as "not invoiced" (order 31986: planks = Squaredeal, the rest = UPB). So for a
+    # split, use the Monday split-part's OWN item list (order_items) only, not the full Shopify order.
+    import re as _re
+    _op = (inv.get("order_part") or "").strip()
+    _on = (inv.get("order_no") or "").strip()
+    is_split = bool(_re.search(r"-\d+$", _op)) and _op != _on
+    if is_split:
         lines = None
+    else:
+        try:
+            lines = ds.fetch_order_line_items(sid) if sid else None
+        except Exception:  # noqa: BLE001
+            lines = None
     order = core.order_candidates(lines, inv.get("order_items"))
     ship, sup_n = None, core.norm_code(sup)
     if (core.is_carron(sup_n) or core.is_ctie(sup_n)) and sid:
