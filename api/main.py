@@ -2627,7 +2627,7 @@ def _reviews_log_add(entries: list):
 
 
 _REVIEW_LOGO_URL = "https://www.tradesuperstoreonline.co.uk/cdn/shop/files/TSO_Logo_224x126.png?v=1767471702"
-_REVIEW_TEAM_URL = "https://cdn.shopify.com/s/files/1/0444/8675/4460/files/AVI06394.jpg?v=1794232582&width=1240"
+_REVIEW_TEAM_URL = "https://cdn.shopify.com/s/files/1/0444/8675/4460/files/AVI06394.jpg?v=1794232582&width=800"
 _REVIEW_IMG_SOURCES = [
     {"cid": "tsologo", "name": "logo.png", "url": _REVIEW_LOGO_URL},
     {"cid": "tsoteam", "name": "team.jpg", "url": _REVIEW_TEAM_URL},
