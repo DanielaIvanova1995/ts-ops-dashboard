@@ -36,7 +36,7 @@ const NAV = [
   { href: "/pricing", label: "Pricing", icon: "pricing", module: "pricing" },
   { href: "/quotes", label: "Quotes", icon: "quotes", module: "quotes" },
   { href: "/assistant", label: "My Assistant", icon: "assistant", module: "assistant" },
-  { href: "/aftersales", label: "Aftersales", icon: "aftersales", module: "aftersales" },
+  { href: "/aftersales", label: "Aftersales", icon: "aftersales", module: null },
 ];
 const SOON = [];
 
