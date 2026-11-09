@@ -29,7 +29,10 @@ COL = {
     "review": "status_18",
 }
 _COL_IDS = list(COL.values())
-_FIELDS = ('id name updates(limit:25){id creator{id}} column_values(ids:[%s]){id text}'
+# updates(limit:10): we only need enough recent updates to spot a human chase (>max_updates, default
+# 3). 10 keeps Monday API complexity down vs 25; the stage/aftersales/review columns are the primary
+# problem-catchers, so a rare undercount on a very high-activity order is still caught by those.
+_FIELDS = ('id name updates(limit:10){id creator{id}} column_values(ids:[%s]){id text}'
            % ",".join(f'"{c}"' for c in _COL_IDS))
 
 # Update creators that are NOT a real person — automations post with a null creator (TradeHub's

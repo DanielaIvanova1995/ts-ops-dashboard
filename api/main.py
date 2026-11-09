@@ -2620,7 +2620,7 @@ def _reviews_raw(refresh=False):
     import review_requests as rr
     now = _dt.datetime.now()
     fresh = (_REVIEWS_CACHE["raw"] is not None and _REVIEWS_CACHE["at"]
-             and (now - _REVIEWS_CACHE["at"]).total_seconds() < 600)
+             and (now - _REVIEWS_CACHE["at"]).total_seconds() < 1800)   # 30-min cache: fewer Monday pulls
     if refresh or not fresh:
         _REVIEWS_CACHE["raw"] = rr.fetch_raw()
         _REVIEWS_CACHE["at"] = now
@@ -2631,7 +2631,7 @@ def _reviews_raw(refresh=False):
 def reviews_get(window_days: int = 60, max_gap: int = 5, max_updates: int = 3,
                 include_b: bool = True, refresh: int = 0, delivered: str = ""):
     """The qualifying review-request list for the given filters (Tier A/B) + exclusion-reason counts.
-    The Monday pull is cached 10 minutes (pass refresh=1 to force a fresh pull). `delivered` is an
+    The Monday pull is cached 30 minutes (pass refresh=1 to force a fresh pull). `delivered` is an
     optional comma list of Delivery-status labels that count as delivered (default 'Delivered')."""
     import review_requests as rr
     try:
