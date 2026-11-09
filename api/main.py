@@ -2539,7 +2539,7 @@ _REVIEWS_CFG_DEFAULT = {
 _REVIEW_EMAIL_HTML = """<!doctype html><html><body style="margin:0;padding:0;background:#f4f5f7;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f5f7;"><tr><td align="center" style="padding:24px 12px;">
 <table role="presentation" width="620" cellpadding="0" cellspacing="0" border="0" style="width:620px;max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">
-<tr><td style="background:#ff6a00;padding:18px 32px;"><span style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">Trade Superstore Online</span></td></tr>
+<tr><td style="background:#ff6a00;padding:16px 28px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="left" valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">Trade Superstore Online</td><td align="right" valign="middle"><span style="display:inline-block;background:#ffffff;border-radius:6px;padding:6px 9px;"><img src="https://www.tradesuperstoreonline.co.uk/cdn/shop/files/TSO_Logo_224x126.png?v=1767471702" width="104" alt="Trade Superstore Online" style="display:block;width:104px;height:auto;border:0;"></span></td></tr></table></td></tr>
 <tr><td style="padding:30px 32px 6px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
 <p style="margin:0 0 16px;font-size:18px;font-weight:bold;color:#111111;">Hi {{first_name}},</p>
 <p style="margin:0 0 16px;">I hope everything arrived safely with order <b>{{order_no}}</b> and you're pleased with it.</p>
