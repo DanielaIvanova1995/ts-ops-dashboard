@@ -29,7 +29,7 @@ export default function Reviews() {
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState(null);
   const [f, setF] = useState({ window_days: 60, max_gap: 5, max_updates: 3, include_b: true });
-  const [delivered, setDelivered] = useState(["Delivered"]);   // which Delivery-status labels count as delivered
+  const [delivered, setDelivered] = useState(null);   // null = everything in the Delivered folder counts; array = narrow to those statuses
   const [sel, setSel] = useState(() => new Set());
   const [cfg, setCfg] = useState({});
   const [savingCfg, setSavingCfg] = useState(false);
@@ -51,7 +51,7 @@ export default function Reviews() {
     if (!accessKey) return;
     setStatus("loading"); setErr("");
     try {
-      const qs = `window_days=${f.window_days}&max_gap=${f.max_gap}&max_updates=${f.max_updates}&include_b=${f.include_b}&refresh=${refresh}&delivered=${encodeURIComponent(delivered.join(","))}`;
+      const qs = `window_days=${f.window_days}&max_gap=${f.max_gap}&max_updates=${f.max_updates}&include_b=${f.include_b}&refresh=${refresh}&delivered=${encodeURIComponent((delivered || []).join(","))}`;
       const res = await jsonFetch(`/reviews?${qs}`);
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d.ok) throw new Error(d.detail || `API ${res.status}`);
@@ -103,7 +103,7 @@ export default function Reviews() {
       + `It sends at ${cfg.throttle_per_min}/min, max ${cfg.batch_cap} per batch, and skips anyone unsubscribed. This cannot be undone.`;
     if (!window.confirm(msg)) return;
     try {
-      const res = await jsonFetch("/reviews/send", { method: "POST", body: JSON.stringify({ item_ids: ids, ...f, delivered }) });
+      const res = await jsonFetch("/reviews/send", { method: "POST", body: JSON.stringify({ item_ids: ids, ...f, delivered: delivered || [] }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) { setNotice({ kind: "ok", text: `Sending to ${d.total}${d.capped ? " (capped to the batch limit)" : ""}…` }); setSend({ running: true, done: 0, total: d.total, ok: 0, failed: 0 }); }
       else setNotice({ kind: "warn", text: d.detail || `API ${res.status}` });
@@ -180,32 +180,42 @@ export default function Reviews() {
         <label className="sub"><input type="checkbox" checked={f.include_b} onChange={(e) => setF((x) => ({ ...x, include_b: e.target.checked }))} /> Include Tier B (no ETA)</label>
       </div>
 
-      {/* Which Delivery statuses count as "delivered" — orders sit in the Delivered groups at many
-          statuses (Out For Delivery, Booked, Posted…); only the ticked ones are treated as received. */}
-      {data?.delivery_dist && Object.keys(data.delivery_dist).length > 0 && (
-        <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
-          <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-            Count as delivered <span style={{ fontWeight: 400 }}>— tick every status that means the customer has the order. Only ticked ones are emailed.</span>
+      {/* By default everything in the Delivered groups counts (group membership = delivered). This
+          lets her optionally narrow to specific Delivery statuses if she ever wants to. */}
+      {data?.delivery_dist && Object.keys(data.delivery_dist).length > 0 && (() => {
+        const allLabels = Object.keys(data.delivery_dist);
+        const isAll = delivered === null;
+        const isOn = (label) => isAll || delivered.some((s) => s.toLowerCase() === label.toLowerCase());
+        const toggle = (label, checked) => setDelivered((prev) => {
+          const cur = prev === null ? allLabels.slice() : prev.slice();
+          const next = checked
+            ? (cur.some((s) => s.toLowerCase() === label.toLowerCase()) ? cur : [...cur, label])
+            : cur.filter((s) => s.toLowerCase() !== label.toLowerCase());
+          // Covers every status again? normalise back to "all".
+          return allLabels.every((l) => next.some((s) => s.toLowerCase() === l.toLowerCase())) ? null : next;
+        });
+        return (
+          <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
+            <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
+              Counts as delivered <span style={{ fontWeight: 400 }}>— every order in the Delivered folder counts by default. Untick a status to leave it out. {isAll ? "" : <b>Narrowed.</b>} </span>
+              {!isAll && <button className="btn ghost" style={{ marginLeft: 6, padding: "1px 8px" }} onClick={() => setDelivered(null)}>Reset to all</button>}
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {Object.entries(data.delivery_dist).map(([label, n]) => {
+                const on = isOn(label);
+                return (
+                  <label key={label} className="sub" style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "3px 8px", border: "1px solid var(--line, #d9dce1)", borderRadius: 6,
+                    background: on ? "var(--accent-weak, #e8f0ff)" : "transparent" }}>
+                    <input type="checkbox" checked={on} onChange={(e) => toggle(label, e.target.checked)} />
+                    {label} <b>{n}</b>
+                  </label>
+                );
+              })}
+            </div>
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {Object.entries(data.delivery_dist).map(([label, n]) => {
-              const on = delivered.map((s) => s.toLowerCase()).includes(label.toLowerCase());
-              return (
-                <label key={label} className="sub" style={{ display: "inline-flex", alignItems: "center", gap: 5,
-                  padding: "3px 8px", border: "1px solid var(--line, #d9dce1)", borderRadius: 6,
-                  background: on ? "var(--accent-weak, #e8f0ff)" : "transparent" }}>
-                  <input type="checkbox" checked={on} onChange={(e) => {
-                    setDelivered((prev) => e.target.checked
-                      ? [...prev.filter((s) => s.toLowerCase() !== label.toLowerCase()), label]
-                      : prev.filter((s) => s.toLowerCase() !== label.toLowerCase()));
-                  }} />
-                  {label} <b>{n}</b>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {t && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>

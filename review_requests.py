@@ -129,7 +129,10 @@ def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=
     delivered (default just 'Delivered'). Returns {rows, counts, excluded, delivery_dist, total}."""
     raw = raw if raw is not None else fetch_raw()
     supp = {(e or "").strip().lower() for e in (suppression or set())}
-    delivered_ok = {_norm_label(s) for s in (delivered_statuses or ["Delivered"])}
+    # By default every order in the Delivered groups counts as delivered (group membership IS the
+    # signal) — delivered_ok = None means "don't filter on the Delivery-status column at all". Pass a
+    # list to narrow to specific status labels.
+    delivered_ok = {_norm_label(s) for s in delivered_statuses} if delivered_statuses else None
     today = _dt.date.today()
     cutoff = today - _dt.timedelta(days=int(window_days)) if window_days else None
     excl = Counter()
@@ -138,7 +141,7 @@ def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=
     for r in raw:
         lbl = (r["delivery"] or "").strip() or "(blank)"
         delivery_dist[lbl] = delivery_dist.get(lbl, 0) + 1
-        if _norm_label(r["delivery"]) not in delivered_ok:
+        if delivered_ok is not None and _norm_label(r["delivery"]) not in delivered_ok:
             excl["not_delivered"] += 1
             continue
         if r["n_updates"] > max_updates:                      # 4+ updates = there was an issue
@@ -199,7 +202,8 @@ def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=
               "total": len(rows)}
     dist = dict(sorted(delivery_dist.items(), key=lambda kv: kv[1], reverse=True))
     return {"rows": rows, "counts": counts, "excluded": dict(excl),
-            "delivery_dist": dist, "delivered_statuses": sorted(delivered_ok),
+            "delivery_dist": dist,
+            "delivered_statuses": sorted(delivered_ok) if delivered_ok is not None else None,
             "total_scanned": len(raw)}
 
 
