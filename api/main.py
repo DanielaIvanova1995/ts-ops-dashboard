@@ -2734,8 +2734,11 @@ def reviews_send_test(body: ReviewsTestIn):
     sent, errs = [], []
     for a in addrs:
         subject, html, imgs = _review_render({"name": "Alex Sample", "order_no": "TEST-1234", "email": a}, cfg)
+        # Unique subject per test so phones don't thread them together (you'd otherwise keep opening an
+        # old copy at the top of the thread). Real sends keep the normal subject.
+        test_subject = f"[TEST {_dt.datetime.now().strftime('%H:%M')}] {subject}"
         try:
-            ds.send_html_email(cfg["from_mailbox"], a, "[TEST] " + subject, html, reply_to=cfg.get("reply_to"), inline_images=imgs)
+            ds.send_html_email(cfg["from_mailbox"], a, test_subject, html, reply_to=cfg.get("reply_to"), inline_images=imgs)
             sent.append(a)
         except Exception as e:  # noqa: BLE001
             errs.append(f"{a}: {str(e)[:120]}")
