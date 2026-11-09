@@ -13,6 +13,15 @@ const EXCL_LABEL = {
   eta_gap_too_long: "ETA gap too long", tier_b_excluded: "Tier B excluded", duplicate_customer: "Duplicate customer",
 };
 
+// Delivery statuses that count as "delivered" by default (Daniela's chosen set). Everything in the
+// Delivered groups that's actually with / on its way to the customer; excludes problem/early states
+// (Refused, Rescheduled, Route Planned, With Courier, blank, etc.).
+const DELIVERED_DEFAULT = [
+  "Delivered", "Booked For Delivery", "Out For Delivery", "Delivery in 24-48hrs",
+  "AM Out For Delivery", "PM Out For Delivery", "Midday Delivery", "Posted",
+  "Call for ETA", "Customer Collection",
+];
+
 function csvCell(v) { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function download(name, text) {
   const blob = new Blob(["﻿" + text], { type: "text/csv;charset=utf-8;" });
@@ -29,7 +38,8 @@ export default function Reviews() {
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState(null);
   const [f, setF] = useState({ window_days: 30, max_gap: 5, max_updates: 3, include_b: true });
-  const [delivered, setDelivered] = useState(null);   // null = everything in the Delivered folder counts; array = narrow to those statuses
+  const [delivered, setDelivered] = useState(DELIVERED_DEFAULT);   // which Delivery-status labels count (null = all)
+  const [showDelivered, setShowDelivered] = useState(false);       // picker is collapsed by default
   const [sel, setSel] = useState(() => new Set());
   const [cfg, setCfg] = useState({});
   const [savingCfg, setSavingCfg] = useState(false);
@@ -194,39 +204,47 @@ export default function Reviews() {
         <label className="sub"><input type="checkbox" checked={f.include_b} onChange={(e) => setF((x) => ({ ...x, include_b: e.target.checked }))} /> Include Tier B (no ETA)</label>
       </div>
 
-      {/* By default everything in the Delivered groups counts (group membership = delivered). This
-          lets her optionally narrow to specific Delivery statuses if she ever wants to. */}
+      {/* Which Delivery statuses count as delivered. Collapsed by default — a chosen set is baked in,
+          so she only opens this if she wants to change it. */}
       {data?.delivery_dist && Object.keys(data.delivery_dist).length > 0 && (() => {
         const allLabels = Object.keys(data.delivery_dist);
         const isAll = delivered === null;
+        const countOn = isAll ? allLabels.length : delivered.length;
         const isOn = (label) => isAll || delivered.some((s) => s.toLowerCase() === label.toLowerCase());
         const toggle = (label, checked) => setDelivered((prev) => {
           const cur = prev === null ? allLabels.slice() : prev.slice();
           const next = checked
             ? (cur.some((s) => s.toLowerCase() === label.toLowerCase()) ? cur : [...cur, label])
             : cur.filter((s) => s.toLowerCase() !== label.toLowerCase());
-          // Covers every status again? normalise back to "all".
           return allLabels.every((l) => next.some((s) => s.toLowerCase() === l.toLowerCase())) ? null : next;
         });
         return (
-          <div className="card" style={{ padding: "10px 14px", marginBottom: 12 }}>
-            <div className="sub" style={{ fontWeight: 600, marginBottom: 6 }}>
-              Counts as delivered <span style={{ fontWeight: 400 }}>— every order in the Delivered folder counts by default. Untick a status to leave it out. {isAll ? "" : <b>Narrowed.</b>} </span>
-              {!isAll && <button className="btn ghost" style={{ marginLeft: 6, padding: "1px 8px" }} onClick={() => setDelivered(null)}>Reset to all</button>}
+          <div className="card" style={{ padding: "8px 14px", marginBottom: 12 }}>
+            <div className="sub" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span>Counting <b>{isAll ? "all" : countOn}</b> delivery status{countOn === 1 ? "" : "es"} as delivered.</span>
+              <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => setShowDelivered((v) => !v)}>{showDelivered ? "Hide" : "Change"}</button>
             </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {Object.entries(data.delivery_dist).map(([label, n]) => {
-                const on = isOn(label);
-                return (
-                  <label key={label} className="sub" style={{ display: "inline-flex", alignItems: "center", gap: 5,
-                    padding: "3px 8px", border: "1px solid var(--line, #d9dce1)", borderRadius: 6,
-                    background: on ? "var(--accent-weak, #e8f0ff)" : "transparent" }}>
-                    <input type="checkbox" checked={on} onChange={(e) => toggle(label, e.target.checked)} />
-                    {label} <b>{n}</b>
-                  </label>
-                );
-              })}
-            </div>
+            {showDelivered && (
+              <>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+                  {Object.entries(data.delivery_dist).map(([label, n]) => {
+                    const on = isOn(label);
+                    return (
+                      <label key={label} className="sub" style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                        padding: "3px 8px", border: "1px solid var(--line, #d9dce1)", borderRadius: 6,
+                        background: on ? "var(--accent-weak, #e8f0ff)" : "transparent" }}>
+                        <input type="checkbox" checked={on} onChange={(e) => toggle(label, e.target.checked)} />
+                        {label} <b>{n}</b>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => setDelivered(DELIVERED_DEFAULT)}>Reset to default</button>
+                  <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => setDelivered(null)}>Tick all</button>
+                </div>
+              </>
+            )}
           </div>
         );
       })()}
