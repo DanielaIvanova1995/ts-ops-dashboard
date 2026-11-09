@@ -2370,6 +2370,33 @@ def manual_payment_delete(body: ManualPayIdIn):
 # sections. Editable content is stored in the Supabase config `aftersales_booklet`.
 _AFTERSALES_KEY = "aftersales_booklet"
 
+# Pre-filled starting values for suppliers whose terms we already know (from their emails / terms).
+# These SEED the editable fields — the team can overwrite and save; saved values always win. Keyed by
+# norm_code(supplier group title).
+_AFTERSALES_SEED = {
+    "gap": {
+        "return_period": "14 days from delivery",
+        "restocking_fee": "10% restocking",
+        "returns_carriage": "£45 redelivery / £35 collection; carriage £20.83 on orders under £150 net",
+        "returns_process": "Arrange with GAP accounts / account manager; goods must be unused & resaleable.",
+        "notes": "Online-reseller SLA — around 5 working day delivery.",
+    },
+    "squaredeal": {
+        "return_period": "Report damages / shortages within 72 hours of delivery.",
+        "restocking_fee": "10% handling / restocking fee on returns",
+        "returns_carriage": "Unsellable items must be collected at our convenience / cost.",
+        "returns_process": "Contact the branch to arrange (e.g. Swindon 01793 953551). Collections for James Hardie must be arranged before 4:00pm.",
+        "condition": "SPECIAL ORDERS and JAMES HARDIE fibre-cement products are NON-REFUNDABLE.",
+        "damaged_process": "Report any damages or shortages within 72 hours of delivery.",
+        "returns_contact": "info@squaredealupvc.co.uk (or the processing branch)",
+    },
+    "nuieroxor": {
+        "restocking_fee": "15% restocking fee",
+        "returns_contact": "sales@roxorgroup.com",
+        "notes": "Nuie / Ultra Finishing / Roxor Group.",
+    },
+}
+
 
 def _aftersales_load() -> dict:
     try:
@@ -2391,7 +2418,8 @@ def aftersales_get():
     saved = _aftersales_load()
     sfields = saved.get("suppliers") or {}
     for d in directory:
-        d["fields"] = sfields.get(core.norm_code(d.get("supplier")), {})
+        nk = core.norm_code(d.get("supplier"))
+        d["fields"] = {**_AFTERSALES_SEED.get(nk, {}), **(sfields.get(nk) or {})}   # saved overrides seed
     return {"ok": True, "suppliers": directory, "general": saved.get("general") or {},
             "updated_at": saved.get("updated_at")}
 
