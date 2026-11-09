@@ -21,6 +21,7 @@ const Ico = {
   assistant: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><rect x="3" y="11" width="18" height="10" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>),
   users: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>),
   aftersales: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M9 14l-4 4a2 2 0 0 0 3 3l4-4" /><path d="M14.5 9.5 20 4" /><path d="M3 4l5 5" /><path d="M14 10a4 4 0 0 1 5-5l-2.5 2.5L18 9l1.5 1.5L22 8a4 4 0 0 1-5 5z" /></svg>),
+  reviews: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M12 2l2.9 6.3 6.6.6-5 4.4 1.5 6.5L12 17l-5.9 3.3 1.5-6.5-5-4.4 6.6-.6z" /></svg>),
   dot: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" {...p}><circle cx="12" cy="12" r="3" /></svg>),
   logout: (p) => (<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>),
 };
@@ -37,6 +38,7 @@ const NAV = [
   { href: "/quotes", label: "Quotes", icon: "quotes", module: "quotes" },
   { href: "/assistant", label: "My Assistant", icon: "assistant", module: "assistant" },
   { href: "/aftersales", label: "Aftersales", icon: "aftersales", module: null },
+  { href: "/reviews", label: "Review Requests", icon: "reviews", module: "reviews" },
 ];
 const SOON = [];
 

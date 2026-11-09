@@ -40,6 +40,7 @@ MODULES = {
     "triage": "Triage",
     "payments": "Payments",
     "assistant": "My Assistant",
+    "reviews": "Review Requests",
     # NB: "aftersales" is intentionally NOT a per-user module — it's open to every logged-in user
     # (a shared training reference). See module_for_path returning None for /aftersales.
 }
@@ -295,5 +296,7 @@ def module_for_path(path: str) -> str | None:
         return "triage"
     if p.startswith("/assistant"):
         return "assistant"
+    if p.startswith("/reviews") and not p.startswith("/reviews/unsubscribe"):
+        return "reviews"                   # /reviews/unsubscribe is PUBLIC (customers click it)
     # /aftersales → None: the aftersales training booklet is open to every logged-in user.
     return None                            # /meta, /updates-counts, /auth/*, /aftersales, etc.

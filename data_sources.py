@@ -1855,6 +1855,26 @@ def send_supplier_email(mailbox: str, to_email: str, subject: str, body: str,
     return True
 
 
+def send_html_email(mailbox: str, to_email: str, subject: str, html: str,
+                    reply_to: str | None = None, token: str | None = None) -> bool:
+    """Send an HTML email from `mailbox` (saved to Sent Items), with an optional reply-to. Used for
+    customer review-request emails. Needs Mail.Send. Raises on failure."""
+    token = token or ms_token()
+    if not (to_email or "").strip():
+        raise RuntimeError("No recipient email address.")
+    msg = {"subject": subject, "body": {"contentType": "HTML", "content": html},
+           "toRecipients": _to_recipients(to_email)}
+    if reply_to:
+        msg["replyTo"] = _to_recipients(reply_to)
+    r = requests.post(
+        f"{GRAPH}/users/{mailbox}/sendMail",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"message": msg, "saveToSentItems": True}, timeout=45,
+    )
+    r.raise_for_status()
+    return True
+
+
 def create_supplier_draft(mailbox: str, to_email: str, subject: str, body: str,
                           pdf_url: str | None = None, pdf_name: str = "invoice.pdf",
                           pdf_bytes: bytes | None = None, token: str | None = None) -> str | None:

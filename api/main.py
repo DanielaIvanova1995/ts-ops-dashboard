@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware            # noqa: E402
-from fastapi.responses import RedirectResponse               # noqa: E402
+from fastapi.responses import HTMLResponse, RedirectResponse   # noqa: E402
 from pydantic import BaseModel                                # noqa: E402
 
 import data_sources as ds                             # noqa: E402  (reused — Monday/Shopify calls)
@@ -2515,6 +2515,334 @@ def aftersales_save_general(body: AftersalesGeneralIn):
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
+
+
+# ---- Review Requests -------------------------------------------------------------------------
+import threading as _threading
+import time as _time
+
+_REVIEWS_KEY = "reviews_config"
+_REVIEWS_SUPP_KEY = "reviews_suppression"
+_REVIEWS_LOG_KEY = "reviews_sendlog"
+_REVIEW_FROM_DEFAULT = "hello@tradesuperstoreonline.co.uk"
+_REVIEWS_API_BASE = (os.environ.get("TRADEHUB_API_BASE") or "https://tradehub-api-dlib.onrender.com").rstrip("/")
+_REVIEWS_CACHE = {"at": None, "raw": None}
+_REVIEWS_SEND = {"running": False, "done": 0, "total": 0, "ok": 0, "failed": 0, "started": None, "finished": None, "last_error": None}
+
+_REVIEWS_CFG_DEFAULT = {
+    "from_mailbox": _REVIEW_FROM_DEFAULT, "reply_to": _REVIEW_FROM_DEFAULT,
+    "subject": "How did we do, {{first_name}}?", "review_link": "",
+    "throttle_per_min": 20, "batch_cap": 100,
+    "window_days": 60, "max_gap": 5, "max_updates": 3, "include_b": True,
+}
+
+_REVIEW_EMAIL_HTML = """<!doctype html><html><body style="margin:0;padding:0;background:#f4f4f5;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e6e6e8;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="height:5px;background:#ff6a00;"></td></tr>
+<tr><td style="padding:28px 34px 6px;"><div style="font-size:15px;color:#21242b;line-height:1.6;">
+<p style="margin:0 0 16px;font-size:18px;font-weight:700;">Hi {{first_name}},</p>
+<p style="margin:0 0 16px;">I hope everything arrived safely with order <b>{{order_no}}</b> and you're pleased with it.</p>
+<p style="margin:0 0 16px;">We're a small, hands-on team here at Trade Superstore Online, and honestly &mdash; a quick review makes a <b>real</b> difference to us. It helps other customers shop with confidence, and it means the world to the person who personally looked after your order: our team are <b>recognised and rewarded</b> for the great feedback they earn, so your few kind words genuinely go a long way for someone here.</p>
+<p style="margin:0 0 22px;">If you've got 30 seconds, we'd be so grateful if you'd share how we did:</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 24px;"><tr><td align="center" bgcolor="#ff6a00" style="border-radius:10px;"><a href="{{review_link}}" target="_blank" style="display:inline-block;padding:14px 30px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">&#11088; Leave a quick review</a></td></tr></table>
+<p style="margin:0 0 6px;">Thank you so much &mdash; it really does help, and it won't take long.</p>
+<p style="margin:0 0 4px;">With thanks,</p>
+<p style="margin:0 0 20px;font-weight:700;">The Trade Superstore Online team</p>
+<p style="margin:0 0 20px;padding:12px 14px;background:#fff6f0;border:1px solid #ffd9bf;border-radius:10px;font-size:14px;color:#5a3b22;"><b>Was anything not quite right?</b> Please just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</p>
+</div></td></tr>
+<tr><td style="padding:18px 34px 26px;border-top:1px solid #eeeeef;">
+<p style="margin:0 0 8px;font-size:12px;color:#8a8a8f;line-height:1.5;">Trade Superstore Online &middot; TSO UK Ltd, Unit 8, Tomlinson Industrial Estate, Alfreton Road, Derby, DE21 4ED &middot; <a href="mailto:hello@tradesuperstoreonline.co.uk" style="color:#8a8a8f;">hello@tradesuperstoreonline.co.uk</a> &middot; 0333 090 9217</p>
+<p style="margin:0;font-size:12px;color:#a7a7ac;">You're receiving this because you recently ordered from us. <a href="{{unsubscribe_link}}" style="color:#a7a7ac;text-decoration:underline;">Unsubscribe</a>.</p>
+</td></tr></table></td></tr></table></body></html>"""
+
+
+def _reviews_cfg():
+    cfg = dict(_REVIEWS_CFG_DEFAULT)
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            saved = supabase_db.config_get(_REVIEWS_KEY) or {}
+            cfg.update({k: v for k, v in saved.items() if v is not None})
+    except Exception:  # noqa: BLE001
+        pass
+    return cfg
+
+
+def _reviews_suppression() -> set:
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            return {str(e).strip().lower() for e in ((supabase_db.config_get(_REVIEWS_SUPP_KEY) or {}).get("emails") or [])}
+    except Exception:  # noqa: BLE001
+        pass
+    return set()
+
+
+def _reviews_suppress_add(email: str):
+    import supabase_db
+    cur = (supabase_db.config_get(_REVIEWS_SUPP_KEY) or {}) if supabase_db.configured() else {}
+    emails = {str(e).strip().lower() for e in (cur.get("emails") or [])}
+    emails.add(str(email).strip().lower())
+    supabase_db.config_set(_REVIEWS_SUPP_KEY, {"emails": sorted(emails)})
+
+
+def _reviews_log_add(entries: list):
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            return
+        cur = (supabase_db.config_get(_REVIEWS_LOG_KEY) or {}).get("rows") or []
+        supabase_db.config_set(_REVIEWS_LOG_KEY, {"rows": (entries + cur)[:2000]})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _review_render(row, cfg):
+    import review_requests as rr
+    import urllib.parse as _up
+    fn = rr.first_name(row.get("name"))
+    ono = row.get("order_no") or ""
+    link = cfg.get("review_link") or "#"
+    unsub = f"{_REVIEWS_API_BASE}/reviews/unsubscribe?e={_up.quote((row.get('email') or '').strip())}"
+    subject = (cfg.get("subject") or "How did we do, {{first_name}}?").replace("{{first_name}}", fn).replace("{{order_no}}", ono)
+    html = (_REVIEW_EMAIL_HTML.replace("{{first_name}}", fn).replace("{{order_no}}", ono)
+            .replace("{{review_link}}", link).replace("{{unsubscribe_link}}", unsub))
+    return subject, html
+
+
+def _reviews_raw(refresh=False):
+    import review_requests as rr
+    now = _dt.datetime.now()
+    fresh = (_REVIEWS_CACHE["raw"] is not None and _REVIEWS_CACHE["at"]
+             and (now - _REVIEWS_CACHE["at"]).total_seconds() < 600)
+    if refresh or not fresh:
+        _REVIEWS_CACHE["raw"] = rr.fetch_raw()
+        _REVIEWS_CACHE["at"] = now
+    return _REVIEWS_CACHE["raw"]
+
+
+@app.get("/reviews", dependencies=[Depends(require_key)])
+def reviews_get(window_days: int = 60, max_gap: int = 5, max_updates: int = 3,
+                include_b: bool = True, refresh: int = 0):
+    """The qualifying review-request list for the given filters (Tier A/B) + exclusion-reason counts.
+    The Monday pull is cached 10 minutes (pass refresh=1 to force a fresh pull)."""
+    import review_requests as rr
+    try:
+        raw = _reviews_raw(refresh=bool(refresh))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the Orders board: {e}")
+    res = rr.build(window_days=window_days, max_gap=max_gap, max_updates=max_updates,
+                   include_b=include_b, suppression=_reviews_suppression(), raw=raw)
+    return {"ok": True, **res, "config": _reviews_cfg(),
+            "cached_at": _REVIEWS_CACHE["at"].isoformat() if _REVIEWS_CACHE["at"] else None}
+
+
+class ReviewsTestIn(BaseModel):
+    emails: list[str] = []
+
+
+@app.post("/reviews/send-test", dependencies=[Depends(require_key)])
+def reviews_send_test(body: ReviewsTestIn):
+    """Send up to 3 sample review emails to the addresses you type in (never to customers)."""
+    cfg = _reviews_cfg()
+    if not (cfg.get("review_link") or "").strip():
+        raise HTTPException(status_code=400, detail="Set the review link first.")
+    addrs = [e.strip() for e in (body.emails or []) if e.strip()][:3]
+    if not addrs:
+        raise HTTPException(status_code=400, detail="Enter at least one test address.")
+    sent, errs = [], []
+    for a in addrs:
+        subject, html = _review_render({"name": "Alex Sample", "order_no": "TEST-1234", "email": a}, cfg)
+        try:
+            ds.send_html_email(cfg["from_mailbox"], a, "[TEST] " + subject, html, reply_to=cfg.get("reply_to"))
+            sent.append(a)
+        except Exception as e:  # noqa: BLE001
+            errs.append(f"{a}: {str(e)[:120]}")
+    return {"ok": not errs, "sent": sent, "errors": errs}
+
+
+class ReviewsSendIn(BaseModel):
+    item_ids: list[str] = []
+    window_days: int = 60
+    max_gap: int = 5
+    max_updates: int = 3
+    include_b: bool = True
+
+
+def _reviews_send_worker(rows, cfg):
+    import review_requests as rr
+    delay = 60.0 / max(1, int(cfg.get("throttle_per_min") or 20))
+    log = []
+    try:
+        for row in rows:
+            if not _REVIEWS_SEND["running"]:
+                break
+            email = (row.get("email") or "").strip()
+            ts = _dt.datetime.now().isoformat(timespec="seconds")
+            try:
+                subject, html = _review_render(row, cfg)
+                ds.send_html_email(cfg["from_mailbox"], email, subject, html, reply_to=cfg.get("reply_to"))
+                try:
+                    rr.mark_sent(row.get("item_id"))
+                except Exception:  # noqa: BLE001 — email sent; Monday write-back is best-effort
+                    pass
+                _REVIEWS_SEND["ok"] += 1
+                log.append({"at": ts, "order_no": row.get("order_no"), "email": email, "status": "sent", "error": ""})
+            except Exception as e:  # noqa: BLE001
+                _REVIEWS_SEND["failed"] += 1
+                _REVIEWS_SEND["last_error"] = str(e)[:160]
+                log.append({"at": ts, "order_no": row.get("order_no"), "email": email, "status": "failed", "error": str(e)[:160]})
+            _REVIEWS_SEND["done"] += 1
+            _time.sleep(delay)
+    finally:
+        _reviews_log_add(log)
+        _REVIEWS_SEND["running"] = False
+        _REVIEWS_SEND["finished"] = _dt.datetime.now().isoformat(timespec="seconds")
+
+
+@app.post("/reviews/send", dependencies=[Depends(require_key)])
+def reviews_send(body: ReviewsSendIn):
+    """Send review emails to the SELECTED orders (by Monday item id). The frontend gates this behind a
+    confirm step. Re-checks every recipient against the filters AND suppression from a FRESH pull, caps
+    the batch, and throttles. Runs in the background — poll /reviews/send-status."""
+    import review_requests as rr
+    if _REVIEWS_SEND["running"]:
+        raise HTTPException(status_code=409, detail="A send is already running.")
+    cfg = _reviews_cfg()
+    if not (cfg.get("review_link") or "").strip():
+        raise HTTPException(status_code=400, detail="Set the review link first.")
+    want = {str(i) for i in (body.item_ids or [])}
+    if not want:
+        raise HTTPException(status_code=400, detail="No orders selected.")
+    try:
+        raw = _reviews_raw(refresh=True)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the Orders board: {e}")
+    res = rr.build(window_days=body.window_days, max_gap=body.max_gap, max_updates=body.max_updates,
+                   include_b=body.include_b, suppression=_reviews_suppression(), raw=raw)
+    rows = [r for r in res["rows"] if str(r.get("item_id")) in want]
+    cap = int(cfg.get("batch_cap") or 100)
+    capped = len(rows) > cap
+    rows = rows[:cap]
+    if not rows:
+        raise HTTPException(status_code=400, detail="None of the selected orders still qualify to send.")
+    _REVIEWS_SEND.update({"running": True, "done": 0, "total": len(rows), "ok": 0, "failed": 0,
+                          "started": _dt.datetime.now().isoformat(timespec="seconds"), "finished": None, "last_error": None})
+    _threading.Thread(target=_reviews_send_worker, args=(rows, cfg), daemon=True).start()
+    return {"ok": True, "total": len(rows), "capped": capped}
+
+
+@app.post("/reviews/send-stop", dependencies=[Depends(require_key)])
+def reviews_send_stop():
+    _REVIEWS_SEND["running"] = False
+    return {"ok": True}
+
+
+@app.get("/reviews/send-status", dependencies=[Depends(require_key)])
+def reviews_send_status():
+    return {"ok": True, **_REVIEWS_SEND}
+
+
+@app.get("/reviews/log", dependencies=[Depends(require_key)])
+def reviews_log(limit: int = 200):
+    try:
+        import supabase_db
+        rows = (supabase_db.config_get(_REVIEWS_LOG_KEY) or {}).get("rows") or [] if supabase_db.configured() else []
+    except Exception:  # noqa: BLE001
+        rows = []
+    return {"ok": True, "rows": rows[:max(1, min(int(limit or 200), 2000))]}
+
+
+class ReviewsCfgIn(BaseModel):
+    from_mailbox: str | None = None
+    reply_to: str | None = None
+    subject: str | None = None
+    review_link: str | None = None
+    throttle_per_min: int | None = None
+    batch_cap: int | None = None
+
+
+@app.get("/reviews/config", dependencies=[Depends(require_key)])
+def reviews_config_get():
+    return {"ok": True, "config": _reviews_cfg(), "suppression_count": len(_reviews_suppression())}
+
+
+@app.post("/reviews/config", dependencies=[Depends(require_key)])
+def reviews_config_set(body: ReviewsCfgIn):
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Store not available.")
+        cur = supabase_db.config_get(_REVIEWS_KEY) or {}
+        for k in ("from_mailbox", "reply_to", "subject", "review_link"):
+            v = getattr(body, k)
+            if v is not None:
+                cur[k] = v.strip()
+        if body.throttle_per_min is not None:
+            cur["throttle_per_min"] = max(1, min(int(body.throttle_per_min), 120))
+        if body.batch_cap is not None:
+            cur["batch_cap"] = max(1, min(int(body.batch_cap), 500))
+        supabase_db.config_set(_REVIEWS_KEY, cur)
+        return {"ok": True, "config": _reviews_cfg()}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {e}")
+
+
+class ReviewsSuppIn(BaseModel):
+    email: str
+    remove: bool = False
+
+
+@app.get("/reviews/suppression", dependencies=[Depends(require_key)])
+def reviews_suppression_get():
+    return {"ok": True, "emails": sorted(_reviews_suppression())}
+
+
+@app.post("/reviews/suppression", dependencies=[Depends(require_key)])
+def reviews_suppression_set(body: ReviewsSuppIn):
+    e = (body.email or "").strip().lower()
+    if not e:
+        raise HTTPException(status_code=400, detail="email required")
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            raise HTTPException(status_code=503, detail="Store not available.")
+        cur = supabase_db.config_get(_REVIEWS_SUPP_KEY) or {}
+        emails = {str(x).strip().lower() for x in (cur.get("emails") or [])}
+        emails.discard(e) if body.remove else emails.add(e)
+        supabase_db.config_set(_REVIEWS_SUPP_KEY, {"emails": sorted(emails)})
+        return {"ok": True, "count": len(emails)}
+    except HTTPException:
+        raise
+    except Exception as ex:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't save: {ex}")
+
+
+@app.get("/reviews/unsubscribe")
+def reviews_unsubscribe(e: str = ""):
+    """PUBLIC — a customer clicking Unsubscribe. Adds them to the suppression list (always checked
+    before any send) and shows a small confirmation page."""
+    addr = (e or "").strip()
+    done = False
+    if addr:
+        try:
+            _reviews_suppress_add(addr)
+            done = True
+        except Exception:  # noqa: BLE001
+            done = False
+    msg = ("You've been unsubscribed — we won't email you again." if done
+           else "We couldn't process that automatically. Please email hello@tradesuperstoreonline.co.uk and we'll remove you.")
+    html = ("<!doctype html><html><body style=\"font-family:-apple-system,Segoe UI,Arial,sans-serif;"
+            "background:#f4f4f5;padding:40px;text-align:center;color:#21242b;\">"
+            "<div style=\"max-width:460px;margin:0 auto;background:#fff;border-radius:14px;padding:30px;"
+            "border:1px solid #e6e6e8;\"><div style=\"height:5px;background:#ff6a00;border-radius:3px;"
+            "margin:-30px -30px 24px;\"></div>"
+            f"<h2 style=\"margin:0 0 10px;\">Trade Superstore Online</h2><p style=\"color:#555;\">{msg}</p>"
+            "</div></body></html>")
+    return HTMLResponse(content=html)
 
 
 class RemitIn(BaseModel):
