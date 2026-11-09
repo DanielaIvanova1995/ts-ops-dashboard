@@ -2536,24 +2536,24 @@ _REVIEWS_CFG_DEFAULT = {
     "window_days": 60, "max_gap": 5, "max_updates": 3, "include_b": True,
 }
 
-_REVIEW_EMAIL_HTML = """<!doctype html><html><body style="margin:0;padding:0;background:#f4f5f7;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f5f7;"><tr><td align="center" style="padding:24px 12px;">
-<table role="presentation" width="620" cellpadding="0" cellspacing="0" border="0" style="width:620px;max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;">
-<tr><td style="background:#ff6a00;padding:16px 28px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="left" valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">Trade Superstore Online</td><td align="right" valign="middle"><span style="display:inline-block;background:#ffffff;border-radius:6px;padding:6px 9px;"><img src="https://www.tradesuperstoreonline.co.uk/cdn/shop/files/TSO_Logo_224x126.png?v=1767471702" width="104" alt="Trade Superstore Online" style="display:block;width:104px;height:auto;border:0;"></span></td></tr></table></td></tr>
+_REVIEW_EMAIL_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f5f7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;background:#f4f5f7;"><tr><td style="padding:24px 12px;text-align:center;">
+<table role="presentation" width="620" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:620px;max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;font-family:Arial,Helvetica,sans-serif;text-align:left;">
+<tr><td style="background:#ff6a00;padding:16px 28px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;"><tr><td style="vertical-align:middle;text-align:left;font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">Trade Superstore Online</td><td style="vertical-align:middle;text-align:right;"><span style="display:inline-block;background:#ffffff;border-radius:6px;padding:6px 9px;"><img src="https://www.tradesuperstoreonline.co.uk/cdn/shop/files/TSO_Logo_224x126.png?v=1767471702" width="104" alt="Trade Superstore Online" style="display:block;width:104px;height:auto;border:0;"></span></td></tr></table></td></tr>
 <tr><td style="padding:30px 32px 6px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
 <p style="margin:0 0 16px;font-size:18px;font-weight:bold;color:#111111;">Hi {{first_name}},</p>
 <p style="margin:0 0 16px;">I hope everything arrived safely with order <b>{{order_no}}</b> and you're pleased with it.</p>
 <p style="margin:0 0 16px;">We're a small, hands-on team here at Trade Superstore Online, and a quick review makes a <b>real</b> difference to us. It helps other customers shop with confidence &mdash; and it means a lot to the person who personally looked after your order, as our team are recognised and rewarded for the feedback they earn. So a few kind words genuinely go a long way for someone here.</p>
 <p style="margin:0 0 4px;">If you've got 30 seconds, we'd be really grateful if you'd share how we did:</p>
 </td></tr>
-<tr><td align="center" style="padding:20px 32px 26px 32px;">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#ff6a00" style="border-radius:8px;"><a href="{{review_link}}" target="_blank" style="display:inline-block;padding:14px 34px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">Leave a quick review</a></td></tr></table>
+<tr><td style="padding:20px 32px 26px 32px;text-align:center;">
+<a href="{{review_link}}" target="_blank" style="display:inline-block;background-color:#ff6a00;padding:14px 34px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">Leave a quick review</a>
 </td></tr>
 <tr><td style="padding:0 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222222;">
 <p style="margin:0 0 4px;">Thank you &mdash; it really does help, and it won't take long.</p>
 <p style="margin:0 0 2px;">With thanks,</p>
 <p style="margin:0 0 22px;font-weight:bold;">The Trade Superstore Online team</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;"><tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#444444;"><b style="color:#222222;">Was anything not quite right?</b> Just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</td></tr></table>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;"><tr><td style="padding:14px 16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#444444;"><b style="color:#222222;">Was anything not quite right?</b> Just hit reply and tell us &mdash; we'd much rather hear from you and put it right.</td></tr></table>
 </td></tr>
 <tr><td style="padding:20px 0 0 0;"><img src="https://cdn.shopify.com/s/files/1/0444/8675/4460/files/AVI06394.jpg?v=1794232582" width="620" alt="The Trade Superstore Online team" style="display:block;width:100%;max-width:620px;height:auto;border:0;"></td></tr>
 <tr><td style="padding:20px 32px 26px 32px;border-top:1px solid #eeeeee;font-family:Arial,Helvetica,sans-serif;">
