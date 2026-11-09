@@ -28,7 +28,7 @@ export default function Reviews() {
   const [status, setStatus] = useState("idle");
   const [err, setErr] = useState("");
   const [notice, setNotice] = useState(null);
-  const [f, setF] = useState({ window_days: 60, max_gap: 5, max_updates: 3, include_b: true });
+  const [f, setF] = useState({ window_days: 30, max_gap: 5, max_updates: 3, include_b: true });
   const [delivered, setDelivered] = useState(null);   // null = everything in the Delivered folder counts; array = narrow to those statuses
   const [sel, setSel] = useState(() => new Set());
   const [cfg, setCfg] = useState({});
@@ -55,11 +55,25 @@ export default function Reviews() {
       const res = await jsonFetch(`/reviews?${qs}`);
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d.ok) throw new Error(d.detail || `API ${res.status}`);
-      setData(d); setCfg(d.config || {}); setStatus("ok");
+      // NB: don't setCfg here — a list refresh must not clobber settings the user is editing
+      // (that re-showed the "set review link" banner). cfg is owned by loadCfg + saveCfg only.
+      setData(d); setStatus("ok");
       setSel(new Set((d.rows || []).map((r) => r.item_id)));   // default: all selected
     } catch (e) { if (String(e.message) !== "unauthorised") { setErr(String(e.message || e)); setStatus("error"); } }
   }, [accessKey, jsonFetch, f, delivered]);
   useEffect(() => { load(); }, [load]);
+
+  // Load settings ONCE on sign-in, independent of the list. Only Save changes them after this, so a
+  // list refresh can never wipe the review link (which was re-triggering the "set review link" banner).
+  const loadCfg = useCallback(async () => {
+    if (!accessKey) return;
+    try {
+      const res = await jsonFetch("/reviews/config");
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.config) setCfg(d.config);
+    } catch {}
+  }, [accessKey, jsonFetch]);
+  useEffect(() => { loadCfg(); }, [loadCfg]);
 
   // Poll send status while a send is running.
   useEffect(() => {
