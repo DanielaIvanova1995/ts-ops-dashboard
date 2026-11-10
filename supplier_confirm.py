@@ -399,6 +399,59 @@ def plan_carron_email(email, deps):
     return {**base, "plan": "LEAVE in folder", "reason": r.get("reason")}
 
 
+# =================================================================================================
+# LPD (Leeds Plywood & Doors) handler — sales-order confirmations whose OUR-order reference sits
+# INSIDE the PDF (the email only says 'document attached'). Clean + validated → archive to NV
+# Resolved; a backorder, an amendment, or a price/line/margin issue → flag (never auto-archived).
+# =================================================================================================
+_LPD_BACKORDER = re.compile(r"back\s?order", re.I)
+_LPD_AMENDED = re.compile(r"amend", re.I)
+
+
+def classify_lpd(subject, body, sender=""):
+    text = f"{subject or ''}\n{body or ''}"
+    if _LPD_BACKORDER.search(text):
+        return {"action": "flag", "reason": "Backorder confirmation — stock issue, needs a human"}
+    if _LPD_AMENDED.search(text):
+        return {"action": "flag", "reason": "Amended sales order — review the change before clearing"}
+    return {"action": "confirm", "reason": "LPD sales-order confirmation"}
+
+
+def plan_lpd_email(email, deps):
+    """Dry-run plan for one LPD sales-order email. deps.fetch_confirmation returns
+    (product_lines, carriage£, our_order_ref) — the order ref comes from INSIDE the PDF."""
+    r = classify_lpd(email.get("subject"), email.get("body"), email.get("sender", ""))
+    base = {"supplier": "LPD", "subject": email.get("subject"), "order_no": None, "action": r["action"]}
+    if r["action"] == "flag":
+        return {**base, "plan": f"FLAG — {r['reason']} (leave in folder)", "reason": r["reason"]}
+    conf = deps.fetch_confirmation(email)
+    if not conf:
+        return {**base, "action": "flag", "plan": "FLAG — couldn't read the sales-order PDF (check by hand)", "reason": "PDF unreadable"}
+    lines, carriage, order_no = conf
+    base["order_no"] = order_no
+    if not order_no:
+        return {**base, "action": "flag", "plan": "FLAG — no customer order reference on the PDF (can't match our order)", "reason": "no order ref"}
+    mon = deps.find_monday(order_no)
+    if not mon:
+        return {**base, "action": "flag", "plan": f"FLAG — order {order_no} not found on Monday", "reason": "no Monday match"}
+    order = deps.fetch_order(order_no)
+    if not order:
+        return {**base, "action": "flag", "monday": mon, "plan": f"FLAG — couldn't read Shopify order {order_no}", "reason": "no Shopify order"}
+    v = validate_confirmation(lines, carriage, order, our_costs=deps.our_costs(order),
+                              expected_carriage=deps.expected_carriage(order))
+    if v["verdict"] == "validated":
+        msg = "ARCHIVE to NV Resolved (✅ validated — sales order confirmed)"
+        if v.get("note"):
+            msg += f" · {v['note']}"
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v}
+    return {**base, "action": "flag", "monday": mon, "plan": "FLAG for review — do NOT archive",
+            "reason": "; ".join(v["issues"]), "validation": v}
+
+
+def plan_lpd_folder(emails, deps):
+    return [plan_lpd_email(e, deps) for e in (emails or [])]
+
+
 def plan_folder(emails, deps):
     """Dry-run plan for a list of Carron folder emails, with per-order dedupe: when several emails
     share an order number and the LATEST one resolves it (booked-in → archive, or a validated move),

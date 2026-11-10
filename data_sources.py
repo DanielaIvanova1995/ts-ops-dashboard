@@ -3362,6 +3362,9 @@ def _read_invoice_b64(b64: str) -> dict:
         "Read this supplier invoice carefully and extract the line items and totals. "
         "Reply with ONLY a JSON object, no other text:\n"
         '{"supplier":"...","invoice_no":"...","invoice_date":"YYYY-MM-DD",'
+        '"customer_ref":"OUR order reference printed on the document — the customer order number, '
+        'often a 4-6 digit number labelled Your Order / Customer Ref / Customer Order No / Your Ref '
+        '(NOT the supplier\'s own sales-order/invoice number). null if none shown.",'
         '"branch_email":"any contact/branch/depot email address printed on the invoice, or null",'
         '"lines":[{"sku":"the product/SKU code printed on the line","description":"...",'
         '"qty":<number>,"unit_price":<ex-VAT cost per unit>,"line_total":<ex-VAT line total>}],'

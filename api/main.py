@@ -2426,6 +2426,116 @@ def noeta_carron_dry_run(limit: int = 200):
             "n_emails": len(emails), "counts": counts, "plan": slim}
 
 
+def _noeta_split_pdf(parsed):
+    """Parsed supplier confirmation PDF → (product_lines, carriage£). Shared by the Carron/LPD deps."""
+    import re as _re
+    prod, line_carr = [], 0.0
+    for l in (parsed.get("lines") or []):
+        sku, desc = (l.get("sku") or "").strip(), (l.get("description") or "")
+        if _re.search(r"carriage|deliver|pallet|freight|postage|shipping", f"{sku} {desc}", _re.I):
+            try:
+                line_carr += float(l["line_total"]) if l.get("line_total") is not None \
+                    else float(l.get("unit_price") or 0) * float(l.get("qty") or 1)
+            except (TypeError, ValueError):
+                pass
+            continue
+        prod.append({"sku": sku, "desc": desc, "qty": l.get("qty") or 1, "unit_price": l.get("unit_price")})
+    c = parsed.get("carriage")
+    try:
+        carriage = float(c) if c is not None else round(line_carr, 2)
+    except (TypeError, ValueError):
+        carriage = round(line_carr, 2)
+    return prod, carriage
+
+
+class _LpdDryRunDeps:
+    """Injected I/O for the LPD dry-run. Our order ref lives INSIDE the PDF, so fetch_confirmation
+    returns (lines, carriage, order_ref). Best-effort — any failure → the email is flagged, never
+    auto-archived. LPD carriage is by door count (not wired) so expected_carriage is None for now:
+    lines + prices + margin still validate; carriage just isn't cross-checked."""
+    def __init__(self):
+        self._pidx = None
+        self._mon = {}
+
+    def find_monday(self, no):
+        no = str(no)
+        if no not in self._mon:
+            self._mon[no] = _noeta_monday_map([no]).get(no)
+        return self._mon[no]
+
+    def fetch_confirmation(self, email):
+        try:
+            atts = ds.fetch_message_pdf_attachments(_NOETA_MAILBOX, email.get("id"), max_items=2)
+            if not atts:
+                return None
+            parsed = ds.read_invoice_pdf_bytes(atts[0]["bytes"])
+        except Exception:  # noqa: BLE001
+            return None
+        prod, carriage = _noeta_split_pdf(parsed)
+        order_ref = (str(parsed.get("customer_ref") or "").strip() or None)
+        return (prod, carriage, order_ref)
+
+    def fetch_order(self, order_no):
+        try:
+            return ds.fetch_order_by_name_for_check(order_no)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def our_costs(self, order):
+        import invoice_core as core
+        try:
+            if self._pidx is None:
+                self._pidx = _inv_indexes()[0]
+            out = {}
+            for l in (order.get("lines") or []):
+                sku = l.get("sku")
+                if sku:
+                    c = core.order_sku_cost(sku, "lpd", self._pidx)
+                    if c is not None:
+                        out[sku] = c
+            return out or None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def expected_carriage(self, order):
+        return None
+
+
+_LPD_SENDERS = ("lpddoors", "lpdhome", "lpdgroup", "leeds")
+
+
+@app.get("/noeta/lpd/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_lpd_dry_run(limit: int = 40):
+    """DRY RUN — the planned action for every LPD sales-order email in the 'Sales Orders' subfolder.
+    Reads the PDF for our order ref + lines, validates vs Shopify + margin, and plans archive (clean)
+    or flag. Reads/parses only; moves/writes NOTHING."""
+    import supplier_confirm as scf
+    try:
+        fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, "Sales Orders", create=False)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't open the folder: {e}")
+    if not fid:
+        raise HTTPException(status_code=404, detail="Folder 'Sales Orders' not found")
+    try:
+        msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 100))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    emails = [{"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
+               "sender": m.get("from"), "received": m.get("received")}
+              for m in msgs if any(s in (m.get("from") or "") for s in _LPD_SENDERS)]
+    deps = _LpdDryRunDeps()
+    plan = scf.plan_lpd_folder(emails, deps)
+    slim = [{"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
+             "subject": p.get("subject"), "reason": p.get("reason"),
+             "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
+                             "issues": p["validation"].get("issues")} if p.get("validation") else None)}
+            for p in plan]
+    counts = {"archive": sum(1 for p in slim if (p["plan"] or "").startswith("ARCHIVE")),
+              "flag": sum(1 for p in slim if (p["plan"] or "").startswith("FLAG"))}
+    return {"ok": True, "supplier": "LPD", "folder": "Sales Orders", "dry_run": True,
+            "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
 def recon_pay_plan_config_get():
     """The payment-plan settings for the editor: the default weekly threshold + the per-supplier
