@@ -2279,6 +2279,101 @@ def recon_upcoming_hide(body: UpcomingHideIn):
         raise HTTPException(status_code=502, detail=f"Couldn't update: {e}")
 
 
+_NOETA_MAILBOX = "hello@tradesuperstoreonline.co.uk"
+_NOETA_FOLDER = "Natasha - Supplier - No ETA"
+
+
+def _noeta_monday_map(order_nos):
+    """{order_no: monday_item_id} for the given order numbers (one Orders-board query). Empty on error."""
+    nos = [str(n) for n in order_nos if n]
+    if not nos:
+        return {}
+    try:
+        q = ('query($b:ID!,$vals:[String]){items_page_by_column_values(limit:100,board_id:$b,'
+             'columns:[{column_id:"text_mkv6z0nt",column_values:$vals}]){items{id '
+             'column_values(ids:["text_mkv6z0nt"]){text}}}}')
+        data = ds._monday_gql(q, {"b": "1786542990", "vals": nos})
+        out = {}
+        for it in ((data.get("items_page_by_column_values") or {}).get("items") or []):
+            cv = (it.get("column_values") or [{}])
+            no = (cv[0].get("text") or "").strip()
+            if no:
+                out[no] = str(it.get("id"))
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+class _CarronDryRunDeps:
+    """Injected I/O for the Carron dry-run. Booked-in only needs find_monday (+ the thread ETA, which
+    the classifier derives). The order-confirmation money-check fetchers are stubbed for now — until
+    they're wired, an order confirmation is planned as 'move to Supplier - ETAs, validate by hand',
+    which is safe (never auto-archived)."""
+    def __init__(self, monday_map):
+        self._m = monday_map
+
+    def find_monday(self, no):
+        return self._m.get(str(no))
+
+    def fetch_confirmation(self, email):   # TODO: download the PDF attachment + ds invoice parser
+        return None
+
+    def fetch_order(self, order_no):
+        return None
+
+    def our_costs(self, order_no):
+        return None
+
+    def expected_carriage(self, order):
+        return None
+
+
+@app.get("/noeta/carron/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_carron_dry_run(limit: int = 200):
+    """DRY RUN — the planned action for every Carron email in the 'Natasha - Supplier - No ETA'
+    folder. Reads only; moves/writes NOTHING. Booked-in → set Customer ETA + archive; order
+    confirmation → validate + move to Supplier - ETAs (or flag); problems → leave."""
+    import supplier_confirm as scf
+    try:
+        fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, _NOETA_FOLDER, create=False)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't open the folder: {e}")
+    if not fid:
+        raise HTTPException(status_code=404, detail=f"Folder '{_NOETA_FOLDER}' not found")
+    try:
+        msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 300))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    emails = []
+    for m in msgs:
+        if "carronheating" not in (m.get("from") or ""):     # Carron only for now
+            continue
+        rec = m.get("received") or ""
+        try:
+            d = _dt.date.fromisoformat(rec[:10])
+        except ValueError:
+            d = _dt.date.today()
+        emails.append({"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
+                       "sender": m.get("from"), "date": d, "received": rec})
+    nos = {scf.extract_order_no(e["subject"], e["body"]) for e in emails}
+    deps = _CarronDryRunDeps(_noeta_monday_map(nos))
+    plan = scf.plan_folder(emails, deps)
+    # Trim the heavy bits for the response (keep what the UI needs).
+    slim = [{"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
+             "subject": p.get("subject"), "eta": p.get("eta"), "dest": p.get("dest"),
+             "superseded": p.get("superseded", False),
+             "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
+                             "issues": p["validation"].get("issues")} if p.get("validation") else None)}
+            for p in plan]
+    counts = {"archive": sum(1 for p in slim if "ARCHIVE" in (p["plan"] or "") and not p["superseded"]),
+              "to_etas": sum(1 for p in slim if "Supplier - ETAs" in (p["plan"] or "")),
+              "flag": sum(1 for p in slim if "FLAG" in (p["plan"] or "")),
+              "leave": sum(1 for p in slim if (p["plan"] or "").startswith("LEAVE")),
+              "superseded": sum(1 for p in slim if p["superseded"])}
+    return {"ok": True, "supplier": "Carron", "folder": _NOETA_FOLDER, "dry_run": True,
+            "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
 def recon_pay_plan_config_get():
     """The payment-plan settings for the editor: the default weekly threshold + the per-supplier
