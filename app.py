@@ -1893,6 +1893,7 @@ DELIVERY_CHARGES = {
     "markovitz": {"name": "Markovitz", "flat": 35.0, "free_over": 350.0},   # £35 <£350 net, free over
     "velux": {"name": "Velux", "flat": 50.0},   # always £50 + VAT carriage (Daniela 2026-10-05)
     "edmundson": {"name": "Edmundson", "flat": 10.0},   # £10 + VAT per delivery, to us AND to customer (Daniela 2026-11-10)
+    "storm": {"name": "Storm", "flat": 21.0},           # £21 + VAT per delivery (Daniela 2026-11-10)
     # JB Kind delivery is by NUMBER OF DOORS, not goods value — handled separately below.
 }
 

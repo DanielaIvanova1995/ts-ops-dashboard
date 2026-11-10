@@ -349,12 +349,21 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
 #   our_costs(order_no)              -> {sku: our_ex_vat_cost}           (Carron pricelist)
 #   expected_carriage(order)         -> £ | None                         (Carron zone rate)
 # =================================================================================================
+# Short Monday notes (Daniela: keep updates short). The Supplier-ETAs note tells whoever picks the
+# order up to phone the customer and agree a date, so Carron don't turn up to an empty house and bill
+# us a re-delivery charge.
+CARRON_RING_NOTE = "☎ Ring customer to agree a delivery date — avoids a re-delivery charge."
+NV_RESOLVED = "NV Resolved"
+SUPPLIER_ETAS = "Supplier - ETAs"
+
+
 def plan_carron_email(email, deps):
-    """Return the dry-run PLAN for one Carron folder email — what WOULD happen, nothing done."""
+    """Return the PLAN for one Carron folder email. `do` is the live directive the runner executes
+    (attach PDF / set ETA / post update / move folder); an empty `do` means leave it in the folder."""
     r = classify_carron(email.get("subject"), email.get("body"), email.get("sender", ""),
                         email.get("date"))
-    base = {"subject": email.get("subject"), "order_no": r.get("order_no"),
-            "action": r["action"], "dest": r.get("dest")}
+    base = {"subject": email.get("subject"), "order_no": r.get("order_no"), "email_id": email.get("id"),
+            "action": r["action"], "dest": r.get("dest"), "do": {}}
 
     if r["action"] == "leave":
         return {**base, "plan": "LEAVE in folder", "reason": r["reason"]}
@@ -367,10 +376,14 @@ def plan_carron_email(email, deps):
                     "reason": f"order {r.get('order_no') or '?'} not found on the board"}
         if not r.get("eta"):
             return {**base, "monday": mon, "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'",
-                    "reason": r.get("eta_note")}
+                    "reason": r.get("eta_note"),
+                    "do": {"move_to": NV_RESOLVED,
+                           "update": "⚠ Carron booked this in — set the Customer ETA manually (date couldn't be auto-read)."}}
         return {**base, "monday": mon, "eta": r["eta"],
                 "plan": f"SET Customer ETA {r['eta']} + ✅ confirmed update + ARCHIVE to NV Resolved",
-                "reason": r["reason"]}
+                "reason": r["reason"],
+                "do": {"set_eta": r["eta"], "move_to": NV_RESOLVED,
+                       "update": f"✅ Carron confirmed delivery {r['eta']}."}}
 
     if r["action"] == "needs_eta":
         if not mon:
@@ -378,8 +391,9 @@ def plan_carron_email(email, deps):
                     "reason": f"order {r.get('order_no') or '?'} not found on the board"}
         conf = deps.fetch_confirmation(email)
         if not conf:
-            return {**base, "monday": mon, "plan": "MOVE to Supplier - ETAs (⚠ couldn't read the "
-                    "confirmation PDF — validate by hand)", "validation": None}
+            return {**base, "monday": mon, "validation": None,
+                    "plan": "MOVE to Supplier - ETAs (⚠ couldn't read the confirmation PDF — validate by hand)",
+                    "do": {"attach": True, "move_to": SUPPLIER_ETAS, "update": CARRON_RING_NOTE}}
         conf_lines, carriage = conf
         order = deps.fetch_order(r["order_no"])
         if not order:
@@ -392,7 +406,8 @@ def plan_carron_email(email, deps):
             msg = "MOVE to Supplier - ETAs (✅ validated — ring customer for a date)"
             if v.get("note"):
                 msg += f" · {v['note']}"
-            return {**base, "monday": mon, "plan": msg, "validation": v}
+            return {**base, "monday": mon, "plan": msg, "validation": v,
+                    "do": {"attach": True, "move_to": SUPPLIER_ETAS, "update": CARRON_RING_NOTE}}
         return {**base, "monday": mon, "plan": "FLAG for review — do NOT hand over",
                 "reason": "; ".join(v["issues"]), "validation": v}
 
@@ -421,7 +436,8 @@ def plan_lpd_email(email, deps):
     """Dry-run plan for one LPD sales-order email. deps.fetch_confirmation returns
     (product_lines, carriage£, our_order_ref) — the order ref comes from INSIDE the PDF."""
     r = classify_lpd(email.get("subject"), email.get("body"), email.get("sender", ""))
-    base = {"supplier": "LPD", "subject": email.get("subject"), "order_no": None, "action": r["action"]}
+    base = {"supplier": "LPD", "subject": email.get("subject"), "order_no": None,
+            "email_id": email.get("id"), "action": r["action"], "do": {}}
     if r["action"] == "flag":
         return {**base, "plan": f"FLAG — {r['reason']} (leave in folder)", "reason": r["reason"]}
     conf = deps.fetch_confirmation(email)
@@ -443,7 +459,9 @@ def plan_lpd_email(email, deps):
         msg = "ARCHIVE to NV Resolved (✅ validated — sales order confirmed)"
         if v.get("note"):
             msg += f" · {v['note']}"
-        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v}
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v,
+                "do": {"attach": True, "move_to": NV_RESOLVED,
+                       "update": "✅ LPD sales order confirmed — attached to Job."}}
     return {**base, "action": "flag", "monday": mon, "plan": "FLAG for review — do NOT archive",
             "reason": "; ".join(v["issues"]), "validation": v}
 
@@ -475,7 +493,8 @@ def plan_folder(emails, deps):
         for _, p in items[1:]:
             if resolving:
                 out.append({**p, "plan": f"ARCHIVE to NV Resolved — superseded by the later "
-                            f"{latest['action'].replace('_', ' ')} on order {no}", "superseded": True})
+                            f"{latest['action'].replace('_', ' ')} on order {no}", "superseded": True,
+                            "do": {"move_to": NV_RESOLVED}})
             else:
                 out.append(p)
     return out

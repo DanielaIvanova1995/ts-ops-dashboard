@@ -2281,6 +2281,131 @@ def recon_upcoming_hide(body: UpcomingHideIn):
 
 _NOETA_MAILBOX = "hello@tradesuperstoreonline.co.uk"
 _NOETA_FOLDER = "Natasha - Supplier - No ETA"
+_NOETA_ORDERS_BOARD = "1786542990"
+_NOETA_CUST_ETA_COL = "date"               # Orders board "Customer ETA" date column
+_NOETA_AUDIT_KEY = "noeta_audit"           # Supabase log of every LIVE action taken
+_NOETA_FOLDER_IDS = {}                     # {folder name: id} cache for the live moves
+
+
+def _noeta_live_enabled():
+    """Live moves/ETA writes are ON by default; set env NOETA_LIVE to 0/off/false/no to kill-switch
+    them (the dry-run previews keep working either way)."""
+    return str(os.environ.get("NOETA_LIVE", "")).strip().lower() not in {"0", "off", "false", "no"}
+
+
+def _noeta_folder_id(name):
+    """Resolve (and cache) a destination folder id in the hello@ mailbox. None if it doesn't exist."""
+    if name not in _NOETA_FOLDER_IDS:
+        try:
+            _NOETA_FOLDER_IDS[name] = ds.find_or_create_mail_folder(_NOETA_MAILBOX, name, create=False)
+        except Exception:  # noqa: BLE001
+            _NOETA_FOLDER_IDS[name] = None
+    return _NOETA_FOLDER_IDS[name]
+
+
+def _noeta_update(item_id, body):
+    """Post a short Monday update, but skip if an identical body is already on the item (idempotent —
+    a re-run after a failed email move won't double-post)."""
+    try:
+        d = ds._monday_gql("query($i:[ID!]){items(ids:$i){updates(limit:15){body}}}", {"i": [str(item_id)]})
+        for u in (((d.get("items") or [{}])[0]).get("updates") or []):
+            if (u.get("body") or "").strip() == body.strip() or body.strip() in (u.get("body") or ""):
+                return True
+    except Exception:  # noqa: BLE001
+        pass
+    ds._monday_gql("mutation($i:ID!,$b:String!){create_update(item_id:$i,body:$b){id}}",
+                   {"i": str(item_id), "b": body})
+    return True
+
+
+def _noeta_set_eta(item_id, iso_date):
+    """Write the Customer ETA date on an Orders item."""
+    import json as _json
+    ds._monday_gql("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,"
+                   "item_id:$i,column_id:$c,value:$v){id}}",
+                   {"b": _NOETA_ORDERS_BOARD, "i": str(item_id), "c": _NOETA_CUST_ETA_COL,
+                    "v": _json.dumps({"date": str(iso_date)[:10]})})
+    return True
+
+
+def _noeta_audit_done_ids():
+    """Message ids already fully processed by a prior live run (so we never touch them twice)."""
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            return set()
+        rows = (supabase_db.config_get(_NOETA_AUDIT_KEY) or {}).get("rows") or []
+        return {r.get("message_id") for r in rows if r.get("status") == "done" and r.get("message_id")}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _noeta_audit_add(entries):
+    try:
+        import supabase_db
+        if not supabase_db.configured() or not entries:
+            return
+        cur = (supabase_db.config_get(_NOETA_AUDIT_KEY) or {}).get("rows") or []
+        supabase_db.config_set(_NOETA_AUDIT_KEY, {"rows": (entries + cur)[:4000]})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _noeta_execute(plan, deps, supplier):
+    """Carry out the LIVE directive (`do`) on each planned email: attach the confirmation PDF to the
+    Job column, set the Customer ETA, post a short update, then MOVE the email to its destination
+    folder (move last, so a mid-way failure leaves the email in place to retry). Idempotent — skips
+    message ids a prior run already finished, and each sub-step is individually safe to repeat.
+    Returns per-email outcomes + an audit trail. Honors the NOETA_LIVE kill switch."""
+    results, audit = [], []
+    done = _noeta_audit_done_ids()
+    for p in plan:
+        do = p.get("do") or {}
+        mid = p.get("email_id")
+        if not do:                          # FLAG/LEAVE — nothing to do live
+            continue
+        if mid in done:
+            results.append({"order_no": p.get("order_no"), "status": "skipped", "note": "already processed"})
+            continue
+        steps, ok = [], True
+        try:
+            if do.get("attach") and p.get("monday"):
+                att = deps.attachment(mid) if hasattr(deps, "attachment") else None
+                if att:
+                    res = ds.add_pdf_to_item_file(p["monday"], att[1], att[0], column_id=ds.ORDERS_JOB_COL)
+                    steps.append("attached" if (res.get("ok") and not res.get("skipped"))
+                                 else "already attached" if res.get("ok") else "attach failed")
+                    ok = ok and res.get("ok", False)
+                else:
+                    steps.append("no PDF to attach")
+            if do.get("set_eta") and p.get("monday"):
+                _noeta_set_eta(p["monday"], do["set_eta"])
+                steps.append(f"ETA {do['set_eta']}")
+            if do.get("update") and p.get("monday"):
+                _noeta_update(p["monday"], do["update"])
+                steps.append("noted")
+            dest = do.get("move_to")
+            if dest:
+                fid = _noeta_folder_id(dest)
+                if not fid:
+                    steps.append(f"move FAILED — '{dest}' folder not found")
+                    ok = False
+                else:
+                    ds.move_message_to_folder(_NOETA_MAILBOX, mid, fid)
+                    steps.append(f"→ {dest}")
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            steps.append(f"error: {str(e)[:100]}")
+        status = "done" if ok else "partial"
+        results.append({"order_no": p.get("order_no"), "subject": p.get("subject"),
+                        "status": status, "steps": steps})
+        audit.append({"at": _dt.datetime.now().isoformat(timespec="seconds"), "supplier": supplier,
+                      "order_no": p.get("order_no"), "message_id": mid, "status": status, "steps": steps})
+    _noeta_audit_add(audit)
+    done_n = sum(1 for r in results if r["status"] == "done")
+    return {"results": results, "n_done": done_n,
+            "n_partial": sum(1 for r in results if r["status"] == "partial"),
+            "n_skipped": sum(1 for r in results if r["status"] == "skipped")}
 
 
 def _noeta_monday_map(order_nos):
@@ -2312,13 +2437,16 @@ class _CarronDryRunDeps:
     def __init__(self, monday_map):
         self._m = monday_map
         self._pidx = None
+        self._att = {}      # email id -> (filename, bytes) of the confirmation PDF, for live attach
 
     def find_monday(self, no):
         return self._m.get(str(no))
 
+    def attachment(self, email_id):
+        return self._att.get(email_id)
+
     def fetch_confirmation(self, email):
         """Download the attached confirmation PDF → (product_lines, carriage£)."""
-        import re as _re
         try:
             atts = ds.fetch_message_pdf_attachments(_NOETA_MAILBOX, email.get("id"), max_items=2)
             if not atts:
@@ -2326,23 +2454,8 @@ class _CarronDryRunDeps:
             parsed = ds.read_invoice_pdf_bytes(atts[0]["bytes"])
         except Exception:  # noqa: BLE001
             return None
-        prod, line_carr = [], 0.0
-        for l in (parsed.get("lines") or []):
-            sku, desc = (l.get("sku") or "").strip(), (l.get("description") or "")
-            if _re.search(r"carriage|deliver|pallet|freight|postage|shipping", f"{sku} {desc}", _re.I):
-                try:
-                    line_carr += float(l["line_total"]) if l.get("line_total") is not None \
-                        else float(l.get("unit_price") or 0) * float(l.get("qty") or 1)
-                except (TypeError, ValueError):
-                    pass
-                continue
-            prod.append({"sku": sku, "desc": desc, "qty": l.get("qty") or 1, "unit_price": l.get("unit_price")})
-        c = parsed.get("carriage")
-        try:
-            carriage = float(c) if c is not None else round(line_carr, 2)
-        except (TypeError, ValueError):
-            carriage = round(line_carr, 2)
-        return (prod, carriage)
+        self._att[email.get("id")] = (atts[0].get("name") or "Carron confirmation.pdf", atts[0]["bytes"])
+        return _noeta_split_pdf(parsed)
 
     def fetch_order(self, order_no):
         try:
@@ -2380,22 +2493,13 @@ class _CarronDryRunDeps:
             return None
 
 
-@app.get("/noeta/carron/dry-run", dependencies=[Depends(require_key_or_statements)])
-def noeta_carron_dry_run(limit: int = 200):
-    """DRY RUN — the planned action for every Carron email in the 'Natasha - Supplier - No ETA'
-    folder. Reads only; moves/writes NOTHING. Booked-in → set Customer ETA + archive; order
-    confirmation → validate + move to Supplier - ETAs (or flag); problems → leave."""
+def _carron_plan(limit=200):
+    """(emails, deps, plan) for the Carron folder — shared by the preview and the live run."""
     import supplier_confirm as scf
-    try:
-        fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, _NOETA_FOLDER, create=False)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't open the folder: {e}")
+    fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, _NOETA_FOLDER, create=False)
     if not fid:
         raise HTTPException(status_code=404, detail=f"Folder '{_NOETA_FOLDER}' not found")
-    try:
-        msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 300))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 300))
     emails = []
     for m in msgs:
         if "carronheating" not in (m.get("from") or ""):     # Carron only for now
@@ -2409,8 +2513,10 @@ def noeta_carron_dry_run(limit: int = 200):
                        "sender": m.get("from"), "date": d, "received": rec})
     nos = {scf.extract_order_no(e["subject"], e["body"]) for e in emails}
     deps = _CarronDryRunDeps(_noeta_monday_map(nos))
-    plan = scf.plan_folder(emails, deps)
-    # Trim the heavy bits for the response (keep what the UI needs).
+    return emails, deps, scf.plan_folder(emails, deps)
+
+
+def _carron_slim(plan):
     slim = [{"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
              "subject": p.get("subject"), "eta": p.get("eta"), "dest": p.get("dest"),
              "superseded": p.get("superseded", False),
@@ -2422,8 +2528,40 @@ def noeta_carron_dry_run(limit: int = 200):
               "flag": sum(1 for p in slim if "FLAG" in (p["plan"] or "")),
               "leave": sum(1 for p in slim if (p["plan"] or "").startswith("LEAVE")),
               "superseded": sum(1 for p in slim if p["superseded"])}
+    return slim, counts
+
+
+@app.get("/noeta/carron/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_carron_dry_run(limit: int = 200):
+    """PREVIEW — the planned action for every Carron email in the 'Natasha - Supplier - No ETA'
+    folder. Reads only; moves/writes NOTHING. Booked-in → set Customer ETA + archive; order
+    confirmation → validate + move to Supplier - ETAs (or flag); problems → leave."""
+    try:
+        emails, _deps, plan = _carron_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    slim, counts = _carron_slim(plan)
     return {"ok": True, "supplier": "Carron", "folder": _NOETA_FOLDER, "dry_run": True,
-            "n_emails": len(emails), "counts": counts, "plan": slim}
+            "live_enabled": _noeta_live_enabled(), "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
+@app.post("/noeta/carron/run", dependencies=[Depends(require_key_or_statements)])
+def noeta_carron_run(limit: int = 200):
+    """LIVE — execute the Carron plan: set ETAs, attach confirmations to the Job column, post the
+    short notes, and MOVE emails to NV Resolved / Supplier - ETAs. Idempotent + audited. Flagged/
+    problem emails are left in the folder untouched."""
+    if not _noeta_live_enabled():
+        raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
+    try:
+        _emails, deps, plan = _carron_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    out = _noeta_execute(plan, deps, "Carron")
+    return {"ok": True, "supplier": "Carron", "live": True, **out}
 
 
 def _noeta_split_pdf(parsed):
@@ -2510,58 +2648,62 @@ class _LpdDryRunDeps:
 _LPD_SENDERS = ("lpddoors", "lpdhome", "lpdgroup", "leeds")
 
 
-@app.get("/noeta/lpd/dry-run", dependencies=[Depends(require_key_or_statements)])
-def noeta_lpd_dry_run(limit: int = 40):
-    """DRY RUN — the planned action for every LPD sales-order email in the 'Sales Orders' subfolder.
-    Reads the PDF for our order ref + lines, validates vs Shopify + margin, and plans archive (clean)
-    or flag. Reads/parses only; moves/writes NOTHING."""
+def _lpd_plan(limit=40):
+    """(emails, deps, plan) for the LPD 'Sales Orders' subfolder — shared by preview and live run."""
     import supplier_confirm as scf
-    try:
-        fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, "Sales Orders", create=False)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't open the folder: {e}")
+    fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, "Sales Orders", create=False)
     if not fid:
         raise HTTPException(status_code=404, detail="Folder 'Sales Orders' not found")
-    try:
-        msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 100))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 100))
     emails = [{"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
                "sender": m.get("from"), "received": m.get("received")}
               for m in msgs if any(s in (m.get("from") or "") for s in _LPD_SENDERS)]
     deps = _LpdDryRunDeps()
-    plan = scf.plan_lpd_folder(emails, deps)
-    slim = []
-    for em, p in zip(emails, plan):
-        validated = bool(p.get("validation")) and p["validation"].get("verdict") == "validated"
-        attach = None
-        # LIVE step (approved): a validated LPD confirmation gets its PDF attached to the order's
-        # "Job" file column straight away. The email ARCHIVING stays dry-run (nothing is moved). Idempotent
-        # — a re-run won't stack duplicates (skip_if_named). Best-effort: a failure is reported, not fatal.
-        if validated and p.get("monday"):
-            att = deps.attachment(em.get("id"))
-            if att:
-                try:
-                    res = ds.add_pdf_to_item_file(p["monday"], att[1], att[0], column_id=ds.ORDERS_JOB_COL)
-                    if res.get("ok") and res.get("skipped"):
-                        attach = "already on Job column"
-                    elif res.get("ok"):
-                        attach = "attached to Job column"
-                    else:
-                        attach = "attach FAILED (verify by hand)"
-                except Exception as e:  # noqa: BLE001
-                    attach = f"attach error: {str(e)[:80]}"
-            else:
-                attach = "no PDF to attach"
-        slim.append({"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
-                     "subject": p.get("subject"), "reason": p.get("reason"), "attached": attach,
-                     "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
-                                     "issues": p["validation"].get("issues")} if p.get("validation") else None)})
+    return emails, deps, scf.plan_lpd_folder(emails, deps)
+
+
+def _lpd_slim(plan):
+    slim = [{"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
+             "subject": p.get("subject"), "reason": p.get("reason"),
+             "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
+                             "issues": p["validation"].get("issues")} if p.get("validation") else None)}
+            for p in plan]
     counts = {"archive": sum(1 for p in slim if (p["plan"] or "").startswith("ARCHIVE")),
-              "flag": sum(1 for p in slim if (p["plan"] or "").startswith("FLAG")),
-              "attached": sum(1 for p in slim if p.get("attached") in ("attached to Job column", "already on Job column"))}
+              "flag": sum(1 for p in slim if (p["plan"] or "").startswith("FLAG"))}
+    return slim, counts
+
+
+@app.get("/noeta/lpd/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_lpd_dry_run(limit: int = 40):
+    """PREVIEW — the planned action for every LPD sales-order email in the 'Sales Orders' subfolder.
+    Reads the PDF for our order ref + lines, validates vs Shopify + margin. Reads/parses only; moves
+    and writes NOTHING (the attach + archive happen in /noeta/lpd/run)."""
+    try:
+        emails, _deps, plan = _lpd_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    slim, counts = _lpd_slim(plan)
     return {"ok": True, "supplier": "LPD", "folder": "Sales Orders", "dry_run": True,
-            "n_emails": len(emails), "counts": counts, "plan": slim}
+            "live_enabled": _noeta_live_enabled(), "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
+@app.post("/noeta/lpd/run", dependencies=[Depends(require_key_or_statements)])
+def noeta_lpd_run(limit: int = 40):
+    """LIVE — execute the LPD plan: attach each validated confirmation to the Job column, post the
+    short note, and MOVE the email to NV Resolved. Backorder / amended / unmatched → left in place.
+    Idempotent + audited."""
+    if not _noeta_live_enabled():
+        raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
+    try:
+        _emails, deps, plan = _lpd_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    out = _noeta_execute(plan, deps, "LPD")
+    return {"ok": True, "supplier": "LPD", "live": True, **out}
 
 
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
