@@ -47,6 +47,8 @@ export default function Reviews() {
   const [testTo, setTestTo] = useState("");
   const [staff, setStaff] = useState("");
   const [send, setSend] = useState(null);     // send-status
+  const [emailed, setEmailed] = useState(null);   // who's been emailed, grouped by count
+  const [showEmailed, setShowEmailed] = useState(false);
 
   useEffect(() => { let k = null; try { k = localStorage.getItem(KEY_STORE); } catch {} if (k) setAccessKey(k); else setNeedKey(true); }, []);
 
@@ -85,6 +87,15 @@ export default function Reviews() {
     } catch {}
   }, [accessKey, jsonFetch]);
   useEffect(() => { loadCfg(); }, [loadCfg]);
+
+  const loadEmailed = useCallback(async () => {
+    if (!accessKey) return;
+    try {
+      const res = await jsonFetch("/reviews/emailed");
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) setEmailed(d);
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+  }, [accessKey, jsonFetch]);
 
   // Poll send status while a send is running.
   useEffect(() => {
@@ -167,6 +178,7 @@ export default function Reviews() {
       <div className="topbar">
         <div className="pagetitle">Review Requests</div>
         <div className="right">
+          <button className="btn ghost" onClick={() => { setShowEmailed((v) => !v); if (!emailed) loadEmailed(); }}>📧 Emailed</button>
           <button className="btn ghost" onClick={() => setShowCfg((v) => !v)}>⚙ Settings</button>
           <button className="btn primary" onClick={() => load(1)} disabled={status === "loading"}>{status === "loading" ? "Loading…" : (data ? "↻ Refresh" : "Load list")}</button>
         </div>
@@ -175,6 +187,44 @@ export default function Reviews() {
       {notice && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 12 }}>{notice.text}</div>}
       {err && <div className="route-msg warn" style={{ marginBottom: 12 }}>{err}</div>}
       {!(cfg.review_link || "").trim() && <div className="route-msg warn" style={{ marginBottom: 12 }}>⚠ Set your <b>review link</b> in ⚙ Settings before sending — that's the page the button points customers to.</div>}
+
+      {showEmailed && (
+        <div className="card" style={{ padding: "14px 16px", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+            <div className="tool-label" style={{ margin: 0 }}>Emailed — who's had a review request</div>
+            <span className="sub" style={{ flex: 1 }}>{emailed ? `${emailed.total_people} people · ${emailed.total_sends} emails sent` : "Loading…"}</span>
+            <button className="btn ghost" onClick={loadEmailed}>↻ Refresh</button>
+            <button className="btn ghost" onClick={() => setShowEmailed(false)}>Close</button>
+          </div>
+          {emailed && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
+              {[["Emailed once", emailed.emailed_1, "green"], ["Emailed twice", emailed.emailed_2, "amber"], ["Emailed 3+ times", emailed.emailed_3plus, "red"]].map(([title, list, cls]) => (
+                <div key={title} style={{ border: "1px solid var(--line,#e5e7eb)", borderRadius: 10, overflow: "hidden" }}>
+                  <div style={{ padding: "7px 10px", fontWeight: 600, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(127,127,127,0.05)" }}>
+                    <span>{title}</span><span className={`chip ${cls}`}>{(list || []).length}</span>
+                  </div>
+                  <div style={{ maxHeight: 320, overflowY: "auto" }}>
+                    {(list || []).length === 0 && <div className="sub" style={{ padding: "8px 10px", fontSize: 12 }}>Nobody yet.</div>}
+                    {(list || []).map((p) => (
+                      <div key={p.email} style={{ padding: "6px 10px", borderTop: "1px solid var(--line,#eee)", fontSize: 12 }}>
+                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.email}>{p.email}</div>
+                        <div className="sub" style={{ fontSize: 11 }}>{p.count}× · last {p.last_sent ? String(p.last_sent).slice(0, 10) : "—"}{p.orders && p.orders.length ? ` · order ${p.orders.slice(0, 3).join(", ")}` : ""}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 10 }}>
+            <button className="btn ghost" disabled={!emailed} onClick={() => {
+              const all = emailed ? [...emailed.emailed_1, ...emailed.emailed_2, ...emailed.emailed_3plus] : [];
+              const r = [["Email", "Times emailed", "Last sent", "Orders"]].concat(all.map((p) => [p.email, p.count, p.last_sent || "", (p.orders || []).join(" ")]));
+              download(`emailed_${new Date().toISOString().slice(0, 10)}.csv`, r.map((row) => row.map(csvCell).join(",")).join("\r\n"));
+            }}>⬇ CSV of everyone emailed</button>
+          </div>
+        </div>
+      )}
 
       {!data && status !== "loading" && !err && (
         <div className="card" style={{ padding: "18px 16px", marginBottom: 12, textAlign: "center" }}>

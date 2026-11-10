@@ -2964,6 +2964,38 @@ def reviews_log(limit: int = 200):
     return {"ok": True, "rows": rows[:max(1, min(int(limit or 200), 2000))]}
 
 
+@app.get("/reviews/emailed", dependencies=[Depends(require_key)])
+def reviews_emailed():
+    """Everyone who has had a review email, grouped by how many times they've been emailed
+    (Emailed 1 / Emailed 2 / Emailed 3+). Built from the send log, one row per customer email."""
+    try:
+        import supabase_db
+        rows = (supabase_db.config_get(_REVIEWS_LOG_KEY) or {}).get("rows") or [] if supabase_db.configured() else []
+    except Exception:  # noqa: BLE001
+        rows = []
+    agg = {}
+    for r in rows:
+        if (r.get("status") or "") != "sent":
+            continue
+        e = (r.get("email") or "").strip().lower()
+        if not e:
+            continue
+        a = agg.setdefault(e, {"email": r.get("email") or e, "count": 0, "last_sent": None, "orders": []})
+        a["count"] += 1
+        at = (r.get("at") or "")
+        if at and (not a["last_sent"] or at > a["last_sent"]):
+            a["last_sent"] = at
+        ono = r.get("order_no")
+        if ono and ono not in a["orders"]:
+            a["orders"].append(ono)
+    people = sorted(agg.values(), key=lambda x: (-x["count"], x["last_sent"] or ""))
+    b1 = [p for p in people if p["count"] == 1]
+    b2 = [p for p in people if p["count"] == 2]
+    b3 = [p for p in people if p["count"] >= 3]
+    return {"ok": True, "total_people": len(people), "total_sends": sum(p["count"] for p in people),
+            "emailed_1": b1, "emailed_2": b2, "emailed_3plus": b3}
+
+
 class ReviewsCfgIn(BaseModel):
     from_mailbox: str | None = None
     reply_to: str | None = None
