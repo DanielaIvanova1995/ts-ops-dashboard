@@ -18,8 +18,9 @@ const SUPPLIERS = {
     label: "LPD",
     endpoint: "/noeta/lpd/dry-run",
     folder: "“Sales Orders”",
-    blurb: "Reads the Sales Orders subfolder, pulls our order ref + lines from each LPD PDF, and validates against Shopify + full money-check. Backorder / amended confirmations are flagged for a human.",
-    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+    blurb: "Reads the Sales Orders subfolder, pulls our order ref + lines from each LPD PDF, and validates against Shopify + full money-check. Validated ones have their PDF attached to the order's Job column live; backorder / amended confirmations are flagged for a human.",
+    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Attached to Job", t.attached, "blue"], ["Flag — review", t.flag, "red"]],
+    attachNote: true,
   },
 };
 
@@ -102,8 +103,18 @@ export default function NoEta() {
       </div>
 
       <div className="route-msg" style={{ marginBottom: 12, background: "rgba(0,126,181,0.08)", border: "1px solid rgba(0,126,181,0.25)" }}>
-        <b>Dry run — nothing moves.</b> This shows what the automation <i>would</i> do to each {noun} email in the
-        {" "}{cfg.folder} folder. Review it; the live moves stay off until switched on.
+        {cfg.attachNote ? (
+          <>
+            <b>Validated confirmations are attached to Monday live.</b> When an {noun} confirmation passes the
+            money-check, its PDF is attached to the order&rsquo;s <b>Job</b> column straight away. The <i>email
+            archiving</i> stays a dry run — nothing is moved out of the {cfg.folder} folder until switched on.
+          </>
+        ) : (
+          <>
+            <b>Dry run — nothing moves.</b> This shows what the automation <i>would</i> do to each {noun} email in the
+            {" "}{cfg.folder} folder. Review it; the live moves stay off until switched on.
+          </>
+        )}
       </div>
 
       {err && <div className="route-msg warn" style={{ marginBottom: 12 }}>{err}</div>}
@@ -138,6 +149,10 @@ export default function NoEta() {
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{p.order_no ? `Order ${p.order_no}` : "(no order no)"}{p.eta ? ` · ETA ${p.eta}` : ""}</div>
                   <div className="sub" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.subject}>{p.subject || ""}</div>
                   <div style={{ fontSize: 12, marginTop: 3 }}>{p.plan}</div>
+                  {p.attached && (
+                    <div style={{ fontSize: 11.5, marginTop: 2 }}
+                      className={/fail|error|no pdf/i.test(p.attached) ? "th-red" : "sub"}>📎 {p.attached}</div>
+                  )}
                   {v && v.issues && v.issues.length > 0 && (
                     <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12 }}>
                       {v.issues.map((iss, j) => <li key={j} className="th-red">{iss}</li>)}

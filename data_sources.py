@@ -6815,6 +6815,54 @@ def op_upload_po(item_id, file_bytes: bytes, filename: str, replace: bool = True
             "n_assets": len(assets)}
 
 
+ORDERS_JOB_COL = "file_mkv1qa2c"       # the "Job" file column on the Orders board — where a validated
+                                       # supplier ORDER CONFIRMATION / acknowledgement PDF is attached.
+
+
+def add_pdf_to_item_file(item_id, file_bytes: bytes, filename: str, column_id: str = ORDERS_JOB_COL,
+                         skip_if_named: bool = True, token: str | None = None) -> dict:
+    """Attach a PDF to a main Orders-item file column (default the 'Job' column), with read-back byte
+    verification (never trust the write response). When `skip_if_named`, a file already on the column
+    with the SAME name + matching size is left as-is (so re-running the dry-run can't stack duplicate
+    confirmations). Returns {ok, skipped, asset_id, name, size, want, n_assets}. Raises on API failure."""
+    token = token or get_token()
+    want = len(file_bytes)
+    # Idempotency: look for an existing asset with this name already on the item.
+    d0 = _monday_gql("query($i:[ID!]){items(ids:$i){assets{id name file_size}}}",
+                     {"i": [str(item_id)]}, token)
+    existing = (((d0.get("items") or [{}])[0]).get("assets") or [])
+    if skip_if_named:
+        for a in existing:
+            try:
+                sz = int(a.get("file_size") or 0)
+            except (TypeError, ValueError):
+                sz = 0
+            if a.get("name") == filename and abs(sz - want) <= 2:
+                return {"ok": True, "skipped": True, "asset_id": a.get("id"), "name": filename,
+                        "size": sz, "want": want, "n_assets": len(existing)}
+    q = ('mutation ($file: File!){add_file_to_column(item_id:%s,column_id:"%s",file:$file){id}}'
+         % (int(item_id), column_id))
+    r = requests.post("https://api.monday.com/v2/file", headers={"Authorization": token},
+                      data={"query": q, "map": '{"file":"variables.file"}'},
+                      files={"file": (filename, file_bytes, "application/pdf")}, timeout=180)
+    r.raise_for_status()
+    if "errors" in r.json():
+        raise RuntimeError(f"Monday rejected file upload: {r.json()['errors']}")
+    d = _monday_gql("query($i:[ID!]){items(ids:$i){assets{id name file_size}}}",
+                    {"i": [str(item_id)]}, token)
+    assets = (((d.get("items") or [{}])[0]).get("assets") or [])
+    for a in assets:
+        try:
+            sz = int(a.get("file_size") or 0)
+        except (TypeError, ValueError):
+            sz = 0
+        if a.get("name") == filename and abs(sz - want) <= 2:
+            return {"ok": True, "skipped": False, "asset_id": a.get("id"), "name": filename,
+                    "size": sz, "want": want, "n_assets": len(assets)}
+    return {"ok": False, "skipped": False, "asset_id": None, "name": filename, "size": None,
+            "want": want, "n_assets": len(assets)}
+
+
 def op_set_branch(item_id, branch=None, email=None, phone=None, token: str | None = None):
     """Set the routed branch (text1), branch email and/or branch phone on an order. Pass any of
     them as "" to CLEAR that field (portal suppliers keep them empty); pass None to leave it

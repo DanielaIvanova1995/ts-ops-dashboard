@@ -2456,6 +2456,8 @@ class _LpdDryRunDeps:
     def __init__(self):
         self._pidx = None
         self._mon = {}
+        self._att = {}      # email id -> (filename, bytes) of the confirmation PDF, cached so the
+                            # endpoint can attach it to Monday without re-downloading.
 
     def find_monday(self, no):
         no = str(no)
@@ -2471,9 +2473,13 @@ class _LpdDryRunDeps:
             parsed = ds.read_invoice_pdf_bytes(atts[0]["bytes"])
         except Exception:  # noqa: BLE001
             return None
+        self._att[email.get("id")] = (atts[0].get("name") or "LPD confirmation.pdf", atts[0]["bytes"])
         prod, carriage = _noeta_split_pdf(parsed)
         order_ref = (str(parsed.get("customer_ref") or "").strip() or None)
         return (prod, carriage, order_ref)
+
+    def attachment(self, email_id):
+        return self._att.get(email_id)
 
     def fetch_order(self, order_no):
         try:
@@ -2525,13 +2531,35 @@ def noeta_lpd_dry_run(limit: int = 40):
               for m in msgs if any(s in (m.get("from") or "") for s in _LPD_SENDERS)]
     deps = _LpdDryRunDeps()
     plan = scf.plan_lpd_folder(emails, deps)
-    slim = [{"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
-             "subject": p.get("subject"), "reason": p.get("reason"),
-             "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
-                             "issues": p["validation"].get("issues")} if p.get("validation") else None)}
-            for p in plan]
+    slim = []
+    for em, p in zip(emails, plan):
+        validated = bool(p.get("validation")) and p["validation"].get("verdict") == "validated"
+        attach = None
+        # LIVE step (approved): a validated LPD confirmation gets its PDF attached to the order's
+        # "Job" file column straight away. The email ARCHIVING stays dry-run (nothing is moved). Idempotent
+        # — a re-run won't stack duplicates (skip_if_named). Best-effort: a failure is reported, not fatal.
+        if validated and p.get("monday"):
+            att = deps.attachment(em.get("id"))
+            if att:
+                try:
+                    res = ds.add_pdf_to_item_file(p["monday"], att[1], att[0], column_id=ds.ORDERS_JOB_COL)
+                    if res.get("ok") and res.get("skipped"):
+                        attach = "already on Job column"
+                    elif res.get("ok"):
+                        attach = "attached to Job column"
+                    else:
+                        attach = "attach FAILED (verify by hand)"
+                except Exception as e:  # noqa: BLE001
+                    attach = f"attach error: {str(e)[:80]}"
+            else:
+                attach = "no PDF to attach"
+        slim.append({"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
+                     "subject": p.get("subject"), "reason": p.get("reason"), "attached": attach,
+                     "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
+                                     "issues": p["validation"].get("issues")} if p.get("validation") else None)})
     counts = {"archive": sum(1 for p in slim if (p["plan"] or "").startswith("ARCHIVE")),
-              "flag": sum(1 for p in slim if (p["plan"] or "").startswith("FLAG"))}
+              "flag": sum(1 for p in slim if (p["plan"] or "").startswith("FLAG")),
+              "attached": sum(1 for p in slim if p.get("attached") in ("attached to Job column", "already on Job column"))}
     return {"ok": True, "supplier": "LPD", "folder": "Sales Orders", "dry_run": True,
             "n_emails": len(emails), "counts": counts, "plan": slim}
 
