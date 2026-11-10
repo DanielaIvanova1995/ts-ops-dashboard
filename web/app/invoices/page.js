@@ -53,7 +53,9 @@ function discrepancyDetail(r) {
       }
     });
   });
-  (r?.missing || []).forEach((m) => lines.push(`on the order but not invoiced: ${m}`));
+  // NB: items on the order but NOT on the invoice are deliberately left OUT — if the supplier hasn't
+  // billed something, that's not a discrepancy to query (raising it would just invite them to bill us
+  // more). Only actual overcharges / wrong lines go to the supplier. (Daniela 2026-11-10)
   const overcharge = ocOk && oc > 0.005 ? Math.round(oc * 100) / 100 : null;
   return { lines, overcharge, approx };
 }
@@ -1198,14 +1200,14 @@ export default function Invoices() {
           const r = checks[iv.sub_id];
           const busy = checking[iv.sub_id];
           const al = r && r.ok ? actionLabel(r.suggested_action, r.matched) : null;
-          // Per-line accept: group each problem LINE (and each missing item) so one "accept" clears it.
+          // Per-line accept: one "accept" clears each problem line. Items on the order but NOT on the
+          // invoice are intentionally NOT shown here — an unbilled line isn't a discrepancy (Daniela).
           const probLines = [];
           if (r && r.ok) {
             (r.lines || []).forEach((l, i) => {
               const iss = (l.issues || []).filter((x) => x[0] !== "name");
               if (iss.length) probLines.push({ key: `L${i}`, idx: i, sku: l.sku || l.desc || "line", msgs: iss.map((x) => x[1]) });
             });
-            (r.missing || []).forEach((m) => probLines.push({ key: `M${m}`, sku: null, msgs: [`On the order but not invoiced: ${m}`] }));
           }
           const accSet = accepted[iv.sub_id];
           const isAcc = (k) => !!(accSet && accSet.has(k));

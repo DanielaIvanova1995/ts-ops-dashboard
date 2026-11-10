@@ -3389,8 +3389,8 @@ def invoices_chase_discrepancies(body: ChaseDiscIn):
                "then get the invoices cleared together with their credit notes."), "",
             "Thanks so much,", "Trade Superstore Online", "Accounts"]
         body_txt = "\n".join(lines)
-        subject = (f"Query on invoice {items[0].get('invoice_no') or 'invoice'}" if _one
-                   else f"Query on {n} invoices")
+        subject = (f"Discrepancy on invoice {items[0].get('invoice_no') or 'invoice'}" if _one
+                   else f"Discrepancy on {n} invoices")
         draft_link = None
         if email:
             try:
@@ -4079,7 +4079,7 @@ def invoice_flag(sub_id: str, body: FlagIn):
             return out
         inv = (body.invoice_no or "").strip() or "this invoice"
         on = (body.order_no or "").strip()
-        subject = f"Query on invoice {body.invoice_no}" if (body.invoice_no or "").strip() else "Invoice query"
+        subject = f"Discrepancy on invoice {body.invoice_no}" if (body.invoice_no or "").strip() else "Invoice discrepancy"
         body_txt = "\n".join([
             "Hi,", "",
             f"Hope you're well. We've been going through invoice {inv}" + (f" (order {on})" if on else "")
