@@ -205,6 +205,18 @@ def sku_keys(sk, order):
     return [k for k in order if k == sk or k.startswith(pre)]
 
 
+def cost_by_prefix(sk, supplier, pidx):
+    """Cost for a TRUNCATED invoice SKU that's a prefix of exactly one pricelist key carrying this
+    supplier's price (e.g. invoice 'ZZZ040-CSA3118' → pricelist 'ZZZ040-CSA3118C' at £15.21). Needs
+    the prefix to be long (≥8) and UNAMBIGUOUS (one match). None otherwise. Only this supplier's own
+    price — never another's."""
+    if not sk or len(sk) < 8:
+        return None
+    hits = [k for k in pidx if k != sk and k.startswith(sk)
+            and isinstance(pidx[k].get(supplier), (int, float))]
+    return pidx[hits[0]].get(supplier) if len(hits) == 1 else None
+
+
 def prefix_match(sk, order, used):
     """When a supplier TRUNCATES the SKU on the invoice so it's a prefix of our full order SKU
     (e.g. Molan poly 'ZZZ047-SUNTUFI' on the invoice → 'ZZZ047-SUNTUFIRNBHCLR35' on the order),
@@ -774,6 +786,12 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                 c2 = order_sku_cost(sku_raw, supplier, pidx)
                 if c2 is not None:
                     cost = c2
+            if cost is None and not no_pl:
+                # Supplier truncated the SKU on the invoice (dropped a trailing suffix like 'C') so it
+                # no longer matches our fuller pricelist code — resolve by unambiguous prefix.
+                c3 = cost_by_prefix(sk, supplier, pidx)
+                if c3 is not None:
+                    cost, title_note = c3, "matched to our pricelist code by SKU prefix"
             if not no_pl:
                 if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                     sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
