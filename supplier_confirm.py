@@ -273,6 +273,8 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
         ord_by.setdefault(_nsku(o.get("sku")), []).append(o)
 
     line_report = []
+    all_verified = our_costs is not None   # did we confirm EVERY product line's price vs our cost?
+    overcharge = False
     # Every Shopify line must appear on the confirmation at the right qty.
     for k, olist in ord_by.items():
         oq = sum(float(o.get("qty") or 0) for o in olist)
@@ -288,8 +290,11 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
         unit = clist[0].get("unit_price")
         if our_costs is not None:
             oc = our_costs.get(olist[0].get("sku")) or our_costs.get(k)
-            if oc is not None and unit is not None and float(unit) > float(oc) + 0.01:
+            if oc is None or unit is None:
+                all_verified = False
+            elif float(unit) > float(oc) + 0.01:
                 issues.append(f"Overcharge on {title}: £{float(unit):.2f} vs our cost £{float(oc):.2f}")
+                overcharge = True
         line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "ok",
                             "qty": oq, "unit_price": unit})
     # Extra lines on the confirmation that aren't on the order (ignore carriage-type lines).
@@ -312,12 +317,24 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
     fee = round(float(order.get("total_inc_vat") or 0) * fee_pct / 100.0, 2)
     profit = round(sell - cost - fee, 2)
     margin_pct = round(profit / sell * 100.0, 1) if sell else None
+    matches_pricelist = all_verified and not overcharge   # supplier charged us our agreed prices
+    note = None
     if margin_pct is None:
         issues.append("Can't read the sell price — margin unknown")
+    elif matches_pricelist:
+        # Prices match our pricelist, so a thin margin is just a low-margin sale we already made —
+        # NOT a reason to hold the confirmation for review (Daniela 2026-11-10). Only an actual LOSS
+        # still gets flagged.
+        if profit < 0:
+            issues.append(f"We'd LOSE £{abs(profit):.2f} on this (margin {margin_pct:.1f}% after the "
+                          f"{fee_pct:g}% fee) even though prices match — check before proceeding")
+        elif margin_pct < floor_pct:
+            note = f"Thin margin {margin_pct:.1f}% after the {fee_pct:g}% fee, but prices match our pricelist — OK to proceed"
     elif margin_pct < floor_pct:
-        issues.append(f"Margin only {margin_pct:.1f}% after the {fee_pct:g}% fee (floor {floor_pct:g}%) — "
-                      f"too thin, would barely profit / lose money")
+        # Price NOT verified against our pricelist (or an overcharge) — margin is the safeguard.
+        issues.append(f"Margin only {margin_pct:.1f}% after the {fee_pct:g}% fee (floor {floor_pct:g}%) "
+                      f"and prices not confirmed against our pricelist — review")
 
-    return {"verdict": "review" if issues else "validated", "issues": issues,
+    return {"verdict": "review" if issues else "validated", "issues": issues, "note": note,
             "margin_pct": margin_pct, "profit": profit, "sell": sell, "cost": cost, "fee": fee,
-            "lines": line_report}
+            "matches_pricelist": matches_pricelist, "lines": line_report}
