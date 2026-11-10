@@ -400,5 +400,29 @@ def plan_carron_email(email, deps):
 
 
 def plan_folder(emails, deps):
-    """Dry-run plan for a list of Carron folder emails."""
-    return [plan_carron_email(e, deps) for e in (emails or [])]
+    """Dry-run plan for a list of Carron folder emails, with per-order dedupe: when several emails
+    share an order number and the LATEST one resolves it (booked-in → archive, or a validated move),
+    the earlier ones in that now-settled thread are archived as 'superseded' rather than re-actioned.
+    If the latest is still open (a problem/question/leave), every email in the thread is left as-is.
+    Needs each email to carry a sortable `received` (ISO) or `date` for ordering."""
+    planned = [(e, plan_carron_email(e, deps)) for e in (emails or [])]
+    groups = {}
+    for e, p in planned:
+        groups.setdefault(p.get("order_no"), []).append((e, p))
+    out = []
+    for no, items in groups.items():
+        if not no or len(items) == 1:
+            out.extend(p for _, p in items)
+            continue
+        items.sort(key=lambda ep: str(ep[0].get("received") or ep[0].get("date") or ""), reverse=True)
+        _, latest = items[0]
+        resolving = ((latest["action"] == "booked_in" and "ARCHIVE" in latest.get("plan", ""))
+                     or (latest["action"] == "needs_eta" and latest.get("plan", "").startswith("MOVE")))
+        out.append(latest)
+        for _, p in items[1:]:
+            if resolving:
+                out.append({**p, "plan": f"ARCHIVE to NV Resolved — superseded by the later "
+                            f"{latest['action'].replace('_', ' ')} on order {no}", "superseded": True})
+            else:
+                out.append(p)
+    return out
