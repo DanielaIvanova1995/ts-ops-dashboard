@@ -438,13 +438,20 @@ def plan_lpd_email(email, deps):
     r = classify_lpd(email.get("subject"), email.get("body"), email.get("sender", ""))
     base = {"supplier": "LPD", "subject": email.get("subject"), "order_no": None,
             "email_id": email.get("id"), "action": r["action"], "do": {}}
+    sig = delay_signal(email.get("subject"), email.get("body"))
+    if sig:
+        return {**base, "action": "flag", "reason": f"delay signal: {sig}",
+                "plan": f"FLAG — email mentions “{sig}” (possible delay) — check by hand"}
     if r["action"] == "flag":
         return {**base, "plan": f"FLAG — {r['reason']} (leave in folder)", "reason": r["reason"]}
     conf = deps.fetch_confirmation(email)
     if not conf:
         return {**base, "action": "flag", "plan": "FLAG — couldn't read the sales-order PDF (check by hand)", "reason": "PDF unreadable"}
-    lines, carriage, order_no = conf
+    lines, carriage, order_no, stock_warning = conf
     base["order_no"] = order_no
+    if stock_warning:
+        return {**base, "action": "flag", "reason": f"delay signal on the PDF: {stock_warning}",
+                "plan": f"FLAG — the document mentions “{stock_warning}” (possible delay) — check by hand"}
     if not order_no:
         return {**base, "action": "flag", "plan": "FLAG — no customer order reference on the PDF (can't match our order)", "reason": "no order ref"}
     mon = deps.find_monday(order_no)
@@ -468,6 +475,126 @@ def plan_lpd_email(email, deps):
 
 def plan_lpd_folder(emails, deps):
     return [plan_lpd_email(e, deps) for e in (emails or [])]
+
+
+# =================================================================================================
+# Shared DELAY guard (Daniela 2026-11-10): never auto-clear an order if the email OR the document
+# mentions anything that could delay it (out of stock, back order, discontinued, lead time, to
+# follow…). The parsed PDF surfaces this as `stock_warning`; this regex catches it on the email text.
+# =================================================================================================
+_DELAY_RE = re.compile(
+    r"out[\s-]?of[\s-]?stock|\bno stock\b|not in stock|back[\s-]?order|\boos\b|discontinued|"
+    r"awaiting stock|to follow|on back[\s-]?order|no longer available|unavailable|lead[\s-]?time|"
+    r"\bdelay(?:ed|s)?\b|not expected until", re.I)
+
+
+def delay_signal(*texts):
+    """Return the first delay/stock phrase found across the given texts, else None."""
+    for t in texts:
+        if not t:
+            continue
+        m = _DELAY_RE.search(str(t))
+        if m:
+            return m.group(0)
+    return None
+
+
+# =================================================================================================
+# SOUTHERN SHEETING handler — two email types in the 'Sales Orders' subfolder:
+#   * "Sales Order SOxxxx" (order confirmation, our ref INSIDE the PDF) → money-check (8% floor) →
+#     attach to Job + archive to NV Resolved.
+#   * "Delivery Date Booked - Order SOxxxx" (the date is in the body) → set Customer ETA + archive.
+# Southern Sheeting books the delivery itself, so NOTHING routes to Supplier-ETAs (Daniela 2026-11-10).
+# Any out-of-stock / back-order / delay wording on the email OR the PDF → flag, never archived.
+# =================================================================================================
+_SS_BOOKED_RE = re.compile(r"delivery date booked|booked for delivery", re.I)
+_SS_AMEND_RE = re.compile(r"\bamend", re.I)
+_SS_CONFIRM_RE = re.compile(r"sales order|confirmation of your order|thank you for your (?:recent )?order", re.I)
+_SS_DATE_RE = re.compile(r"booked for delivery on[^0-9]*?(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", re.I)
+
+
+def parse_ss_booked_date(body):
+    """'…booked for delivery on Friday, 13 November 2026.' → '2026-11-13'. None if not found."""
+    m = _SS_DATE_RE.search(body or "")
+    if not m:
+        return None
+    try:
+        return _dt.datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%d %B %Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def classify_ss(subject, body, sender=""):
+    text = f"{subject or ''}\n{body or ''}"
+    if _SS_AMEND_RE.search(text):
+        return {"type": "flag", "reason": "Amended order — review the change before clearing"}
+    if _SS_BOOKED_RE.search(text):
+        return {"type": "booked"}
+    if _SS_CONFIRM_RE.search(text):
+        return {"type": "confirm"}
+    return {"type": "flag", "reason": "Not a recognised Southern Sheeting sales-order email"}
+
+
+def plan_ss_email(email, deps):
+    """Plan for one Southern Sheeting email. deps.fetch_confirmation(email) returns
+    (lines, carriage, our_order_ref, stock_warning). `do` is the live directive the runner executes."""
+    subj, body = email.get("subject"), email.get("body")
+    base = {"supplier": "Southern Sheeting", "subject": subj, "email_id": email.get("id"),
+            "order_no": None, "action": "flag", "do": {}}
+
+    sig = delay_signal(subj, body)
+    if sig:
+        return {**base, "plan": f"FLAG — email mentions “{sig}” (possible delay) — check by hand",
+                "reason": f"delay signal: {sig}"}
+    c = classify_ss(subj, body, email.get("sender", ""))
+    if c["type"] == "flag":
+        return {**base, "plan": f"FLAG — {c['reason']} (leave in folder)", "reason": c["reason"]}
+
+    conf = deps.fetch_confirmation(email)
+    if not conf:
+        return {**base, "plan": "FLAG — couldn't read the sales-order PDF (check by hand)", "reason": "PDF unreadable"}
+    lines, carriage, order_no, stock_warning = conf
+    base["order_no"] = order_no
+    if stock_warning:
+        return {**base, "plan": f"FLAG — the document mentions “{stock_warning}” (possible delay) — check by hand",
+                "reason": f"delay signal on the PDF: {stock_warning}"}
+    if not order_no:
+        return {**base, "plan": "FLAG — no customer order reference on the PDF (can't match our order)", "reason": "no order ref"}
+    mon = deps.find_monday(order_no)
+    if not mon:
+        return {**base, "plan": f"FLAG — order {order_no} not found on Monday", "reason": "no Monday match"}
+
+    if c["type"] == "booked":
+        eta = parse_ss_booked_date(body)
+        if eta:
+            return {**base, "action": "booked", "monday": mon, "eta": eta,
+                    "plan": f"SET Customer ETA {eta} + ARCHIVE to NV Resolved", "reason": "SS booked delivery",
+                    "do": {"set_eta": eta, "move_to": NV_RESOLVED,
+                           "update": f"✅ Southern Sheeting booked delivery {eta}."}}
+        return {**base, "action": "booked", "monday": mon,
+                "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'", "reason": "couldn't read the booked date",
+                "do": {"move_to": NV_RESOLVED,
+                       "update": "⚠ Southern Sheeting booked delivery — set the Customer ETA manually (date couldn't be read)."}}
+
+    # confirm
+    order = deps.fetch_order(order_no)
+    if not order:
+        return {**base, "monday": mon, "plan": f"FLAG — couldn't read Shopify order {order_no}", "reason": "no Shopify order"}
+    v = validate_confirmation(lines, carriage, order, our_costs=deps.our_costs(order),
+                              expected_carriage=deps.expected_carriage(order), floor_pct=8.0)
+    if v["verdict"] == "validated":
+        msg = "ARCHIVE to NV Resolved (✅ validated — order confirmed)"
+        if v.get("note"):
+            msg += f" · {v['note']}"
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v,
+                "do": {"attach": True, "move_to": NV_RESOLVED,
+                       "update": "✅ Southern Sheeting order confirmed — attached to Job."}}
+    return {**base, "monday": mon, "plan": "FLAG for review — do NOT archive",
+            "reason": "; ".join(v["issues"]), "validation": v}
+
+
+def plan_ss_folder(emails, deps):
+    return [plan_ss_email(e, deps) for e in (emails or [])]
 
 
 def plan_folder(emails, deps):

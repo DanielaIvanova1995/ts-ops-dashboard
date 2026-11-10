@@ -20,8 +20,16 @@ const SUPPLIERS = {
     preview: "/noeta/lpd/dry-run",
     run: "/noeta/lpd/run",
     folder: "“Sales Orders”",
-    blurb: "Pulls our order ref + lines from each LPD PDF and validates vs Shopify + full money-check. Validated → attach to the Job column + archive to NV Resolved. Backorder / amended / unmatched → flagged for a human.",
+    blurb: "Pulls our order ref + lines from each LPD PDF and validates vs Shopify + full money-check. Validated → attach to the Job column + archive to NV Resolved. Backorder / amended / out-of-stock / unmatched → flagged for a human.",
     tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
+  ss: {
+    label: "Southern Sheeting",
+    preview: "/noeta/ss/dry-run",
+    run: "/noeta/ss/run",
+    folder: "“Sales Orders”",
+    blurb: "Two email types: a Sales Order confirmation → money-check (8% floor) → attach to Job + archive; a 'Delivery Date Booked' → read the date, set the Customer ETA + archive. Any out-of-stock / back-order / delay wording on the email or PDF → flagged. SS books delivery itself, so nothing goes to Supplier-ETAs.",
+    tiles: (t) => [["Set ETA / archive", t.archive, "green"], ["Flag — review", t.flag, "red"]],
   },
 };
 

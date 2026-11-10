@@ -2614,7 +2614,8 @@ class _LpdDryRunDeps:
         self._att[email.get("id")] = (atts[0].get("name") or "LPD confirmation.pdf", atts[0]["bytes"])
         prod, carriage = _noeta_split_pdf(parsed)
         order_ref = (str(parsed.get("customer_ref") or "").strip() or None)
-        return (prod, carriage, order_ref)
+        stock = (str(parsed.get("stock_warning") or "").strip() or None)
+        return (prod, carriage, order_ref, stock)
 
     def attachment(self, email_id):
         return self._att.get(email_id)
@@ -2625,7 +2626,7 @@ class _LpdDryRunDeps:
         except Exception:  # noqa: BLE001
             return None
 
-    def our_costs(self, order):
+    def _costs(self, order, supplier):
         import invoice_core as core
         try:
             if self._pidx is None:
@@ -2634,18 +2635,30 @@ class _LpdDryRunDeps:
             for l in (order.get("lines") or []):
                 sku = l.get("sku")
                 if sku:
-                    c = core.order_sku_cost(sku, "lpd", self._pidx)
+                    c = core.order_sku_cost(sku, supplier, self._pidx)
                     if c is not None:
                         out[sku] = c
             return out or None
         except Exception:  # noqa: BLE001
             return None
 
+    def our_costs(self, order):
+        return self._costs(order, "lpd")
+
     def expected_carriage(self, order):
         return None
 
 
+class _SsDryRunDeps(_LpdDryRunDeps):
+    """Southern Sheeting — same PDF→(lines,carriage,ref,stock) shape as LPD, but its own cost key.
+    Carriage is left to the margin check (their confirmation carries the real carriage line), so
+    expected_carriage stays None."""
+    def our_costs(self, order):
+        return self._costs(order, "southernsheeting")
+
+
 _LPD_SENDERS = ("lpddoors", "lpdhome", "lpdgroup", "leeds")
+_SS_SENDERS = ("southernsheeting",)
 
 
 def _lpd_plan(limit=40):
@@ -2704,6 +2717,64 @@ def noeta_lpd_run(limit: int = 40):
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
     out = _noeta_execute(plan, deps, "LPD")
     return {"ok": True, "supplier": "LPD", "live": True, **out}
+
+
+def _ss_plan(limit=40):
+    """(emails, deps, plan) for the Southern Sheeting emails in the 'Sales Orders' subfolder."""
+    import supplier_confirm as scf
+    fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, "Sales Orders", create=False)
+    if not fid:
+        raise HTTPException(status_code=404, detail="Folder 'Sales Orders' not found")
+    msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 100))
+    emails = [{"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
+               "sender": m.get("from"), "received": m.get("received")}
+              for m in msgs if any(s in (m.get("from") or "") for s in _SS_SENDERS)]
+    deps = _SsDryRunDeps()
+    return emails, deps, scf.plan_ss_folder(emails, deps)
+
+
+def _ss_slim(plan):
+    slim = [{"order_no": p.get("order_no"), "action": p.get("action"), "plan": p.get("plan"),
+             "subject": p.get("subject"), "reason": p.get("reason"), "eta": p.get("eta"),
+             "validation": ({"verdict": p["validation"]["verdict"], "margin_pct": p["validation"].get("margin_pct"),
+                             "issues": p["validation"].get("issues")} if p.get("validation") else None)}
+            for p in plan]
+    counts = {"archive": sum(1 for p in slim if (p["plan"] or "").startswith(("ARCHIVE", "SET Customer ETA"))),
+              "flag": sum(1 for p in slim if (p["plan"] or "").startswith("FLAG"))}
+    return slim, counts
+
+
+@app.get("/noeta/ss/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_ss_dry_run(limit: int = 40):
+    """PREVIEW — the planned action for every Southern Sheeting email in the 'Sales Orders' subfolder.
+    Confirmation → money-check (8% floor). 'Delivery Date Booked' → read the date. Any out-of-stock /
+    back-order / delay wording on the email or PDF → flag. Reads/parses only."""
+    try:
+        emails, _deps, plan = _ss_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    slim, counts = _ss_slim(plan)
+    return {"ok": True, "supplier": "Southern Sheeting", "folder": "Sales Orders", "dry_run": True,
+            "live_enabled": _noeta_live_enabled(), "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
+@app.post("/noeta/ss/run", dependencies=[Depends(require_key_or_statements)])
+def noeta_ss_run(limit: int = 40):
+    """LIVE — execute the Southern Sheeting plan: set ETAs (booked), attach confirmations to the Job
+    column, post the short note, and MOVE emails to NV Resolved. Delay/stock mentions, amendments and
+    unmatched orders are left in place. Idempotent + audited."""
+    if not _noeta_live_enabled():
+        raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
+    try:
+        _emails, deps, plan = _ss_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    out = _noeta_execute(plan, deps, "Southern Sheeting")
+    return {"ok": True, "supplier": "Southern Sheeting", "live": True, **out}
 
 
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
