@@ -472,7 +472,7 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title variantTitle quantity sku customAttributes { key value } "
+             "title variantTitle quantity currentQuantity sku customAttributes { key value } "
              "originalUnitPriceSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
@@ -488,6 +488,11 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     out = []
     for e in (order.get("lineItems") or {}).get("edges") or []:
         n = e.get("node") or {}
+        # Skip lines removed via an order edit (currentQuantity 0) — they are no longer on the order,
+        # so they must not be checked against invoices or ordered on a PO.
+        cq = n.get("currentQuantity")
+        if cq is not None and cq <= 0:
+            continue
         # Fold the variant (usually the colour) into the name so it's present on EVERY line —
         # that lets the matcher spot the colour as an order-wide 'common' token and ignore it.
         # ALSO return the base title + variant separately, so a PO can put the variant on its own
@@ -516,7 +521,8 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
                 props.append({"key": k, "value": v})
         out.append({"title": title, "base_title": base_title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
-                    "qty": n.get("quantity"), "price": price, "properties": props})
+                    "qty": (cq if cq is not None else n.get("quantity")),
+                    "price": price, "properties": props})
     return out
 
 
@@ -562,7 +568,7 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title variantTitle quantity sku variant { product { vendor productType tags } } "
+             "title variantTitle quantity currentQuantity sku variant { product { vendor productType tags } } "
              "product { vendor productType tags } "
              "discountedTotalSet { shopMoney { amount } } } } } } }")
     r = requests.post(
@@ -579,6 +585,12 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     out = []
     for e in (order.get("lineItems") or {}).get("edges") or []:
         n = e.get("node") or {}
+        # currentQuantity reflects order EDITS (removed/reduced lines); quantity is the original. A
+        # line removed via an order edit has currentQuantity 0 — it is NOT part of the order, so it
+        # must never reach a PO (this caused a removed item on #33352 to be ordered and paid for).
+        cq = n.get("currentQuantity")
+        if cq is not None and cq <= 0:
+            continue
         prod = (n.get("variant") or {}).get("product") or n.get("product") or {}
         try:
             sub = float((((n.get("discountedTotalSet") or {}).get("shopMoney") or {})
@@ -593,7 +605,8 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
             title = f"{title} - {variant}"
         out.append({"title": title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
-                    "qty": n.get("quantity"), "vendor": (prod.get("vendor") or "").strip(),
+                    "qty": (cq if cq is not None else n.get("quantity")),
+                    "vendor": (prod.get("vendor") or "").strip(),
                     "product_type": (prod.get("productType") or "").strip(),
                     "tags": prod.get("tags") or [],
                     "line_subtotal": sub})
