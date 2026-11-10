@@ -47,6 +47,7 @@ FLAT = {
     "molan": (23.74, None), "decor8": (5.99, 50),
     "chasehardware": (10.00, None), "bricklink": (16.99, 100),
     "markovitz": (35.00, 350),          # £35 under £350 net, free over
+    "edmundson": (10.00, None),         # £10 + VAT per delivery, to us AND to customer (Daniela 2026-11-10)
 }
 
 

@@ -34,6 +34,7 @@ DELIVERY_CHARGES = {
     "chasehardware": {"name": "Chase Hardware", "flat": 14.0},   # accept up to £14 carriage (undefined
     #   when they charge it); the default 10% push floor still holds a thin-margin order for review.
     "velux": {"name": "Velux", "flat": 50.0},   # always £50 + VAT carriage (Daniela 2026-10-05)
+    "edmundson": {"name": "Edmundson", "flat": 10.0},   # £10 + VAT per delivery, to us AND to customer (Daniela 2026-11-10)
 }
 DECOR8_DISCOUNT = 0.12
 DECOR8_MIN_DISCOUNT = 0.10
