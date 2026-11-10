@@ -3291,20 +3291,31 @@ def monday_asset_url(asset_id, token: str | None = None) -> str | None:
 INVOICE_PARSE_VERSION = 4
 
 
+def read_invoice_pdf_bytes(pdf_bytes: bytes) -> dict:
+    """Same as read_invoice_pdf but from raw PDF bytes (e.g. an email attachment) instead of a URL —
+    used to validate a supplier ORDER CONFIRMATION attached to an email."""
+    import base64
+    return _read_invoice_b64(base64.standard_b64encode(pdf_bytes).decode())
+
+
 def read_invoice_pdf(pdf_url: str) -> dict:
     """Read a supplier invoice PDF with Claude and return structured line items:
     {supplier, invoice_no, invoice_date, lines:[{sku, description, qty,
     unit_price, line_total}], subtotal_ex_vat, vat, total}. Prices ex-VAT, GBP."""
     import base64
+    pdf = requests.get(pdf_url, timeout=60)
+    pdf.raise_for_status()
+    return _read_invoice_b64(base64.standard_b64encode(pdf.content).decode())
+
+
+def _read_invoice_b64(b64: str) -> dict:
+    """Parse a base64 PDF (invoice or order confirmation) with Claude into {lines, carriage, totals…}."""
     import json as _json
     import re
 
     key = get_secret("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("No ANTHROPIC_API_KEY configured")
-    pdf = requests.get(pdf_url, timeout=60)
-    pdf.raise_for_status()
-    b64 = base64.standard_b64encode(pdf.content).decode()
     prompt = (
         "Read this supplier invoice carefully and extract the line items and totals. "
         "Reply with ONLY a JSON object, no other text:\n"
