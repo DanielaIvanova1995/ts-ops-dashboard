@@ -114,6 +114,11 @@ PRODUCT_EQUIV = [
     # Profile' order line (SKU JHPROFP…). The names share only 'starter' (7 chars) so the name-scorer
     # just misses it — pin it: any UPB line saying 'starter' → the order's 'starter' line.
     {"supplier": "upb", "inv_name_has": ["starter"], "order_name_has": ["starter"]},
+    # Eurocell bills the Walnut Eco Fencing Panel as ECOFPANWALS; our Shopify SKU is ECOFPAN6WAL
+    # (extra '6', no trailing 'S') — so the exact-SKU match misses it (invoice 337874008 / order
+    # 30781). Pin the equivalence. (If other colours show the same ECOFPAN<colour>S ↔ ECOFPAN6<colour>
+    # pattern, add them here too.)
+    {"supplier": "eurocell", "inv_sku": "ECOFPANWALS", "order_sku": "ECOFPAN6WAL"},
 ]
 
 _TOK_ABBREV = {
