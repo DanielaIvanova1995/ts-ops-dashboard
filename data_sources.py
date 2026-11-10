@@ -526,6 +526,48 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     return out
 
 
+def fetch_order_by_name_for_check(order_name, token: str | None = None) -> dict | None:
+    """Shopify order by NAME (e.g. '33372') → {lines:[{sku,title,qty,sell_ex_vat}], shipping_ex_vat,
+    total_inc_vat, postcode}, for validating a supplier order confirmation. Removed lines
+    (currentQuantity 0) are dropped. None if not found. Raises on transport error (caller catches)."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    q = ("query($q:String!){orders(first:1,query:$q){edges{node{name "
+         "totalShippingPriceSet{shopMoney{amount}} totalPriceSet{shopMoney{amount}} "
+         "shippingAddress{zip} lineItems(first:50){edges{node{sku title quantity currentQuantity "
+         "discountedTotalSet{shopMoney{amount}}}}}}}}}")
+    r = requests.post(f"https://{store}/admin/api/2024-10/graphql.json",
+                      json={"query": q, "variables": {"q": f"name:{str(order_name).strip()}"}},
+                      headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                      timeout=25)
+    r.raise_for_status()
+    edges = ((((r.json().get("data") or {}).get("orders") or {}).get("edges")) or [])
+    if not edges:
+        return None
+    n = edges[0].get("node") or {}
+
+    def _amt(key):
+        try:
+            return float(((n.get(key) or {}).get("shopMoney") or {}).get("amount"))
+        except (TypeError, ValueError):
+            return 0.0
+    lines = []
+    for e in ((n.get("lineItems") or {}).get("edges") or []):
+        nd = e.get("node") or {}
+        cq = nd.get("currentQuantity")
+        if cq is not None and cq <= 0:
+            continue
+        try:
+            sell = float(((nd.get("discountedTotalSet") or {}).get("shopMoney") or {}).get("amount"))
+        except (TypeError, ValueError):
+            sell = 0.0
+        lines.append({"sku": (nd.get("sku") or "").strip(), "title": nd.get("title"),
+                      "qty": cq if cq is not None else nd.get("quantity"), "sell_ex_vat": sell})
+    return {"lines": lines, "shipping_ex_vat": _amt("totalShippingPriceSet"),
+            "total_inc_vat": _amt("totalPriceSet"),
+            "postcode": (n.get("shippingAddress") or {}).get("zip") or ""}
+
+
 def fetch_order_totals(order_ids, token: str | None = None) -> dict:
     """Live Shopify order TOTAL (inc VAT + shipping = what the customer paid) per order, batched —
     {order_id(str): total(float)}. Used to sanity-check Monday's '£ to us' (numbers48, also the

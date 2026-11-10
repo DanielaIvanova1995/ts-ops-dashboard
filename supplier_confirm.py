@@ -386,7 +386,7 @@ def plan_carron_email(email, deps):
             return {**base, "monday": mon, "plan": "FLAG — couldn't read the Shopify order",
                     "reason": f"order {r['order_no']} not found in Shopify"}
         v = validate_confirmation(conf_lines, carriage, order,
-                                  our_costs=deps.our_costs(r["order_no"]),
+                                  our_costs=deps.our_costs(order),
                                   expected_carriage=deps.expected_carriage(order))
         if v["verdict"] == "validated":
             msg = "MOVE to Supplier - ETAs (✅ validated — ring customer for a date)"

@@ -2305,27 +2305,79 @@ def _noeta_monday_map(order_nos):
 
 
 class _CarronDryRunDeps:
-    """Injected I/O for the Carron dry-run. Booked-in only needs find_monday (+ the thread ETA, which
-    the classifier derives). The order-confirmation money-check fetchers are stubbed for now — until
-    they're wired, an order confirmation is planned as 'move to Supplier - ETAs, validate by hand',
-    which is safe (never auto-archived)."""
+    """Injected I/O for the Carron dry-run. Booked-in needs only find_monday (+ the thread ETA). An
+    order confirmation gets the full money-check: parse the PDF, pull the Shopify order + our Carron
+    costs + the expected zone carriage, then validate. Every fetcher is best-effort — a failure makes
+    that order confirmation route to 'validate by hand', never auto-archived."""
     def __init__(self, monday_map):
         self._m = monday_map
+        self._pidx = None
 
     def find_monday(self, no):
         return self._m.get(str(no))
 
-    def fetch_confirmation(self, email):   # TODO: download the PDF attachment + ds invoice parser
-        return None
+    def fetch_confirmation(self, email):
+        """Download the attached confirmation PDF → (product_lines, carriage£)."""
+        import re as _re
+        try:
+            atts = ds.fetch_message_pdf_attachments(_NOETA_MAILBOX, email.get("id"), max_items=2)
+            if not atts:
+                return None
+            parsed = ds.read_invoice_pdf_bytes(atts[0]["bytes"])
+        except Exception:  # noqa: BLE001
+            return None
+        prod, line_carr = [], 0.0
+        for l in (parsed.get("lines") or []):
+            sku, desc = (l.get("sku") or "").strip(), (l.get("description") or "")
+            if _re.search(r"carriage|deliver|pallet|freight|postage|shipping", f"{sku} {desc}", _re.I):
+                try:
+                    line_carr += float(l["line_total"]) if l.get("line_total") is not None \
+                        else float(l.get("unit_price") or 0) * float(l.get("qty") or 1)
+                except (TypeError, ValueError):
+                    pass
+                continue
+            prod.append({"sku": sku, "desc": desc, "qty": l.get("qty") or 1, "unit_price": l.get("unit_price")})
+        c = parsed.get("carriage")
+        try:
+            carriage = float(c) if c is not None else round(line_carr, 2)
+        except (TypeError, ValueError):
+            carriage = round(line_carr, 2)
+        return (prod, carriage)
 
     def fetch_order(self, order_no):
-        return None
+        try:
+            return ds.fetch_order_by_name_for_check(order_no)
+        except Exception:  # noqa: BLE001
+            return None
 
-    def our_costs(self, order_no):
-        return None
+    def our_costs(self, order):
+        """{sku: our per-unit Carron cost} for the order's lines (for the overcharge check)."""
+        import invoice_core as core
+        try:
+            if self._pidx is None:
+                self._pidx = _inv_indexes()[0]
+            out = {}
+            for l in (order.get("lines") or []):
+                sku = l.get("sku")
+                if sku:
+                    c = core.order_sku_cost(sku, "carron", self._pidx)
+                    if c is not None:
+                        out[sku] = c
+            return out or None
+        except Exception:  # noqa: BLE001
+            return None
 
     def expected_carriage(self, order):
-        return None
+        """Expected Carron zone carriage (free over £250 on our goods cost)."""
+        import invoice_core as core
+        try:
+            costs = self.our_costs(order) or {}
+            by_sku = {l.get("sku"): l for l in (order.get("lines") or [])}
+            goods = round(sum(costs[s] * float((by_sku.get(s) or {}).get("qty") or 1) for s in costs), 2)
+            pc = (order or {}).get("postcode") or ""
+            return core.expected_delivery("carron", goods, {"postcode": pc, "zip": pc})
+        except Exception:  # noqa: BLE001
+            return None
 
 
 @app.get("/noeta/carron/dry-run", dependencies=[Depends(require_key_or_statements)])
