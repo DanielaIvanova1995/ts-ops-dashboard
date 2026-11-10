@@ -205,6 +205,18 @@ def sku_keys(sk, order):
     return [k for k in order if k == sk or k.startswith(pre)]
 
 
+def prefix_match(sk, order, used):
+    """When a supplier TRUNCATES the SKU on the invoice so it's a prefix of our full order SKU
+    (e.g. Molan poly 'ZZZ047-SUNTUFI' on the invoice → 'ZZZ047-SUNTUFIRNBHCLR35' on the order),
+    match it — but only when the prefix is long (≥8 chars, so it's specific) and UNAMBIGUOUS
+    (exactly one order SKU starts with it). Returns that order key or None."""
+    if not sk or len(sk) < 8:
+        return None
+    cands = [k for k in order if k not in used and k != sk
+             and (k.startswith(sk) or k.split("#", 1)[0].startswith(sk))]
+    return cands[0] if len(cands) == 1 else None
+
+
 def equiv_match(supplier, sk, desc, order, hit):
     dl = (desc or "").lower()
     for r in PRODUCT_EQUIV:
@@ -789,10 +801,17 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
             pending.append(rec)
         else:
             ck = code_match(sk, order, hit)
+            pk = prefix_match(sk, order, hit)
             if ck and names_ok(desc, order[ck].get("name"), common):
                 _hit(rec, ck)
                 issues.append(("name", f"matched to order line {order[ck]['sku']} by product "
                                        "code (in our SKU)"))
+            elif pk and (len(sk) >= 12 or names_ok(desc, order[pk].get("name"), common)):
+                # Truncated invoice SKU that's a unique prefix of our order SKU (a long, unambiguous
+                # prefix is strong on its own; a shorter one still needs the description to agree).
+                _hit(rec, pk)
+                issues.append(("name", f"matched to order line {order[pk]['sku']} — invoice SKU is a "
+                                       "truncated prefix of ours"))
             else:
                 pending.append(rec)
 
