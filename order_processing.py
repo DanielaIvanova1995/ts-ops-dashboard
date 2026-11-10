@@ -786,7 +786,7 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         notes += ["⚠️ Two lines share the same Shopify SKU but are different sizes/variants — "
                   "CHECK each line's size, quantity and price before sending this PO."]
 
-    is_portal = supplier in order_routing.PORTAL
+    is_portal = supplier in order_routing.PORTAL and not _is_email_direct(supplier, o.get("branch"))
     in_house = supplier in ("", "SAMPLES", "CLEARANCE")
 
     # Price every line for an email-order supplier. RULE: all prices in → PO; ANY price missing →
@@ -1272,8 +1272,20 @@ def _resolve_branch(supplier, postcode):
     return None, None, None
 
 
-def _stage_for_supplier(supplier):
-    if supplier in order_routing.PORTAL:
+# Branches that email a PO directly to a named contact instead of going via the supplier's portal.
+# Matched by (supplier, normalised branch-name substring). Edinburgh West Travis Perkins emails Lee
+# McLaughlin (branch email set in branches_geocoded.csv) rather than TP's portal — Daniela 2026-11-10.
+EMAIL_DIRECT_BRANCHES = {("Travis Perkins", "edinburghwest")}
+
+
+def _is_email_direct(supplier, branch):
+    """True if this supplier + resolved branch should email a PO directly rather than go to the portal."""
+    b = re.sub(r"[^a-z0-9]", "", (branch or "").lower())
+    return bool(b) and any(supplier == s and bn in b for s, bn in EMAIL_DIRECT_BRANCHES)
+
+
+def _stage_for_supplier(supplier, branch=None):
+    if supplier in order_routing.PORTAL and not _is_email_direct(supplier, branch):
         return "Go To Portal"
     if supplier in order_routing.QUOTE_FIRST:
         return "Needs Quote"
@@ -1336,7 +1348,7 @@ def _merge_parts(selected, target_supplier, all_siblings):
     data_sources.op_set_branch(iid, branch=(branch or ""), email=(bemail or ""),
                                phone=(bphone or ""))
     _fix_po_email(iid, target_supplier)
-    data_sources.op_set_status(iid, _stage_for_supplier(target_supplier))
+    data_sources.op_set_status(iid, _stage_for_supplier(target_supplier, branch))
     data_sources.set_order_number(iid, OP["sell"], sell)
     # numbers6 (£ to supplier) is set from the generated PO's inc-VAT total below.
 
@@ -1393,7 +1405,7 @@ def _process_current(o):
         except Exception:  # noqa: BLE001
             pc = None
     br, em, ph = _resolve_branch(supplier, pc)
-    stage = _stage_for_supplier(supplier)
+    stage = _stage_for_supplier(supplier, br)
     try:
         data_sources.op_set_supplier(iid, supplier)
         if br or em or ph:
