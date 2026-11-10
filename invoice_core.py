@@ -809,6 +809,16 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                 c3 = cost_by_prefix(sk, supplier, pidx)
                 if c3 is not None:
                     cost, title_note = c3, "matched to our pricelist code by SKU prefix"
+            if cost is None and not no_pl and len(sk) >= 8:
+                # Pricelist prefix still ambiguous (e.g. 'ZZZ047-SUNTUF' matches many Suntuf sizes), but
+                # THIS order usually has just ONE such line — disambiguate via the order and take its
+                # cost (the full order SKU IS in our pricelist).
+                oks = [ok for ok, ov in order.items()
+                       if (ok and ok.startswith(sk)) or (ov.get("sku") and norm_code(ov["sku"]).startswith(sk))]
+                if len(oks) == 1:
+                    c4 = order_sku_cost(order[oks[0]].get("sku"), supplier, pidx)
+                    if c4 is not None:
+                        cost, title_note = c4, f"matched to order line {order[oks[0]].get('sku')}"
             if not no_pl:
                 if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                     sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
