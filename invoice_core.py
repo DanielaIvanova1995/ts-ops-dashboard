@@ -357,13 +357,25 @@ def supplier_code_cost(sku_raw, desc, supplier, cidx):
 # ---- index builders (from the pricing_lookup.json the app/runner load) ----------------
 def _price_overrides():
     """Durable per-supplier SKU cost overrides from price_overrides.json (kept in the repo so a
-    feed rebuild can't wipe them). {} if the file is missing or unreadable."""
+    feed rebuild can't wipe them), PLUS the bulk Molan polycarbonate pricelist in molan_poly.json
+    (3,080 per-size variants, kept in its own file so price_overrides.json stays small). A hand-set
+    price in price_overrides.json always wins over the bulk file. {} if unreadable."""
+    base = os.path.dirname(os.path.abspath(__file__))
     try:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "price_overrides.json")
-        with open(path, encoding="utf-8") as f:
-            return json.load(f) or {}
+        with open(os.path.join(base, "price_overrides.json"), encoding="utf-8") as f:
+            ov = json.load(f) or {}
     except Exception:  # noqa: BLE001
-        return {}
+        ov = {}
+    try:
+        with open(os.path.join(base, "molan_poly.json"), encoding="utf-8") as f:
+            poly = json.load(f) or {}
+        for sup, skus in poly.items():
+            if isinstance(skus, dict) and isinstance(ov.setdefault(sup, {}), dict):
+                for k, v in skus.items():
+                    ov[sup].setdefault(k, v)        # price_overrides.json wins on a clash
+    except Exception:  # noqa: BLE001
+        pass
+    return ov
 
 
 def order_sku_cost(order_sku, supplier, pidx):
