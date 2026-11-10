@@ -338,3 +338,67 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
     return {"verdict": "review" if issues else "validated", "issues": issues, "note": note,
             "margin_pct": margin_pct, "profit": profit, "sell": sell, "cost": cost, "fee": fee,
             "matches_pricelist": matches_pricelist, "lines": line_report}
+
+
+# =================================================================================================
+# RUNNER — decides the planned action per email WITHOUT doing it (dry run). The caller injects the
+# real I/O via `deps` so this stays pure/testable. `deps` provides:
+#   find_monday(order_no)            -> monday item id | None
+#   fetch_confirmation(email)        -> (conf_lines, carriage) | None   (parse the attached PDF)
+#   fetch_order(order_no)            -> {lines, shipping_ex_vat, total_inc_vat, postcode} | None
+#   our_costs(order_no)              -> {sku: our_ex_vat_cost}           (Carron pricelist)
+#   expected_carriage(order)         -> £ | None                         (Carron zone rate)
+# =================================================================================================
+def plan_carron_email(email, deps):
+    """Return the dry-run PLAN for one Carron folder email — what WOULD happen, nothing done."""
+    r = classify_carron(email.get("subject"), email.get("body"), email.get("sender", ""),
+                        email.get("date"))
+    base = {"subject": email.get("subject"), "order_no": r.get("order_no"),
+            "action": r["action"], "dest": r.get("dest")}
+
+    if r["action"] == "leave":
+        return {**base, "plan": "LEAVE in folder", "reason": r["reason"]}
+
+    mon = deps.find_monday(r["order_no"]) if r.get("order_no") else None
+
+    if r["action"] == "booked_in":
+        if not mon:
+            return {**base, "plan": "FLAG — no matching Monday order (don't archive)",
+                    "reason": f"order {r.get('order_no') or '?'} not found on the board"}
+        if not r.get("eta"):
+            return {**base, "monday": mon, "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'",
+                    "reason": r.get("eta_note")}
+        return {**base, "monday": mon, "eta": r["eta"],
+                "plan": f"SET Customer ETA {r['eta']} + ✅ confirmed update + ARCHIVE to NV Resolved",
+                "reason": r["reason"]}
+
+    if r["action"] == "needs_eta":
+        if not mon:
+            return {**base, "plan": "FLAG — order confirmation but no matching Monday order",
+                    "reason": f"order {r.get('order_no') or '?'} not found on the board"}
+        conf = deps.fetch_confirmation(email)
+        if not conf:
+            return {**base, "monday": mon, "plan": "MOVE to Supplier - ETAs (⚠ couldn't read the "
+                    "confirmation PDF — validate by hand)", "validation": None}
+        conf_lines, carriage = conf
+        order = deps.fetch_order(r["order_no"])
+        if not order:
+            return {**base, "monday": mon, "plan": "FLAG — couldn't read the Shopify order",
+                    "reason": f"order {r['order_no']} not found in Shopify"}
+        v = validate_confirmation(conf_lines, carriage, order,
+                                  our_costs=deps.our_costs(r["order_no"]),
+                                  expected_carriage=deps.expected_carriage(order))
+        if v["verdict"] == "validated":
+            msg = "MOVE to Supplier - ETAs (✅ validated — ring customer for a date)"
+            if v.get("note"):
+                msg += f" · {v['note']}"
+            return {**base, "monday": mon, "plan": msg, "validation": v}
+        return {**base, "monday": mon, "plan": "FLAG for review — do NOT hand over",
+                "reason": "; ".join(v["issues"]), "validation": v}
+
+    return {**base, "plan": "LEAVE in folder", "reason": r.get("reason")}
+
+
+def plan_folder(emails, deps):
+    """Dry-run plan for a list of Carron folder emails."""
+    return [plan_carron_email(e, deps) for e in (emails or [])]
