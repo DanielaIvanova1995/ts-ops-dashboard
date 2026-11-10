@@ -2289,7 +2289,7 @@ def _noeta_monday_map(order_nos):
     if not nos:
         return {}
     try:
-        q = ('query($b:ID!,$vals:[String]){items_page_by_column_values(limit:100,board_id:$b,'
+        q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(limit:100,board_id:$b,'
              'columns:[{column_id:"text_mkv6z0nt",column_values:$vals}]){items{id '
              'column_values(ids:["text_mkv6z0nt"]){text}}}}')
         data = ds._monday_gql(q, {"b": "1786542990", "vals": nos})
