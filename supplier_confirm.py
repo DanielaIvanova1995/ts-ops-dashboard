@@ -238,3 +238,86 @@ def classify_carron(subject, body, sender="", email_date=None):
                 "reason": "Order confirmation — validate/upload + ring the customer for a delivery date"}
     return {"action": "leave", "dest": None, "order_no": order_no,
             "reason": "Not a Carron confirmation or ETA request"}
+
+
+# --- Order-confirmation money-check (line-by-line vs Shopify + prices + carriage + margin) ---------
+SHOPIFY_FEE_PCT = 1.8        # card/platform fee taken off the customer's inc-VAT payment
+MARGIN_FLOOR_PCT = 10.0     # below this (after the fee) = flag, don't lose money even if lines match
+_CARRIAGE_SKU = re.compile(r"carriage|deliver|shipping|freight|pallet", re.I)
+
+
+def _nsku(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expected_carriage=None,
+                          fee_pct=SHOPIFY_FEE_PCT, floor_pct=MARGIN_FLOOR_PCT):
+    """Validate a supplier order confirmation against the Shopify order and the money.
+
+    conf_lines: [{sku, desc, qty, unit_price}] product lines from the confirmation PDF (carriage
+                excluded — pass it as conf_carriage).
+    conf_carriage: £ ex-VAT carriage the supplier is charging us (0 if none).
+    order: {lines:[{sku, title, qty, sell_ex_vat}], shipping_ex_vat, total_inc_vat}.
+    our_costs: optional {sku: our_agreed_ex_vat_cost} — flags an overcharge when present.
+    expected_carriage: optional £ we expect the supplier to charge (e.g. Carron zone rate).
+
+    Returns {verdict: 'validated'|'review', issues:[...], margin_pct, profit, sell, cost, fee, lines:[...]}.
+    HIGH CAUTION: any line mismatch, overcharge, carriage mismatch OR margin below floor → 'review'.
+    """
+    issues = []
+    conf_by = {}
+    for c in (conf_lines or []):
+        conf_by.setdefault(_nsku(c.get("sku")), []).append(c)
+    ord_by = {}
+    for o in (order.get("lines") or []):
+        ord_by.setdefault(_nsku(o.get("sku")), []).append(o)
+
+    line_report = []
+    # Every Shopify line must appear on the confirmation at the right qty.
+    for k, olist in ord_by.items():
+        oq = sum(float(o.get("qty") or 0) for o in olist)
+        clist = conf_by.get(k) or []
+        cq = sum(float(c.get("qty") or 0) for c in clist)
+        title = olist[0].get("title") or olist[0].get("sku")
+        if not clist:
+            issues.append(f"On the order but NOT on the confirmation: {title} (SKU {olist[0].get('sku')})")
+            line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "missing"})
+            continue
+        if abs(cq - oq) > 0.001:
+            issues.append(f"Qty mismatch for {title}: order {oq:g} vs confirmation {cq:g}")
+        unit = clist[0].get("unit_price")
+        if our_costs is not None:
+            oc = our_costs.get(olist[0].get("sku")) or our_costs.get(k)
+            if oc is not None and unit is not None and float(unit) > float(oc) + 0.01:
+                issues.append(f"Overcharge on {title}: £{float(unit):.2f} vs our cost £{float(oc):.2f}")
+        line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "ok",
+                            "qty": oq, "unit_price": unit})
+    # Extra lines on the confirmation that aren't on the order (ignore carriage-type lines).
+    for k, clist in conf_by.items():
+        if k not in ord_by and not _CARRIAGE_SKU.search((clist[0].get("sku") or "") + " " + (clist[0].get("desc") or "")):
+            issues.append(f"On the confirmation but NOT on the order: {clist[0].get('desc') or clist[0].get('sku')}")
+            line_report.append({"sku": clist[0].get("sku"), "title": clist[0].get("desc"), "status": "extra"})
+
+    # Carriage check.
+    if expected_carriage is not None and conf_carriage is not None \
+            and abs(float(conf_carriage) - float(expected_carriage)) > 0.01:
+        issues.append(f"Carriage £{float(conf_carriage):.2f} vs expected £{float(expected_carriage):.2f}")
+
+    # Money: sell (ex VAT, products + what the customer paid for shipping) vs cost (confirmation incl
+    # carriage), minus the platform fee on the customer's inc-VAT total.
+    sell = round(sum(float(o.get("sell_ex_vat") or 0) for o in (order.get("lines") or []))
+                 + float(order.get("shipping_ex_vat") or 0), 2)
+    cost = round(sum(float(c.get("unit_price") or 0) * float(c.get("qty") or 0) for c in (conf_lines or []))
+                 + float(conf_carriage or 0), 2)
+    fee = round(float(order.get("total_inc_vat") or 0) * fee_pct / 100.0, 2)
+    profit = round(sell - cost - fee, 2)
+    margin_pct = round(profit / sell * 100.0, 1) if sell else None
+    if margin_pct is None:
+        issues.append("Can't read the sell price — margin unknown")
+    elif margin_pct < floor_pct:
+        issues.append(f"Margin only {margin_pct:.1f}% after the {fee_pct:g}% fee (floor {floor_pct:g}%) — "
+                      f"too thin, would barely profit / lose money")
+
+    return {"verdict": "review" if issues else "validated", "issues": issues,
+            "margin_pct": margin_pct, "profit": profit, "sell": sell, "cost": cost, "fee": fee,
+            "lines": line_report}
