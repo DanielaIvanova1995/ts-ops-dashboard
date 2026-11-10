@@ -11,6 +11,7 @@ const EXCL_LABEL = {
   already_reviewed: "Already asked / unhappy", no_email: "No valid email",
   suppressed: "Unsubscribed/suppressed", out_of_window: "Outside date window",
   eta_gap_too_long: "ETA gap too long", tier_b_excluded: "Tier B excluded", duplicate_customer: "Duplicate customer",
+  split_incomplete: "Split order — part not delivered yet",
 };
 
 // Delivery statuses that count as "delivered" by default (Daniela's chosen set). Everything in the

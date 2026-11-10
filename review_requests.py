@@ -146,6 +146,47 @@ def fetch_raw(token=None):
     return out
 
 
+# Sibling-line delivery labels that mean "this part really is with the customer". Deliberately strict:
+# 'Booked For Delivery' / 'Out For Delivery' etc. are NOT settled — the customer hasn't had it yet, so
+# a split order with such a sibling is still held back.
+_SIBLING_SETTLED = {"delivered", "posted", "customer collection", "collected", "delivery confirmed"}
+
+
+def outstanding_split_orders(order_nos, token=None):
+    """Of the given order numbers, return the set of BASE order numbers that still have at least one
+    Monday line OUTSTANDING — a split order where part hasn't been delivered yet. A sibling line counts
+    as settled if it sits in a delivered group, shows a delivered status, or is in a cancelled/refunded
+    group; anything else (To Post, PO Sent, Out For Delivery, blank…) means the customer is still owed
+    goods, so we don't ask them for a review. Best-effort: a query failure yields no holds (fail-open —
+    a Monday hiccup shouldn't suppress the whole batch)."""
+    token = token or ds.get_token()
+    nos = sorted({str(n).strip() for n in order_nos if str(n).strip()})
+    if not nos:
+        return set()
+    q = ('query($b:ID!,$vals:[String!]!){items_page_by_column_values(board_id:$b,limit:500,'
+         'columns:[{column_id:"%s",column_values:$vals}]){items{id name group{id title} '
+         'column_values(ids:["%s","%s"]){id text}}}}'
+         % (COL["order_no"], COL["order_no"], COL["delivery"]))
+    outstanding = set()
+    for i in range(0, len(nos), 100):
+        chunk = nos[i:i + 100]
+        try:
+            data = ds._monday_gql(q, {"b": str(BOARD_ID), "vals": chunk}, token)
+        except Exception:  # noqa: BLE001 — fail-open: unknown orders simply aren't held
+            continue
+        for it in ((data.get("items_page_by_column_values") or {}).get("items") or []):
+            cv = {c["id"]: (c.get("text") or "").strip() for c in (it.get("column_values") or [])}
+            ono = cv.get(COL["order_no"]) or (it.get("name") or "").strip()
+            gid = (it.get("group") or {}).get("id")
+            gtitle = _norm_label((it.get("group") or {}).get("title"))
+            deliv = _norm_label(cv.get(COL["delivery"]))
+            settled = (gid in GROUPS or deliv in _SIBLING_SETTLED
+                       or "cancel" in gtitle or "refund" in gtitle or "delivered" in gtitle)
+            if not settled:
+                outstanding.add(_base_order_no(ono))
+    return outstanding
+
+
 def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=None, raw=None,
           delivered_statuses=None):
     """Decide who qualifies, assign Tier A/B, dedupe, and count every exclusion reason. `raw` lets a
@@ -220,6 +261,21 @@ def build(window_days=60, max_gap=5, max_updates=3, include_b=True, suppression=
         seen_email.add(key_e)
         c.pop("order_date_d", None)
         rows.append(c)
+
+    # Split-order guard: a delivered line can belong to an order whose OTHER half (a different supplier
+    # line, same order no) is still outstanding — asking for a review then annoys a customer who hasn't
+    # had everything (e.g. 32353: Travis Perkins half delivered, UPB cladding half still To Post). Hold
+    # any such order back until the whole thing is delivered.
+    if rows:
+        out_bases = outstanding_split_orders([r["order_no"] for r in rows])
+        if out_bases:
+            kept = []
+            for r in rows:
+                if r.get("base") in out_bases:
+                    excl["split_incomplete"] += 1
+                else:
+                    kept.append(r)
+            rows = kept
 
     counts = {"A": sum(1 for r in rows if r["tier"] == "A"),
               "B": sum(1 for r in rows if r["tier"] == "B"),
