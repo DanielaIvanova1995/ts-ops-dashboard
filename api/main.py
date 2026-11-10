@@ -3043,7 +3043,17 @@ class ReviewsSendIn(BaseModel):
 def _reviews_send_worker(rows, cfg):
     import review_requests as rr
     delay = 60.0 / max(1, int(cfg.get("throttle_per_min") or 20))
-    log = []
+    log, flushed = [], 0
+    _FLUSH_EVERY = 10          # persist to the send log every 10 emails (not just at the end) so the
+                               # Emailed list updates live AND a mid-send instance restart can't lose
+                               # a whole batch of already-sent emails.
+
+    def _flush():
+        nonlocal flushed
+        if len(log) > flushed:
+            _reviews_log_add(log[flushed:])   # prepends just the new delta to the stored log
+            flushed = len(log)
+
     try:
         for row in rows:
             if not _REVIEWS_SEND["running"]:
@@ -3064,9 +3074,11 @@ def _reviews_send_worker(rows, cfg):
                 _REVIEWS_SEND["last_error"] = str(e)[:160]
                 log.append({"at": ts, "order_no": row.get("order_no"), "email": email, "status": "failed", "error": str(e)[:160]})
             _REVIEWS_SEND["done"] += 1
+            if len(log) - flushed >= _FLUSH_EVERY:
+                _flush()
             _time.sleep(delay)
     finally:
-        _reviews_log_add(log)
+        _flush()
         _REVIEWS_SEND["running"] = False
         _REVIEWS_SEND["finished"] = _dt.datetime.now().isoformat(timespec="seconds")
 

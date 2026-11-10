@@ -179,7 +179,7 @@ export default function Reviews() {
       <div className="topbar">
         <div className="pagetitle">Review Requests</div>
         <div className="right">
-          <button className="btn ghost" onClick={() => { setShowEmailed((v) => !v); if (!emailed) loadEmailed(); }}>📧 Emailed</button>
+          <button className="btn ghost" onClick={() => { setShowEmailed((v) => { const next = !v; if (next) loadEmailed(); return next; }); }}>📧 Emailed</button>
           <button className="btn ghost" onClick={() => setShowCfg((v) => !v)}>⚙ Settings</button>
           <button className="btn primary" onClick={() => load(1)} disabled={status === "loading"}>{status === "loading" ? "Loading…" : (data ? "↻ Refresh" : "Load list")}</button>
         </div>
