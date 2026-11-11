@@ -782,6 +782,181 @@ def plan_deanta_folder(emails, deps):
     return [plan_deanta_email(e, deps) for e in (emails or [])]
 
 
+# =================================================================================================
+# TRAVIS PERKINS handler — the hard one: a body-only HTML acknowledgement (NO PDF) that does NOT carry
+# our TSO order number — only TP's own "OUR REF" (F-number), the delivery postcode, the delivery date,
+# and a priced products table. So we match to Monday by DELIVERY POSTCODE, then DISAMBIGUATE by the
+# products + quantities (one customer may have two orders at the same address — Daniela 2026-11-11).
+# Only a single, product-matched order is actioned: set Customer ETA from the delivery date + money-
+# check (8% TP floor) + SO Approved + archive. Anything ambiguous / non-stock / delayed → flag.
+# =================================================================================================
+import html as _html
+
+_TP_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b")
+_TP_DATE_RE = re.compile(r"DELIVERY DATE\s*[|:\s]*([0-3]?\d/[01]?\d/\d{2,4})", re.I)
+_TP_REF_RE = re.compile(r"OUR REF\s*[|:\s]*([A-Z]?\d+)", re.I)
+# a product row in the flattened text: "DESCRIPTION |…| <qty> <unit> |…| <exvat> |…| <incvat>"
+_TP_LINE_RE = re.compile(r"([A-Za-z0-9][^|]*?)\s*(?:\|\s*)+(\d+)\s+[A-Z0-9/]+\s*(?:\|\s*)+([\d.]+)\s*(?:\|\s*)+([\d.]+)")
+
+
+def _tp_flatten(html):
+    # <br> → space (keep multi-line descriptions/addresses together); cell/row boundaries → " | ".
+    t = re.sub(r"<\s*br\s*/?>", " ", html or "", flags=re.I)
+    t = re.sub(r"<\s*/\s*t[dr]\s*>", " | ", t, flags=re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = _html.unescape(t)
+    return re.sub(r"[ \t]+", " ", t).strip()
+
+
+def parse_tp_ack(html):
+    """Parse a Travis Perkins order-acknowledgement HTML body into
+    {delivery_date(ISO|None), postcode, tp_ref, lines:[{desc,qty,price_ex}], non_stock:[desc], delay}.
+    `delay` is True if a real product (not the minimum-order charge) sits under TP's 'must be ordered
+    from the supplier' section — i.e. a non-stock/special-order item that could hold the order up."""
+    text = _tp_flatten(html)
+    # Delivery postcode: take the one inside the DELIVERY ADDRESS block (before the TP branch block).
+    postcode = None
+    mblk = re.search(r"DELIVERY ADDRESS\s*:(.*?)(?:TRAVIS PERKINS|CONTACT NAME|$)", text, re.I)
+    if mblk:
+        pcs = _TP_POSTCODE_RE.findall(mblk.group(1))
+        postcode = re.sub(r"\s+", " ", pcs[-1]).strip().upper() if pcs else None
+    md = _TP_DATE_RE.search(text)
+    delivery_date = None
+    if md:
+        try:
+            delivery_date = _dt.datetime.strptime(md.group(1), "%d/%m/%y").date().isoformat() \
+                if len(md.group(1).split("/")[-1]) == 2 else \
+                _dt.datetime.strptime(md.group(1), "%d/%m/%Y").date().isoformat()
+        except ValueError:
+            delivery_date = None
+    mr = _TP_REF_RE.search(text)
+    tp_ref = mr.group(1) if mr else None
+
+    # Split the "available from stock" vs "must be ordered from the supplier" sections.
+    stock_part, order_part = text, ""
+    msec = re.search(r"must be ordered from the supplier", text, re.I)
+    if msec:
+        stock_part, order_part = text[:msec.start()], text[msec.start():]
+
+    def _lines(seg):
+        out = []
+        for m in _TP_LINE_RE.finditer(seg or ""):
+            desc = re.sub(r"\s+", " ", m.group(1)).strip()
+            if not desc or desc.upper().startswith(("PRODUCT DESCRIPTION", "QUANTITY")):
+                continue
+            try:
+                out.append({"desc": desc, "qty": int(m.group(2)), "price_ex": float(m.group(3))})
+            except ValueError:
+                continue
+        return out
+
+    stock_lines = _lines(stock_part)
+    order_lines = _lines(order_part)
+    # A real non-stock product (anything other than the standard MINIMUM ORDER / DELIVERY charge).
+    non_stock = [l["desc"] for l in order_lines
+                 if not re.search(r"minimum order|delivery charge|carriage", l["desc"], re.I)]
+    # charges to include in our cost: the non-product lines (min order / delivery / carriage).
+    charges = round(sum(l["price_ex"] * l["qty"] for l in order_lines
+                        if re.search(r"minimum order|delivery charge|carriage", l["desc"], re.I)), 2)
+    return {"delivery_date": delivery_date, "postcode": postcode, "tp_ref": tp_ref,
+            "lines": stock_lines, "charges": charges, "non_stock": non_stock, "delay": bool(non_stock)}
+
+
+def _tp_toks(s):
+    return set(re.findall(r"[a-z0-9]{3,}", (s or "").lower()))
+
+
+def _tp_match(ack_lines, order_lines):
+    """(qty_ok, desc_ok) — does this Shopify order's line-set match the ack's products/quantities?"""
+    aq = sorted(l["qty"] for l in ack_lines)
+    oq = sorted(int(float(l.get("qty") or 0)) for l in (order_lines or []))
+    qty_ok = bool(aq) and aq == oq
+    otok = set()
+    for l in (order_lines or []):
+        otok |= _tp_toks(l.get("title"))
+    hit = sum(1 for l in ack_lines if _tp_toks(l["desc"]) & otok)
+    desc_ok = bool(ack_lines) and hit / len(ack_lines) >= 0.5
+    return qty_ok, desc_ok
+
+
+def plan_tp_email(email, deps):
+    """Plan for one Travis Perkins acknowledgement. No PDF + no TSO order ref, so: parse the body,
+    match to Monday by delivery POSTCODE, disambiguate by products+quantities, then set the Customer
+    ETA from the delivery date (margin-checked, 8% floor). deps.candidates(postcode) → TP orders at
+    that postcode; deps.order_lines(order_no) → the Shopify order."""
+    base = {"supplier": "Travis Perkins", "subject": email.get("subject"), "email_id": email.get("id"),
+            "order_no": None, "action": "flag", "do": {}}
+
+    sig = delay_signal(email.get("subject"), email.get("body"))
+    if sig:
+        return {**base, "plan": f"FLAG — mentions “{sig}” (possible delay) — check by hand", "reason": f"delay signal: {sig}"}
+    ack = parse_tp_ack(email.get("body") or "")
+    if ack.get("delay"):
+        return {**base, "plan": f"FLAG — non-stock / special-order item ({', '.join(ack['non_stock'])[:60]}) — check by hand",
+                "reason": "non-stock item on the acknowledgement"}
+    pc = ack.get("postcode")
+    if not pc:
+        return {**base, "plan": "FLAG — couldn't read the delivery postcode — check by hand", "reason": "no postcode"}
+    if not ack.get("lines"):
+        return {**base, "plan": "FLAG — couldn't read the products — check by hand", "reason": "no product lines parsed"}
+
+    cands = deps.candidates(pc)
+    if not cands:
+        return {**base, "plan": f"FLAG — no open Travis Perkins order found at {pc} — check by hand", "reason": "no postcode match"}
+    scored = []
+    for c in cands:
+        ol = deps.order_lines(c.get("order_no"))
+        if not ol:
+            continue
+        qty_ok, desc_ok = _tp_match(ack["lines"], ol.get("lines"))
+        scored.append((c, ol, qty_ok, desc_ok))
+    strong = [(c, ol) for c, ol, q, d in scored if q and d]
+    if len(strong) == 1:
+        c, order = strong[0]
+    elif len(scored) == 1 and scored[0][3]:          # single order at the postcode + products overlap
+        c, order = scored[0][0], scored[0][1]
+    else:
+        return {**base, "plan": f"FLAG — {len(cands)} TP order(s) at {pc}, {len(strong)} match the "
+                f"products/quantities — check by hand (one customer may have two orders)",
+                "reason": "ambiguous / no product match"}
+
+    order_no = c.get("order_no")
+    mon = c.get("item_id")
+    base["order_no"] = order_no
+
+    # Margin check (TP has no pricelist, so the order margin is the safeguard — 8% floor). Cost = the
+    # ack's ex-VAT line prices + its charges (min-order/delivery); sell = the Shopify order.
+    cost = round(sum(l["price_ex"] * l["qty"] for l in ack["lines"]) + float(ack.get("charges") or 0), 2)
+    sell = round(sum(float(o.get("sell_ex_vat") or 0) for o in (order.get("lines") or []))
+                 + float(order.get("shipping_ex_vat") or 0), 2)
+    fee = round(float(order.get("total_inc_vat") or 0) * 1.8 / 100.0, 2)
+    profit = round(sell - cost - fee, 2)
+    margin = round(profit / sell * 100.0, 1) if sell else None
+    val = {"verdict": "validated", "margin_pct": margin, "profit": profit, "sell": sell, "cost": cost, "issues": []}
+    if profit < 0:
+        val.update(verdict="review", issues=[f"We'd LOSE £{abs(profit):.2f} (margin {margin}% after fee)"])
+        return {**base, "monday": mon, "validation": val,
+                "plan": f"FLAG — we'd LOSE £{abs(profit):.2f} on {order_no} — check before archiving", "reason": "actual loss"}
+    if margin is not None and margin < 8.0:
+        val.update(verdict="review", issues=[f"Margin only {margin}% after fee (8% floor) — no TP pricelist, review"])
+        return {**base, "monday": mon, "validation": val,
+                "plan": f"FLAG — thin margin {margin}% on {order_no} — review", "reason": "thin margin"}
+
+    eta = ack.get("delivery_date")
+    note = f"(matched {pc} · {len(ack['lines'])} line(s) · margin {margin}%)"
+    if eta:
+        return {**base, "action": "booked", "monday": mon, "eta": eta, "validation": val, "so_approved": True,
+                "plan": f"SET Customer ETA {eta} + ARCHIVE to NV Resolved {note}",
+                "do": {"set_eta": eta, "move_to": NV_RESOLVED, "update": f"✅ Travis Perkins confirmed — delivery {eta}."}}
+    return {**base, "action": "booked", "monday": mon, "validation": val, "so_approved": True,
+            "plan": f"ARCHIVE to NV Resolved + set ETA manually {note}", "reason": "couldn't read the delivery date",
+            "do": {"move_to": NV_RESOLVED, "update": "⚠ Travis Perkins confirmed — set the Customer ETA manually (date couldn't be read)."}}
+
+
+def plan_tp_folder(emails, deps):
+    return [plan_tp_email(e, deps) for e in (emails or [])]
+
+
 def plan_folder(emails, deps):
     """Dry-run plan for a list of Carron folder emails, with per-order dedupe: when several emails
     share an order number and the LATEST one resolves it (booked-in → archive, or a validated move),

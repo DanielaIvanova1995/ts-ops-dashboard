@@ -71,6 +71,14 @@ const SUPPLIERS = {
     blurb: "Deanta dispatch confirmations (our PO in the subject). Reads the delivery date from the body ('delivery tomorrow 10/11' or 'between 10/11–11/11') → sets the Customer ETA (which auto-emails the customer) + attaches the PDF to Job + archives. Out-of-stock / questions / already-delivered / a loss → flagged.",
     tiles: (t) => [["Set ETA / archive", t.archive, "green"], ["Flag — review", t.flag, "red"]],
   },
+  tp: {
+    label: "Travis Perkins",
+    preview: "/noeta/tp/dry-run",
+    run: "/noeta/tp/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "Travis Perkins acknowledgements have no TSO order number, so each is matched to Monday by DELIVERY POSTCODE and confirmed by the products + quantities (one customer may have two orders). A single, product-matched order → set the Customer ETA from the delivery date (margin-checked, 8% floor) + archive. Ambiguous match / non-stock item / a loss → flagged. No PDF, so nothing is attached.",
+    tiles: (t) => [["Set ETA / archive", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
 };
 
 // Colour + label for each planned action.

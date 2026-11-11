@@ -2900,6 +2900,102 @@ def noeta_deanta_run(limit: int = 300):
     return {"ok": True, "supplier": "Deanta", "live": True, **out}
 
 
+import re as _re_tp
+_TP_PC_RE = _re_tp.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b")
+
+
+def _tp_norm_pc(pc):
+    return _re_tp.sub(r"\s+", "", (pc or "").upper())
+
+
+class _TpDeps:
+    """Travis Perkins: build a {delivery-postcode: [TP orders]} map from the board once, so the
+    planner can match an acknowledgement (which has no TSO order ref) by postcode + products."""
+    def __init__(self):
+        self._by_pc = None
+
+    def _load(self):
+        if self._by_pc is not None:
+            return
+        self._by_pc = {}
+        q1 = ('query($b:ID!,$vals:[String!]!){items_page_by_column_values(limit:200,board_id:$b,'
+              'columns:[{column_id:"dropdown_mkyqdeqd",column_values:$vals}]){cursor items{id '
+              'column_values(ids:["text_mkv6z0nt","customer_address8"]){id text}}}}')
+        qn = ('query($c:String!){next_items_page(cursor:$c,limit:200){cursor items{id '
+              'column_values(ids:["text_mkv6z0nt","customer_address8"]){id text}}}}')
+        try:
+            data = ds._monday_gql(q1, {"b": _NOETA_ORDERS_BOARD, "vals": ["Travis Perkins"]})
+        except Exception:  # noqa: BLE001
+            return
+        page = data.get("items_page_by_column_values") or {}
+        items = list(page.get("items") or [])
+        cursor, pages = page.get("cursor"), 1
+        while cursor and pages < 4:                 # up to ~800 TP orders (covers the active ones)
+            try:
+                d2 = ds._monday_gql(qn, {"c": cursor})
+            except Exception:  # noqa: BLE001
+                break
+            np = d2.get("next_items_page") or {}
+            items += list(np.get("items") or [])
+            cursor, pages = np.get("cursor"), pages + 1
+        for it in items:
+            cv = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+            m = _TP_PC_RE.search(cv.get("customer_address8") or "")
+            if not m:
+                continue
+            self._by_pc.setdefault(_tp_norm_pc(m.group(1)), []).append(
+                {"item_id": it.get("id"), "order_no": cv.get("text_mkv6z0nt")})
+
+    def candidates(self, postcode):
+        self._load()
+        return self._by_pc.get(_tp_norm_pc(postcode), [])
+
+    def order_lines(self, order_no):
+        try:
+            return ds.fetch_order_by_name_for_check(order_no)
+        except Exception:  # noqa: BLE001
+            return None
+
+
+def _tp_plan(limit=300):
+    """(emails, deps, plan) for Travis Perkins acknowledgements — scans both folders."""
+    import supplier_confirm as scf
+    emails = _noeta_emails_for(("travisperkins.co.uk",), limit)
+    deps = _TpDeps()
+    return emails, deps, scf.plan_tp_folder(emails, deps)
+
+
+@app.get("/noeta/tp/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_tp_dry_run(limit: int = 300):
+    """PREVIEW — Travis Perkins acknowledgements: match by delivery postcode + products → set the
+    Customer ETA from the delivery date (margin-checked). Ambiguous / non-stock / loss → flag."""
+    try:
+        emails, _deps, plan = _tp_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    slim, counts = _ss_slim(plan)
+    return {"ok": True, "supplier": "Travis Perkins", "folder": "No ETA + Sales Orders", "dry_run": True,
+            "live_enabled": _noeta_live_enabled(), "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
+@app.post("/noeta/tp/run", dependencies=[Depends(require_key_or_statements)])
+def noeta_tp_run(limit: int = 300):
+    """LIVE — Travis Perkins: set the Customer ETA (auto-emails the customer), SO Approved, archive.
+    Only single, product-matched orders are actioned; everything else was flagged."""
+    if not _noeta_live_enabled():
+        raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
+    try:
+        _emails, deps, plan = _tp_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    out = _noeta_execute(plan, deps, "Travis Perkins")
+    return {"ok": True, "supplier": "Travis Perkins", "live": True, **out}
+
+
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
 def recon_pay_plan_config_get():
     """The payment-plan settings for the editor: the default weekly threshold + the per-supplier
