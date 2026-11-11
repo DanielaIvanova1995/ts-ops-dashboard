@@ -2493,24 +2493,55 @@ class _CarronDryRunDeps:
             return None
 
 
-def _carron_plan(limit=200):
-    """(emails, deps, plan) for the Carron folder — shared by the preview and the live run."""
-    import supplier_confirm as scf
-    fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, _NOETA_FOLDER, create=False)
-    if not fid:
-        raise HTTPException(status_code=404, detail=f"Folder '{_NOETA_FOLDER}' not found")
-    msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 300))
+# Order confirmations land in EITHER the main No-ETA folder OR its 'Sales Orders' subfolder, so every
+# supplier's preview/run scans BOTH (Daniela 2026-11-11). Read once, dedupe by message id.
+_NOETA_SUBFOLDER = "Sales Orders"
+
+
+def _noeta_messages(limit=300):
+    """All messages across the No-ETA folder + its 'Sales Orders' subfolder, deduped by id."""
+    out, seen = [], set()
+    for fname in (_NOETA_FOLDER, _NOETA_SUBFOLDER):
+        try:
+            fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, fname, create=False)
+        except Exception:  # noqa: BLE001
+            fid = None
+        if not fid:
+            continue
+        try:
+            for m in ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 300)):
+                mid = m.get("id")
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    out.append(m)
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _noeta_emails_for(senders, limit=300, with_date=False):
+    """Email dicts (across both folders) from any of the given senders."""
     emails = []
-    for m in msgs:
-        if "carronheating" not in (m.get("from") or ""):     # Carron only for now
+    for m in _noeta_messages(limit):
+        frm = (m.get("from") or "")
+        if not any(s in frm for s in senders):
             continue
         rec = m.get("received") or ""
-        try:
-            d = _dt.date.fromisoformat(rec[:10])
-        except ValueError:
-            d = _dt.date.today()
-        emails.append({"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
-                       "sender": m.get("from"), "date": d, "received": rec})
+        e = {"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
+             "sender": frm, "received": rec}
+        if with_date:
+            try:
+                e["date"] = _dt.date.fromisoformat(rec[:10])
+            except ValueError:
+                e["date"] = _dt.date.today()
+        emails.append(e)
+    return emails
+
+
+def _carron_plan(limit=300):
+    """(emails, deps, plan) for Carron — scans both folders."""
+    import supplier_confirm as scf
+    emails = _noeta_emails_for(("carronheating",), limit, with_date=True)
     nos = {scf.extract_order_no(e["subject"], e["body"]) for e in emails}
     deps = _CarronDryRunDeps(_noeta_monday_map(nos))
     return emails, deps, scf.plan_folder(emails, deps)
@@ -2661,16 +2692,10 @@ _LPD_SENDERS = ("lpddoors", "lpdhome", "lpdgroup", "leeds")
 _SS_SENDERS = ("southernsheeting",)
 
 
-def _lpd_plan(limit=40):
-    """(emails, deps, plan) for the LPD 'Sales Orders' subfolder — shared by preview and live run."""
+def _lpd_plan(limit=300):
+    """(emails, deps, plan) for LPD — scans both folders."""
     import supplier_confirm as scf
-    fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, "Sales Orders", create=False)
-    if not fid:
-        raise HTTPException(status_code=404, detail="Folder 'Sales Orders' not found")
-    msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 100))
-    emails = [{"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
-               "sender": m.get("from"), "received": m.get("received")}
-              for m in msgs if any(s in (m.get("from") or "") for s in _LPD_SENDERS)]
+    emails = _noeta_emails_for(_LPD_SENDERS, limit)
     deps = _LpdDryRunDeps()
     return emails, deps, scf.plan_lpd_folder(emails, deps)
 
@@ -2719,16 +2744,10 @@ def noeta_lpd_run(limit: int = 40):
     return {"ok": True, "supplier": "LPD", "live": True, **out}
 
 
-def _ss_plan(limit=40):
-    """(emails, deps, plan) for the Southern Sheeting emails in the 'Sales Orders' subfolder."""
+def _ss_plan(limit=300):
+    """(emails, deps, plan) for Southern Sheeting — scans both folders."""
     import supplier_confirm as scf
-    fid = ds.find_or_create_mail_folder(_NOETA_MAILBOX, "Sales Orders", create=False)
-    if not fid:
-        raise HTTPException(status_code=404, detail="Folder 'Sales Orders' not found")
-    msgs = ds.list_folder_messages_full(_NOETA_MAILBOX, fid, limit=min(int(limit), 100))
-    emails = [{"id": m.get("id"), "subject": m.get("subject"), "body": m.get("body"),
-               "sender": m.get("from"), "received": m.get("received")}
-              for m in msgs if any(s in (m.get("from") or "") for s in _SS_SENDERS)]
+    emails = _noeta_emails_for(_SS_SENDERS, limit)
     deps = _SsDryRunDeps()
     return emails, deps, scf.plan_ss_folder(emails, deps)
 
