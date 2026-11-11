@@ -138,6 +138,19 @@ def norm_code(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def canon_supplier(s):
+    """Normalised supplier key, canonicalised via the routing map so the FEED's name and our
+    invoice/order label resolve to the SAME key (the feed calls it 'LPD', we call it 'LPD DOORS' —
+    both must key to the same cost, else RFLB36 reads as 'no pricelist cost')."""
+    n = norm_code(s)
+    try:
+        import order_routing as _rt
+        lbl = _rt.CANON.get(n)
+        return norm_code(lbl) if lbl else n
+    except Exception:  # noqa: BLE001
+        return n
+
+
 def title_tokens(s):
     s = (s or "").lower()
     s = re.sub(r"(?<=\d)(?=[a-z])", " ", s)
@@ -419,18 +432,19 @@ def order_sku_cost(order_sku, supplier, pidx):
     nk = norm_code(order_sku)
     if not nk:
         return None
+    supplier = canon_supplier(supplier)   # feed/override/invoice names all resolve to one key
     c = (pidx.get(nk) or {}).get(supplier)
     if isinstance(c, (int, float)):
         return c
     ov = _price_overrides()
     for sup, skus in ov.items():
-        if sup.startswith("_") or not isinstance(skus, dict) or norm_code(sup) != supplier:
+        if sup.startswith("_") or not isinstance(skus, dict) or canon_supplier(sup) != supplier:
             continue
         for sk2, cost in skus.items():
             if isinstance(cost, (int, float)) and norm_code(sk2) == nk:
                 return cost
     for sup, rules in (ov.get("_patterns") or {}).items():
-        if norm_code(sup) != supplier:
+        if canon_supplier(sup) != supplier:
             continue
         for r in (rules or []):
             cost = r.get("cost")
@@ -496,20 +510,20 @@ def pricelist_index(lookup):
         if not sk:
             continue
         for o in (it.get("offers") or []):
-            sup = norm_code(o.get("s"))
+            sup = canon_supplier(o.get("s"))
             if sup and o.get("c") is not None:
                 idx.setdefault(sk, {})[sup] = o.get("c")
     ov = _price_overrides()
     for sup, skus in ov.items():
         if sup.startswith("_") or not isinstance(skus, dict):
             continue
-        sn = norm_code(sup)
+        sn = canon_supplier(sup)
         for sk, cost in skus.items():
             if isinstance(cost, (int, float)):
                 idx.setdefault(norm_code(sk), {})[sn] = cost
     # Same-supplier family patterns (e.g. UPB price one product TYPE, not per colour). Fills ONLY
     # that supplier's own cost — never borrows another supplier's price.
-    pats = [(norm_code(sup), norm_code(r.get("prefix")), norm_code(r.get("suffix") or ""),
+    pats = [(canon_supplier(sup), norm_code(r.get("prefix")), norm_code(r.get("suffix") or ""),
              r.get("cost"))
             for sup, rules in (ov.get("_patterns") or {}).items()
             for r in (rules or []) if isinstance(r.get("cost"), (int, float))]
@@ -716,7 +730,7 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the order's
     SKUs/quantities. `order`, `tidx`, `cidx`, `carron_ship` are supplied by the caller
     (the app or the headless runner). Returns the same result dict app._check_invoice does."""
-    supplier = norm_code(supplier_name)
+    supplier = canon_supplier(supplier_name)   # 'LPD DOORS'/'LPD', 'Hurlingham'/'Carron' → one key
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     if no_pl:
         tidx = cidx = None
