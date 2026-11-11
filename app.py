@@ -2119,24 +2119,11 @@ SUPPLIER_SURCHARGE = {
 # Zone 1 (UK mainland) is free over £250 ex-VAT, else £25 large / £10 small. Zones 2-6 are
 # per-zone surcharges. We can't tell 'large' from 'small' (Carron say "ask sales"), so we
 # check against the LARGER (max legitimate) charge and only flag a genuine overcharge. ---
-CARRON_FREE_OVER = 250.0
-CARRON_ZONES = {
-    1: {"name": "UK Mainland", "large": 25.0, "small": 10.0},
-    2: {"name": "Scotland", "large": 50.0, "small": 20.0},
-    3: {"name": "Scottish Highlands", "large": 85.0, "small": 25.0},
-    4: {"name": "Northern Ireland", "large": 65.0, "small": 25.0},
-    5: {"name": "Republic of Ireland", "large": None, "small": None},   # rates TBC
-    6: {"name": "Isles", "large": 105.0, "small": 25.0},
-}
-# Postcode AREA (leading letters) → zone. Anything not listed = Zone 1 (mainland). This is
-# approximate (from Carron's zone map) — edit freely if a postcode lands in the wrong zone.
-CARRON_AREA_ZONE = {
-    "AB": 2, "DD": 2, "DG": 2, "EH": 2, "FK": 2, "G": 2, "KA": 2, "KY": 2,
-    "ML": 2, "PA": 2, "TD": 2,                                # Zone 2 — Scotland
-    "IV": 3, "KW": 3, "PH": 3,                                # Zone 3 — Highlands
-    "BT": 4,                                                  # Zone 4 — N. Ireland
-    "HS": 6, "ZE": 6, "IM": 6,                                # Zone 6 — Isles
-}
+# Carron carriage now lives ONCE in delivery_rules (shared with the checker + quote/PO builders so
+# the rates can't drift). Re-exported + delegated here for app.py's call sites. Edit delivery_rules.py.
+CARRON_FREE_OVER = delivery_rules.CARRON_FREE_OVER
+CARRON_ZONES = delivery_rules.CARRON_ZONES
+CARRON_AREA_ZONE = delivery_rules.CARRON_AREA_ZONE
 
 
 def _is_carron(supplier):
@@ -2144,31 +2131,15 @@ def _is_carron(supplier):
 
 
 def _carron_zone(ship):
-    """Carron delivery zone (1-6) for a Shopify shipping address {postcode, country}.
-    Defaults to Zone 1 (mainland) when the address can't be read."""
-    if not ship:
-        return 1
-    country = (ship.get("country") or "").strip().upper()
-    if country in ("IE", "IRL", "IRELAND", "REPUBLIC OF IRELAND", "EIRE"):
-        return 5
-    pc = re.sub(r"[^A-Z0-9]", "", (ship.get("postcode") or "").upper())
-    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
-    return CARRON_AREA_ZONE.get(area, 1)
+    return delivery_rules.carron_zone(ship)
 
 
 def _carron_zone_label(ship):
-    z = _carron_zone(ship)
-    pc = (ship or {}).get("postcode") or "no postcode"
-    return f"Carron Zone {z} — {CARRON_ZONES[z]['name']}, {pc}"
+    return delivery_rules.carron_zone_label(ship)
 
 
 def _carron_expected(goods_value, ship):
-    """Max legitimate ex-VAT Carron delivery for the zone (None if unknown/TBC)."""
-    z = _carron_zone(ship)
-    zc = CARRON_ZONES[z]
-    if z == 1 and goods_value is not None and goods_value >= CARRON_FREE_OVER:
-        return 0.0                                            # free over £250 ex-VAT, mainland
-    return zc["large"]                                        # None for Zone 5 (ROI, TBC)
+    return delivery_rules.carron_expected(goods_value, ship)
 
 # Default email address for supplier discrepancy chases, keyed by normalised supplier
 # name (_norm_code). Used as the 'To' default before the order's own email field.
@@ -2287,23 +2258,12 @@ def _shopify_cost(sku):
 
 # Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
 # (BT postcodes) £13 under £250 (free over). Priced on the delivery postcode, like Carron.
-CTIE_UK = {"flat": 7.0, "free_over": 100.0}
-CTIE_NI = {"flat": 13.0, "free_over": 250.0}
-
-
 def _is_ctie(supplier):
     return (supplier or "").startswith("ctie")
 
 
-def _ctie_expected(goods_value, ship):
-    pc = re.sub(r"[^A-Z0-9]", "", ((ship or {}).get("postcode") or "").upper())
-    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
-    country = ((ship or {}).get("country") or "").strip().upper()
-    is_ni = area == "BT" or country in ("GB-NIR", "NORTHERN IRELAND")
-    rule = CTIE_NI if is_ni else CTIE_UK
-    if goods_value is not None and goods_value >= rule["free_over"]:
-        return 0.0
-    return rule["flat"]
+def _ctie_expected(goods_value, ship):   # delegates to the single source (delivery_rules)
+    return delivery_rules.ctie_expected(goods_value, ship)
 
 
 # --- Nuie/Roxor: delivery priced by the delivery postcode ZONE and the product's shipping

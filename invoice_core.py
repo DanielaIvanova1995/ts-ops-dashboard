@@ -11,6 +11,8 @@ import re
 import os
 import json
 
+import delivery_rules as _dr   # the single source for carriage (Carron/Ctie/LPD/… live here)
+
 # ---- Monday Payment Status labels -----------------------------------------------------
 MATCHED_LABEL = "Matched (TradeHub)"
 APPROVED_QB_LABEL = "Approved (To QB)"
@@ -41,20 +43,11 @@ DECOR8_DISCOUNT = 0.12
 DECOR8_MIN_DISCOUNT = 0.10
 SUPPLIER_SURCHARGE = {"eurocell": 0.05}
 
-CARRON_FREE_OVER = 250.0
-CARRON_ZONES = {
-    1: {"name": "UK Mainland", "large": 25.0, "small": 10.0},
-    2: {"name": "Scotland", "large": 50.0, "small": 20.0},
-    3: {"name": "Scottish Highlands", "large": 85.0, "small": 25.0},
-    4: {"name": "Northern Ireland", "large": 65.0, "small": 25.0},
-    5: {"name": "Republic of Ireland", "large": None, "small": None},
-    6: {"name": "Isles", "large": 105.0, "small": 25.0},
-}
-CARRON_AREA_ZONE = {
-    "AB": 2, "DD": 2, "DG": 2, "EH": 2, "FK": 2, "G": 2, "KA": 2, "KY": 2,
-    "ML": 2, "PA": 2, "TD": 2, "IV": 3, "KW": 3, "PH": 3, "BT": 4,
-    "HS": 6, "ZE": 6, "IM": 6,
-}
+# Carron carriage data + logic now live ONCE in delivery_rules (so quotes, POs and the checker can
+# never drift); these names are re-exported for the many call sites that import them from invoice_core.
+CARRON_FREE_OVER = _dr.CARRON_FREE_OVER
+CARRON_ZONES = _dr.CARRON_ZONES
+CARRON_AREA_ZONE = _dr.CARRON_AREA_ZONE
 
 SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
@@ -579,50 +572,26 @@ def is_carron(supplier):
     return (supplier or "").startswith("carron")
 
 
-# Ctie (C TIE) zone-based delivery: UK mainland £7 under £100 (free over); Northern Ireland
-# (BT postcodes) £13 under £250 (free over). Priced on the delivery postcode.
-CTIE_UK = {"flat": 7.0, "free_over": 100.0}
-CTIE_NI = {"flat": 13.0, "free_over": 250.0}
-
-
 def is_ctie(supplier):
     return (supplier or "").startswith("ctie")
 
 
+# C TIE + Carron carriage: delegate to delivery_rules (the single source). Thin wrappers keep the
+# invoice_core import paths these call sites already use.
 def ctie_expected(goods_value, ship):
-    pc = re.sub(r"[^A-Z0-9]", "", ((ship or {}).get("postcode") or "").upper())
-    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
-    country = ((ship or {}).get("country") or "").strip().upper()
-    is_ni = area == "BT" or country in ("GB-NIR", "NORTHERN IRELAND")
-    rule = CTIE_NI if is_ni else CTIE_UK
-    if goods_value is not None and goods_value >= rule["free_over"]:
-        return 0.0
-    return rule["flat"]
+    return _dr.ctie_expected(goods_value, ship)
 
 
 def carron_zone(ship):
-    if not ship:
-        return 1
-    country = (ship.get("country") or "").strip().upper()
-    if country in ("IE", "IRL", "IRELAND", "REPUBLIC OF IRELAND", "EIRE"):
-        return 5
-    pc = re.sub(r"[^A-Z0-9]", "", (ship.get("postcode") or "").upper())
-    area = (re.match(r"[A-Z]+", pc) or [""])[0] if pc else ""
-    return CARRON_AREA_ZONE.get(area, 1)
+    return _dr.carron_zone(ship)
 
 
 def carron_zone_label(ship):
-    z = carron_zone(ship)
-    pc = (ship or {}).get("postcode") or "no postcode"
-    return f"Carron Zone {z} — {CARRON_ZONES[z]['name']}, {pc}"
+    return _dr.carron_zone_label(ship)
 
 
 def carron_expected(goods_value, ship):
-    z = carron_zone(ship)
-    zc = CARRON_ZONES[z]
-    if z == 1 and goods_value is not None and goods_value >= CARRON_FREE_OVER:
-        return 0.0
-    return zc["large"]
+    return _dr.carron_expected(goods_value, ship)
 
 
 def _dolle_rates():

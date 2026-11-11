@@ -53,15 +53,23 @@ FLAT = {
 
 
 # --- Carron (zone by delivery postcode) -----------------------------------------------------
+# THE single source for Carron carriage (invoice_core + app.py delegate here). 'name'/'small' are
+# carried for the zone label; carron_expected itself only uses 'large'.
 CARRON_FREE_OVER = 250.0
-CARRON_ZONES = {1: {"large": 25.0}, 2: {"large": 50.0}, 3: {"large": 85.0}, 4: {"large": 65.0},
-                5: {"large": None}, 6: {"large": 105.0}}
+CARRON_ZONES = {
+    1: {"name": "UK Mainland", "large": 25.0, "small": 10.0},
+    2: {"name": "Scotland", "large": 50.0, "small": 20.0},
+    3: {"name": "Scottish Highlands", "large": 85.0, "small": 25.0},
+    4: {"name": "Northern Ireland", "large": 65.0, "small": 25.0},
+    5: {"name": "Republic of Ireland", "large": None, "small": None},
+    6: {"name": "Isles", "large": 105.0, "small": 25.0},
+}
 CARRON_AREA_ZONE = {"AB": 2, "DD": 2, "DG": 2, "EH": 2, "FK": 2, "G": 2, "KA": 2, "KY": 2,
                     "ML": 2, "PA": 2, "TD": 2, "IV": 3, "KW": 3, "PH": 3, "BT": 4,
                     "HS": 6, "ZE": 6, "IM": 6}
 
 
-def _carron_zone(ship):
+def carron_zone(ship):
     if not ship:
         return 1
     country = (ship.get("country") or "").strip().upper()
@@ -72,8 +80,17 @@ def _carron_zone(ship):
     return CARRON_AREA_ZONE.get(area, 1)
 
 
+_carron_zone = carron_zone          # back-compat alias (was the private name)
+
+
+def carron_zone_label(ship):
+    z = carron_zone(ship)
+    pc = (ship or {}).get("postcode") or "no postcode"
+    return f"Carron Zone {z} — {CARRON_ZONES[z]['name']}, {pc}"
+
+
 def carron_expected(goods, ship):
-    z = _carron_zone(ship)
+    z = carron_zone(ship)
     if z == 1 and goods is not None and goods >= CARRON_FREE_OVER:
         return 0.0
     return CARRON_ZONES[z]["large"]
