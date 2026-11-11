@@ -1,4 +1,14 @@
 {
+  "Southern Sheeting": {
+    "BB1HICEM-6": 17.78,
+    "BB1HICEM-9": 26.12,
+    "BB1HICEM-12": 34.89,
+    "BB1HICEM-18": 53.76,
+    "BB1HILUX-6": 18.78,
+    "BB1HILUX-10": 31.86,
+    "BB1HILUX-12": 37.76,
+    "BB1HILUX-16": 49.71
+  },
   "Etills": {
     "ECO500V3POT": 227.36
   },
