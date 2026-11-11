@@ -4213,7 +4213,9 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
             lines = None
     order = core.order_candidates(lines, inv.get("order_items"))
     ship, sup_n = None, core.norm_code(sup)
-    if (core.is_carron(sup_n) or core.is_ctie(sup_n)) and sid:
+    # Postcode-dependent carriage (zone or door-count + surcharge) needs the delivery address.
+    if (core.is_carron(sup_n) or core.is_ctie(sup_n)
+            or sup_n.startswith(("lpd", "jbkind", "deanta", "southern"))) and sid:
         try:
             ship = ds.fetch_order_shipping(sid)
         except Exception:  # noqa: BLE001

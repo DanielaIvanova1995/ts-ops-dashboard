@@ -219,7 +219,9 @@ def main(check_only=False, dry_run=None, max_total=None):
         order = core.order_candidates(lines, inv.get("order_items"))
         ship = None
         sup_n = core.norm_code(sup)
-        if (core.is_carron(sup_n) or core.is_ctie(sup_n)) and sid:   # zone-priced delivery
+        # Suppliers whose carriage depends on the delivery POSTCODE (zone or door-count + surcharge).
+        if (core.is_carron(sup_n) or core.is_ctie(sup_n)
+                or sup_n.startswith(("lpd", "jbkind", "deanta", "southern"))) and sid:
             try:
                 ship = ds.fetch_order_shipping(sid)
             except Exception:  # noqa: BLE001

@@ -648,8 +648,41 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
         _pc = re.sub(r"[^a-z0-9]", "", str((ship or {}).get("postcode") or "").lower())
         if _pc == "de214ed":
             return 0.0
+    # Door- / line-count suppliers: DELEGATE to delivery_rules — the SAME module the quote + PO
+    # builders use — so the invoice checker charges the identical rate (Daniela 2026-11-11: new
+    # delivery rules must apply everywhere). LPD/JB Kind/Deanta price by door count + postcode
+    # surcharge; Vista by goods + lines. `order` → simple lines for the door/hardware split.
+    sc = norm_code(supplier)
+    if sc.startswith(("lpd", "jbkind", "deanta", "vista")):
+        try:
+            import delivery_rules as dr
+            lines = [{"description": v.get("name"), "qty": v.get("qty")}
+                     for v in (order or {}).values()]
+            if sc.startswith("lpd"):
+                return dr.lpd_expected(lines, ship)
+            if sc.startswith("jbkind"):
+                return dr.jbkind_expected(lines, ship)
+            if sc.startswith("deanta"):
+                return dr.deanta_expected(goods_value, lines, ship)
+            if sc.startswith("vista"):
+                return dr.vista_expected(goods_value, lines)
+        except Exception:  # noqa: BLE001
+            return None
+
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:
+        # Fall back to the quote/PO flat map (delivery_rules.FLAT) so a flat carriage rate added there
+        # ALSO applies to the invoice checker — one place to add a supplier's rate (Daniela 2026-11-11).
+        try:
+            import delivery_rules as dr
+            flr = (getattr(dr, "FLAT", None) or {}).get(supplier)
+            if flr:
+                flat, free_over = flr
+                if free_over is not None and goods_value is not None and goods_value >= free_over:
+                    return 0.0
+                return float(flat or 0.0)
+        except Exception:  # noqa: BLE001
+            pass
         return None
     free_over = rule.get("free_over")
     if free_over is not None and goods_value is not None and goods_value >= free_over:
