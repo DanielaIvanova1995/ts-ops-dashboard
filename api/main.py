@@ -2318,6 +2318,20 @@ def _noeta_update(item_id, body):
     return True
 
 
+_NOETA_STAGE_COL = "color_mktyje8e"        # Orders board "Order Process Stage" status column
+
+
+def _noeta_set_stage(item_id, label="SO Approved"):
+    """Set the Order Process Stage (e.g. 'SO Approved' once a supplier's sales order is found +
+    validated/booked). The label already exists on the column."""
+    import json as _json
+    ds._monday_gql("mutation($b:ID!,$i:ID!,$c:String!,$v:JSON!){change_column_value(board_id:$b,"
+                   "item_id:$i,column_id:$c,value:$v){id}}",
+                   {"b": _NOETA_ORDERS_BOARD, "i": str(item_id), "c": _NOETA_STAGE_COL,
+                    "v": _json.dumps({"label": label})})
+    return True
+
+
 def _noeta_set_eta(item_id, iso_date):
     """Write the Customer ETA date on an Orders item."""
     import json as _json
@@ -2384,6 +2398,11 @@ def _noeta_execute(plan, deps, supplier):
             if do.get("update") and p.get("monday"):
                 _noeta_update(p["monday"], do["update"])
                 steps.append("noted")
+            # Once a sales order is found + validated/booked, mark the Order Process Stage SO Approved
+            # (Daniela 2026-11-11). Only on genuine successes — the planner sets p["so_approved"].
+            if p.get("so_approved") and p.get("monday"):
+                _noeta_set_stage(p["monday"], "SO Approved")
+                steps.append("SO Approved")
             dest = do.get("move_to")
             if dest:
                 fid = _noeta_folder_id(dest)

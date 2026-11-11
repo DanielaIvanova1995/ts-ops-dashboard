@@ -375,11 +375,12 @@ def plan_carron_email(email, deps):
             return {**base, "plan": "FLAG — no matching Monday order (don't archive)",
                     "reason": f"order {r.get('order_no') or '?'} not found on the board"}
         if not r.get("eta"):
-            return {**base, "monday": mon, "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'",
+            return {**base, "monday": mon, "so_approved": True,
+                    "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'",
                     "reason": r.get("eta_note"),
                     "do": {"move_to": NV_RESOLVED,
                            "update": "⚠ Carron booked this in — set the Customer ETA manually (date couldn't be auto-read)."}}
-        return {**base, "monday": mon, "eta": r["eta"],
+        return {**base, "monday": mon, "eta": r["eta"], "so_approved": True,
                 "plan": f"SET Customer ETA {r['eta']} + ✅ confirmed update + ARCHIVE to NV Resolved",
                 "reason": r["reason"],
                 "do": {"set_eta": r["eta"], "move_to": NV_RESOLVED,
@@ -406,7 +407,7 @@ def plan_carron_email(email, deps):
             msg = "MOVE to Supplier - ETAs (✅ validated — ring customer for a date)"
             if v.get("note"):
                 msg += f" · {v['note']}"
-            return {**base, "monday": mon, "plan": msg, "validation": v,
+            return {**base, "monday": mon, "plan": msg, "validation": v, "so_approved": True,
                     "do": {"attach": True, "move_to": SUPPLIER_ETAS, "update": CARRON_RING_NOTE}}
         return {**base, "monday": mon, "plan": "FLAG for review — do NOT hand over",
                 "reason": "; ".join(v["issues"]), "validation": v}
@@ -466,7 +467,7 @@ def plan_lpd_email(email, deps):
         msg = "ARCHIVE to NV Resolved (✅ validated — sales order confirmed)"
         if v.get("note"):
             msg += f" · {v['note']}"
-        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v,
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v, "so_approved": True,
                 "do": {"attach": True, "move_to": NV_RESOLVED,
                        "update": "✅ LPD sales order confirmed — attached to Job."}}
     return {**base, "action": "flag", "monday": mon, "plan": "FLAG for review — do NOT archive",
@@ -567,11 +568,11 @@ def plan_ss_email(email, deps):
     if c["type"] == "booked":
         eta = parse_ss_booked_date(body)
         if eta:
-            return {**base, "action": "booked", "monday": mon, "eta": eta,
+            return {**base, "action": "booked", "monday": mon, "eta": eta, "so_approved": True,
                     "plan": f"SET Customer ETA {eta} + ARCHIVE to NV Resolved", "reason": "SS booked delivery",
                     "do": {"set_eta": eta, "move_to": NV_RESOLVED,
                            "update": f"✅ Southern Sheeting booked delivery {eta}."}}
-        return {**base, "action": "booked", "monday": mon,
+        return {**base, "action": "booked", "monday": mon, "so_approved": True,
                 "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'", "reason": "couldn't read the booked date",
                 "do": {"move_to": NV_RESOLVED,
                        "update": "⚠ Southern Sheeting booked delivery — set the Customer ETA manually (date couldn't be read)."}}
@@ -586,7 +587,7 @@ def plan_ss_email(email, deps):
         msg = "ARCHIVE to NV Resolved (✅ validated — order confirmed)"
         if v.get("note"):
             msg += f" · {v['note']}"
-        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v,
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v, "so_approved": True,
                 "do": {"attach": True, "move_to": NV_RESOLVED,
                        "update": "✅ Southern Sheeting order confirmed — attached to Job."}}
     return {**base, "monday": mon, "plan": "FLAG for review — do NOT archive",
@@ -661,7 +662,7 @@ def plan_simple_email(email, deps, cfg):
         msg = "ARCHIVE to NV Resolved (✅ validated — order confirmed)"
         if v.get("note"):
             msg += f" · {v['note']}"
-        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v,
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v, "so_approved": True,
                 "do": {"attach": True, "move_to": NV_RESOLVED, "update": f"✅ {cfg['name']} order confirmed — attached to Job."}}
     return {**base, "monday": mon, "plan": "FLAG for review — do NOT archive",
             "reason": "; ".join(v["issues"]), "validation": v}
@@ -767,11 +768,11 @@ def plan_deanta_email(email, deps):
                     "plan": f"FLAG — we'd LOSE £{abs(v['profit']):.2f} on this — check before archiving", "reason": "actual loss"}
 
     if eta:
-        return {**base, "action": "booked", "monday": mon, "eta": eta, "validation": v,
+        return {**base, "action": "booked", "monday": mon, "eta": eta, "validation": v, "so_approved": True,
                 "plan": f"SET Customer ETA {eta} (auto-emails the customer) + attach + ARCHIVE to NV Resolved",
                 "do": {"attach": True, "set_eta": eta, "move_to": NV_RESOLVED,
                        "update": f"✅ Deanta dispatched — delivery by {eta}."}}
-    return {**base, "action": "booked", "monday": mon, "validation": v,
+    return {**base, "action": "booked", "monday": mon, "validation": v, "so_approved": True,
             "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'", "reason": "couldn't read the delivery date",
             "do": {"attach": True, "move_to": NV_RESOLVED,
                    "update": "⚠ Deanta dispatched — set the Customer ETA manually (date couldn't be read)."}}
