@@ -2376,7 +2376,27 @@ def _noeta_execute(plan, deps, supplier):
     for p in plan:
         do = p.get("do") or {}
         mid = p.get("email_id")
-        if not do:                          # FLAG/LEAVE — nothing to do live
+        # Flagged-for-review emails: raise the Outlook follow-up flag and park them in the No-ETA
+        # folder so a human works them in one place (Daniela 2026-11-11). The flag also makes the next
+        # run skip them (so they're not re-processed/re-parsed).
+        if (p.get("plan") or "").startswith("FLAG"):
+            if not mid:
+                continue
+            steps, ok = [], True
+            try:
+                ds.set_message_flag(_NOETA_MAILBOX, mid)
+                steps.append("flagged")
+                fid = _noeta_folder_id(_NOETA_FOLDER)
+                if fid:
+                    ds.move_message_to_folder(_NOETA_MAILBOX, mid, fid)
+                    steps.append("→ No-ETA folder")
+            except Exception as e:  # noqa: BLE001
+                ok = False
+                steps.append(f"error: {str(e)[:80]}")
+            results.append({"order_no": p.get("order_no"), "subject": p.get("subject"),
+                            "status": "flagged" if ok else "partial", "steps": steps})
+            continue
+        if not do:                          # LEAVE — nothing to do live
             continue
         if mid in done:
             results.append({"order_no": p.get("order_no"), "status": "skipped", "note": "already processed"})
@@ -2421,9 +2441,10 @@ def _noeta_execute(plan, deps, supplier):
         audit.append({"at": _dt.datetime.now().isoformat(timespec="seconds"), "supplier": supplier,
                       "order_no": p.get("order_no"), "message_id": mid, "status": status, "steps": steps})
     _noeta_audit_add(audit)
-    done_n = sum(1 for r in results if r["status"] == "done")
-    return {"results": results, "n_done": done_n,
+    return {"results": results,
+            "n_done": sum(1 for r in results if r["status"] == "done"),
             "n_partial": sum(1 for r in results if r["status"] == "partial"),
+            "n_flagged": sum(1 for r in results if r["status"] == "flagged"),
             "n_skipped": sum(1 for r in results if r["status"] == "skipped")}
 
 
@@ -2539,9 +2560,12 @@ def _noeta_messages(limit=300):
 
 
 def _noeta_emails_for(senders, limit=300, with_date=False):
-    """Email dicts (across both folders) from any of the given senders."""
+    """Email dicts (across both folders) from any of the given senders. Already-flagged messages are
+    skipped — a flag means a human has it (and it stops flagged-for-review emails being re-processed)."""
     emails = []
     for m in _noeta_messages(limit):
+        if m.get("flagged"):
+            continue
         frm = (m.get("from") or "")
         if not any(s in frm for s in senders):
             continue
@@ -2815,8 +2839,9 @@ _SIMPLE_SENDERS = {
     "vista": ("vistaeng.co.uk",),
     "mbdiy": ("mbdiy.co.uk",),
     "roxor": ("roxorgroup.com",),
+    "storm": ("sales@stormbuildingproducts.com",),   # sales@ only (accounts@/quotes@ aren't acks)
 }
-_SIMPLE_COST_KEY = {"jbkind": "jbkind", "vista": "vista", "mbdiy": "mbdecor", "roxor": "nuie"}
+_SIMPLE_COST_KEY = {"jbkind": "jbkind", "vista": "vista", "mbdiy": "mbdecor", "roxor": "nuie", "storm": "storm"}
 
 
 def _simple_plan(key, limit=300):

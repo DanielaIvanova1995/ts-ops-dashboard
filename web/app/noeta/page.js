@@ -71,6 +71,14 @@ const SUPPLIERS = {
     blurb: "Deanta dispatch confirmations (our PO in the subject). Reads the delivery date from the body ('delivery tomorrow 10/11' or 'between 10/11–11/11') → sets the Customer ETA (which auto-emails the customer) + attaches the PDF to Job + archives. Out-of-stock / questions / already-delivered / a loss → flagged.",
     tiles: (t) => [["Set ETA / archive", t.archive, "green"], ["Flag — review", t.flag, "red"]],
   },
+  storm: {
+    label: "Storm",
+    preview: "/noeta/simple/storm/dry-run",
+    run: "/noeta/simple/storm/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "Storm order acknowledgements (our order no in the subject parens, e.g. 'SO0083865 (33351)'). Money-check → attach to Job + archive. Credit-control / on-hold / out-of-stock / unmatched → flagged.",
+    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
   tp: {
     label: "Travis Perkins",
     preview: "/noeta/tp/dry-run",
@@ -133,7 +141,8 @@ export default function NoEta() {
     if (!accessKey || !data) return;
     const t = data.counts || {};
     const willAct = (t.archive || 0) + (t.to_etas || 0) + (t.superseded || 0);
-    if (!window.confirm(`Process ${SUPPLIERS[supplier].label} LIVE now?\n\nThis will move ${willAct} email${willAct === 1 ? "" : "s"} out of the folder and write to Monday (ETAs, notes, Job-column files) for the validated/booked-in orders. Flagged ones are left untouched.\n\nThis can't be auto-undone.`)) return;
+    const willFlag = t.flag || 0;
+    if (!window.confirm(`Process ${SUPPLIERS[supplier].label} LIVE now?\n\nThis will process ${willAct} order${willAct === 1 ? "" : "s"} — set ETAs/SO Approved, attach to Job, archive — and flag ${willFlag} for-review email${willFlag === 1 ? "" : "s"} in Outlook, moving them to the No-ETA folder for a human.\n\nThis can't be auto-undone.`)) return;
     setRunning(true); setErr("");
     try {
       const res = await jsonFetch(SUPPLIERS[supplier].run, { method: "POST" });
@@ -165,7 +174,7 @@ export default function NoEta() {
   const t = data?.counts;
   const noun = cfg.label;
   const liveOff = data && data.live_enabled === false;
-  const actionable = data ? (data.counts?.archive || 0) + (data.counts?.to_etas || 0) + (data.counts?.superseded || 0) : 0;
+  const actionable = data ? (data.counts?.archive || 0) + (data.counts?.to_etas || 0) + (data.counts?.superseded || 0) + (data.counts?.flag || 0) : 0;
   return (
     <div className="wrap">
       <div className="topbar">
@@ -196,11 +205,11 @@ export default function NoEta() {
       {runResult && (
         <div className="card" style={{ padding: "4px 0", marginBottom: 12, border: "1px solid rgba(40,167,69,0.35)" }}>
           <div className="sub" style={{ padding: "8px 14px" }}>
-            <b>Live run done</b> · {runResult.n_done} processed{runResult.n_partial ? ` · ${runResult.n_partial} partial` : ""}{runResult.n_skipped ? ` · ${runResult.n_skipped} already done` : ""}
+            <b>Live run done</b> · {runResult.n_done} processed{runResult.n_flagged ? ` · ${runResult.n_flagged} flagged to No-ETA` : ""}{runResult.n_partial ? ` · ${runResult.n_partial} partial` : ""}{runResult.n_skipped ? ` · ${runResult.n_skipped} already done` : ""}
           </div>
           {(runResult.results || []).map((r, i) => (
             <div key={i} style={{ borderTop: "1px solid var(--line,#eee)", padding: "7px 14px", fontSize: 12.5 }}>
-              <span className={`chip ${r.status === "done" ? "green" : r.status === "partial" ? "red" : "grey"}`} style={{ marginRight: 8 }}>{r.status}</span>
+              <span className={`chip ${r.status === "done" ? "green" : r.status === "partial" ? "red" : r.status === "flagged" ? "amber" : "grey"}`} style={{ marginRight: 8 }}>{r.status}</span>
               <b>{r.order_no ? `Order ${r.order_no}` : "(order?)"}</b>
               {r.steps && <span className="sub"> — {r.steps.join(" · ")}</span>}
               {r.note && <span className="sub"> — {r.note}</span>}

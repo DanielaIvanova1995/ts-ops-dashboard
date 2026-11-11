@@ -486,7 +486,9 @@ def plan_lpd_folder(emails, deps):
 _DELAY_RE = re.compile(
     r"out[\s-]?of[\s-]?stock|\bno stock\b|not in stock|back[\s-]?order|\boos\b|discontinued|"
     r"awaiting stock|to follow|on back[\s-]?order|no longer available|unavailable|lead[\s-]?time|"
-    r"\bdelay(?:ed|s)?\b|not expected until", re.I)
+    r"\bdelay(?:ed|s)?\b|not expected until|"
+    # account holds that stop an order going ahead (Daniela 2026-11-11)
+    r"credit control|on hold|account.{0,12}hold|held in credit|overdue", re.I)
 
 
 def delay_signal(*texts):
@@ -611,8 +613,11 @@ SIMPLE_CONFIRM = {
     # ref inside the PDF (the email only says "order acknowledgement attached")
     "vista": {"name": "Vista", "floor": 10.0},
     "mbdiy": {"name": "MB DIY", "floor": 10.0},
-    # Roxor/Ultra Finishing: body "Your Reference: 32930_1-REM" → our order 32930
-    "roxor": {"name": "Roxor", "body_re": r"your reference:\s*(\d{3,})", "floor": 10.0},
+    # Roxor/Ultra Finishing: order confirmation body "Your Reference: 32930_1-REM" → 32930; the
+    # despatch note "Ultra Finishing Ltd Despatch ( 33071 )" carries our order in the subject parens.
+    "roxor": {"name": "Roxor", "subject_re": r"\(\s*(\d{4,})\s*\)", "body_re": r"your reference:\s*(\d{3,})", "floor": 10.0},
+    # Storm: "Order Acknowledgement SO0083865 (33351)" → our order 33351 in the subject parens.
+    "storm": {"name": "Storm", "subject_re": r"\(\s*(\d{4,})\s*\)", "floor": 10.0},
 }
 _SIMPLE_AMEND_RE = re.compile(r"\bamend|\brevised\b", re.I)
 

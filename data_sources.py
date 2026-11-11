@@ -3995,7 +3995,7 @@ def list_folder_messages_full(mailbox: str, folder_id: str, limit: int = 60,
         headers={"Authorization": f"Bearer {token}",
                  "Prefer": 'outlook.body-content-type="text"'},
         params={"$top": str(limit), "$orderby": "receivedDateTime desc",
-                "$select": "id,internetMessageId,subject,from,receivedDateTime,body"},
+                "$select": "id,internetMessageId,subject,from,receivedDateTime,body,flag"},
         timeout=45,
     )
     r.raise_for_status()
@@ -4010,10 +4010,21 @@ def list_folder_messages_full(mailbox: str, folder_id: str, limit: int = 60,
                 pass
         frm = (((m.get("from") or {}).get("emailAddress") or {}).get("address") or "").lower()
         body = ((m.get("body") or {}).get("content") or "")
+        flagged = ((m.get("flag") or {}).get("flagStatus") or "").lower() == "flagged"
         out.append({"id": m.get("id"), "internet_id": m.get("internetMessageId") or m.get("id"),
                     "subject": (m.get("subject") or "").strip(), "from": frm,
-                    "received": rec, "body": body})
+                    "received": rec, "body": body, "flagged": flagged})
     return out
+
+
+def set_message_flag(mailbox: str, message_id: str, token: str | None = None) -> bool:
+    """Set the Outlook follow-up flag on a message (so a human sees it needs attention)."""
+    token = token or ms_token()
+    r = requests.patch(f"{GRAPH}/users/{mailbox}/messages/{message_id}",
+                       headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                       json={"flag": {"flagStatus": "flagged"}}, timeout=30)
+    r.raise_for_status()
+    return True
 
 
 # The exact triage contract the Make "Outlook Triage NEW" scenario used, so the native classifier is
