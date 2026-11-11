@@ -13,6 +13,10 @@ on:
         description: "Dry run (log only, write nothing to Monday)"
         type: boolean
         default: true
+      max_invoices:
+        description: "Max invoices to process this run (raise to clear a backlog in one sweep)"
+        type: string
+        default: "60"
   # --- enable this AFTER you've verified a dry run, to run automatically ---
   # schedule:
   #   - cron: "*/30 6-18 * * 1-5"   # every 30 min, ~7am-7pm UK, Mon-Fri (times are UTC)
@@ -41,4 +45,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Scheduled runs have no input, so default to DRY RUN unless a manual run says otherwise.
           DRY_RUN: ${{ github.event.inputs.dry_run == 'false' && '0' || '1' }}
+          MAX_INVOICES: ${{ github.event.inputs.max_invoices || '60' }}
+          # Supabase (optional): lets the "recently-checked" cooldown work here too, so repeat runs
+          # advance through the queue instead of re-checking the same front.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python run_invoice_check.py
