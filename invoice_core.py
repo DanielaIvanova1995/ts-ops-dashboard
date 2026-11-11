@@ -184,7 +184,8 @@ def order_candidates(shopify_lines, order_items_text=None):
             if key in out:
                 key = f"{key}#{i}"
             out[key] = {"sku": sku or (l.get("title") or "(no SKU)"),
-                        "qty": l.get("qty"), "name": l.get("title"), "price": l.get("price")}
+                        "qty": l.get("qty"), "name": l.get("title"), "price": l.get("price"),
+                        "tags": l.get("tags") or [], "weight": l.get("weight")}
         if out:
             return out
     return parse_order_items(order_items_text)
@@ -656,7 +657,8 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
     if sc.startswith(("lpd", "jbkind", "deanta", "vista")):
         try:
             import delivery_rules as dr
-            lines = [{"description": v.get("name"), "qty": v.get("qty")}
+            lines = [{"description": v.get("name"), "qty": v.get("qty"),
+                      "tags": v.get("tags") or [], "weight": v.get("weight")}
                      for v in (order or {}).values()]
             if sc.startswith("lpd"):
                 return dr.lpd_expected(lines, ship)

@@ -233,7 +233,77 @@ def _lpd_doors(lines):
     return int(round(doors)), int(round(packs))
 
 
+# --- LPD HOME FURNITURE: a SEPARATE range (Shopify tag 'Home Furniture') delivered by LPD Home, and
+# priced by WEIGHT per product (not door count). Flyer Sept 2024: per-product weight band, summed,
+# CAPPED at £85/delivery; plus a per-delivery surcharge for Highlands/Offshore/NI (small vs large
+# parcel = >20kg); some areas LPD can't deliver (GY/IM/JE, TR21-25, PO30-40, ROI). Weight (kg) must be
+# set on the product — a furniture line with no weight returns None (so it flags, never mis-prices).
+_LPD_FURN_BANDS = [(10.0, 14.0), (20.0, 21.0), (40.0, 30.0), (50.0, 42.0), (60.0, 55.0)]  # (max-kg, £)
+_LPD_FURN_OVER = 65.0        # over 60kg
+_LPD_FURN_CAP = 85.0         # multiple products to one address capped at £85/delivery
+
+
+def _lpd_furn_unit(w):
+    if not isinstance(w, (int, float)) or w <= 0:
+        return None          # no weight on the product → can't price
+    for hi, charge in _LPD_FURN_BANDS:
+        if w <= hi:
+            return charge
+    return _LPD_FURN_OVER
+
+
+def _lpd_furn_surcharge(ship):
+    """(small_parcel£, large_parcel£) added per delivery for remote postcodes, (0,0) standard, or None
+    where LPD can't deliver. Large parcel = >1.2m OR >20kg (we detect >20kg; length isn't on file)."""
+    area, dist, _ = _lpd_pc_parts(ship)
+    if area is None:
+        return 0.0, 0.0
+    if area in ("GY", "IM", "JE") or (area == "TR" and 21 <= dist <= 25) or (area == "PO" and 30 <= dist <= 40):
+        return None                                                   # LPD can't deliver (port only)
+    if area in ("HS", "ZE") or (area == "KA" and dist in (27, 28)) or (area == "KW" and dist >= 15) \
+            or (area == "PA" and dist >= 20):
+        return 35.0, 70.0                                             # Scottish Offshore
+    if area == "BT":
+        return 25.0, 70.0                                             # Northern Ireland
+    if area in ("AB", "DD", "FK", "IV", "KW", "KY", "PH") or (area == "PA" and dist <= 19) \
+            or (area == "G" and dist in (63, 82, 83, 84)):
+        return 15.0, 45.0                                             # Scottish Highlands
+    return 0.0, 0.0
+
+
+def _is_lpd_furniture(lines):
+    """A line belongs to LPD's Home Furniture range (weight-priced), not the door range (door-count)."""
+    for l in (lines or []):
+        if any("furniture" in str(t).lower() for t in (l.get("tags") or [])):
+            return True
+        if "furniture" in (l.get("product_type") or "").lower():
+            return True
+    return False
+
+
+def lpd_furniture_expected(lines, ship=None):
+    sc = _lpd_furn_surcharge(ship)
+    if sc is None:
+        return None
+    small, large = sc
+    total, any_large = 0.0, False
+    for l in _product_lines(lines):
+        unit = _lpd_furn_unit(l.get("weight"))
+        if unit is None:
+            return None          # a furniture line has no weight on file → can't price it
+        q = l.get("qty") if isinstance(l.get("qty"), (int, float)) else 1
+        total += unit * q
+        if (l.get("weight") or 0) > 20:
+            any_large = True
+    if total <= 0:
+        return None
+    return round(min(total, _LPD_FURN_CAP) + (large if any_large else small), 2)
+
+
 def lpd_expected(lines, ship=None):
+    # LPD Home Furniture is a separate, WEIGHT-priced range — route it away from door-count pricing.
+    if _is_lpd_furniture(lines):
+        return lpd_furniture_expected(lines, ship)
     surcharge, poa = _lpd_surcharge(ship)
     if poa:
         return None

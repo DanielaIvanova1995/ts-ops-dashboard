@@ -473,6 +473,7 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
              "title variantTitle quantity currentQuantity sku customAttributes { key value } "
+             "variant { product { tags } inventoryItem { measurement { weight { value unit } } } } "
              "originalUnitPriceSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
@@ -519,10 +520,17 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
             v = (a.get("value") or "").strip()
             if k and v and not k.startswith("_"):
                 props.append({"key": k, "value": v})
+        _pv = (n.get("variant") or {})
+        _tags = ((_pv.get("product") or {}).get("tags")) or []
+        _meas = (((_pv.get("inventoryItem") or {}).get("measurement") or {}).get("weight") or {})
+        _wkg = None
+        if isinstance(_meas.get("value"), (int, float)):
+            _wkg = float(_meas["value"]) * {"GRAMS": 0.001, "KILOGRAMS": 1.0, "OUNCES": 0.0283495,
+                                            "POUNDS": 0.453592}.get((_meas.get("unit") or "").upper(), 1.0)
         out.append({"title": title, "base_title": base_title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
                     "qty": (cq if cq is not None else n.get("quantity")),
-                    "price": price, "properties": props})
+                    "price": price, "properties": props, "tags": _tags, "weight": _wkg})
     return out
 
 
@@ -610,7 +618,9 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
-             "title variantTitle quantity currentQuantity sku variant { product { vendor productType tags } } "
+             "title variantTitle quantity currentQuantity sku "
+             "variant { product { vendor productType tags } "
+             "inventoryItem { measurement { weight { value unit } } } } "
              "product { vendor productType tags } "
              "discountedTotalSet { shopMoney { amount } } } } } } }")
     r = requests.post(
@@ -645,12 +655,21 @@ def fetch_order_lines_with_vendor(order_id, token: str | None = None) -> list:
         variant = (n.get("variantTitle") or "").strip()
         if variant and variant.lower() != "default title" and variant.lower() not in title.lower():
             title = f"{title} - {variant}"
+        # Product weight in KG (for weight-priced delivery, e.g. LPD Home Furniture). None if not set.
+        meas = ((((n.get("variant") or {}).get("inventoryItem") or {}).get("measurement") or {})
+                .get("weight") or {})
+        wkg = None
+        if isinstance(meas.get("value"), (int, float)):
+            wkg = float(meas["value"]) * {"GRAMS": 0.001, "KILOGRAMS": 1.0,
+                                          "OUNCES": 0.0283495, "POUNDS": 0.453592}.get(
+                (meas.get("unit") or "").upper(), 1.0)
         out.append({"title": title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
                     "qty": (cq if cq is not None else n.get("quantity")),
                     "vendor": (prod.get("vendor") or "").strip(),
                     "product_type": (prod.get("productType") or "").strip(),
                     "tags": prod.get("tags") or [],
+                    "weight": wkg,
                     "line_subtotal": sub})
     return out
 
