@@ -1177,9 +1177,12 @@ def _enrich_num(v):
 
 
 def _inv_core(s) -> str:
-    """Digit core of an invoice number for loose matching within one supplier: the digits with
-    leading zeros dropped, so '019780', 'PSI-019780' and '19780' all key to '19780'."""
-    d = _re.sub(r"\D", "", str(s or ""))
+    """Digit core of an invoice number for loose matching within one supplier: a leading branch
+    prefix like '01/' (LPD stores '01/1875624', the statement shows '1875624') is dropped FIRST, then
+    the remaining digits with leading zeros dropped — so '019780', 'PSI-019780', '19780' all key to
+    '19780', and '01/1875624' keys to '1875624' (not '11875624')."""
+    s = _re.sub(r"^\s*\d{1,3}\s*/\s*", "", str(s or ""))   # strip an 'NN/' branch prefix
+    d = _re.sub(r"\D", "", s)
     return d.lstrip("0") or d
 
 
@@ -1215,11 +1218,11 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
         core_to_num.setdefault(_inv_core(n), n)
         all_cands.extend(_inv_name_candidates(n))
     all_cands = list(dict.fromkeys(all_cands))
+    _ITEM_F = ('items{id name column_values(ids:["status7__1"]){id text} '
+               'parent_item{id name column_values(ids:["text_mkv6z0nt","numbers48","numbers6","formula_mkn9918j"])'
+               '{id text ... on FormulaValue { display_value }}}}')
     q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:500,'
-         'columns:[{column_id:"name",column_values:$vals}]){items{id name '
-         'column_values(ids:["status7__1"]){id text} '
-         'parent_item{id name column_values(ids:["text_mkv6z0nt","numbers48","numbers6","formula_mkn9918j"])'
-         '{id text ... on FormulaValue { display_value }}}}}}')
+         'columns:[{column_id:"name",column_values:$vals}]){' + _ITEM_F + '}}')
     out = {}
     tok = ds.get_token()
     for i in range(0, len(all_cands), 100):
@@ -1230,33 +1233,52 @@ def _statement_monday_enrich(invoice_numbers: list) -> dict:
             continue
         for it in (((data.get("items_page_by_column_values") or {}).get("items")) or []):
             stmt_num = core_to_num.get(_inv_core(it.get("name")))
-            if not stmt_num or stmt_num in out:
+            if stmt_num and stmt_num not in out:
+                out[stmt_num] = _enrich_row(it)
+    # Fallback for invoices whose Monday name carries a branch PREFIX the statement omits (LPD stores
+    # '01/1875624', the statement shows '1875624'): the exact-name batch can't guess the prefix, so look
+    # each still-missing one up by name CONTAINS its digit core, then verify the core matches.
+    missing = [n for n in nums if n not in out]
+    if missing:
+        cq = ('query($b:[ID!],$v:CompareValue!){boards(ids:$b){items_page(limit:50,query_params:{rules:['
+              '{column_id:"name",compare_value:$v,operator:contains_text}]}){' + _ITEM_F + '}}}')
+        for n in missing[:80]:
+            core = _inv_core(n)
+            if len(core) < 5:                 # too short → a 'contains' match would be unreliable
                 continue
-            cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
-            parent = it.get("parent_item") or {}
-            pcols = parent.get("column_values") or []
-            pcv = {c["id"]: (c.get("text") or "") for c in pcols}
-            # Live order margin — read the SAME Monday formula column the invoice checker uses
-            # (formula_mkn9918j) so the recon margin always matches the checker. Fall back to the
-            # £-to-us / £-to-supplier calc only when the formula column returns no value.
-            margin = None
-            for c in pcols:
-                if c.get("id") == "formula_mkn9918j":
-                    mm = _re.search(r"-?\d+(?:\.\d+)?", c.get("display_value") or "")
-                    margin = float(mm.group()) if mm else None
-            if margin is None:
-                sell, cost = _enrich_num(pcv.get("numbers48")), _enrich_num(pcv.get("numbers6"))
-                margin = round((sell - cost) / sell * 100, 1) if (sell and cost is not None and sell > 0) else None
-            pname = (parent.get("name") or "").strip()
-            out[stmt_num] = {
-                "monday_status": cvs.get("status7__1") or "",
-                "order_no": pname or (pcv.get("text_mkv6z0nt") or ""),
-                "is_split": bool(_re.search(r"-\d+$", pname)),
-                "margin": margin,
-                "sub_id": it.get("id"),
-                "order_item_id": parent.get("id"),
-            }
+            try:
+                data = ds._monday_gql(cq, {"b": [str(ds.SUBITEMS_BOARD_ID)], "v": core}, tok)
+            except Exception:  # noqa: BLE001
+                continue
+            page = (((data.get("boards") or [{}])[0]).get("items_page")) or {}
+            for it in (page.get("items") or []):
+                if _inv_core(it.get("name")) == core:
+                    out[n] = _enrich_row(it)
+                    break
     return out
+
+
+def _enrich_row(it) -> dict:
+    """Parse one Monday invoice subitem into the recon enrichment shape {monday_status, order_no,
+    is_split, margin, sub_id, order_item_id}. Live margin uses the SAME formula column (formula_mkn9918j)
+    the invoice checker reads, falling back to the £-to-us / £-to-supplier calc."""
+    cvs = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+    parent = it.get("parent_item") or {}
+    pcols = parent.get("column_values") or []
+    pcv = {c["id"]: (c.get("text") or "") for c in pcols}
+    margin = None
+    for c in pcols:
+        if c.get("id") == "formula_mkn9918j":
+            mm = _re.search(r"-?\d+(?:\.\d+)?", c.get("display_value") or "")
+            margin = float(mm.group()) if mm else None
+    if margin is None:
+        sell, cost = _enrich_num(pcv.get("numbers48")), _enrich_num(pcv.get("numbers6"))
+        margin = round((sell - cost) / sell * 100, 1) if (sell and cost is not None and sell > 0) else None
+    pname = (parent.get("name") or "").strip()
+    return {"monday_status": cvs.get("status7__1") or "",
+            "order_no": pname or (pcv.get("text_mkv6z0nt") or ""),
+            "is_split": bool(_re.search(r"-\d+$", pname)),
+            "margin": margin, "sub_id": it.get("id"), "order_item_id": parent.get("id")}
 
 
 def _recon_from_bytes(by: bytes, filename: str, supplier: str = "") -> dict:
