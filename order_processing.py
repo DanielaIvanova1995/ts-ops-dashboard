@@ -754,9 +754,20 @@ def _build_doc(o, delivery_override=None, notes_extra=None, items_override=None,
         # records — Shopify only knows the whole order. That subset was built line-by-line from
         # Shopify at split time (NOT the lossy original summary), so it's used as-is here. A WHOLE
         # order is always rebuilt from the live Shopify lines (the 30247 fix).
-        is_split_part = bool(re.search(r"-\d+$", str(o.get("order_no") or o.get("name") or "")))
+        # A split part has order_no = the BASE ('33476') but name = '33476-N'; detect the suffix on
+        # EITHER (the name always carries it on reload, order_no carries it on the split-time temp
+        # dict). Checking order_no alone misses it on reload and wrongly rebuilt from the WHOLE Shopify
+        # order — leaking the other suppliers' lines onto this part's PO (33476).
+        is_split_part = bool(re.search(r"-\d+$", str(o.get("name") or "").strip())
+                             or re.search(r"-\d+$", str(o.get("order_no") or "").strip()))
         if is_split_part:
             items = _parse_monday_items(o.get("items"))
+            if not items:
+                # Never fall back to the whole Shopify order for a split part — that re-leaks the other
+                # suppliers' lines. If the stored subset can't be read, refuse (processor retries/fixes).
+                raise RuntimeError("This is a split part but its stored line subset couldn't be read — "
+                                   "refusing to build a PO from the whole order (would include other "
+                                   "suppliers' lines).")
         else:
             if not sid:
                 raise RuntimeError("No Shopify order id on this order — can't build the PO from the "
