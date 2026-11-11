@@ -2622,11 +2622,12 @@ class _LpdDryRunDeps:
     returns (lines, carriage, order_ref). Best-effort — any failure → the email is flagged, never
     auto-archived. LPD carriage is by door count (not wired) so expected_carriage is None for now:
     lines + prices + margin still validate; carriage just isn't cross-checked."""
-    def __init__(self):
+    def __init__(self, cost_key="lpd"):
         self._pidx = None
         self._mon = {}
         self._att = {}      # email id -> (filename, bytes) of the confirmation PDF, cached so the
                             # endpoint can attach it to Monday without re-downloading.
+        self._cost_key = cost_key
 
     def find_monday(self, no):
         no = str(no)
@@ -2674,18 +2675,10 @@ class _LpdDryRunDeps:
             return None
 
     def our_costs(self, order):
-        return self._costs(order, "lpd")
+        return self._costs(order, self._cost_key)
 
     def expected_carriage(self, order):
         return None
-
-
-class _SsDryRunDeps(_LpdDryRunDeps):
-    """Southern Sheeting — same PDF→(lines,carriage,ref,stock) shape as LPD, but its own cost key.
-    Carriage is left to the margin check (their confirmation carries the real carriage line), so
-    expected_carriage stays None."""
-    def our_costs(self, order):
-        return self._costs(order, "southernsheeting")
 
 
 _LPD_SENDERS = ("lpddoors", "lpdhome", "lpdgroup", "leeds")
@@ -2748,7 +2741,7 @@ def _ss_plan(limit=300):
     """(emails, deps, plan) for Southern Sheeting — scans both folders."""
     import supplier_confirm as scf
     emails = _noeta_emails_for(_SS_SENDERS, limit)
-    deps = _SsDryRunDeps()
+    deps = _LpdDryRunDeps(cost_key="southernsheeting")
     return emails, deps, scf.plan_ss_folder(emails, deps)
 
 
@@ -2794,6 +2787,60 @@ def noeta_ss_run(limit: int = 40):
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
     out = _noeta_execute(plan, deps, "Southern Sheeting")
     return {"ok": True, "supplier": "Southern Sheeting", "live": True, **out}
+
+
+# Generic confirmation suppliers (JB Kind, Vista, MB DIY, Roxor) — same PDF→validate→attach+archive
+# shape, config-driven. Sender match + cost key per supplier; order ref from subject/body/PDF.
+_SIMPLE_SENDERS = {
+    "jbkind": ("jbkind.com",),
+    "vista": ("vistaeng.co.uk",),
+    "mbdiy": ("mbdiy.co.uk",),
+    "roxor": ("roxorgroup.com",),
+}
+_SIMPLE_COST_KEY = {"jbkind": "jbkind", "vista": "vista", "mbdiy": "mbdecor", "roxor": "nuie"}
+
+
+def _simple_plan(key, limit=300):
+    import supplier_confirm as scf
+    cfg = scf.SIMPLE_CONFIRM[key]
+    emails = _noeta_emails_for(_SIMPLE_SENDERS[key], limit)
+    deps = _LpdDryRunDeps(cost_key=_SIMPLE_COST_KEY[key])
+    return emails, deps, scf.plan_simple_folder(emails, deps, cfg)
+
+
+@app.get("/noeta/simple/{key}/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_simple_dry_run(key: str, limit: int = 300):
+    """PREVIEW for a generic confirmation supplier (jbkind/vista/mbdiy/roxor). Reads/parses only."""
+    import supplier_confirm as scf
+    if key not in _SIMPLE_SENDERS:
+        raise HTTPException(status_code=404, detail=f"Unknown supplier '{key}'")
+    try:
+        emails, _deps, plan = _simple_plan(key, limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    slim, counts = _lpd_slim(plan)
+    return {"ok": True, "supplier": scf.SIMPLE_CONFIRM[key]["name"], "key": key, "dry_run": True,
+            "live_enabled": _noeta_live_enabled(), "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
+@app.post("/noeta/simple/{key}/run", dependencies=[Depends(require_key_or_statements)])
+def noeta_simple_run(key: str, limit: int = 300):
+    """LIVE for a generic confirmation supplier: validated → attach to Job + archive to NV Resolved."""
+    import supplier_confirm as scf
+    if key not in _SIMPLE_SENDERS:
+        raise HTTPException(status_code=404, detail=f"Unknown supplier '{key}'")
+    if not _noeta_live_enabled():
+        raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
+    try:
+        _emails, deps, plan = _simple_plan(key, limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    out = _noeta_execute(plan, deps, scf.SIMPLE_CONFIRM[key]["name"])
+    return {"ok": True, "supplier": scf.SIMPLE_CONFIRM[key]["name"], "key": key, "live": True, **out}
 
 
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])

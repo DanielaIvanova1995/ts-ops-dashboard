@@ -597,6 +597,80 @@ def plan_ss_folder(emails, deps):
     return [plan_ss_email(e, deps) for e in (emails or [])]
 
 
+# =================================================================================================
+# GENERIC order-confirmation suppliers (JB Kind, Vista, MB DIY, Roxor…). All follow the same shape:
+# a PDF acknowledgement of our PO → money-check → attach to Job + archive to NV Resolved. They differ
+# only in how OUR order ref is found (the email subject, the email body, or the PDF's customer_ref)
+# and the margin floor. Driven by SIMPLE_CONFIRM config so a new supplier is a few lines, no new code.
+# Any delay/stock wording on the email OR the PDF → flag (never archived).
+# =================================================================================================
+SIMPLE_CONFIRM = {
+    # order no is in the subject: "Sales Order Acknowledgement 219312 - Your Order 33408"
+    "jbkind": {"name": "JB Kind", "subject_re": r"your order\s+(\d{3,})", "floor": 10.0},
+    # ref inside the PDF (the email only says "order acknowledgement attached")
+    "vista": {"name": "Vista", "floor": 10.0},
+    "mbdiy": {"name": "MB DIY", "floor": 10.0},
+    # Roxor/Ultra Finishing: body "Your Reference: 32930_1-REM" → our order 32930
+    "roxor": {"name": "Roxor", "body_re": r"your reference:\s*(\d{3,})", "floor": 10.0},
+}
+_SIMPLE_AMEND_RE = re.compile(r"\bamend|\brevised\b", re.I)
+
+
+def plan_simple_email(email, deps, cfg):
+    """Generic confirmation plan. deps.fetch_confirmation(email) → (lines, carriage, pdf_ref, stock).
+    Order ref: subject regex, then body regex, then the PDF's customer_ref. `do` is the live directive."""
+    subj, body = email.get("subject") or "", email.get("body") or ""
+    base = {"supplier": cfg["name"], "subject": email.get("subject"), "email_id": email.get("id"),
+            "order_no": None, "action": "flag", "do": {}}
+
+    sig = delay_signal(subj, body)
+    if sig:
+        return {**base, "plan": f"FLAG — email mentions “{sig}” (possible delay) — check by hand", "reason": f"delay signal: {sig}"}
+    if _SIMPLE_AMEND_RE.search(f"{subj}\n{body}"):
+        return {**base, "plan": "FLAG — amended/revised order — review the change (leave in folder)", "reason": "amended"}
+
+    order_no = None
+    if cfg.get("subject_re"):
+        m = re.search(cfg["subject_re"], subj, re.I)
+        order_no = m.group(1) if m else None
+    if not order_no and cfg.get("body_re"):
+        m = re.search(cfg["body_re"], body, re.I)
+        order_no = m.group(1) if m else None
+
+    conf = deps.fetch_confirmation(email)
+    if not conf:
+        return {**base, "plan": "FLAG — couldn't read the confirmation PDF (check by hand)", "reason": "PDF unreadable"}
+    lines, carriage, pdf_ref, stock = conf
+    if stock:
+        return {**base, "plan": f"FLAG — the document mentions “{stock}” (possible delay) — check by hand",
+                "reason": f"delay signal on the PDF: {stock}"}
+    if not order_no:
+        order_no = pdf_ref
+    base["order_no"] = order_no
+    if not order_no:
+        return {**base, "plan": "FLAG — no order reference found (subject, body or PDF)", "reason": "no order ref"}
+    mon = deps.find_monday(order_no)
+    if not mon:
+        return {**base, "plan": f"FLAG — order {order_no} not found on Monday", "reason": "no Monday match"}
+    order = deps.fetch_order(order_no)
+    if not order:
+        return {**base, "monday": mon, "plan": f"FLAG — couldn't read Shopify order {order_no}", "reason": "no Shopify order"}
+    v = validate_confirmation(lines, carriage, order, our_costs=deps.our_costs(order),
+                              expected_carriage=deps.expected_carriage(order), floor_pct=cfg.get("floor", 10.0))
+    if v["verdict"] == "validated":
+        msg = "ARCHIVE to NV Resolved (✅ validated — order confirmed)"
+        if v.get("note"):
+            msg += f" · {v['note']}"
+        return {**base, "action": "confirm", "monday": mon, "plan": msg, "validation": v,
+                "do": {"attach": True, "move_to": NV_RESOLVED, "update": f"✅ {cfg['name']} order confirmed — attached to Job."}}
+    return {**base, "monday": mon, "plan": "FLAG for review — do NOT archive",
+            "reason": "; ".join(v["issues"]), "validation": v}
+
+
+def plan_simple_folder(emails, deps, cfg):
+    return [plan_simple_email(e, deps, cfg) for e in (emails or [])]
+
+
 def plan_folder(emails, deps):
     """Dry-run plan for a list of Carron folder emails, with per-order dedupe: when several emails
     share an order number and the LATEST one resolves it (booked-in → archive, or a validated move),

@@ -31,6 +31,38 @@ const SUPPLIERS = {
     blurb: "Two email types: a Sales Order confirmation → money-check (8% floor) → attach to Job + archive; a 'Delivery Date Booked' → read the date, set the Customer ETA + archive. Any out-of-stock / back-order / delay wording on the email or PDF → flagged. SS books delivery itself, so nothing goes to Supplier-ETAs.",
     tiles: (t) => [["Set ETA / archive", t.archive, "green"], ["Flag — review", t.flag, "red"]],
   },
+  jbkind: {
+    label: "JB Kind",
+    preview: "/noeta/simple/jbkind/dry-run",
+    run: "/noeta/simple/jbkind/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "JB Kind sales-order acknowledgements (our order no is in the subject). Money-check → attach to Job + archive to NV Resolved. Amended / out-of-stock / unmatched → flagged.",
+    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
+  vista: {
+    label: "Vista",
+    preview: "/noeta/simple/vista/dry-run",
+    run: "/noeta/simple/vista/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "Vista Engineering order acknowledgements (our ref inside the PDF). Money-check → attach to Job + archive. Amended / delay / unmatched → flagged.",
+    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
+  mbdiy: {
+    label: "MB DIY",
+    preview: "/noeta/simple/mbdiy/dry-run",
+    run: "/noeta/simple/mbdiy/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "MB DIY order confirmations (our ref inside the PDF). Money-check → attach to Job + archive. Amended / delay / unmatched → flagged.",
+    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
+  roxor: {
+    label: "Roxor",
+    preview: "/noeta/simple/roxor/dry-run",
+    run: "/noeta/simple/roxor/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "Roxor / Ultra Finishing order confirmations (our ref in the body, e.g. 'Your Reference: 32930_1-REM'). Money-check → attach to Job + archive. Amended / delay / unmatched → flagged.",
+    tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
 };
 
 // Colour + label for each planned action.
