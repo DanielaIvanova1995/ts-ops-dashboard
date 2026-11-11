@@ -671,6 +671,116 @@ def plan_simple_folder(emails, deps, cfg):
     return [plan_simple_email(e, deps, cfg) for e in (emails or [])]
 
 
+# =================================================================================================
+# DEANTA handler — a DISPATCH confirmation: "…your order has been allocated, this is on for delivery
+# tomorrow 10/11" / "…sent with parcelforce between 10/11 – 11/11". Our PO is in the subject
+# ("Purchase Order 33412"). The delivery date is in the BODY → set the Customer ETA (which auto-emails
+# the customer the date) + attach the PDF to Job + archive. HIGH PRECISION: only the clean dispatch
+# confirmations are actioned; out-of-stock, questions, cancellations and "already delivered" replies
+# are flagged for a human (Deanta is a chatty thread — 285+ emails — so we touch only the clear ones).
+# =================================================================================================
+_DEANTA_PO_RE = re.compile(r"purchase order\s+(\d{3,})", re.I)
+_DEANTA_ALLOC_RE = re.compile(r"been allocated", re.I)
+_DEANTA_DELIVERED_RE = re.compile(r"delivery was made|has been delivered|customer (?:has )?accepted", re.I)
+_DEANTA_QUESTION_RE = re.compile(
+    r"can you (?:please )?confirm|do you want us to|we are unable|unable to (?:deliver|ask)|"
+    r"please confirm if|if you want us to cancel|please advise if", re.I)
+_DEANTA_DATE_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b")
+
+
+def parse_deanta_date(body, anchor=None):
+    """Delivery date from a Deanta dispatch body. Picks the LATEST DD/MM date found (so a window
+    '10/11 – 11/11' resolves to the later bound, and a single 'tomorrow 10/11' to that date). Year is
+    inferred from the email's own date (handles a Dec→Jan wrap). ISO string, or None."""
+    anchor = anchor or _dt.date.today()
+    best = None
+    for m in _DEANTA_DATE_RE.finditer(body or ""):
+        dd, mm, yy = int(m.group(1)), int(m.group(2)), m.group(3)
+        if not (1 <= dd <= 31 and 1 <= mm <= 12):
+            continue
+        try:
+            if yy:
+                year = int(yy)
+                year += 2000 if year < 100 else 0
+                cand = _dt.date(year, mm, dd)
+            else:
+                cand = _dt.date(anchor.year, mm, dd)
+                if (cand - anchor).days < -60:          # date already well past → it's next year
+                    cand = _dt.date(anchor.year + 1, mm, dd)
+        except ValueError:
+            continue
+        if best is None or cand > best:
+            best = cand
+    return best.isoformat() if best else None
+
+
+def plan_deanta_email(email, deps):
+    """Plan for one Deanta email. deps.fetch_confirmation → (lines, carriage, pdf_ref, stock)."""
+    subj, body = email.get("subject") or "", email.get("body") or ""
+    base = {"supplier": "Deanta", "subject": email.get("subject"), "email_id": email.get("id"),
+            "order_no": None, "action": "flag", "do": {}}
+
+    sig = delay_signal(subj, body)
+    if sig:
+        return {**base, "plan": f"FLAG — mentions “{sig}” (possible delay) — check by hand", "reason": f"delay signal: {sig}"}
+    if _DEANTA_QUESTION_RE.search(body):
+        return {**base, "plan": "FLAG — Deanta asked a question — reply by hand (leave in folder)", "reason": "question/awaiting our reply"}
+    if _DEANTA_DELIVERED_RE.search(body):
+        return {**base, "plan": "FLAG — Deanta says it's already delivered — confirm/close by hand", "reason": "already delivered"}
+    if not _DEANTA_ALLOC_RE.search(body):
+        return {**base, "plan": "FLAG — not a clear dispatch confirmation — leave for a human", "reason": "not a dispatch confirmation"}
+
+    m = _DEANTA_PO_RE.search(subj)
+    order_no = m.group(1) if m else None
+    conf = deps.fetch_confirmation(email)
+    if not conf:
+        return {**base, "plan": "FLAG — couldn't read the confirmation PDF (check by hand)", "reason": "PDF unreadable"}
+    lines, carriage, pdf_ref, stock = conf
+    if stock:
+        return {**base, "plan": f"FLAG — the document mentions “{stock}” (possible delay) — check by hand",
+                "reason": f"delay signal on the PDF: {stock}"}
+    if not order_no:
+        order_no = pdf_ref
+    base["order_no"] = order_no
+    if not order_no:
+        return {**base, "plan": "FLAG — no order reference (subject or PDF)", "reason": "no order ref"}
+    mon = deps.find_monday(order_no)
+    if not mon:
+        return {**base, "plan": f"FLAG — order {order_no} not found on Monday", "reason": "no Monday match"}
+
+    anchor = None
+    try:
+        anchor = _dt.date.fromisoformat((email.get("received") or "")[:10])
+    except ValueError:
+        anchor = _dt.date.today()
+    eta = parse_deanta_date(body, anchor)
+
+    # Loss-only money guard: Deanta is post-dispatch, and door-SKU line matching is noisy, so we DON'T
+    # hold the dispatch over cosmetic line diffs — only an actual LOSS stops the auto-archive.
+    v = None
+    order = deps.fetch_order(order_no)
+    if order:
+        v = validate_confirmation(lines, carriage, order, our_costs=deps.our_costs(order),
+                                  expected_carriage=deps.expected_carriage(order), floor_pct=10.0)
+        if v.get("profit") is not None and v["profit"] < 0:
+            return {**base, "monday": mon, "validation": v,
+                    "plan": f"FLAG — we'd LOSE £{abs(v['profit']):.2f} on this — check before archiving", "reason": "actual loss"}
+
+    if eta:
+        return {**base, "action": "booked", "monday": mon, "eta": eta, "validation": v,
+                "plan": f"SET Customer ETA {eta} (auto-emails the customer) + attach + ARCHIVE to NV Resolved",
+                "do": {"attach": True, "set_eta": eta, "move_to": NV_RESOLVED,
+                       "update": f"✅ Deanta dispatched — delivery by {eta}."}}
+    return {**base, "action": "booked", "monday": mon, "validation": v,
+            "plan": "ARCHIVE to NV Resolved + FLAG 'set ETA manually'", "reason": "couldn't read the delivery date",
+            "do": {"attach": True, "move_to": NV_RESOLVED,
+                   "update": "⚠ Deanta dispatched — set the Customer ETA manually (date couldn't be read)."}}
+
+
+def plan_deanta_folder(emails, deps):
+    return [plan_deanta_email(e, deps) for e in (emails or [])]
+
+
 def plan_folder(emails, deps):
     """Dry-run plan for a list of Carron folder emails, with per-order dedupe: when several emails
     share an order number and the LATEST one resolves it (booked-in → archive, or a validated move),

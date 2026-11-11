@@ -2843,6 +2843,44 @@ def noeta_simple_run(key: str, limit: int = 300):
     return {"ok": True, "supplier": scf.SIMPLE_CONFIRM[key]["name"], "key": key, "live": True, **out}
 
 
+def _deanta_plan(limit=300):
+    """(emails, deps, plan) for Deanta dispatch confirmations — scans both folders."""
+    import supplier_confirm as scf
+    emails = _noeta_emails_for(("deanta.co.uk",), limit)
+    deps = _LpdDryRunDeps(cost_key="deanta")
+    return emails, deps, scf.plan_deanta_folder(emails, deps)
+
+
+@app.get("/noeta/deanta/dry-run", dependencies=[Depends(require_key_or_statements)])
+def noeta_deanta_dry_run(limit: int = 300):
+    """PREVIEW — Deanta dispatch confirmations: read the delivery date → set Customer ETA + archive.
+    Out-of-stock / questions / already-delivered / loss → flag. Reads/parses only."""
+    try:
+        emails, _deps, plan = _deanta_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    slim, counts = _ss_slim(plan)   # same shape (eta + archive/flag counts)
+    return {"ok": True, "supplier": "Deanta", "folder": "No ETA + Sales Orders", "dry_run": True,
+            "live_enabled": _noeta_live_enabled(), "n_emails": len(emails), "counts": counts, "plan": slim}
+
+
+@app.post("/noeta/deanta/run", dependencies=[Depends(require_key_or_statements)])
+def noeta_deanta_run(limit: int = 300):
+    """LIVE — Deanta: set the Customer ETA (auto-emails the customer), attach the PDF to Job, archive."""
+    if not _noeta_live_enabled():
+        raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
+    try:
+        _emails, deps, plan = _deanta_plan(limit)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
+    out = _noeta_execute(plan, deps, "Deanta")
+    return {"ok": True, "supplier": "Deanta", "live": True, **out}
+
+
 @app.get("/recon/pay-plan-config", dependencies=[Depends(require_key_or_statements)])
 def recon_pay_plan_config_get():
     """The payment-plan settings for the editor: the default weekly threshold + the per-supplier

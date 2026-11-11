@@ -63,6 +63,14 @@ const SUPPLIERS = {
     blurb: "Roxor / Ultra Finishing order confirmations (our ref in the body, e.g. 'Your Reference: 32930_1-REM'). Money-check → attach to Job + archive. Amended / delay / unmatched → flagged.",
     tiles: (t) => [["Archive to NV Resolved", t.archive, "green"], ["Flag — review", t.flag, "red"]],
   },
+  deanta: {
+    label: "Deanta",
+    preview: "/noeta/deanta/dry-run",
+    run: "/noeta/deanta/run",
+    folder: "“No ETA” + “Sales Orders”",
+    blurb: "Deanta dispatch confirmations (our PO in the subject). Reads the delivery date from the body ('delivery tomorrow 10/11' or 'between 10/11–11/11') → sets the Customer ETA (which auto-emails the customer) + attaches the PDF to Job + archives. Out-of-stock / questions / already-delivered / a loss → flagged.",
+    tiles: (t) => [["Set ETA / archive", t.archive, "green"], ["Flag — review", t.flag, "red"]],
+  },
 };
 
 // Colour + label for each planned action.
