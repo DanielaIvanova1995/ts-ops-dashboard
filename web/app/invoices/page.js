@@ -402,13 +402,13 @@ export default function Invoices() {
     } catch { window.prompt("Copy the query email:", discEmailText(iv)); }
   }
 
-  // Draft supplier query emails for the given discrepancies — ONE Outlook draft per supplier
-  // (grouped), in the Accounts mailbox, for review. Never auto-sent.
+  // Email supplier query emails for the given discrepancies — ONE email per supplier (grouped), SENT
+  // DIRECT from the Accounts mailbox and saved to Sent (falls back to a draft only if a send fails).
   async function chaseDiscrepancies(subIds) {
     const ids = [...subIds];
     if (!ids.length) return;
     const n = ids.length;
-    if (!window.confirm(`Draft supplier query email${n === 1 ? "" : "s"} for ${n} discrepanc${n === 1 ? "y" : "ies"}? One draft per supplier is created in the Accounts mailbox for you to review and send — nothing is sent automatically.`)) return;
+    if (!window.confirm(`Email supplier query${n === 1 ? "" : "s"} for ${n} discrepanc${n === 1 ? "y" : "ies"}? One email per supplier is SENT NOW from the Accounts mailbox (saved to Sent). This goes straight to the supplier — there's no draft to review first.`)) return;
     setChasing(true); setChaseResult(null);
     try {
       const res = await jsonFetch("/invoices/chase-discrepancies", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
@@ -416,9 +416,14 @@ export default function Invoices() {
       if (res.ok && d.ok) {
         setChaseResult(d);
         const noEmail = (d.suppliers || []).filter((s) => s.no_email);
-        setNotice({ kind: noEmail.length ? "warn" : "ok", text: `Drafted ${d.drafted} supplier email${d.drafted === 1 ? "" : "s"} in Accounts for review${noEmail.length ? ` — ${noEmail.length} supplier(s) had no email on file` : ""}.` });
+        const nSent = d.sent || 0, nDraft = d.drafted || 0;
+        const bits = [];
+        if (nSent) bits.push(`Emailed ${nSent} supplier${nSent === 1 ? "" : "s"}`);
+        if (nDraft) bits.push(`${nDraft} left as a draft (send failed)`);
+        if (noEmail.length) bits.push(`${noEmail.length} had no email on file`);
+        setNotice({ kind: (noEmail.length || nDraft) ? "warn" : "ok", text: (bits.join(" · ") || "Nothing to send") + "." });
         setDiscSel(new Set());
-      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t draft the chasers." });
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t send the chasers." });
     } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setChasing(false); }
   }
@@ -965,8 +970,8 @@ export default function Invoices() {
                   </select>
                   <span style={{ flex: 1 }} />
                   <button className="btn" onClick={() => setDiscSel(allSel ? new Set() : new Set(discShown.map((x) => x.sub_id)))}>{allSel ? "Clear" : "Select all"}</button>
-                  {discSel.size > 0 && <button className="btn primary" onClick={() => chaseDiscrepancies(discSel)} disabled={chasing}>{chasing ? "Drafting…" : `Chase selected (${discSel.size})`}</button>}
-                  <button className="btn" onClick={() => chaseDiscrepancies(new Set(discShown.map((x) => x.sub_id)))} disabled={chasing} title="Draft one Outlook email per supplier for the discrepancies shown">{chasing ? "…" : chaseAllLabel}</button>
+                  {discSel.size > 0 && <button className="btn primary" onClick={() => chaseDiscrepancies(discSel)} disabled={chasing}>{chasing ? "Sending…" : `Chase selected (${discSel.size})`}</button>}
+                  <button className="btn" onClick={() => chaseDiscrepancies(new Set(discShown.map((x) => x.sub_id)))} disabled={chasing} title="Email one query per supplier for the discrepancies shown — sends now, saved to Sent">{chasing ? "…" : chaseAllLabel}</button>
                   <button className="btn" onClick={() => downloadDiscCsv(discShown, discSupFilter || "all")} disabled={!discShown.length} title="Download these discrepancies as a CSV">Download CSV</button>
                   <button className="btn" onClick={loadWatch} disabled={watching} title="Check which discrepancies already have a matching credit note on the order (report only)">{watching ? "Checking…" : "Credit-note check"}</button>
                 </div>
@@ -975,10 +980,10 @@ export default function Invoices() {
                 </div>
                 {chaseResult && (
                   <div className="route-msg ok" style={{ marginTop: 10 }}>
-                    <b>Drafted {chaseResult.drafted} email{chaseResult.drafted === 1 ? "" : "s"} in the Accounts mailbox</b> — open Outlook to review and send.
+                    <b>Emailed {chaseResult.sent || 0} supplier{(chaseResult.sent || 0) === 1 ? "" : "s"} from Accounts</b> — saved to Sent.{chaseResult.drafted ? ` ${chaseResult.drafted} left as a draft (send failed).` : ""}
                     <div style={{ marginTop: 6 }}>
                       {(chaseResult.suppliers || []).map((r, i) => (
-                        <div key={i} className="sub">{r.drafted ? "✓" : "⚠️"} {r.supplier} · {r.count} invoice{r.count === 1 ? "" : "s"} {r.no_email ? "— no email on file, draft not created" : `→ ${r.email}`}</div>
+                        <div key={i} className="sub">{r.sent ? "✓ sent" : r.drafted ? "⚠️ draft (send failed)" : "⚠️"} {r.supplier} · {r.count} invoice{r.count === 1 ? "" : "s"} {r.no_email ? "— no email on file, nothing sent" : `→ ${r.email}`}</div>
                       ))}
                     </div>
                   </div>
@@ -1008,7 +1013,7 @@ export default function Invoices() {
                   <div className="inv-right">
                     {iv.order_url && <a className="btn ghost" href={iv.order_url} target="_blank" rel="noreferrer">Order ↗</a>}
                     <button className="btn primary" onClick={() => doApproveDisc(iv)} disabled={approving[iv.sub_id] === "working"} title="Approve this invoice to QuickBooks (overrides the discrepancy)">{approving[iv.sub_id] === "working" ? "…" : "Approve → QB"}</button>
-                    <button className="btn" onClick={() => chaseDiscrepancies(new Set([iv.sub_id]))} disabled={chasing} title="Draft an Outlook query email to this supplier for review">Chase</button>
+                    <button className="btn" onClick={() => chaseDiscrepancies(new Set([iv.sub_id]))} disabled={chasing} title="Email a query to this supplier now (sends from Accounts, saved to Sent)">Chase</button>
                     <button className="btn" onClick={() => copyDiscEmail(iv)} title="Copy a query email to the supplier">{discCopied[iv.sub_id] ? "Copied ✓" : "Copy query email"}</button>
                     <button className="btn" onClick={() => doUnflag(iv)} disabled={unflagging[iv.sub_id]} title="Move back to Needs Review">{unflagging[iv.sub_id] ? "…" : "Move back to review"}</button>
                   </div>

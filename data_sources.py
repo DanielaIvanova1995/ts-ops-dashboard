@@ -407,7 +407,8 @@ def fetch_order_shipping(order_id, token: str | None = None) -> dict:
     token = token or shopify_products_token()
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { shippingAddress { zip countryCodeV2 "
-             "country } totalShippingPriceSet { shopMoney { amount } } } }")
+             "country } totalShippingPriceSet { shopMoney { amount } } "
+             "shippingLines(first: 5) { nodes { title } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
         json={"query": query, "variables": {"id": gid}},
@@ -425,8 +426,13 @@ def fetch_order_shipping(order_id, token: str | None = None) -> dict:
                       .get("amount")) or 0.0)
     except (TypeError, ValueError):
         ship = 0.0
+    # Shipping METHOD the customer chose (e.g. "Express", "Next Day") — lets the invoice checker
+    # expect LPD/Deanta next-day carriage when express was picked (Daniela 2026-11-11).
+    method = "; ".join(n.get("title", "").strip()
+                       for n in ((order.get("shippingLines") or {}).get("nodes") or [])
+                       if n.get("title"))
     return {"postcode": sa.get("zip"), "country": sa.get("countryCodeV2") or sa.get("country"),
-            "shipping": ship}
+            "shipping": ship, "shipping_method": method}
 
 
 def fetch_order_shipping_full(order_id, token: str | None = None) -> dict:
@@ -473,7 +479,7 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
     gid = f"gid://shopify/Order/{str(order_id).strip()}"
     query = ("query ($id: ID!) { order(id: $id) { lineItems(first: 100) { edges { node { "
              "title variantTitle quantity currentQuantity sku customAttributes { key value } "
-             "variant { product { tags } inventoryItem { measurement { weight { value unit } } } } "
+             "variant { product { tags vendor } inventoryItem { measurement { weight { value unit } } } } "
              "originalUnitPriceSet { shopMoney { amount } } } } } } }")
     r = requests.post(
         f"https://{store}/admin/api/2024-10/graphql.json",
@@ -521,7 +527,9 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
             if k and v and not k.startswith("_"):
                 props.append({"key": k, "value": v})
         _pv = (n.get("variant") or {})
-        _tags = ((_pv.get("product") or {}).get("tags")) or []
+        _prod = (_pv.get("product") or {})
+        _tags = _prod.get("tags") or []
+        _vendor = (_prod.get("vendor") or "").strip()
         _meas = (((_pv.get("inventoryItem") or {}).get("measurement") or {}).get("weight") or {})
         _wkg = None
         if isinstance(_meas.get("value"), (int, float)):
@@ -530,7 +538,8 @@ def fetch_order_line_items(order_id, token: str | None = None) -> list:
         out.append({"title": title, "base_title": base_title, "variant": variant,
                     "sku": (n.get("sku") or "").strip() or None,
                     "qty": (cq if cq is not None else n.get("quantity")),
-                    "price": price, "properties": props, "tags": _tags, "weight": _wkg})
+                    "price": price, "properties": props, "tags": _tags, "weight": _wkg,
+                    "vendor": _vendor})
     return out
 
 

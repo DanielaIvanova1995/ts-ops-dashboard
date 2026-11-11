@@ -611,27 +611,22 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
         return carron_expected(goods_value, ship)
     if is_ctie(supplier):
         return ctie_expected(goods_value, ship)
-    if norm_code(supplier) == "ajw":
-        # AJW Cedral: flat per-zone carriage by delivery postcode, free over the zone's ex-VAT cost
-        # threshold (measured on our cost = the invoice goods value). White/unknown → can't check.
+    # AJW / Dolle / GAP carriage now lives ONCE in delivery_rules (Daniela 2026-11-11: "fold
+    # AJW/GAP/Dolle into delivery_rules too"), so quotes, POs and the invoice checker price them
+    # identically. Build simple lines from the order dict (carry `sku` for Dolle's per-product band,
+    # tags/weight for completeness). AJW = per-zone by postcode (free over the zone threshold); Dolle
+    # = highest per-product band among ordered SKUs; GAP = free to Derby DE21 4ED, else £20.83 (<£150).
+    sc0 = norm_code(supplier)
+    if sc0 == "ajw" or sc0.startswith("dolle") or sc0 == "gap":
         try:
-            import ajw_delivery
-            r = ajw_delivery.tso_carriage((ship or {}).get("postcode") or "", goods_value or 0)
-            return None if (r.get("quote") or not r.get("known")) else r.get("charge")
+            import delivery_rules as dr
+            lines = [{"description": v.get("name"),
+                      "sku": (k.split("#")[0] if isinstance(k, str) else v.get("sku")),
+                      "qty": v.get("qty"), "tags": v.get("tags") or [], "weight": v.get("weight")}
+                     for k, v in (order or {}).items()]
+            return dr.expected_delivery(supplier, goods_value, ship, lines)
         except Exception:  # noqa: BLE001
             return None
-    if norm_code(supplier).startswith("dolle"):
-        # Dolle carriage = the HIGHEST per-product band among the ORDER's SKUs (a mixed order is
-        # charged the single highest shipping rate, not the sum). None if no order SKU is priced.
-        rates = _dolle_rates()
-        vals = [rates[k.split("#")[0]] for k in (order or {}) if k.split("#")[0] in rates]
-        return round(max(vals), 2) if vals else None
-    if norm_code(supplier) == "gap":
-        # GAP's Derby branch delivers to our office (DE21 4ED) FREE — so a GAP order shipped there
-        # expects no carriage; any charge is an overcharge to query/credit (Daniela 2026-10-05).
-        _pc = re.sub(r"[^a-z0-9]", "", str((ship or {}).get("postcode") or "").lower())
-        if _pc == "de214ed":
-            return 0.0
     # Door- / line-count suppliers: DELEGATE to delivery_rules — the SAME module the quote + PO
     # builders use — so the invoice checker charges the identical rate (Daniela 2026-11-11: new
     # delivery rules must apply everywhere). LPD/JB Kind/Deanta price by door count + postcode
@@ -694,6 +689,69 @@ def ancillary_charge(supplier, sku_raw, desc):
     return None
 
 
+def _merge_lpd_packs(parsed_lines, supplier, pidx):
+    """LPD split one furniture product (e.g. a HALSTON bed) across several 'pack' invoice lines, each
+    with SKU = the base code + a pack index (HALSTON4.6 → HALSTON4.61 + HALSTON4.62) carrying a SHARE
+    of the price; our pricelist holds only the BASE (whole-item) cost. Merge the sibling packs back
+    into ONE line (base SKU, summed total, shared qty) BEFORE pricing, so the item checks against the
+    base cost and matches its order line once — instead of every pack reading 'no pricelist cost' and
+    the quantity being counted once per pack. Only fires for LPD, for a SKU not itself on the
+    pricelist whose base (minus 1-2 trailing digits) IS, with ≥2 such siblings. Non-LPD is untouched."""
+    def _priced(sk_norm):
+        return (pidx.get(sk_norm) or {}).get(supplier) is not None \
+            or order_sku_cost(sk_norm, supplier, pidx) is not None
+
+    def _base(sk_norm):
+        for n in (2, 1):                       # strip up to 2 trailing pack digits to reach a priced base
+            if len(sk_norm) > n and sk_norm[-n:].isdigit() and _priced(sk_norm[:-n]):
+                return sk_norm[:-n]
+        return None
+
+    def _tot(l):
+        if isinstance(l.get("line_total"), (int, float)):
+            return l["line_total"]
+        u, q = l.get("unit_price"), l.get("qty")
+        return u * q if isinstance(u, (int, float)) and isinstance(q, (int, float)) else None
+
+    groups = {}
+    for i, l in enumerate(parsed_lines):
+        raw = l.get("sku") or ""
+        snorm = norm_code(raw)
+        if (not snorm) or str(raw).lstrip().startswith(".") or _priced(snorm) \
+                or is_delivery(raw) or is_delivery(l.get("description")) \
+                or is_surcharge(raw) or is_surcharge(l.get("description")):
+            continue
+        b = _base(snorm)
+        if b:
+            groups.setdefault(b, []).append(i)
+    packs_by_first = {idxs[0]: b for b, idxs in groups.items() if len(idxs) >= 2}
+    if not packs_by_first:
+        return parsed_lines
+    member = {i for idxs in groups.values() if len(idxs) >= 2 for i in idxs}
+    out = []
+    for i, l in enumerate(parsed_lines):
+        if i in packs_by_first:
+            b = packs_by_first[i]
+            packs = [parsed_lines[j] for j in groups[b]]
+            tots = [_tot(p) for p in packs]
+            if any(t is None for t in tots):      # can't sum reliably → leave packs to flag, not mis-price
+                out.extend(packs)
+                continue
+            total = round(sum(tots), 2)
+            qtys = [p.get("qty") for p in packs if isinstance(p.get("qty"), (int, float))]
+            q = qtys[0] if (qtys and len(set(qtys)) == 1) else (qtys[0] if qtys else 1)
+            disp = (os.path.commonprefix([str(p.get("sku") or "") for p in packs])
+                    or str(packs[0].get("sku") or "")).rstrip(" .-") or str(packs[0].get("sku") or "")
+            out.append({"sku": disp, "description": packs[0].get("description"), "qty": q,
+                        "unit_price": round(total / q, 2) if q else total, "line_total": total,
+                        "_pack_note": (f"{len(packs)} packs ("
+                                       + ", ".join(str(p.get("sku")) for p in packs)
+                                       + f") summed to £{total:,.2f}, checked vs the base pricelist cost")})
+        elif i not in member:
+            out.append(l)
+    return out
+
+
 # ---- the 3-way check ------------------------------------------------------------------
 def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=None, tol=0.01):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the order's
@@ -704,6 +762,10 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
     if no_pl:
         tidx = cidx = None
     parsed_lines = parsed.get("lines") or []
+    if norm_code(supplier).startswith("lpd"):
+        # LPD split furniture into priced 'packs' (HALSTON4.6 → HALSTON4.61 + HALSTON4.62) — merge them
+        # back to one base line so the summed packs check against the base pricelist cost once.
+        parsed_lines = _merge_lpd_packs(parsed_lines, supplier, pidx)
 
     def _line_total(l):
         if isinstance(l.get("line_total"), (int, float)):
@@ -858,6 +920,8 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                         issues.append(("name", f"price checked vs '{title_note}' on the pricelist"))
                 elif isinstance(unit, (int, float)) and cost is None:
                     issues.append(("noprice", "no pricelist cost for this supplier/SKU"))
+        if ln.get("_pack_note"):
+            issues.append(("name", ln["_pack_note"]))
         rec = {"sku": sku_raw, "desc": ln.get("description"), "qty": qty,
                "unit": unit, "line_total": ln.get("line_total"), "cost": cost,
                "issues": issues, "_okey": None}

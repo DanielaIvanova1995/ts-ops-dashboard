@@ -149,9 +149,9 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
           const url = URL.createObjectURL(new Blob([arr], { type: "application/pdf" }));
           const a = document.createElement("a"); a.href = url; a.download = d.pdf_name; a.click(); URL.revokeObjectURL(url);
         } catch {}
-        // Drafting does NOT consume credits — they stay in play until the payment is recorded in
+        // Emailing does NOT consume credits — they stay in play until the payment is recorded in
         // QuickBooks (Mark paid). The PDF shows them netted off; the ticks are left as they are.
-        onNotice({ kind: "ok", text: (d.draft_link ? `Remittance drafted in Outlook${d.to_email ? ` to ${d.to_email}` : ""} — review & send. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t create the Outlook draft — send it manually)" : ""}`) });
+        onNotice({ kind: d.draft_link ? "warn" : "ok", text: (d.sent ? `Remittance emailed${d.to_email ? ` to ${d.to_email}` : ""} (saved to Sent). PDF downloaded.` : d.draft_link ? `Couldn’t send — remittance left as a draft in Accounts${d.to_email ? ` to ${d.to_email}` : ""}. PDF downloaded.` : `Remittance PDF downloaded.${remitTo ? " (couldn’t email it — send it manually)" : ""}`) });
       } else onNotice({ kind: "warn", text: d.detail || "Couldn’t build the remittance." });
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setRemitting(false); }
@@ -159,7 +159,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
 
   return (
     <div className="paypanel">
-      <div className="tool-label">Pay these — tick invoices, mark paid in QuickBooks, draft the remittance{overdueCount ? <span className="pill red" style={{ marginLeft: 8 }}>{overdueCount} overdue</span> : null}</div>
+      <div className="tool-label">Pay these — tick invoices, mark paid in QuickBooks, email the remittance{overdueCount ? <span className="pill red" style={{ marginLeft: 8 }}>{overdueCount} overdue</span> : null}</div>
       <div className="sel-ctl">
         <button type="button" className="btn ghost" onClick={() => setSel(new Set(lines.map((l) => l.bill_id)))}>Select all ({lines.length})</button>
         <button type="button" className="btn ghost" onClick={() => setSel(new Set(lines.filter((l) => l._od).map((l) => l.bill_id)))} disabled={!overdueCount}>Select overdue{overdueCount ? ` (${overdueCount})` : ""}</button>
@@ -225,9 +225,9 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
       {bankErr ? <div className="route-msg warn" style={{ marginTop: 6 }}>{bankErr} <button className="linkish" onClick={loadBanks}>retry</button></div> : null}
       <div className="pay-ctl">
         <input className="search" style={{ maxWidth: 300, flex: "none" }} value={remitTo} onChange={(e) => setRemitTo(e.target.value)} placeholder="Supplier accounts email (for the remittance)" />
-        <button className="btn" onClick={draftRemit} disabled={remitting}>{remitting ? "…" : "Draft remittance"}</button>
+        <button className="btn" onClick={draftRemit} disabled={remitting}>{remitting ? "…" : "Email remittance"}</button>
       </div>
-      <div className="sub" style={{ marginTop: 6 }}>Credit notes aren’t written to QuickBooks (no API) — apply them against the bill in QuickBooks by hand. They’re only marked “used” here when you Mark paid in QuickBooks, so drafting a remittance leaves them in play. The remittance is drafted in Outlook for you to review & send.</div>
+      <div className="sub" style={{ marginTop: 6 }}>Credit notes aren’t written to QuickBooks (no API) — apply them against the bill in QuickBooks by hand. They’re only marked “used” here when you Mark paid in QuickBooks, so emailing a remittance leaves them in play. The remittance is emailed direct to the supplier (saved to Sent); you still get the PDF.</div>
     </div>
   );
 }
@@ -391,14 +391,14 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
   async function chase(supplier, reason, lastDate) {
     const email = (cov?.emails || {})[norm(supplier)] || "";
     const msg = email
-      ? `Draft a statement request to ${supplier} at ${email}?`
-      : `Draft a statement request for ${supplier}? No email is on file, so it'll be drafted without a recipient for you to add in Outlook.`;
+      ? `Email a statement request to ${supplier} at ${email} now? It sends straight from Accounts (saved to Sent).`
+      : `Statement request for ${supplier}? No email is on file, so there's nothing to send to — add an accounts email first.`;
     if (!window.confirm(msg)) return;
     try {
       const res = await jsonFetch("/recon/chase-statement", { method: "POST", body: JSON.stringify({ supplier, email, reason, last_date: lastDate || "" }) });
       const d = await res.json();
-      if (res.ok && d.ok) onNotice({ kind: "ok", text: d.draft_link ? `Statement request drafted to ${d.email || supplier} — review & send in Outlook.` : `Draft prepared${d.email ? "" : " — no email on file, add a recipient in Outlook"}.` });
-      else onNotice({ kind: "warn", text: d.detail || "Couldn’t draft it." });
+      if (res.ok && d.ok) onNotice({ kind: d.sent ? "ok" : "warn", text: d.sent ? `Statement request emailed to ${d.email || supplier} (saved to Sent).` : d.draft_link ? `Couldn’t send — left a draft in Accounts for ${d.email || supplier}.` : `No email on file — add an accounts email to send the request.` });
+      else onNotice({ kind: "warn", text: d.detail || "Couldn’t send it." });
     } catch (e) { if (String(e.message) !== "unauthorised") onNotice({ kind: "warn", text: String(e.message || e) }); }
   }
 
@@ -464,7 +464,7 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
               <div className="sub" style={{ marginBottom: 4 }}>Last statement over 35 days old — chase a fresh one:</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {[...stale].sort((a, b) => String(a.supplier || "").localeCompare(String(b.supplier || ""))).map((s, i) => (
-                  <span key={i} className="pill amber">{s.supplier} ⏱<button className="linkish" style={{ marginLeft: 6 }} onClick={() => chase(s.supplier, "stale", s.statement_date || s.saved_at)} title="Draft an email asking for their latest statement">✉ chase</button></span>
+                  <span key={i} className="pill amber">{s.supplier} ⏱<button className="linkish" style={{ marginLeft: 6 }} onClick={() => chase(s.supplier, "stale", s.statement_date || s.saved_at)} title="Email a request for their latest statement (sends now, saved to Sent)">✉ chase</button></span>
                 ))}
               </div>
             </div>
@@ -474,7 +474,7 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
               <div className="sub" style={{ marginBottom: 4 }}>No statement reconciled yet — chase, or drop one in the folder:</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {missing.map((s, i) => (
-                  <span key={i} className="pill grey">{s}<button className="linkish" style={{ marginLeft: 6 }} onClick={() => chase(s, "missing")} title="Draft an email asking for their latest statement">✉ chase</button></span>
+                  <span key={i} className="pill grey">{s}<button className="linkish" style={{ marginLeft: 6 }} onClick={() => chase(s, "missing")} title="Email a request for their latest statement (sends now, saved to Sent)">✉ chase</button></span>
                 ))}
               </div>
             </div>

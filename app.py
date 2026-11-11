@@ -2052,19 +2052,10 @@ def _lpd_doors(lines):
 
 
 def _lpd_expected(lines, ship=None):
-    """Expected (max legit) ex-VAT LPD carriage: door-count band (or hardware rate) + postcode
-    surcharge. None = POA/non-deliverable postcode or can't tell (noted, not flagged)."""
-    surcharge, poa = _lpd_surcharge(ship)
-    if poa:
-        return None
-    doors, packs = _lpd_doors(lines)
-    if doors > 0:
-        base = min(LPD_DOOR_BASE + (doors - 1) * LPD_DOOR_STEP, LPD_DOOR_CAP)
-    elif packs > 0:
-        base = LPD_HARDWARE_LO if packs <= 10 else LPD_HARDWARE_HI
-    else:
-        return None
-    return base + surcharge
+    """Expected (max legit) ex-VAT LPD carriage. DELEGATES to delivery_rules.lpd_expected — the single
+    source the checker + PO builder use — so door-count bands, postcode surcharges, the express/next-day
+    uplift and the weight-priced Home Furniture range all stay in one place (Daniela 2026-11-11)."""
+    return delivery_rules.lpd_expected(lines, ship)
 
 
 # --- Southern Sheeting: delivery priced by the delivery postcode's colour ZONE (ex-VAT):

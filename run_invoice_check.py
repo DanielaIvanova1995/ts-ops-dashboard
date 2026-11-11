@@ -216,6 +216,16 @@ def main(check_only=False, dry_run=None, max_total=None):
             lines = ds.fetch_order_line_items(sid) if sid else None
         except Exception:  # noqa: BLE001
             lines = None
+        # Split order (Monday part like "32290-1"): keep only the live Shopify lines whose vendor maps
+        # to THIS supplier — so another supplier's products don't leak in, but re-added/edited lines are
+        # still caught (order 32290: RFLB36 removed then re-added). Empty filter → fall back to Monday's
+        # cached part list via order_candidates.
+        import re as _re
+        _op = (inv.get("order_part") or "").strip()
+        _on = (inv.get("order_no") or "").strip()
+        if lines and bool(_re.search(r"-\d+$", _op)) and _op != _on:
+            _supc = core.canon_supplier(sup)
+            lines = [l for l in lines if core.canon_supplier(l.get("vendor") or "") == _supc] or None
         order = core.order_candidates(lines, inv.get("order_items"))
         ship = None
         sup_n = core.norm_code(sup)

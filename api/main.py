@@ -1598,7 +1598,11 @@ def recon_open(key: str, refresh: int = 0):
                 snap["n_missing"] = res.get("n_missing")
         except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
             pass
-        # Re-enrich Monday stage/order/margin so older snapshots pick up matching fixes.
+    if refresh:
+        # Re-enrich Monday stage/order/margin so older snapshots pick up matching fixes. Runs on ANY
+        # refresh — NOT gated on a QuickBooks vendor id — because Monday matching needs only the invoice
+        # numbers. LPD has no QB vendor, so the old `and vid` gate meant Refresh never re-matched its
+        # statement to Monday and it stayed stuck showing every invoice as 'not on Monday'.
         try:
             enrich = _statement_monday_enrich([r.get("invoice") for r in rows])
             for r in rows:
@@ -1616,6 +1620,14 @@ def recon_open(key: str, refresh: int = 0):
         snap["credits"] = ds.applied_credits_annotate(vid, snap.get("credits") or [])
     except Exception:  # noqa: BLE001
         pass
+    if refresh:
+        # PERSIST the refreshed snapshot so navigating away and reopening shows the re-matched result.
+        # A plain open is instant and reads the saved snapshot — without saving here, every refresh was
+        # thrown away and the stale 'nothing on Monday' came straight back on reopen.
+        try:
+            ds.recon_save(key, snap)
+        except Exception:  # noqa: BLE001
+            pass
     return snap
 
 
@@ -1691,9 +1703,10 @@ class ChaseIn(BaseModel):
 
 @app.post("/recon/chase-statement", dependencies=[Depends(require_statements_key)])
 def recon_chase_statement(body: ChaseIn):
-    """Draft an email to a supplier asking for their latest statement of account — for suppliers we
-    have no statement from, or whose last statement is too old. Drafted in Outlook (Accounts) for
-    review, never auto-sent. Looks up the supplier's accounts email if one isn't passed."""
+    """Email a supplier asking for their latest statement of account — for suppliers we have no
+    statement from, or whose last statement is too old. SENT DIRECT from Accounts and saved to Sent
+    (Mail.Send, Daniela 2026-11-11); falls back to a Drafts copy only if the send fails. Looks up the
+    supplier's accounts email if one isn't passed."""
     import recon_core
     sup = (body.supplier or "").strip()
     email = (body.email or "").strip()
@@ -1710,13 +1723,19 @@ def recon_chase_statement(body: ChaseIn):
                "on file, and we reconcile supplier statements before scheduling payment.")
     body_txt = f"Hi,\n\n{ask}\n\nMany thanks,\nTrade Superstore Online\nAccounts"
     subject = "Statement of account request — Trade Superstore Online"
-    draft_link = None
+    sent, draft_link = False, None
     if email:
         try:
-            draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            # Mail.Send (granted 2026-11-11): statement chase-ups SEND DIRECT + save to Sent (Daniela's
+            # call) — fall back to a Drafts copy only if the send fails.
+            ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            sent = True
         except Exception:  # noqa: BLE001
-            draft_link = None
-    return {"ok": True, "draft_link": draft_link, "email": email, "supplier": sup,
+            try:
+                draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            except Exception:  # noqa: BLE001
+                draft_link = None
+    return {"ok": True, "sent": sent, "draft_link": draft_link, "email": email, "supplier": sup,
             "subject": subject, "body": body_txt}
 
 
@@ -3823,8 +3842,9 @@ class RemitIn(BaseModel):
 
 @app.post("/recon/remittance", dependencies=[Depends(require_statements_key)])
 def recon_remittance(body: RemitIn):
-    """Build the branded remittance-advice PDF and create an Outlook DRAFT to the supplier (never
-    auto-sent — a person reviews and sends it). Returns the PDF (base64) to download too."""
+    """Build the branded remittance-advice PDF and EMAIL it to the supplier — sent direct from Accounts
+    and saved to Sent (Mail.Send, Daniela 2026-11-11); falls back to a Drafts copy only if the send
+    fails. Returns the PDF (base64) to download too."""
     import base64
     ref = (body.ref or "").strip() or "REM"
     pdf_lines = [{"bill_no": l.get("bill_no") or l.get("inv"), "bill_date": l.get("inv_date"),
@@ -3845,19 +3865,27 @@ def recon_remittance(body: RemitIn):
                 + "_from_Trade_Superstore_Online.pdf")
     cover = (f"Hi,\n\nPlease find attached our remittance advice ({ref}) for a total of "
              f"£{body.total:,.2f}.\n\nKind regards,\nTrade Superstore Online\nAccounts")
-    draft_link = None
+    sent, draft_link = False, None
     if (body.to_email or "").strip():
         try:
-            draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, body.to_email.strip(),
-                                                  f"Remittance Advice — {ref}", cover,
-                                                  pdf_bytes=pdf, pdf_name=pdf_name)
+            # Mail.Send (granted 2026-11-11): remittances SEND DIRECT + save to Sent (Daniela's call) —
+            # fall back to a Drafts copy if the send fails, so the PDF is never lost.
+            ds.send_supplier_email(_ACCOUNTS_MAILBOX, body.to_email.strip(),
+                                   f"Remittance Advice — {ref}", cover,
+                                   pdf_bytes=pdf, pdf_name=pdf_name)
+            sent = True
         except Exception:  # noqa: BLE001
-            draft_link = None     # still return the PDF so it can be downloaded/sent manually
-    # NOTE: drafting a remittance deliberately does NOT mark credit notes as used. The PDF shows the
+            try:
+                draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, body.to_email.strip(),
+                                                      f"Remittance Advice — {ref}", cover,
+                                                      pdf_bytes=pdf, pdf_name=pdf_name)
+            except Exception:  # noqa: BLE001
+                draft_link = None     # still return the PDF so it can be downloaded/sent manually
+    # NOTE: emailing a remittance deliberately does NOT mark credit notes as used. The PDF shows the
     # credits netted off, but they're only recorded as used when the payment is actually recorded in
-    # QuickBooks (/recon/pay), so a draft that's edited or never sent doesn't consume a credit.
+    # QuickBooks (/recon/pay), so a remittance that's edited or never acted on doesn't consume a credit.
     return {"ok": True, "pdf_b64": base64.b64encode(pdf).decode(), "pdf_name": pdf_name,
-            "draft_link": draft_link, "to_email": (body.to_email or "").strip(),
+            "sent": sent, "draft_link": draft_link, "to_email": (body.to_email or "").strip(),
             "credits_applied": 0}
 
 
@@ -4064,11 +4092,11 @@ class ChaseDiscIn(BaseModel):
 
 @app.post("/invoices/chase-discrepancies", dependencies=[Depends(require_key)])
 def invoices_chase_discrepancies(body: ChaseDiscIn):
-    """Draft a supplier query email for the selected discrepancy invoices — ONE Outlook draft per
-    supplier (grouping that supplier's discrepancies into a single email to their accounts address),
-    in the Accounts mailbox for review. Human-gated: never auto-sent, and Monday is NOT marked
-    'queried' here (that only happens when the draft is actually sent). Returns a per-supplier result
-    so the UI can show which drafted and which had no email on file."""
+    """Email a supplier query for the selected discrepancy invoices — ONE email per supplier (grouping
+    that supplier's discrepancies into a single email to their accounts address), SENT DIRECT from the
+    Accounts mailbox and saved to Sent (Mail.Send, Daniela 2026-11-11); falls back to a Drafts copy
+    only if the send fails. Monday isn't auto-marked 'queried' here. Returns a per-supplier result so
+    the UI can show which sent, which drafted (send failed), and which had no email on file."""
     import invoice_core as core
     want = {str(s) for s in (body.sub_ids or [])}
     if not want:
@@ -4115,19 +4143,26 @@ def invoices_chase_discrepancies(body: ChaseDiscIn):
         body_txt = "\n".join(lines)
         subject = (f"Discrepancy on invoice {items[0].get('invoice_no') or 'invoice'}" if _one
                    else f"Discrepancy on {n} invoices")
-        draft_link = None
+        sent, draft_link = False, None
         if email:
             try:
-                draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                # Mail.Send (granted 2026-11-11): discrepancy queries SEND DIRECT to the supplier +
+                # save to Sent (Daniela's call) — fall back to a Drafts copy only if the send fails.
+                ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                sent = True
             except Exception:  # noqa: BLE001
-                draft_link = None
+                try:
+                    draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                except Exception:  # noqa: BLE001
+                    draft_link = None
         results.append({"supplier": sup or "(no supplier)", "email": email, "count": n,
-                        "draft_link": draft_link, "drafted": bool(draft_link),
-                        "no_email": not email, "subject": subject, "body": body_txt,
+                        "sent": sent, "draft_link": draft_link,
+                        "drafted": bool(draft_link), "no_email": not email,
+                        "subject": subject, "body": body_txt,
                         "invoices": [i.get("invoice_no") for i in items]})
     results.sort(key=lambda r: r["supplier"].lower())
-    return {"ok": True, "drafted": sum(1 for r in results if r["drafted"]),
-            "suppliers": results}
+    return {"ok": True, "sent": sum(1 for r in results if r.get("sent")),
+            "drafted": sum(1 for r in results if r["drafted"]), "suppliers": results}
 
 
 @app.post("/invoices/{sub_id}/check", dependencies=[Depends(require_key_or_statements)])
@@ -4196,21 +4231,25 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
         return {"ok": False, "detail": "couldn't read the invoice PDF: " + str((parsed or {}).get("error") or "")[:140]}
     sup = inv.get("supplier")
     sid = inv.get("shopify_order_id")
-    # A SPLIT order (Monday part named like "31986-2") is shared between suppliers — this invoice only
-    # covers THIS supplier's part. Checking it against the WHOLE Shopify order would flag the OTHER
-    # supplier's lines as "not invoiced" (order 31986: planks = Squaredeal, the rest = UPB). So for a
-    # split, use the Monday split-part's OWN item list (order_items) only, not the full Shopify order.
+    # A SPLIT order (Monday part named like "31986-2") is shared between parts/suppliers — this invoice
+    # only covers THIS supplier's lines. For a split we use the LIVE Shopify lines but FILTER to the
+    # lines whose vendor maps to this supplier — so another supplier's products never leak in (order
+    # 31986: planks = Squaredeal, the rest = UPB), yet re-added/edited lines ARE caught (order 32290:
+    # RFLB36 removed then re-added via an order edit was being missed when we used Monday's stale part
+    # text). If the vendor filter leaves nothing (vendor blank, or an odd mapping), fall back to
+    # Monday's cached part list so we never check against an empty order.
     import re as _re
     _op = (inv.get("order_part") or "").strip()
     _on = (inv.get("order_no") or "").strip()
     is_split = bool(_re.search(r"-\d+$", _op)) and _op != _on
-    if is_split:
+    try:
+        lines = ds.fetch_order_line_items(sid) if sid else None
+    except Exception:  # noqa: BLE001
         lines = None
-    else:
-        try:
-            lines = ds.fetch_order_line_items(sid) if sid else None
-        except Exception:  # noqa: BLE001
-            lines = None
+    if is_split and lines:
+        _supc = core.canon_supplier(sup)
+        _kept = [l for l in lines if core.canon_supplier(l.get("vendor") or "") == _supc]
+        lines = _kept or None      # empty filter → fall back to the Monday part list below
     order = core.order_candidates(lines, inv.get("order_items"))
     ship, sup_n = None, core.norm_code(sup)
     # Postcode-dependent carriage (zone or door-count + surcharge) needs the delivery address.

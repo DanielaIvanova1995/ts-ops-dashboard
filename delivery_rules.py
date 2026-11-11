@@ -186,6 +186,18 @@ def jbkind_expected(lines, ship=None):
 LPD_DOOR_BASE, LPD_DOOR_STEP, LPD_DOOR_CAP = 40.0, 5.0, 80.0
 LPD_HARDWARE_LO, LPD_HARDWARE_HI = 15.0, 20.0
 _LPD_CONGESTION = {"W1", "NW1", "WC1", "WC2", "EC1", "EC2", "EC3", "EC4", "E1", "SE1", "SE11"}
+# NEXT-DAY / EXPRESS courier — when the customer picks express LPD door delivery on Shopify, LPD add
+# a next-day uplift ON TOP of the standard door charge + any postcode surcharge (flyer 2025, per
+# delivery: 1-2 doors +£50, 3-4 +£70, 5+ +£90). E.g. order 32925 = 1 door express → £40 + £50 = £90.
+LPD_NEXTDAY = ((2, 50.0), (4, 70.0))
+LPD_NEXTDAY_OVER = 90.0
+
+
+def _lpd_nextday_uplift(doors):
+    for hi, c in LPD_NEXTDAY:
+        if doors <= hi:
+            return c
+    return LPD_NEXTDAY_OVER
 
 
 def _lpd_pc_parts(ship):
@@ -327,6 +339,8 @@ def lpd_expected(lines, ship=None):
     doors, packs = _lpd_doors(lines)
     if doors > 0:
         base = min(LPD_DOOR_BASE + (doors - 1) * LPD_DOOR_STEP, LPD_DOOR_CAP)
+        if _is_express(ship):
+            base += _lpd_nextday_uplift(doors)   # customer picked express/next-day courier
     elif packs > 0:
         base = LPD_HARDWARE_LO if packs <= 10 else LPD_HARDWARE_HI
     else:
@@ -476,6 +490,11 @@ def expected_delivery(supplier, goods=None, ship=None, lines=None):
         return dolle_expected(lines)
     if s.startswith("vista"):
         return vista_expected(goods, lines)
+    if s == "gap":
+        # GAP's Derby branch delivers to our office (DE21 4ED) FREE; any charge there is an overcharge
+        # to query. Everywhere else falls through to GAP's flat rate below.
+        if re.sub(r"[^a-z0-9]", "", str((ship or {}).get("postcode") or "").lower()) == "de214ed":
+            return 0.0
     if s in FLAT:
         flat, free_over = FLAT[s]
         if free_over is not None and goods is not None and goods >= free_over:
