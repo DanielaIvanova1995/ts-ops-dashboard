@@ -28,7 +28,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Each invoice is a PDF download + AI parse (~4-5s), so a big backlog sweep needs headroom — a
+    # 250-invoice run timed out at 20 min. GitHub allows up to 6h; 120 min clears a full backlog.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
