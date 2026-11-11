@@ -2448,25 +2448,46 @@ def _noeta_execute(plan, deps, supplier):
             "n_skipped": sum(1 for r in results if r["status"] == "skipped")}
 
 
+def _noeta_base_order_no(s):
+    """'33047-1' / '33047 (1 of 2)' → '33047' — a split-order suffix stripped to the base."""
+    import re as _re
+    m = _re.match(r"^\s*([A-Za-z]*\d+)", str(s or ""))
+    return (m.group(1) if m else str(s or "")).strip()
+
+
 def _noeta_monday_map(order_nos):
-    """{order_no: monday_item_id} for the given order numbers (one Orders-board query). Empty on error."""
-    nos = [str(n) for n in order_nos if n]
+    """{order_no: monday_item_id}. Handles SPLIT orders: a supplier ref like '33047-1' is the Monday
+    item NAME, but the order-no column holds the base '33047' (shared by 33047-1/33047-2). So we match
+    by item name first (picks the exact split line), then the order-no column, then — for a suffixed
+    ref — the base column value if it's unique. Empty on error."""
+    nos = [str(n).strip() for n in order_nos if str(n).strip()]
     if not nos:
         return {}
+    vals = sorted(set(nos) | {_noeta_base_order_no(n) for n in nos})
     try:
-        q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(limit:100,board_id:$b,'
-             'columns:[{column_id:"text_mkv6z0nt",column_values:$vals}]){items{id '
+        q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(limit:300,board_id:$b,'
+             'columns:[{column_id:"text_mkv6z0nt",column_values:$vals}]){items{id name '
              'column_values(ids:["text_mkv6z0nt"]){text}}}}')
-        data = ds._monday_gql(q, {"b": "1786542990", "vals": nos})
-        out = {}
-        for it in ((data.get("items_page_by_column_values") or {}).get("items") or []):
-            cv = (it.get("column_values") or [{}])
-            no = (cv[0].get("text") or "").strip()
-            if no:
-                out[no] = str(it.get("id"))
-        return out
+        data = ds._monday_gql(q, {"b": "1786542990", "vals": vals})
     except Exception:  # noqa: BLE001
         return {}
+    items = []
+    for it in ((data.get("items_page_by_column_values") or {}).get("items") or []):
+        name = (it.get("name") or "").strip()
+        ono = ((it.get("column_values") or [{}])[0].get("text") or "").strip()
+        items.append((str(it.get("id")), name, ono))
+    out = {}
+    for ref in nos:
+        if ref in out:
+            continue
+        m = [iid for iid, name, ono in items if name == ref]          # 1) exact item name (split line)
+        if len(m) != 1:
+            m = [iid for iid, name, ono in items if ono == ref]       # 2) exact order-no column
+        if len(m) != 1 and _noeta_base_order_no(ref) != ref:          # 3) suffixed ref → unique base
+            m = [iid for iid, name, ono in items if ono == _noeta_base_order_no(ref)]
+        if len(m) == 1:
+            out[ref] = m[0]
+    return out
 
 
 class _CarronDryRunDeps:

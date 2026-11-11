@@ -250,6 +250,15 @@ def _nsku(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def _desc_tokens(s):
+    """Significant words in a product description (len>=3, trailing-s stripped for simple plurals) —
+    for matching a Shopify line to a confirmation line when the SUPPLIER used its own code."""
+    out = set()
+    for t in re.findall(r"[a-z0-9]{3,}", (s or "").lower()):
+        out.add(t[:-1] if len(t) >= 5 and t.endswith("s") else t)
+    return out
+
+
 def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expected_carriage=None,
                           fee_pct=SHOPIFY_FEE_PCT, floor_pct=MARGIN_FLOOR_PCT):
     """Validate a supplier order confirmation against the Shopify order and the money.
@@ -275,16 +284,18 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
     line_report = []
     all_verified = our_costs is not None   # did we confirm EVERY product line's price vs our cost?
     overcharge = False
-    # Every Shopify line must appear on the confirmation at the right qty.
+    unmatched_orders = []                  # order lines with no SKU match on the confirmation
+    used_conf = set()                      # confirmation keys consumed by a match
+    # 1) Match every Shopify line to the confirmation by SKU.
     for k, olist in ord_by.items():
         oq = sum(float(o.get("qty") or 0) for o in olist)
         clist = conf_by.get(k) or []
-        cq = sum(float(c.get("qty") or 0) for c in clist)
         title = olist[0].get("title") or olist[0].get("sku")
         if not clist:
-            issues.append(f"On the order but NOT on the confirmation: {title} (SKU {olist[0].get('sku')})")
-            line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "missing"})
+            unmatched_orders.append((k, olist))
             continue
+        used_conf.add(k)
+        cq = sum(float(c.get("qty") or 0) for c in clist)
         if abs(cq - oq) > 0.001:
             issues.append(f"Qty mismatch for {title}: order {oq:g} vs confirmation {cq:g}")
         unit = clist[0].get("unit_price")
@@ -297,11 +308,45 @@ def validate_confirmation(conf_lines, conf_carriage, order, our_costs=None, expe
                 overcharge = True
         line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "ok",
                             "qty": oq, "unit_price": unit})
-    # Extra lines on the confirmation that aren't on the order (ignore carriage-type lines).
-    for k, clist in conf_by.items():
-        if k not in ord_by and not _CARRIAGE_SKU.search((clist[0].get("sku") or "") + " " + (clist[0].get("desc") or "")):
-            issues.append(f"On the confirmation but NOT on the order: {clist[0].get('desc') or clist[0].get('sku')}")
-            line_report.append({"sku": clist[0].get("sku"), "title": clist[0].get("desc"), "status": "extra"})
+    # Confirmation lines not matched by SKU (excluding carriage).
+    extra_keys = [k for k in conf_by if k not in used_conf
+                  and not _CARRIAGE_SKU.search((conf_by[k][0].get("sku") or "") + " " + (conf_by[k][0].get("desc") or ""))]
+    # 2) DESCRIPTION fallback: suppliers often use their OWN code and sell per-unit vs our pack (e.g.
+    # Vista '100 x 1 unit' vs our '1 x pack of 100'). Pair leftover order lines to leftover confirmation
+    # lines by description-word overlap; per-unit price/qty legitimately differ, so compare the LINE
+    # TOTAL vs our cost × order-qty for the overcharge instead, and don't raise a qty mismatch.
+    for pair in unmatched_orders[:]:
+        k, olist = pair
+        otok = _desc_tokens(f"{olist[0].get('title') or ''} {olist[0].get('sku') or ''}")
+        best, bestscore = None, 0.0
+        for ck in extra_keys:
+            ctok = _desc_tokens(f"{conf_by[ck][0].get('desc') or ''} {conf_by[ck][0].get('sku') or ''}")
+            inter = otok & ctok
+            score = len(inter) / max(1, len(otok))
+            if len(inter) >= 2 and score > bestscore:
+                best, bestscore = ck, score
+        if best is not None and bestscore >= 0.5:
+            clist = conf_by[best]
+            title = olist[0].get("title") or olist[0].get("sku")
+            oq = sum(float(o.get("qty") or 0) for o in olist)
+            conf_total = round(sum(float(c.get("unit_price") or 0) * float(c.get("qty") or 0) for c in clist), 2)
+            oc = (our_costs or {}).get(olist[0].get("sku")) or (our_costs or {}).get(k)
+            if our_costs is None or oc is None:
+                all_verified = False
+            elif conf_total > round(float(oc) * oq, 2) + 0.02:
+                issues.append(f"Overcharge on {title}: confirmation line £{conf_total:.2f} vs our cost £{float(oc) * oq:.2f}")
+                overcharge = True
+            line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "ok (matched by description)", "qty": oq})
+            unmatched_orders.remove(pair)
+            extra_keys.remove(best)
+    # 3) Whatever is left really is missing / extra.
+    for k, olist in unmatched_orders:
+        title = olist[0].get("title") or olist[0].get("sku")
+        issues.append(f"On the order but NOT on the confirmation: {title} (SKU {olist[0].get('sku')})")
+        line_report.append({"sku": olist[0].get("sku"), "title": title, "status": "missing"})
+    for ck in extra_keys:
+        issues.append(f"On the confirmation but NOT on the order: {conf_by[ck][0].get('desc') or conf_by[ck][0].get('sku')}")
+        line_report.append({"sku": conf_by[ck][0].get("sku"), "title": conf_by[ck][0].get("desc"), "status": "extra"})
 
     # Carriage check.
     if expected_carriage is not None and conf_carriage is not None \
