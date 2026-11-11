@@ -17,6 +17,7 @@ CANON = {
     "travisperkins": "Travis Perkins", "tp": "Travis Perkins", "gap": "GAP",
     "huwsgray": "Huws Gray", "edmundson": "Edmundson", "mercado": "Mercardo",
     "searchlight": "Edmundson",   # Searchlight (lighting) brand is ordered from Edmundson (Daniela 2026-11-10)
+    "sigenergy": "Edmundson",     # SigEnergy brand is ordered from Edmundson (Daniela 2026-11-11)
     "hurlinghambaths": "Carron", "hurlingham": "Carron",   # Hurlingham (Baths) = Carron (Daniela 2026-10-12)
     "nationalskirting": "National Skirting", "molan": "Molan", "storm": "Storm",
     "pjh": "PJH", "nuie": "Nuie", "roxor": "Nuie", "decor8": "Decor8", "paintersworld": "Decor8",
