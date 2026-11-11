@@ -98,6 +98,43 @@ def _read_pdf(inv):
         return {"error": str(e)}
 
 
+# Each run only processes MAX_INVOICES (memory-bounded PDF parsing). With a big Needs-Review backlog in
+# board order (oldest first), the runner used to re-chew the same stuck front every run and never reach
+# the approvable invoices behind them — so they sat until a manual run. The cooldown below records which
+# invoices were CHECKED-AND-LEFT and skips them for INV_RECHECK_HOURS, so each run ADVANCES through the
+# whole queue; stuck ones are revisited later (to catch any that became approvable).
+_SEEN_KEY = "invoice_check_seen"
+_RECHECK_H = float(os.environ.get("INV_RECHECK_HOURS", "36"))
+
+
+def _now_iso():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_seen():
+    try:
+        import supabase_db
+        if supabase_db.configured():
+            return dict((supabase_db.config_get(_SEEN_KEY) or {}).get("rows") or {})
+    except Exception:  # noqa: BLE001
+        pass
+    return {}
+
+
+def _save_seen(seen):
+    try:
+        import supabase_db
+        from datetime import datetime, timezone, timedelta
+        if not supabase_db.configured():
+            return
+        keep_after = (datetime.now(timezone.utc) - timedelta(hours=_RECHECK_H * 3)).isoformat()
+        pruned = {k: v for k, v in seen.items() if v >= keep_after}
+        supabase_db.config_set(_SEEN_KEY, {"rows": pruned})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(check_only=False, dry_run=None, max_total=None):
     """Headless invoice auto-check. check_only=True marks clean, in-margin invoices 'Matched
     (TradeHub)' for Daniela to approve (NEVER writes the approve label / never touches QuickBooks),
@@ -131,8 +168,21 @@ def main(check_only=False, dry_run=None, max_total=None):
     invs = _dedup(invs)
     amt_dups = core.amount_dup_ids(invs)          # same order + same £, different inv number
 
+    # Advance through the queue: skip invoices already checked-and-left within the cooldown, so each run
+    # reaches NEW/unseen ones instead of re-chewing the oldest stuck front. If everything is on cooldown,
+    # revisit the whole backlog (so nothing is skipped forever).
+    from datetime import datetime, timezone, timedelta
+    seen = {} if dry else _load_seen()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=_RECHECK_H)).isoformat()
+    fresh = [i for i in invs if seen.get(str(i.get("sub_id")), "") < cutoff]
+    n_skipped = len(invs) - len(fresh)
+    if n_skipped:
+        log(f"  skipping {n_skipped} checked in the last {_RECHECK_H:.0f}h — advancing the queue")
+    queue = fresh if fresh else invs
+
+    left = {}     # sub_ids left in Needs Review this run → put on cooldown so the next run moves on
     n = pushed = held = flagged = review = dupflag = fail = 0
-    for inv in invs[:(max_total or MAX_INVOICES)]:
+    for inv in queue[:(max_total or MAX_INVOICES)]:
         n += 1
         no, sup, sid = inv.get("invoice_no"), inv.get("supplier"), inv.get("shopify_order_id")
         # Suspected double-invoice → never auto-approve; leave in Needs Review with a note.
@@ -149,15 +199,18 @@ def main(check_only=False, dry_run=None, max_total=None):
                         "Check you're not paying twice.")
                 except Exception:  # noqa: BLE001
                     pass
+            left[str(inv.get("sub_id"))] = _now_iso()
             continue
         if not inv.get("asset_id"):
             review += 1
             log(f"  {no} ({sup}): no PDF attached — left for review")
+            left[str(inv.get("sub_id"))] = _now_iso()
             continue
         parsed = _read_pdf(inv)
         if parsed.get("error"):
             fail += 1
             log(f"  {no} ({sup}): unreadable — {parsed['error'][:90]}")
+            left[str(inv.get("sub_id"))] = _now_iso()
             continue
         try:
             lines = ds.fetch_order_line_items(sid) if sid else None
@@ -203,11 +256,13 @@ def main(check_only=False, dry_run=None, max_total=None):
             flagged += 1
             log(f"  {no} ({sup}, order {inv.get('order_no')}): matched, margin {m} > {HI:.0f}% "
                 "-> left in Needs Review (high margin — check for a missing invoice)")
+            left[str(inv.get("sub_id"))] = _now_iso()
             continue
         else:
             review += 1
             log(f"  {no} ({sup}, order {inv.get('order_no')}): {res['n_issues']} issue(s) "
                 "-> left in Needs Review for you to check")
+            left[str(inv.get("sub_id"))] = _now_iso()
             continue
         # FULL-AUTO: a clean, in-margin invoice (action "push") is approved straight to QuickBooks —
         # create the bill + mark 'Approved (To QB by TradeHub)'. CHECK-ONLY instead marks it
@@ -235,6 +290,9 @@ def main(check_only=False, dry_run=None, max_total=None):
                 log("     status write failed:", str(e)[:120])
         time.sleep(0.2)
 
+    if not dry and left:
+        seen.update(left)
+        _save_seen(seen)
     log(f"=== done · checked {n} · {'matched' if check_only else 'push'} {pushed} · hold {held} · "
         f"flag {flagged} · review {review} · possible-dup {dupflag} · unreadable {fail} ===")
     if dry:
