@@ -243,7 +243,11 @@ def classify_carron(subject, body, sender="", email_date=None):
 # --- Order-confirmation money-check (line-by-line vs Shopify + prices + carriage + margin) ---------
 SHOPIFY_FEE_PCT = 1.8        # card/platform fee taken off the customer's inc-VAT payment
 MARGIN_FLOOR_PCT = 10.0     # below this (after the fee) = flag, don't lose money even if lines match
-_CARRIAGE_SKU = re.compile(r"carriage|deliver|shipping|freight|pallet", re.I)
+# Non-product charge lines on a confirmation — folded into cost, NOT flagged as a mystery "extra"
+# line (carriage/delivery, plus legit supplier add-ons like a manufacturer surcharge / handling /
+# minimum-order charge — e.g. MB Decor's "Manufacturers Surcharge", Daniela 2026-11-11).
+_CARRIAGE_SKU = re.compile(
+    r"carriage|deliver|shipping|freight|pallet|surcharge|handling|min(?:imum)?\s*order", re.I)
 
 
 def _nsku(s):
@@ -531,7 +535,9 @@ def plan_lpd_folder(emails, deps):
 _DELAY_RE = re.compile(
     r"out[\s-]?of[\s-]?stock|\bno stock\b|not in stock|back[\s-]?order|\boos\b|discontinued|"
     r"awaiting stock|to follow|on back[\s-]?order|no longer available|unavailable|lead[\s-]?time|"
-    r"\bdelay(?:ed|s)?\b|not expected until|"
+    # NB: bare "delay/delays" removed — it matches footer boilerplate ("to avoid delays…") and
+    # false-flagged a normal Deanta dispatch (Daniela 2026-11-11). Specific stock phrases are reliable.
+    r"not expected until|"
     # account holds that stop an order going ahead (Daniela 2026-11-11)
     r"credit control|on hold|account.{0,12}hold|held in credit|overdue", re.I)
 
@@ -545,6 +551,52 @@ def delay_signal(*texts):
         if m:
             return m.group(0)
     return None
+
+
+# =================================================================================================
+# SUPPLIER QUERY EMAIL — when a confirmation is flagged on a price/line discrepancy, turn the internal
+# validation issues into a polite supplier query (plain text) for staff to review + send. Returns None
+# when the only issues are internal (e.g. a thin-margin flag) with nothing to actually ask the supplier.
+# =================================================================================================
+_QUERY_FACING = ("overcharge", "on the order but not", "on the confirmation but not", "qty mismatch", "carriage")
+
+
+def _phrase_issue(i):
+    m = re.match(r"overcharge on (.+?): (?:confirmation line )?£([\d.]+) vs our cost £([\d.]+)", i, re.I)
+    if m:
+        return f"- {m.group(1)}: your confirmation shows £{m.group(2)}, but our agreed price is £{m.group(3)}. Please confirm or correct."
+    m = re.match(r"on the order but NOT on the confirmation: (.+?)(?: \(SKU.*)?$", i, re.I)
+    if m:
+        return f"- {m.group(1)}: this was on our order but we can't see it on your confirmation. Please confirm it is included."
+    m = re.match(r"on the confirmation but NOT on the order: (.+)$", i, re.I)
+    if m:
+        return f"- {m.group(1)}: this is on your confirmation but not on our order. Please clarify."
+    m = re.match(r"qty mismatch for (.+?): order ([\d.]+) vs confirmation ([\d.]+)", i, re.I)
+    if m:
+        return f"- {m.group(1)}: we ordered {m.group(2)} but your confirmation shows {m.group(3)}. Please confirm the quantity."
+    m = re.match(r"carriage £([\d.]+) vs expected £([\d.]+)", i, re.I)
+    if m:
+        return f"- Carriage: your confirmation shows £{m.group(1)} but we expected £{m.group(2)}. Please confirm."
+    return f"- {i}"
+
+
+def build_query_email(plan):
+    """{subject, body, n} for a supplier query on this flagged confirmation, or None if nothing is
+    supplier-facing (e.g. a thin margin, or no Monday/Shopify match)."""
+    v = plan.get("validation")
+    if not v:
+        return None
+    facing = [i for i in (v.get("issues") or []) if any(t in i.lower() for t in _QUERY_FACING)]
+    if not facing:
+        return None
+    order_no = str(plan.get("order_no") or "").strip()
+    ref = f" (our order {order_no})" if order_no else ""
+    body = ("Hi,\n\nThank you for your order confirmation" + ref + ".\n\n"
+            "Before we proceed, could you please check the following:\n\n"
+            + "\n".join(_phrase_issue(i) for i in facing)
+            + "\n\nMany thanks,\nTrade Superstore Online")
+    return {"subject": (f"Query - our order {order_no}" if order_no else "Query - order confirmation"),
+            "body": body, "n": len(facing)}
 
 
 # =================================================================================================

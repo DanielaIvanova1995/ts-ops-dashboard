@@ -2287,6 +2287,15 @@ _NOETA_AUDIT_KEY = "noeta_audit"           # Supabase log of every LIVE action t
 _NOETA_FOLDER_IDS = {}                     # {folder name: id} cache for the live moves
 
 
+def _noeta_is_noreply(addr):
+    a = (addr or "").lower()
+    return any(x in a for x in ("noreply", "no-reply", "donotreply", "do-not-reply", "no_reply"))
+
+
+def _noeta_senders(emails):
+    return {e.get("id"): e.get("sender") for e in (emails or []) if e.get("id")}
+
+
 def _noeta_live_enabled():
     """Live moves/ETA writes are ON by default; set env NOETA_LIVE to 0/off/false/no to kill-switch
     them (the dry-run previews keep working either way)."""
@@ -2365,12 +2374,14 @@ def _noeta_audit_add(entries):
         pass
 
 
-def _noeta_execute(plan, deps, supplier):
+def _noeta_execute(plan, deps, supplier, senders=None):
     """Carry out the LIVE directive (`do`) on each planned email: attach the confirmation PDF to the
     Job column, set the Customer ETA, post a short update, then MOVE the email to its destination
     folder (move last, so a mid-way failure leaves the email in place to retry). Idempotent — skips
     message ids a prior run already finished, and each sub-step is individually safe to repeat.
     Returns per-email outcomes + an audit trail. Honors the NOETA_LIVE kill switch."""
+    import supplier_confirm as scf
+    senders = senders or {}
     results, audit = [], []
     done = _noeta_audit_done_ids()
     for p in plan:
@@ -2378,7 +2389,8 @@ def _noeta_execute(plan, deps, supplier):
         mid = p.get("email_id")
         # Flagged-for-review emails: raise the Outlook follow-up flag and park them in the No-ETA
         # folder so a human works them in one place (Daniela 2026-11-11). The flag also makes the next
-        # run skip them (so they're not re-processed/re-parsed).
+        # run skip them (so they're not re-processed/re-parsed). When the flag is a price/line
+        # discrepancy, ALSO draft a supplier query email for staff to review + send.
         if (p.get("plan") or "").startswith("FLAG"):
             if not mid:
                 continue
@@ -2386,6 +2398,16 @@ def _noeta_execute(plan, deps, supplier):
             try:
                 ds.set_message_flag(_NOETA_MAILBOX, mid)
                 steps.append("flagged")
+                q = scf.build_query_email(p)
+                frm = (senders.get(mid) or "").strip()
+                if q and frm and not _noeta_is_noreply(frm):
+                    try:
+                        ds.create_supplier_draft(_NOETA_MAILBOX, frm, q["subject"], q["body"])
+                        steps.append(f"drafted query → {frm}")
+                    except Exception as e:  # noqa: BLE001
+                        steps.append(f"draft failed: {str(e)[:60]}")
+                elif q:
+                    steps.append("query not drafted (no reply-to address)")
                 fid = _noeta_folder_id(_NOETA_FOLDER)
                 if fid:
                     ds.move_message_to_folder(_NOETA_MAILBOX, mid, fid)
@@ -2650,12 +2672,12 @@ def noeta_carron_run(limit: int = 200):
     if not _noeta_live_enabled():
         raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
     try:
-        _emails, deps, plan = _carron_plan(limit)
+        emails, deps, plan = _carron_plan(limit)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
-    out = _noeta_execute(plan, deps, "Carron")
+    out = _noeta_execute(plan, deps, "Carron", _noeta_senders(emails))
     return {"ok": True, "supplier": "Carron", "live": True, **out}
 
 
@@ -2792,12 +2814,12 @@ def noeta_lpd_run(limit: int = 40):
     if not _noeta_live_enabled():
         raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
     try:
-        _emails, deps, plan = _lpd_plan(limit)
+        emails, deps, plan = _lpd_plan(limit)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
-    out = _noeta_execute(plan, deps, "LPD")
+    out = _noeta_execute(plan, deps, "LPD", _noeta_senders(emails))
     return {"ok": True, "supplier": "LPD", "live": True, **out}
 
 
@@ -2844,12 +2866,12 @@ def noeta_ss_run(limit: int = 40):
     if not _noeta_live_enabled():
         raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
     try:
-        _emails, deps, plan = _ss_plan(limit)
+        emails, deps, plan = _ss_plan(limit)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
-    out = _noeta_execute(plan, deps, "Southern Sheeting")
+    out = _noeta_execute(plan, deps, "Southern Sheeting", _noeta_senders(emails))
     return {"ok": True, "supplier": "Southern Sheeting", "live": True, **out}
 
 
@@ -2899,12 +2921,12 @@ def noeta_simple_run(key: str, limit: int = 300):
     if not _noeta_live_enabled():
         raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
     try:
-        _emails, deps, plan = _simple_plan(key, limit)
+        emails, deps, plan = _simple_plan(key, limit)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
-    out = _noeta_execute(plan, deps, scf.SIMPLE_CONFIRM[key]["name"])
+    out = _noeta_execute(plan, deps, scf.SIMPLE_CONFIRM[key]["name"], _noeta_senders(emails))
     return {"ok": True, "supplier": scf.SIMPLE_CONFIRM[key]["name"], "key": key, "live": True, **out}
 
 
@@ -2937,12 +2959,12 @@ def noeta_deanta_run(limit: int = 300):
     if not _noeta_live_enabled():
         raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
     try:
-        _emails, deps, plan = _deanta_plan(limit)
+        emails, deps, plan = _deanta_plan(limit)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
-    out = _noeta_execute(plan, deps, "Deanta")
+    out = _noeta_execute(plan, deps, "Deanta", _noeta_senders(emails))
     return {"ok": True, "supplier": "Deanta", "live": True, **out}
 
 
@@ -3033,12 +3055,12 @@ def noeta_tp_run(limit: int = 300):
     if not _noeta_live_enabled():
         raise HTTPException(status_code=403, detail="Live processing is switched off (NOETA_LIVE).")
     try:
-        _emails, deps, plan = _tp_plan(limit)
+        emails, deps, plan = _tp_plan(limit)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Couldn't read the folder: {e}")
-    out = _noeta_execute(plan, deps, "Travis Perkins")
+    out = _noeta_execute(plan, deps, "Travis Perkins", _noeta_senders(emails))
     return {"ok": True, "supplier": "Travis Perkins", "live": True, **out}
 
 
