@@ -4296,14 +4296,20 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
         except Exception:  # noqa: BLE001
             ship = None
     pidx, tidx, cidx = _inv_indexes()
-    res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship)
-    matched = res["n_issues"] == 0
+    res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship,
+                             agreed_cost=inv.get("agreed_cost"),
+                             single_invoice=(inv.get("n_invoices") == 1))
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+    matched = res["n_issues"] == 0 or res.get("agreed_total_match")
     _lo = lo if lo is not None else core.MARGIN_PUSH_MIN
     _hi = hi if hi is not None else core.MARGIN_PUSH_MAX
     _rule = core.SUPPLIER_RULES.get(core.norm_code(sup), {})
     _lo_eff = _rule.get("push_min", _lo)
-    label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"), sup, _lo, _hi)
+    if res.get("agreed_total_match"):
+        # Single invoice total == agreed £ to supplier → price confirmed; approve regardless of margin.
+        label, action = core.APPROVED_QB_LABEL, "push"
+    else:
+        label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"), sup, _lo, _hi)
     # Order-level double-charge guard: even if THIS invoice matches on its own, flag it when the WHOLE
     # order has been over-invoiced across ALL its invoices/credits (order 31371) — a second invoice can
     # re-bill items a first already covered and each looks fine alone. Considers them together.

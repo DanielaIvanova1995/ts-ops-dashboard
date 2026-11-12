@@ -236,11 +236,17 @@ def main(check_only=False, dry_run=None, max_total=None):
                 ship = ds.fetch_order_shipping(sid)
             except Exception:  # noqa: BLE001
                 ship = None
-        res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship)
-        matched = res["n_issues"] == 0
+        res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship,
+                                 agreed_cost=inv.get("agreed_cost"),
+                                 single_invoice=(inv.get("n_invoices") == 1))
         is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
-        label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"),
-                                            sup, LO, HI)
+        matched = res["n_issues"] == 0 or res.get("agreed_total_match")
+        if res.get("agreed_total_match"):
+            # Single invoice total == agreed £ to supplier → price confirmed; approve regardless of margin.
+            label, action = core.APPROVED_QB_LABEL, "push"
+        else:
+            label, action = core.push_decision(matched, is_cn, inv.get("order_margin_live"),
+                                                sup, LO, HI)
         # Order-level double-charge guard: don't auto-APPROVE when the WHOLE order has been
         # over-invoiced across ALL its invoices/credits (a 2nd invoice re-billing items a 1st already
         # covered — order 31371, each looks fine alone). Hold it in Needs Review for a human to query.

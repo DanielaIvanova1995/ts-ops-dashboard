@@ -42,6 +42,11 @@ DELIVERY_CHARGES = {
 DECOR8_DISCOUNT = 0.12
 DECOR8_MIN_DISCOUNT = 0.10
 SUPPLIER_SURCHARGE = {"eurocell": 0.05}
+# "Agreed PO total" fast-path: when the order's £-to-supplier (our PO total, ex-VAT incl. carriage) is
+# filled in and a SINGLE invoice's ex-VAT total matches it within a few pence, the price is confirmed by
+# the agreed figure, so approve regardless of margin (Daniela 2026-11-12). Part-invoices (total < agreed)
+# and orders with no £-to-supplier fall through to the normal full line check / supplier rules.
+AGREED_TOTAL_TOL = 0.05
 
 # Carron carriage data + logic now live ONCE in delivery_rules (so quotes, POs and the checker can
 # never drift); these names are re-exported for the many call sites that import them from invoice_core.
@@ -753,7 +758,8 @@ def _merge_lpd_packs(parsed_lines, supplier, pidx):
 
 
 # ---- the 3-way check ------------------------------------------------------------------
-def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=None, tol=0.01):
+def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=None, tol=0.01,
+                  agreed_cost=None, single_invoice=False):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the order's
     SKUs/quantities. `order`, `tidx`, `cidx`, `carron_ship` are supplied by the caller
     (the app or the headless runner). Returns the same result dict app._check_invoice does."""
@@ -1173,8 +1179,32 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
     missing = [order[s]["sku"] for s in order if s not in hit]
     n_issues = sum(1 for l in lines for t, _ in l["issues"] if t != "name")
     incomplete = bool(missing) and n_issues == 0
+
+    # AGREED PO TOTAL fast-path (Daniela 2026-11-12). The invoice's ex-VAT total to us = goods + every
+    # charge line (delivery/surcharge) + any separate carriage. When a SINGLE invoice on the order
+    # matches the order's £-to-supplier (our agreed PO total) within a few pence, the price is confirmed
+    # by the agreed figure, so it's approvable on the total regardless of margin. A credit note, a
+    # part-invoice (total < agreed), or a missing £-to-supplier falls through to the full check below.
+    _charge_sum = sum(_line_total(l) for l in parsed_lines if _is_charge_line(l))
+    _carr = parsed.get("carriage")
+    _extra_carr = _carr if (isinstance(_carr, (int, float)) and not saw_delivery) else 0.0
+    inv_total_net = round(goods_value + _charge_sum + _extra_carr, 2)
+    _is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
+    try:
+        _agreed = float(agreed_cost) if agreed_cost not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        _agreed = None
+    agreed_total_match = bool(single_invoice and _agreed and not _is_cn and inv_total_net > 0
+                              and abs(inv_total_net - _agreed) <= AGREED_TOTAL_TOL)
+    if agreed_total_match:
+        lines.insert(0, {"sku": "✓ Agreed total", "desc": (
+            f"Invoice total £{inv_total_net:,.2f} = agreed £ to supplier £{_agreed:,.2f} — approved on "
+            "the agreed PO total (price confirmed; margin not required)"), "qty": None, "unit": None,
+            "cost": _agreed, "issues": [("name", "matches the agreed PO total")], "_okey": None})
     return {"lines": lines, "missing": missing, "n_issues": n_issues, "incomplete": incomplete,
-            "covered": set(hit), "order_map": {s: order[s]["sku"] for s in order}}
+            "covered": set(hit), "order_map": {s: order[s]["sku"] for s in order},
+            "agreed_total_match": agreed_total_match, "inv_total_net": inv_total_net,
+            "agreed_cost": _agreed}
 
 
 def verdict(res):
