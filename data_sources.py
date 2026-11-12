@@ -2007,6 +2007,104 @@ def create_supplier_draft(mailbox: str, to_email: str, subject: str, body: str,
     return r.json().get("webLink")
 
 
+# ---- TSO house-style supplier email (direct send, with Daniela's signature) -------------------
+_TSO_ORANGE = "#ED6A1C"
+
+
+def _tso_logo_b64():
+    """The TSO logo as base64 (for an inline email-signature image), or None if the file isn't found."""
+    import base64
+    for rel in ("assets/tso-logo.png", "order_processing/tso-logo.png"):
+        fp = os.path.join(os.path.dirname(os.path.abspath(__file__)), rel)
+        try:
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    return base64.b64encode(f.read()).decode()
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
+def tso_signature_html():
+    """(html, inline_images) — Daniela's TSO email signature. Graph sendMail does NOT apply the Outlook
+    client signature, so supplier emails sent direct must carry it in the body. No internal tool names."""
+    b64 = _tso_logo_b64()
+    logo = (f'<img src="cid:tsologo" width="160" alt="Trade Superstore Online" '
+            'style="display:block;border:0;margin:0 0 10px">' if b64 else
+            f'<div style="font-weight:800;color:{_TSO_ORANGE};font-size:16px;letter-spacing:.5px;'
+            'margin-bottom:6px">TRADE SUPERSTORE ONLINE</div>')
+    html = (
+        f'<div style="margin-top:24px;border-top:3px solid {_TSO_ORANGE};padding-top:12px;'
+        'font-family:Arial,Helvetica,sans-serif;color:#2b2b2b;font-size:13px;line-height:1.5">'
+        f'{logo}'
+        '<div style="font-weight:700;font-size:15px;color:#141414">Daniela Ivanova</div>'
+        f'<div style="color:{_TSO_ORANGE};font-weight:600;margin-bottom:6px">Operations Manager</div>'
+        '<div>T: <a href="tel:+443330909217" style="color:#2b2b2b;text-decoration:none">0333 090 9217</a></div>'
+        f'<div>E: <a href="mailto:hello@tradesuperstoreonline.co.uk" style="color:{_TSO_ORANGE};'
+        'text-decoration:none">hello@tradesuperstoreonline.co.uk</a></div>'
+        f'<div>W: <a href="https://www.tradesuperstoreonline.co.uk" style="color:{_TSO_ORANGE};'
+        'text-decoration:none">www.tradesuperstoreonline.co.uk</a></div>'
+        '<div style="margin-top:8px;color:#8a8a8a;font-size:11px">TSO UK Ltd &middot; Unit 8, Tomlinson '
+        'Industrial Estate, Alfreton Rd, Derby, DE21 4ED<br>Registered in England No. 13733637</div>'
+        '</div>')
+    imgs = ([{"cid": "tsologo", "name": "tso-logo.png", "contentType": "image/png",
+              "content_b64": b64}] if b64 else [])
+    return html, imgs
+
+
+def _email_wrap(inner_html: str) -> str:
+    return ('<html><body style="margin:0;padding:0;background:#ffffff"><div style="max-width:620px;'
+            'margin:0 auto;padding:6px 2px;font-family:Arial,Helvetica,sans-serif;color:#2b2b2b;'
+            'font-size:14px;line-height:1.6">' + inner_html + '</div></body></html>')
+
+
+def send_supplier_message(mailbox: str, to_email: str, subject: str, body_html: str,
+                          pdf_bytes: bytes | None = None, pdf_url: str | None = None,
+                          pdf_name: str = "document.pdf", draft: bool = False,
+                          token: str | None = None):
+    """Send (or DRAFT) a supplier email in TSO house style: `body_html` is the message body; Daniela's
+    signature (with the logo inline) is appended automatically and NO internal tool name appears.
+    Direct send saves to Sent; draft lands in Drafts. Returns True when sent, or the draft's webLink
+    when draft=True. Raises on failure."""
+    import base64
+    token = token or ms_token()
+    if not (to_email or "").strip():
+        raise RuntimeError("No recipient email address.")
+    sig_html, sig_imgs = tso_signature_html()
+    html = _email_wrap(body_html + sig_html)
+    pdf = pdf_bytes
+    if pdf is None and pdf_url:
+        try:
+            rr = requests.get(pdf_url, timeout=40)
+            rr.raise_for_status()
+            pdf = rr.content
+        except Exception:  # noqa: BLE001 — don't lose the email over a bad PDF link
+            pdf = None
+    atts = []
+    if pdf:
+        atts.append({"@odata.type": "#microsoft.graph.fileAttachment", "name": pdf_name,
+                     "contentType": "application/pdf", "contentBytes": base64.b64encode(pdf).decode()})
+    for im in sig_imgs:
+        atts.append({"@odata.type": "#microsoft.graph.fileAttachment", "name": im["name"],
+                     "contentType": im["contentType"], "contentBytes": im["content_b64"],
+                     "isInline": True, "contentId": im["cid"]})
+    msg = {"subject": subject, "body": {"contentType": "HTML", "content": html},
+           "toRecipients": _to_recipients(to_email)}
+    if atts:
+        msg["attachments"] = atts
+    if draft:
+        r = requests.post(f"{GRAPH}/users/{mailbox}/messages",
+                          headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                          json=msg, timeout=45)
+        r.raise_for_status()
+        return r.json().get("webLink")
+    r = requests.post(f"{GRAPH}/users/{mailbox}/sendMail",
+                      headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                      json={"message": msg, "saveToSentItems": True}, timeout=45)
+    r.raise_for_status()
+    return True
+
+
 def fetch_quote_emails(mailbox: str, folder_name: str, limit: int = 200,
                        token: str | None = None, days: int = 14) -> list:
     """Full messages in a folder for quoting: [{id, subject, from, from_name,

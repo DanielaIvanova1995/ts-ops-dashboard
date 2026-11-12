@@ -12,6 +12,36 @@ function money(v) {
 // Order number for display — prefers the Monday item name (order_part), which carries the split
 // suffix like "31824-2", so split orders show -1/-2 instead of just the base number.
 function ordNo(iv) { return (iv?.order_part || iv?.order_no || "").toString().trim() || "—"; }
+
+// In-app confirmation — replaces window.confirm(), which a browser can SUPPRESS ("Don't let this page
+// create more dialogs"), silently making every confirm-gated button do nothing. This modal can't be
+// blocked. uiConfirm(msg) -> Promise<boolean>; <ConfirmHost/> (mounted once in Invoices) shows it.
+let _confirmOpen = null;
+function uiConfirm(message) {
+  if (_confirmOpen) return _confirmOpen(message);
+  const native = (typeof window !== "undefined") ? window["confirm"] : null;   // pre-mount fallback
+  return Promise.resolve(native ? native.call(window, message) : true);
+}
+function ConfirmHost() {
+  const [ask, setAsk] = useState(null);   // { message, resolve }
+  useEffect(() => {
+    _confirmOpen = (message) => new Promise((resolve) => setAsk({ message, resolve }));
+    return () => { _confirmOpen = null; };
+  }, []);
+  if (!ask) return null;
+  const close = (v) => { const r = ask.resolve; setAsk(null); r(v); };
+  return (
+    <div onClick={() => close(false)} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" style={{ background: "var(--card, #fff)", color: "var(--fg, #111)", border: "1px solid var(--line, #e5e5e5)", borderRadius: 12, padding: "18px 20px", maxWidth: 460, width: "100%", boxShadow: "0 12px 40px rgba(0,0,0,0.35)" }}>
+        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, marginBottom: 16 }}>{ask.message}</div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn" onClick={() => close(false)}>Cancel</button>
+          <button className="btn primary" autoFocus onClick={() => close(true)}>OK</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 // A Monday date like "2026-10-15" → "15 Oct 2026" (UK). Returns "" for blanks.
 function ukDate(s) {
   if (!s) return "";
@@ -98,7 +128,7 @@ function ImportPanel({ jsonFetch, onNotice }) {
   }
 
   async function run(dry) {
-    if (!dry && !window.confirm(`Import for real from "${folder}"? This creates invoice subitems on Monday.`)) return;
+    if (!dry && !await uiConfirm(`Import for real from "${folder}"? This creates invoice subitems on Monday.`)) return;
     setRunning(true); setStatus(null);
     try {
       const res = await jsonFetch("/invoices/import-run", { method: "POST", body: JSON.stringify({ folders: folder.trim() ? [folder.trim()] : null, dry_run: dry, limit: 15 }) });
@@ -188,7 +218,7 @@ function DuplicatesPanel({ jsonFetch, onNotice }) {
   async function del() {
     const n = found?.n_dupes || 0;
     if (!n) return;
-    if (!window.confirm(`Delete ${n} duplicate invoice${n === 1 ? "" : "s"} from Monday (keeping one of each)?\n\nThis also fixes the affected orders' INV slots + margin. It can't be undone from here.`)) return;
+    if (!await uiConfirm(`Delete ${n} duplicate invoice${n === 1 ? "" : "s"} from Monday (keeping one of each)?\n\nThis also fixes the affected orders' INV slots + margin. It can't be undone from here.`)) return;
     setRunning(true); setStatus(null);
     try {
       const r = await jsonFetch("/invoices/duplicates/delete", { method: "POST" });
@@ -408,7 +438,7 @@ export default function Invoices() {
     const ids = [...subIds];
     if (!ids.length) return;
     const n = ids.length;
-    if (!window.confirm(`Email supplier query${n === 1 ? "" : "s"} for ${n} discrepanc${n === 1 ? "y" : "ies"}? One email per supplier is SENT NOW from the Accounts mailbox (saved to Sent). This goes straight to the supplier — there's no draft to review first.`)) return;
+    if (!await uiConfirm(`Email supplier query${n === 1 ? "" : "s"} for ${n} discrepanc${n === 1 ? "y" : "ies"}? One email per supplier is SENT NOW from the Accounts mailbox (saved to Sent). This goes straight to the supplier — there's no draft to review first.`)) return;
     setChasing(true); setChaseResult(null);
     try {
       const res = await jsonFetch("/invoices/chase-discrepancies", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
@@ -482,7 +512,7 @@ export default function Invoices() {
     const confirmMsg = isCredit
       ? `Credit note ${iv.invoice_no} is flagged as a discrepancy. Approve it? It's marked “CN Approved (To QB)” on Monday and cleared from the queue — the vendor credit is applied in QuickBooks by hand (no bill is created).`
       : `Invoice ${iv.invoice_no} is flagged as a discrepancy. Approve it to QuickBooks anyway? This creates its bill and clears it from the discrepancy queue.`;
-    if (!window.confirm(confirmMsg)) return;
+    if (!await uiConfirm(confirmMsg)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     // QuickBooks (vendor lookup + create bill) can take a while; give it up to 90s, but never let the
     // button spin forever — a timeout, a dropped request or any error always resets it with a message.
@@ -537,7 +567,7 @@ export default function Invoices() {
   }
 
   async function doUnflag(iv) {
-    if (!window.confirm(`Move invoice ${iv.invoice_no} back to Needs Review? The discrepancy is treated as resolved.`)) return;
+    if (!await uiConfirm(`Move invoice ${iv.invoice_no} back to Needs Review? The discrepancy is treated as resolved.`)) return;
     setUnflagging((u) => ({ ...u, [iv.sub_id]: true }));
     try {
       const res = await jsonFetch(`/invoices/${iv.sub_id}/unflag`, { method: "POST" });
@@ -574,7 +604,7 @@ export default function Invoices() {
   function toggleIssue(id) { setIssueSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   function toggleAllIssues() { setIssueSel((s) => (s.size >= issues.length ? new Set() : new Set(issues.map((r) => r.id).filter(Boolean)))); }
   async function clearOnMonday() {
-    if (!window.confirm("Check all of these against Monday and clear any whose invoice is already a subitem there?")) return;
+    if (!await uiConfirm("Check all of these against Monday and clear any whose invoice is already a subitem there?")) return;
     setClearing(true);
     try {
       const res = await jsonFetch(`/invoices/import-issues/clear-on-monday`, { method: "POST" });
@@ -587,7 +617,7 @@ export default function Invoices() {
   async function clearIds(ids) {
     const list = (ids || []).filter(Boolean);
     if (!list.length) return;
-    if (!window.confirm(`Clear ${list.length} failed import(s) off this list? They won't be retried.`)) return;
+    if (!await uiConfirm(`Clear ${list.length} failed import(s) off this list? They won't be retried.`)) return;
     setClearing(true);
     try {
       const res = await jsonFetch(`/invoices/import-issues/clear`, { method: "POST", body: JSON.stringify({ ids: list }) });
@@ -673,7 +703,7 @@ export default function Invoices() {
       : force
         ? `⚠️ Invoice ${iv.invoice_no} is NOT fully matched (it has discrepancies). Push it to QuickBooks anyway? This creates its bill.`
         : `Approve invoice ${iv.invoice_no}? This creates its bill in QuickBooks.`;
-    if (!window.confirm(msg)) return;
+    if (!await uiConfirm(msg)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));
     const ctrl = new AbortController();
@@ -716,7 +746,7 @@ export default function Invoices() {
     // Rich reason: the specific discrepancies + the resolution ask (credit & reinvoice, or credit
     // the difference). Falls back to the one-line reason if we don't have a full check result.
     const reason = (r && r.ok) ? discrepancyReason(iv, r) : ((r && r.discrepancy_reason) || "Discrepancy — see invoice");
-    if (!window.confirm(`Flag invoice ${iv.invoice_no} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue, with the resolution ask (credit & reinvoice / credit the difference) saved as the note.`)) return;
+    if (!await uiConfirm(`Flag invoice ${iv.invoice_no} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue, with the resolution ask (credit & reinvoice / credit the difference) saved as the note.`)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));
     try {
@@ -743,7 +773,7 @@ export default function Invoices() {
     const sub_id = iv.sub_id;
     const r = checks[sub_id];
     const reason = (r && r.ok) ? discrepancyReason(iv, r) : ((r && r.discrepancy_reason) || "Discrepancy — see invoice");
-    if (!window.confirm(`Email ${iv.supplier || "the supplier"}'s accounts team the query for invoice ${iv.invoice_no} and mark it Discrepancy on Monday? The email is sent from the Accounts mailbox.`)) return;
+    if (!await uiConfirm(`Email ${iv.supplier || "the supplier"}'s accounts team the query for invoice ${iv.invoice_no} and mark it Discrepancy on Monday? The email is sent from the Accounts mailbox.`)) return;
     setApproving((a) => ({ ...a, [sub_id]: "working" }));
     setApproveMsg((m) => ({ ...m, [sub_id]: null }));
     try {
@@ -791,7 +821,7 @@ export default function Invoices() {
   async function fixMargins() {
     const ids = [...sel];
     if (!ids.length) return;
-    if (!window.confirm(`Fix the order margin for ${ids.length} selected invoice(s)? This adds any invoice totals missing from the order on Monday (fixes a wrong 98%-type margin). It won't double-count.`)) return;
+    if (!await uiConfirm(`Fix the order margin for ${ids.length} selected invoice(s)? This adds any invoice totals missing from the order on Monday (fixes a wrong 98%-type margin). It won't double-count.`)) return;
     setFixingMargins(true);
     try {
       const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
@@ -841,7 +871,7 @@ export default function Invoices() {
   async function pushSelected() {
     const ids = [...sel];
     if (!ids.length) return;
-    if (!window.confirm(`Push ${ids.length} invoice(s) straight to QuickBooks without checking? This creates a bill in QuickBooks for each.`)) return;
+    if (!await uiConfirm(`Push ${ids.length} invoice(s) straight to QuickBooks without checking? This creates a bill in QuickBooks for each.`)) return;
     const results = [];
     setProc({ running: true, done: 0, total: ids.length, results: [] });
     for (const sub_id of ids) {
@@ -921,6 +951,7 @@ export default function Invoices() {
 
   return (
     <div className="wrap">
+      <ConfirmHost />
       <div className="topbar">
         <div className="pagetitle">Invoice Checker</div>
         <div className="right">
@@ -1373,7 +1404,7 @@ function OrderPanel({ sub_id, orderItemId, jsonFetch, onNotice }) {
   // Delete a duplicated/wrong invoice on Monday, then the order's INV slots are resynced server-side.
   async function delInvoice(s) {
     const amt = s.total != null ? money(s.total) : "no total";
-    if (!window.confirm(`Delete invoice "${s.name}" (${amt}) from Monday?\n\nThis removes the subitem and updates the order's INV slots + margin. It can't be undone from here.`)) return;
+    if (!await uiConfirm(`Delete invoice "${s.name}" (${amt}) from Monday?\n\nThis removes the subitem and updates the order's INV slots + margin. It can't be undone from here.`)) return;
     setDeleting(s.sub_id);
     try {
       const r = await jsonFetch(`/invoices/${s.sub_id}/delete`, { method: "POST", body: JSON.stringify({ order_item_id: data.order.order_item_id }) });

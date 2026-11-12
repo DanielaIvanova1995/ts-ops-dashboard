@@ -12,6 +12,36 @@ function money(v) {
 }
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
+// In-app confirmation — replaces window.confirm(), which a browser can SUPPRESS ("Don't let this page
+// create more dialogs"), silently making every confirm-gated button do nothing. This modal can't be
+// blocked. uiConfirm(msg) -> Promise<boolean>; <ConfirmHost/> (mounted once in Recon) shows the popup.
+let _confirmOpen = null;
+function uiConfirm(message) {
+  if (_confirmOpen) return _confirmOpen(message);
+  const native = (typeof window !== "undefined") ? window["confirm"] : null;   // pre-mount fallback
+  return Promise.resolve(native ? native.call(window, message) : true);
+}
+function ConfirmHost() {
+  const [ask, setAsk] = useState(null);   // { message, resolve }
+  useEffect(() => {
+    _confirmOpen = (message) => new Promise((resolve) => setAsk({ message, resolve }));
+    return () => { _confirmOpen = null; };
+  }, []);
+  if (!ask) return null;
+  const close = (v) => { const r = ask.resolve; setAsk(null); r(v); };
+  return (
+    <div onClick={() => close(false)} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" style={{ background: "var(--card, #fff)", color: "var(--fg, #111)", border: "1px solid var(--line, #e5e5e5)", borderRadius: 12, padding: "18px 20px", maxWidth: 460, width: "100%", boxShadow: "0 12px 40px rgba(0,0,0,0.35)" }}>
+        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45, marginBottom: 16 }}>{ask.message}</div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn" onClick={() => close(false)}>Cancel</button>
+          <button className="btn primary" autoFocus onClick={() => close(true)}>OK</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Overdue = invoice date is 2+ calendar months before this month (Daniela's pay-by-end-of-next-month
 // rule). Computed live from the date so it's right even for older saved statements without the flag.
 function isOverdue(dateStr) {
@@ -110,7 +140,7 @@ function PayPanel({ r, jsonFetch, onNotice, onPaid }) {
   async function markPaid() {
     if (!bank) { onNotice({ kind: "warn", text: "Choose a bank account to pay from." }); return; }
     if (!selLines.length) { onNotice({ kind: "warn", text: "Tick at least one invoice." }); return; }
-    if (!window.confirm(`Record a £${invTotal.toFixed(2)} bill payment in QuickBooks, settling ${selLines.length} invoice(s), ref ${ref}? This marks them PAID in QuickBooks. You still move the money via the bank separately.`)) return;
+    if (!await uiConfirm(`Record a £${invTotal.toFixed(2)} bill payment in QuickBooks, settling ${selLines.length} invoice(s), ref ${ref}? This marks them PAID in QuickBooks. You still move the money via the bank separately.`)) return;
     setPaying(true);
     try {
       const res = await jsonFetch("/recon/pay", { method: "POST", body: JSON.stringify({ vendor_id: r.vendor_id, supplier: r.vendor_name || r.supplier || "", bank_id: bank, ref, lines: selLines.map((l) => ({ bill_id: l.bill_id, amount: l.amt, inv: l.inv })), credits: selCredits.map((c) => ({ ref: c.ref, amount: c.amount, date: c.date })) }) });
@@ -393,7 +423,7 @@ function AutoReconcilePanel({ jsonFetch, onNotice }) {
     const msg = email
       ? `Email a statement request to ${supplier} at ${email} now? It sends straight from Accounts (saved to Sent).`
       : `Statement request for ${supplier}? No email is on file, so there's nothing to send to — add an accounts email first.`;
-    if (!window.confirm(msg)) return;
+    if (!await uiConfirm(msg)) return;
     try {
       const res = await jsonFetch("/recon/chase-statement", { method: "POST", body: JSON.stringify({ supplier, email, reason, last_date: lastDate || "" }) });
       const d = await res.json();
@@ -624,7 +654,7 @@ function ManualPaymentsToRemit({ jsonFetch, onNotice }) {
             <div><b>{r.vendor_name}</b> <span className="sub">· {money(r.amount)}{r.date ? ` · ${String(r.date).slice(0, 10)}` : ""}{r.reference ? ` · ${r.reference}` : ""}{r.note ? ` · ${r.note}` : ""}</span></div>
             <div className="saved-right">
               <button className="btn" disabled={busy[r.id]} onClick={() => act(r.id, "/recon/manual-payment/clear", `Marked ${r.vendor_name}'s ${money(r.amount)} as remitted.`)} title="Remittance sent to accounts — remove it from the owed/to-remit figures">Mark remitted</button>
-              <button className="btn ghost" disabled={busy[r.id]} onClick={() => { if (window.confirm(`Delete this logged payment (${r.vendor_name} ${money(r.amount)})? Use this only if it was entered by mistake.`)) act(r.id, "/recon/manual-payment/delete", "Deleted."); }} title="Entered by mistake — delete it">Delete</button>
+              <button className="btn ghost" disabled={busy[r.id]} onClick={async () => { if (await uiConfirm(`Delete this logged payment (${r.vendor_name} ${money(r.amount)})? Use this only if it was entered by mistake.`)) act(r.id, "/recon/manual-payment/delete", "Deleted."); }} title="Entered by mistake — delete it">Delete</button>
             </div>
           </div>
         ))}
@@ -995,7 +1025,7 @@ export default function Recon() {
   useEffect(() => { loadSaved(); }, [loadSaved]);
 
   async function dismissSaved(s) {
-    if (!window.confirm(`Remove the saved ${s.supplier} statement from the list? (It won't touch QuickBooks or any payments.)`)) return;
+    if (!await uiConfirm(`Remove the saved ${s.supplier} statement from the list? (It won't touch QuickBooks or any payments.)`)) return;
     try {
       const res = await jsonFetch("/recon/dismiss", { method: "POST", body: JSON.stringify({ key: s.key, vid: s.vid }) });
       const d = await res.json().catch(() => ({}));
@@ -1006,7 +1036,7 @@ export default function Recon() {
 
   async function excludeSupplier(vid, supplier) {
     if (!vid) { setNotice({ kind: "warn", text: "No QuickBooks vendor id for this supplier." }); return; }
-    if (!window.confirm(`Never auto-reconcile ${supplier || "this supplier"} again? It'll be removed from the list and skipped on future runs. (You can allow it again any time.)`)) return;
+    if (!await uiConfirm(`Never auto-reconcile ${supplier || "this supplier"} again? It'll be removed from the list and skipped on future runs. (You can allow it again any time.)`)) return;
     try {
       const res = await jsonFetch("/recon/exclude", { method: "POST", body: JSON.stringify({ vid: String(vid), supplier: supplier || "" }) });
       const d = await res.json();
@@ -1126,7 +1156,7 @@ export default function Recon() {
 
   async function doApprove(row) {
     const inv = row.invoice;
-    if (!window.confirm(`Create a QuickBooks bill for invoice ${inv}? This posts it to QuickBooks.`)) return;
+    if (!await uiConfirm(`Create a QuickBooks bill for invoice ${inv}? This posts it to QuickBooks.`)) return;
     setApproving((a) => ({ ...a, [inv]: "working" }));
     try {
       const res = await jsonFetch("/recon/approve", { method: "POST", body: JSON.stringify({ invoice_no: inv, inv_date: row.inv_date || null }) });
@@ -1169,7 +1199,7 @@ export default function Recon() {
 
   async function rowFixMargins(row) {
     const id = row.sub_id; if (!id) return;
-    if (!window.confirm(`Fix the order margin for ${row.invoice}? This fills any invoice totals missing from the order on Monday (corrects a wrong ~98% margin). It won't double-count.`)) return;
+    if (!await uiConfirm(`Fix the order margin for ${row.invoice}? This fills any invoice totals missing from the order on Monday (corrects a wrong ~98% margin). It won't double-count.`)) return;
     setRFixing((f) => ({ ...f, [id]: true }));
     try {
       const fmBody = row.order_item_id ? { order_item_ids: [String(row.order_item_id)] } : { sub_ids: [id] };
@@ -1190,7 +1220,7 @@ export default function Recon() {
     const msg = emailAccounts
       ? `Email ${row.supplier || (r && r.supplier) || "the supplier"}’s accounts the query for ${row.invoice} and mark it Discrepancy on Monday? It’s sent from the Accounts mailbox.`
       : `Flag ${row.invoice} as a Discrepancy on Monday? It moves out of Needs Review into the discrepancy queue.`;
-    if (!window.confirm(msg)) return;
+    if (!await uiConfirm(msg)) return;
     setRFlagging((f) => ({ ...f, [id]: "working" }));
     try {
       const body = emailAccounts
@@ -1241,6 +1271,7 @@ export default function Recon() {
   const r = result;
   return (
     <div className="wrap">
+      <ConfirmHost />
       <div className="topbar">
         <div className="pagetitle">Statements</div>
         <div className="right">

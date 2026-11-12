@@ -1633,6 +1633,31 @@ def recon_open(key: str, refresh: int = 0):
 
 # ---- Phase B: pay the bills in QuickBooks + draft the remittance -------------------------------
 _ACCOUNTS_MAILBOX = "accounts@tradesuperstoreonline.co.uk"
+_TSO_ORANGE_API = "#ED6A1C"
+
+
+def _esc(s) -> str:
+    import html as _html
+    return _html.escape(str(s if s is not None else ""))
+
+
+def _clean_reason(reason) -> str:
+    """Strip any internal tool name from a discrepancy reason — the supplier must never see it."""
+    r = str(reason or "").strip()
+    r = _re.sub(r"(?im)^\s*tradehub\b\s*[:\-–]?\s*", "", r)   # leading "TradeHub:" prefix
+    r = _re.sub(r"(?i)\btradehub\b\s*[:\-–]?\s*", "", r)       # any stray mention
+    return r.strip()
+
+
+def _reason_box(reason) -> str:
+    """Highlighted box showing the (cleaned) discrepancy detail, line breaks preserved."""
+    txt = _esc(_clean_reason(reason)).replace("\n", "<br>") or "(see the attached/original invoice)"
+    return (f'<div style="margin:12px 0;padding:12px 14px;background:#fff6ef;border-left:4px solid '
+            f'{_TSO_ORANGE_API};border-radius:4px">{txt}</div>')
+
+
+def _p(text: str) -> str:
+    return f'<p style="margin:0 0 12px">{text}</p>'
 
 
 @app.get("/recon/bank-accounts", dependencies=[Depends(require_statements_key)])
@@ -1721,18 +1746,19 @@ def recon_chase_statement(body: ChaseIn):
     else:
         ask = ("Please could you send us your latest statement of account? We don't have a recent one "
                "on file, and we reconcile supplier statements before scheduling payment.")
-    body_txt = f"Hi,\n\n{ask}\n\nMany thanks,\nTrade Superstore Online\nAccounts"
+    body_txt = f"Hi,\n\n{ask}\n\nMany thanks,\nDaniela Ivanova\nTrade Superstore Online"
+    body_html = _p("Hi,") + _p(_esc(ask)) + _p("Many thanks.")
     subject = "Statement of account request — Trade Superstore Online"
     sent, draft_link = False, None
     if email:
         try:
-            # Mail.Send (granted 2026-11-11): statement chase-ups SEND DIRECT + save to Sent (Daniela's
-            # call) — fall back to a Drafts copy only if the send fails.
-            ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            # Mail.Send: statement chase-ups SEND DIRECT (house style + signature) + save to Sent —
+            # fall back to a Drafts copy only if the send fails.
+            ds.send_supplier_message(_ACCOUNTS_MAILBOX, email, subject, body_html)
             sent = True
         except Exception:  # noqa: BLE001
             try:
-                draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                draft_link = ds.send_supplier_message(_ACCOUNTS_MAILBOX, email, subject, body_html, draft=True)
             except Exception:  # noqa: BLE001
                 draft_link = None
     return {"ok": True, "sent": sent, "draft_link": draft_link, "email": email, "supplier": sup,
@@ -3864,21 +3890,25 @@ def recon_remittance(body: RemitIn):
     pdf_name = ("Remittance_Advice_" + _re.sub(r"[^A-Za-z0-9]+", "_", ref).strip("_")
                 + "_from_Trade_Superstore_Online.pdf")
     cover = (f"Hi,\n\nPlease find attached our remittance advice ({ref}) for a total of "
-             f"£{body.total:,.2f}.\n\nKind regards,\nTrade Superstore Online\nAccounts")
+             f"£{body.total:,.2f}.\n\nKind regards,\nDaniela Ivanova\nTrade Superstore Online")
+    cover_html = (_p("Hi,")
+                  + _p(f"Please find attached our remittance advice (<strong>{_esc(ref)}</strong>) for "
+                       f"a total of <strong>£{body.total:,.2f}</strong>.")
+                  + _p("If anything doesn't look right, just let us know and we'll get it sorted."))
     sent, draft_link = False, None
     if (body.to_email or "").strip():
         try:
-            # Mail.Send (granted 2026-11-11): remittances SEND DIRECT + save to Sent (Daniela's call) —
-            # fall back to a Drafts copy if the send fails, so the PDF is never lost.
-            ds.send_supplier_email(_ACCOUNTS_MAILBOX, body.to_email.strip(),
-                                   f"Remittance Advice — {ref}", cover,
-                                   pdf_bytes=pdf, pdf_name=pdf_name)
+            # Mail.Send: remittances SEND DIRECT (house style + signature) + save to Sent — fall back to
+            # a Drafts copy if the send fails, so the PDF is never lost.
+            ds.send_supplier_message(_ACCOUNTS_MAILBOX, body.to_email.strip(),
+                                     f"Remittance Advice — {ref}", cover_html,
+                                     pdf_bytes=pdf, pdf_name=pdf_name)
             sent = True
         except Exception:  # noqa: BLE001
             try:
-                draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, body.to_email.strip(),
-                                                      f"Remittance Advice — {ref}", cover,
-                                                      pdf_bytes=pdf, pdf_name=pdf_name)
+                draft_link = ds.send_supplier_message(_ACCOUNTS_MAILBOX, body.to_email.strip(),
+                                                      f"Remittance Advice — {ref}", cover_html,
+                                                      pdf_bytes=pdf, pdf_name=pdf_name, draft=True)
             except Exception:  # noqa: BLE001
                 draft_link = None     # still return the PDF so it can be downloaded/sent manually
     # NOTE: emailing a remittance deliberately does NOT mark credit notes as used. The PDF shows the
@@ -4120,39 +4150,45 @@ def invoices_chase_discrepancies(body: ChaseDiscIn):
         email = (emails.get(core.norm_code(sup)) or "") if sup else ""
         n = len(items)
         _one = n == 1
-        opener = ("Hope you're well. We've been going through invoice "
-                  f"{items[0].get('invoice_no') or 'this invoice'} and there's a discrepancy we "
-                  "wanted to flag:") if _one else (
-                  "Hope you're well. We've been going through a few invoices and spotted some "
-                  "discrepancies we wanted to flag:")
-        lines = ["Hi,", "", opener, ""]
+        opener = ("Hope you're well. We've been reviewing invoice "
+                  f"{items[0].get('invoice_no') or 'this invoice'} and wanted to flag a discrepancy with "
+                  "you:") if _one else (
+                  "Hope you're well. We've been reviewing a few of your invoices and wanted to flag the "
+                  "discrepancies below:")
+        ask = ("Could you put this right — either credit the invoice in full and re-invoice at the "
+               "corrected amount, or raise a credit note for the difference, whichever's easier your "
+               "end? We'll clear the invoice alongside its credit note." if _one else
+               "For each, could you either credit the invoice in full and re-invoice at the corrected "
+               "amount, or raise a credit note for the difference, whichever's easier your end? We'll "
+               "clear each invoice alongside its credit note.")
+        tlines, hbody = ["Hi,", "", opener, ""], [_p("Hi,"), _p(_esc(opener))]
         for i in items:
             inv = i.get("invoice_no") or "?"
             on = i.get("order_no")
-            reason = (i.get("query_note") or "").strip()
+            reason = _clean_reason(i.get("query_note") or "")
             if not _one:
-                lines.append(f"Invoice {inv}" + (f" (order {on})" if on else "") + ":")
-            lines.append(reason if reason else "(see invoice)")
-            lines.append("")
-        lines += [
-            "For each, would you be able to either credit the invoice in full and reinvoice at the "
-            "corrected amount, or send a credit note for the difference — whichever's easiest? We'll "
-            + ("then get the invoice cleared together with its credit note." if _one else
-               "then get the invoices cleared together with their credit notes."), "",
-            "Thanks so much,", "Trade Superstore Online", "Accounts"]
-        body_txt = "\n".join(lines)
+                hbody.append(_p(f"<strong>Invoice {_esc(inv)}</strong>"
+                                + (f" (order {_esc(on)})" if on else "") + ":"))
+                tlines.append(f"Invoice {inv}" + (f" (order {on})" if on else "") + ":")
+            hbody.append(_reason_box(reason))
+            tlines.append(reason if reason else "(see invoice)")
+            tlines.append("")
+        hbody.append(_p(_esc(ask)))
+        hbody.append(_p("Thanks so much for your help."))
+        tlines += [ask, "", "Many thanks,", "Daniela Ivanova", "Trade Superstore Online"]
+        body_txt, body_html = "\n".join(tlines), "".join(hbody)
         subject = (f"Discrepancy on invoice {items[0].get('invoice_no') or 'invoice'}" if _one
                    else f"Discrepancy on {n} invoices")
         sent, draft_link = False, None
         if email:
             try:
-                # Mail.Send (granted 2026-11-11): discrepancy queries SEND DIRECT to the supplier +
-                # save to Sent (Daniela's call) — fall back to a Drafts copy only if the send fails.
-                ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                # Mail.Send: discrepancy queries SEND DIRECT (house style + signature, no tool name) and
+                # save to Sent — fall back to a Drafts copy only if the send fails.
+                ds.send_supplier_message(_ACCOUNTS_MAILBOX, email, subject, body_html)
                 sent = True
             except Exception:  # noqa: BLE001
                 try:
-                    draft_link = ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                    draft_link = ds.send_supplier_message(_ACCOUNTS_MAILBOX, email, subject, body_html, draft=True)
                 except Exception:  # noqa: BLE001
                     draft_link = None
         results.append({"supplier": sup or "(no supplier)", "email": email, "count": n,
@@ -4844,22 +4880,21 @@ def invoice_flag(sub_id: str, body: FlagIn):
             return out
         inv = (body.invoice_no or "").strip() or "this invoice"
         on = (body.order_no or "").strip()
+        reason_clean = _clean_reason(reason)
         subject = f"Discrepancy on invoice {body.invoice_no}" if (body.invoice_no or "").strip() else "Invoice discrepancy"
-        body_txt = "\n".join([
-            "Hi,", "",
-            f"Hope you're well. We've been going through invoice {inv}" + (f" (order {on})" if on else "")
-            + " and there's a discrepancy we wanted to flag:", "",
-            reason or "(see invoice)", "",
-            "Would you be able to put this right — either credit the invoice in full and reinvoice at "
-            "the corrected amount, or send a credit note for the difference, whichever's easiest for "
-            "you? We'll then get the invoice cleared together with its credit note.", "",
-            "Thanks so much,", "Trade Superstore Online", "Accounts"])
+        opener = (f"Hope you're well. We've been reviewing invoice {inv}"
+                  + (f" (order {on})" if on else "") + " and wanted to flag a discrepancy with you:")
+        askp = ("Could you put this right — either credit the invoice in full and re-invoice at the "
+                "corrected amount, or raise a credit note for the difference, whichever's easier your "
+                "end? We'll clear the invoice alongside its credit note.")
+        body_html = _p("Hi,") + _p(_esc(opener)) + _reason_box(reason_clean) + _p(_esc(askp)) \
+            + _p("Thanks so much for your help.")
         try:
-            ds.send_supplier_email(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+            ds.send_supplier_message(_ACCOUNTS_MAILBOX, email, subject, body_html)
             emailed = True
         except Exception:  # noqa: BLE001 — direct send blocked/failed → leave a draft to send by hand
             try:
-                ds.create_supplier_draft(_ACCOUNTS_MAILBOX, email, subject, body_txt)
+                ds.send_supplier_message(_ACCOUNTS_MAILBOX, email, subject, body_html, draft=True)
                 drafted = True
             except Exception:  # noqa: BLE001
                 pass
