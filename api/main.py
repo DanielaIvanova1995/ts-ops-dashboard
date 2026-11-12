@@ -6139,3 +6139,171 @@ def housekeeping_run(body: HousekeepingRunIn):
     except Exception:  # noqa: BLE001
         pass
     return log
+
+
+# ---- National Skirting / Stream (go2stream) tracking sweep -------------------------------------
+# Stream emails a live tracking link to hello@/orders@ for each National Skirting dropship order. We
+# fulfil the Shopify order with courier "Other" + that link (notifying the customer), post the link to
+# the Monday order, and set the Customer ETA once the link/email shows a delivery date. See
+# stream_tracking.py for the parsing + plan logic. Fulfilment is idempotent (never re-fulfils / re-
+# emails) and LIVE writes are OFF unless STREAM_LIVE is explicitly on — the dry-run always works.
+_STREAM_MAILBOXES = ["hello@tradesuperstoreonline.co.uk", "orders@tradesuperstoreonline.co.uk"]
+_STREAM_SEEN_KEY = "stream_seen"
+
+
+def _stream_live_enabled():
+    """LIVE fulfil/notify/writes are OFF by default (this emails customers) — set env STREAM_LIVE to
+    1/on/true/yes to enable. The dry-run preview works either way."""
+    return str(os.environ.get("STREAM_LIVE", "")).strip().lower() in {"1", "on", "true", "yes"}
+
+
+def _stream_messages(limit=60, since_days=10):
+    """National Skirting Stream emails across hello@ + orders@ inbox, parsed. Newest first."""
+    import stream_tracking as st
+    out = []
+    for mbx in _STREAM_MAILBOXES:
+        try:
+            msgs = ds.list_folder_messages_full(mbx, "inbox", limit=limit, since_days=since_days)
+        except Exception:  # noqa: BLE001
+            msgs = []
+        for m in msgs:
+            if not st.is_national_skirting_stream(m.get("from"), m.get("subject")):
+                continue
+            p = st.parse_stream_email(m.get("subject"), m.get("body"))
+            if not p.get("job_no"):
+                continue
+            out.append({"msg_id": m.get("id"), "internet_id": m.get("internet_id"), "mailbox": mbx,
+                        "subject": m.get("subject"), "received": m.get("received"), "parsed": p})
+    out.sort(key=lambda r: r.get("received") or "", reverse=True)
+    return out
+
+
+def _stream_monday_lookup(job_no):
+    """Find OUR order on the Monday Orders board by Job no. (National Skirting's order number)."""
+    import stream_tracking as st
+    q = ('query($b:ID!,$vals:[String]!){items_page_by_column_values(board_id:$b,limit:5,'
+         'columns:[{column_id:"' + st.JOB_NO_COL + '",column_values:$vals}]){items{id name '
+         'column_values(ids:["' + st.ORDER_NO_COL + '","' + st.ORDER_ID_COL + '","' + st.CUSTOMER_COL
+         + '","' + st.SUPPLIER_COL + '","' + st.CUSTOMER_ETA_COL + '"]){id text}}}}')
+    try:
+        data = ds._monday_gql(q, {"b": str(st.ORDERS_BOARD_ID), "vals": [str(job_no)]})
+    except Exception:  # noqa: BLE001
+        return None
+    items = ((data.get("items_page_by_column_values") or {}).get("items")) or []
+    if not items:
+        return None
+    it = items[0]
+    cv = {c["id"]: (c.get("text") or "") for c in (it.get("column_values") or [])}
+    return {"item_id": it.get("id"), "order_no": cv.get(st.ORDER_NO_COL) or it.get("name"),
+            "shopify_id": cv.get(st.ORDER_ID_COL), "customer": cv.get(st.CUSTOMER_COL),
+            "supplier": cv.get(st.SUPPLIER_COL), "customer_eta": cv.get(st.CUSTOMER_ETA_COL)}
+
+
+def _stream_plans(msgs):
+    """One plan per ORDER (job_no), using the message that carries a delivery date if any, else the
+    newest. Looks up Monday + Shopify fulfilment status. Pure preview — no writes."""
+    import stream_tracking as st
+    by_job = {}
+    for m in msgs:
+        job = m["parsed"]["job_no"]
+        cur = by_job.get(job)
+        # prefer a message that already carries a date (so the ETA can be set), else keep the newest
+        if cur is None or (m["parsed"].get("body_date") and not cur["parsed"].get("body_date")):
+            by_job[job] = m
+    plans = []
+    for job, m in by_job.items():
+        order = _stream_monday_lookup(job)
+        already = False
+        if order and order.get("shopify_id"):
+            already = (ds.order_fulfillment_status(order["shopify_id"]) or "").upper() == "FULFILLED"
+        plan = st.build_plan(m["parsed"], order, already)
+        plan["mailbox"] = m["mailbox"]
+        plan["msg_id"] = m["msg_id"]
+        plan["internet_id"] = m["internet_id"]
+        plan["subject"] = m["subject"]
+        plan["received"] = m["received"]
+        plan["emails_for_order"] = sum(1 for x in msgs if x["parsed"]["job_no"] == job)
+        plans.append(plan)
+    plans.sort(key=lambda p: p.get("received") or "", reverse=True)
+    return plans
+
+
+@app.get("/stream/dry-run", dependencies=[Depends(require_key)])
+def stream_dry_run(limit: int = 60, since_days: int = 10):
+    """Preview the National Skirting / Stream sweep — for each order, what we WOULD do (fulfil +
+    tracking link, Monday update, Customer ETA if a date is available). No writes."""
+    try:
+        plans = _stream_plans(_stream_messages(limit=limit, since_days=since_days))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't build the Stream preview: {e}")
+    return {"ok": True, "live_enabled": _stream_live_enabled(), "count": len(plans),
+            "n_fulfil": sum(1 for p in plans if p["do"]["fulfil"]),
+            "n_eta": sum(1 for p in plans if p["do"]["set_eta"]),
+            "n_no_match": sum(1 for p in plans if p["status"] == "no_match"), "plans": plans}
+
+
+class StreamRunIn(BaseModel):
+    job_nos: list[str] = []          # restrict to these job numbers; empty = all previewed
+
+
+@app.post("/stream/run", dependencies=[Depends(require_key)])
+def stream_run(body: StreamRunIn):
+    """Process the Stream sweep LIVE — fulfil (courier Other + tracking link, notify customer), post the
+    link to Monday, set Customer ETA when a date is known. Idempotent (never re-fulfils / re-emails).
+    Blocked unless STREAM_LIVE is on. Pass job_nos to act on a subset the user approved."""
+    import stream_tracking as st
+    if not _stream_live_enabled():
+        return {"ok": False, "detail": "Live Stream processing is OFF (set STREAM_LIVE=1 to enable). "
+                                       "Use the dry-run to preview.", "live_enabled": False}
+    want = {str(j).strip() for j in (body.job_nos or [])}
+    plans = _stream_plans(_stream_messages())
+    try:
+        import supabase_db
+        seen = (supabase_db.config_get(_STREAM_SEEN_KEY) or {}) if supabase_db.configured() else {}
+    except Exception:  # noqa: BLE001
+        supabase_db, seen = None, {}
+    results = []
+    for p in plans:
+        job = p.get("job_no")
+        if want and job not in want:
+            continue
+        if p["status"] in ("skip", "no_match") or not p.get("shopify_id"):
+            results.append({"job_no": job, "order_no": p.get("order_no"), "status": p["status"],
+                            "steps": [p.get("note") or "skipped"]})
+            continue
+        steps, ok = [], True
+        if p["do"]["fulfil"]:
+            r = ds.fulfill_with_tracking(p["shopify_id"], p["tracking_url"], company="Other", notify=True)
+            if r.get("ok"):
+                steps.append(f"fulfilled {r.get('fulfilled', 0)} line(s) + tracking, customer notified"
+                             if r.get("fulfilled") else "already fulfilled (no re-notify)")
+            else:
+                ok = False
+                steps.append("fulfil failed: " + (r.get("note") or "?"))
+        if p["do"]["update"] and p.get("item_id"):
+            try:
+                ds.monday_post_update(p["item_id"], f"Stream tracking link: {p['tracking_url']}")
+                steps.append("posted tracking link to Monday")
+            except Exception as e:  # noqa: BLE001
+                steps.append("Monday update failed: " + str(e)[:60])
+        if p["do"]["set_eta"] and p.get("item_id"):
+            try:
+                q = ("mutation($b:ID!,$i:ID!,$c:String!,$v:String!){change_simple_column_value("
+                     "board_id:$b,item_id:$i,column_id:$c,value:$v){id}}")
+                ds._monday_gql(q, {"b": str(st.ORDERS_BOARD_ID), "i": str(p["item_id"]),
+                                   "c": st.CUSTOMER_ETA_COL, "v": p["do"]["set_eta"]})
+                steps.append(f"set Customer ETA {p['do']['set_eta']}")
+            except Exception as e:  # noqa: BLE001
+                steps.append("ETA set failed: " + str(e)[:60])
+        if p.get("internet_id"):
+            seen[p["internet_id"]] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        results.append({"job_no": job, "order_no": p.get("order_no"), "customer": p.get("customer"),
+                        "status": "ok" if ok else "error", "steps": steps})
+    try:
+        if supabase_db and supabase_db.configured():
+            supabase_db.config_set(_STREAM_SEEN_KEY, seen)
+            supabase_db.audit("stream", "run",
+                              f"{sum(1 for r in results if r['status'] == 'ok')} ok / {len(results)}", "")
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "processed": len(results), "results": results}

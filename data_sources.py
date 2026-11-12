@@ -718,6 +718,25 @@ def fetch_order_fulfillment_split(order_id, token: str | None = None) -> dict:
     return out
 
 
+def order_fulfillment_status(order_id, token: str | None = None) -> str:
+    """The Shopify order's displayFulfillmentStatus (FULFILLED / UNFULFILLED / PARTIALLY_FULFILLED /
+    FULFILLMENT_NOT_REQUIRED / …), or "" if it can't be read. Used to tell whether a Stream order has
+    already been fulfilled so we never fulfil (and re-email the customer) twice."""
+    store = get_secret("SHOPIFY_STORE")
+    token = token or shopify_products_token()
+    gid = f"gid://shopify/Order/{str(order_id).strip()}"
+    try:
+        r = requests.post(
+            f"https://{store}/admin/api/2024-10/graphql.json",
+            json={"query": "query($id:ID!){order(id:$id){displayFulfillmentStatus}}",
+                  "variables": {"id": gid}},
+            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"}, timeout=25)
+        r.raise_for_status()
+        return (((r.json().get("data") or {}).get("order") or {}).get("displayFulfillmentStatus") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def fetch_order_fulfillment_count(order_id, token: str | None = None) -> int:
     """How many separate fulfilment orders a Shopify order has (2+ = split across
     fulfilments/suppliers). Counts the fulfilment-order nodes directly (a supplier split keeps them
@@ -7350,6 +7369,53 @@ def fulfill_order_for_supplier(order_ref, supplier=None, skus=None, notify=False
         return {"ok": True, "fulfilled": n, "note": ""}
     except Exception as e:  # noqa: BLE001 — fulfilment is best-effort; never break invoice approval
         return {"ok": False, "fulfilled": 0, "note": str(e)[:120]}
+
+
+def fulfill_with_tracking(order_ref, tracking_url, company="Other", notify=True, token=None):
+    """Fulfil the WHOLE Shopify order and attach a courier tracking link — for National Skirting /
+    Stream orders where the 'tracking number' IS the go2stream live link (Daniela 2026-11-12). Sets
+    trackingInfo {company, number=link, url=link} so the customer's fulfilment email carries a clickable
+    'track' link, and notifies the customer by default. Idempotent: if nothing is open it returns
+    fulfilled 0 with a note (already fulfilled). Returns {ok, fulfilled, note}; never raises for a
+    business reason. Needs write_merchant_managed_fulfillment_orders."""
+    try:
+        token = token or shopify_products_token()
+        gid = _resolve_order_gid(order_ref, token)
+        if not gid:
+            return {"ok": False, "fulfilled": 0, "note": f"couldn't find order {order_ref} on Shopify"}
+        q = ("query($id:ID!){order(id:$id){fulfillmentOrders(first:25){nodes{id status "
+             "lineItems(first:100){nodes{id remainingQuantity}}}}}}")
+        data = _shopify_admin_gql(q, {"id": gid}, token)
+        fos = (((data.get("order") or {}).get("fulfillmentOrders") or {}).get("nodes") or [])
+        open_fos = [f for f in fos if (f.get("status") or "").upper() in ("OPEN", "IN_PROGRESS")]
+        if not open_fos:
+            return {"ok": True, "fulfilled": 0, "note": "already fulfilled / nothing open"}
+        entries = []
+        for fo in open_fos:
+            sel = [li for li in ((fo.get("lineItems") or {}).get("nodes") or [])
+                   if (li.get("remainingQuantity") or 0) > 0]
+            if sel:
+                entries.append({"fulfillmentOrderId": fo["id"],
+                                "fulfillmentOrderLineItems": [
+                                    {"id": li["id"], "quantity": li["remainingQuantity"]} for li in sel]})
+        if not entries:
+            return {"ok": True, "fulfilled": 0, "note": "nothing open to fulfil"}
+        tinfo = {"number": tracking_url, "url": tracking_url}
+        if company:
+            tinfo["company"] = company
+        mut = ("mutation($f:FulfillmentV2Input!){fulfillmentCreateV2(fulfillment:$f){"
+               "fulfillment{id status} userErrors{field message}}}")
+        res = _shopify_admin_gql(mut, {"f": {"lineItemsByFulfillmentOrder": entries,
+                                             "trackingInfo": tinfo,
+                                             "notifyCustomer": bool(notify)}}, token)
+        payload = res.get("fulfillmentCreateV2") or {}
+        errs = payload.get("userErrors") or []
+        if errs:
+            return {"ok": False, "fulfilled": 0, "note": errs[0].get("message", "?")[:140]}
+        n = sum(len(e["fulfillmentOrderLineItems"]) for e in entries)
+        return {"ok": True, "fulfilled": n, "note": ""}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "fulfilled": 0, "note": str(e)[:140]}
 
 
 SUGGESTIONS_BOARD = "TradeHub Suggestions"   # dedicated board — one row per note

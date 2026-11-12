@@ -41,6 +41,7 @@ const NAV = [
   { href: "/aftersales", label: "Aftersales", icon: "aftersales", module: null },
   { href: "/reviews", label: "Review Requests", icon: "reviews", module: "reviews" },
   { href: "/noeta", label: "Supplier Confirms", icon: "noeta", module: null },
+  { href: "/stream", label: "Skirting Tracking", icon: "orders", module: null },
 ];
 const SOON = [];
 
