@@ -2171,8 +2171,8 @@ SUPPLIER_RULES = {
                  "flag_high": False, "flag_below": True},
     # Rexel: no pricelist held yet, so the ORDER MARGIN is the safeguard. Auto-approve a matched
     # invoice at 10%+ with NO upper cap (Daniela — approve even over 35%); below 10% → Needs Review.
-    "rexel": {"name": "Rexel", "no_pricelist": True, "push_min": 10.0,
-              "flag_high": False, "flag_below": True},
+    # Rexel: full pricelist LOADED 2026-11-12 (price_overrides.json "Rexel") → lines price-checked now.
+    "rexel": {"name": "Rexel", "push_min": 10.0, "flag_high": False, "flag_below": True},
     # PJH: approve every matched invoice regardless of how HIGH the margin is (no 35% cap).
     "pjh": {"name": "PJH", "flag_high": False},
     # Huws Gray: no pricelist held (quote-first), so the ORDER MARGIN is the safeguard. Auto-approve a
