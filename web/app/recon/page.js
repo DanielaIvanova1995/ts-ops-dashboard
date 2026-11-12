@@ -667,7 +667,7 @@ function ManualPaymentsToRemit({ jsonFetch, onNotice }) {
 // what's due, the credit headroom per supplier, a prepared oldest-first pay plan, and a nudge to
 // approve invoices that are already due but not yet in QuickBooks. Read-only radar; paying still
 // goes through the saved-statement pay flow (the "Open to pay" button jumps to it).
-function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vendors }) {
+function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vendors, reloadKey }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -691,6 +691,9 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
     finally { setLoading(false); }
   }, [jsonFetch, needPin]);
   useEffect(() => { load(); }, [load]);
+  // Reload when a payment is recorded elsewhere on the page, so a just-paid bill drops off the planner
+  // instead of lingering as still-owed (it reads live open bills from QuickBooks).
+  useEffect(() => { if (reloadKey) load(); }, [reloadKey]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function logPayment() {
     const amt = Number(logForm.amount);
@@ -743,6 +746,7 @@ function UpcomingPayments({ jsonFetch, saved, openSaved, onNotice, needPin, vend
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div className="tool-label" style={{ margin: 0 }}>💷 Upcoming payments</div>
         <span className="sub" style={{ flex: 1 }}>{data ? `prepared ${String(data.generated_at || "").slice(0, 16).replace("T", " ")} · due within ${data.due_window} days` : ""}</span>
+        <button className="btn" onClick={load} disabled={loading} title="Re-read live open bills from QuickBooks — use this after paying so a just-paid bill drops off">{loading ? "Refreshing…" : "↻ Refresh"}</button>
         <button className="btn" onClick={() => setShowLog((v) => !v)} title="Record a quick payment you made outside the remittance flow">＋ Log a payment</button>
         <button className="btn ghost" onClick={() => setShowSettings((v) => !v)} title="Set how much to pay each supplier per run, and how often">⚙ Settings</button>
         <button className="btn ghost" onClick={load} disabled={loading}>{loading ? "…" : "↻"}</button>
@@ -926,6 +930,7 @@ export default function Recon() {
   const [openKey, setOpenKey] = useState(null);  // key of the currently-open saved reconciliation
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [payNonce, setPayNonce] = useState(0);   // bumped on a payment → reloads the Upcoming planner
   const [tab, setTab] = useState("upcoming");   // "upcoming" (payments planner) | "reconcile" (statements & pay)
   const [approving, setApproving] = useState({});
   const [saved, setSaved] = useState([]);
@@ -1307,7 +1312,7 @@ export default function Recon() {
 
       {tab === "upcoming" && (
         !needPin && qb && qb.qbo_connected !== false
-          ? <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={(key) => { setTab("reconcile"); openSaved(key); }} onNotice={setNotice} needPin={needPin} vendors={vendors} />
+          ? <UpcomingPayments jsonFetch={jsonFetch} saved={saved} openSaved={(key) => { setTab("reconcile"); openSaved(key); }} onNotice={setNotice} needPin={needPin} vendors={vendors} reloadKey={payNonce} />
           : <div className="sub">{qb && qb.qbo_connected === false ? "Connect QuickBooks above to see the payments plan." : "Loading…"}</div>
       )}
 
@@ -1536,7 +1541,7 @@ export default function Recon() {
           ) : null}
           <MissingPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice} />
           <PayPanel r={r} jsonFetch={jsonFetch} onNotice={setNotice}
-            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); }} />
+            onPaid={(invs) => { setResult((prev) => prev ? { ...prev, rows: (prev.rows || []).map((x) => invs.includes(x.invoice) ? { ...x, status: "paid" } : x), pay_lines: (prev.pay_lines || []).filter((l) => !invs.includes(l.inv)) } : prev); loadSaved(); setPayNonce((n) => n + 1); }} />
         </div>
       )}
       </>}
