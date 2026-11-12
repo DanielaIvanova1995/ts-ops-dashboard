@@ -72,7 +72,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "JB Kind": "jordan.lees@jbkind.com",
                      "Deanta": "ecommerce@deanta.co.uk",
                      "Carron": "sales@carronheating.co.uk",
-                     "Chase Hardware": "matt.jenkinson@chase-hardware.co.uk",
+                     "Chase Hardware": "sales@chase-hardware.co.uk",
                      "Dolle": "uksales@dolle.com",
                      "Evolve": "sales@evolveflooring.co.uk",
                      "Squaredeal": "info@squaredealupvc.co.uk",
