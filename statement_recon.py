@@ -134,6 +134,16 @@ def reconcile_bytes(pdf_bytes=None, text=None, filename="", supplier_hint="", do
         return {"ok": False, "need_vendor": True, "supplier": sup,
                 "statement_date": stmt.get("statement_date"), "balance": stmt.get("balance"),
                 "filename": filename}
+    # Verify the vendor actually HOLDS this statement's invoices — QuickBooks can carry duplicate
+    # vendor records (two "MB Decor"); the name match can resolve the empty one, making every invoice
+    # read "not in QuickBooks". If a DIFFERENT vendor confidently (2+) holds the numbers, switch to it.
+    try:
+        _probe = ds.qbo_vendor_for_docnumbers(
+            [ln.get("invoice_no") for ln in (stmt.get("lines") or []) if ln.get("invoice_no")])
+        if _probe and _probe.get("vid") and str(_probe["vid"]) != str(vid) and _probe.get("hits", 0) >= 2:
+            vid, vname = str(_probe["vid"]), (_probe.get("name") or vname)
+    except Exception:  # noqa: BLE001
+        pass
     if vname:
         sup = vname
     if excluded and str(vid) in {str(x) for x in excluded}:

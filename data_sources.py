@@ -5848,6 +5848,39 @@ def qbo_vendor_bills(vendor_id: str, limit: int = 1000):
     return out
 
 
+def qbo_vendor_for_docnumbers(docs, max_probe: int = 6):
+    """Find which QuickBooks VENDOR actually holds bills carrying these DocNumbers. Used to correct a
+    statement reconciled against the WRONG vendor record — QuickBooks can hold duplicate vendors (two
+    "MB Decor"), and the name match can land on the empty one, so every invoice reads "not in
+    QuickBooks". Probes up to `max_probe` distinct doc numbers (vendor-agnostic lookups) and returns
+    {"vid","name","hits"} for the vendor most of them belong to, or None if none are found anywhere."""
+    from collections import Counter
+    cnt, names, probed = Counter(), {}, []
+    for d in docs or []:
+        s = str(d or "").strip()
+        if not s or s in probed:
+            continue
+        probed.append(s)
+        if len(probed) > max_probe:
+            break
+        doc = s.replace("'", "\\'")
+        try:
+            r = qbo_query(f"select VendorRef, DocNumber from Bill where DocNumber = '{doc}' MAXRESULTS 5")
+        except Exception:  # noqa: BLE001
+            continue
+        for b in (r.get("Bill") or []):
+            vr = b.get("VendorRef") or {}
+            vid = str(vr.get("value") or "")
+            if vid:
+                cnt[vid] += 1
+                if vr.get("name"):
+                    names[vid] = vr["name"]
+    if not cnt:
+        return None
+    vid, hits = cnt.most_common(1)[0]
+    return {"vid": vid, "name": names.get(vid), "hits": hits}
+
+
 def qbo_open_bills(limit: int = 1000):
     """EVERY unpaid QuickBooks Bill across ALL vendors in one query → the payables backbone for the
     Upcoming Payments planner. Returns [{id, doc_no, vendor_id, vendor_name, date, due, total,

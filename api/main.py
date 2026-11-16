@@ -1421,6 +1421,18 @@ def _refresh_recon(snap: dict, vid: str, supplier: str, with_paymap: bool = Fals
     import recon_core
     if not vid or not (snap.get("rows")):
         return None
+    # Vendor-recovery: if this snapshot's vendor id doesn't actually hold the statement's bills (a
+    # DUPLICATE QuickBooks vendor — e.g. two "MB Decor", bills under one, the recon reading the other,
+    # so everything shows "not in QuickBooks"), find the vendor the invoice numbers really live under
+    # and use it. Only switches on a DIFFERENT vendor that confidently (2+ hits) holds them.
+    fix = None
+    try:
+        docs = [r.get("invoice") for r in (snap.get("rows") or []) if r.get("invoice")]
+        probe = ds.qbo_vendor_for_docnumbers(docs) if docs else None
+        if probe and probe.get("vid") and str(probe["vid"]) != str(vid) and probe.get("hits", 0) >= 2:
+            vid, fix = str(probe["vid"]), probe
+    except Exception:  # noqa: BLE001
+        pass
     try:
         bills = ds.qbo_vendor_bills(vid)
     except Exception:  # noqa: BLE001
@@ -1431,7 +1443,10 @@ def _refresh_recon(snap: dict, vid: str, supplier: str, with_paymap: bool = Fals
             paymap = ds.qbo_vendor_payments(vid)
         except Exception:  # noqa: BLE001
             paymap = {}
-    return recon_core.reconcile(_stmt_from_snap(snap), bills, paymap, supplier)
+    res = recon_core.reconcile(_stmt_from_snap(snap), bills, paymap, supplier)
+    if fix:
+        res["vid_fix"] = {"vid": fix["vid"], "name": fix.get("name")}
+    return res
 
 
 @app.get("/recon/saved", dependencies=[Depends(require_statements_key)])
@@ -1596,6 +1611,15 @@ def recon_open(key: str, refresh: int = 0):
                 snap["n_pay"] = res.get("n_pay")
                 snap["n_paid"] = res.get("n_paid")
                 snap["n_missing"] = res.get("n_missing")
+                # Vendor-recovery kicked in: the bills actually live under a different QB vendor, so
+                # re-point this statement to it (fixes the display AND lets the pay flow use the right
+                # vendor). vid is used below for credits + the save.
+                fix = res.get("vid_fix")
+                if fix and fix.get("vid"):
+                    vid = str(fix["vid"])
+                    snap["vid"] = vid
+                    if fix.get("name"):
+                        snap["vendor_name"] = fix["name"]
         except Exception:  # noqa: BLE001 — if QB can't be read, keep the snapshot as-is
             pass
     if refresh:
