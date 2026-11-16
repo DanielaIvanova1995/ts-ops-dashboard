@@ -827,7 +827,12 @@ export default function Invoices() {
       const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
-        setNotice({ kind: "ok", text: d.filled ? `Fixed margins on ${d.orders} order(s) — added ${d.filled} missing total(s). Refreshing…` : `Checked ${d.orders} order(s) — margins already up to date.` });
+        const bits = [];
+        if (d.filled) bits.push(`added ${d.filled} missing total(s)`);
+        if (d.cleared) bits.push(`cleared Total Cost on ${d.cleared}`);
+        if (d.repriced) bits.push(`matched £ to us to Shopify on ${d.repriced}`);
+        const changed = d.filled || d.cleared || d.repriced;
+        setNotice({ kind: "ok", text: changed ? `Fixed margins on ${d.orders} order(s) — ${bits.join(", ")}. Refreshing…` : `Checked ${d.orders} order(s) — margins already up to date.` });
         setSel(new Set());
         load();
       } else setNotice({ kind: "warn", text: d.detail || "Couldn’t fix margins." });

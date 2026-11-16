@@ -4826,6 +4826,56 @@ def reconcile_order_inv_slots(order_item_id, token: str | None = None) -> int:
     return n_filled
 
 
+def fix_order_margin(order_item_id, token: str | None = None) -> dict:
+    """The full 'fix margin' for one order (Daniela 2026-11-16): (1) fill any invoice totals missing
+    from the INV slots; (2) CLEAR the 'Total Cost' column (`numeric`) — it double-counts the cost with
+    £ to supplier / Total Products and drags the Monday margin falsely NEGATIVE (order 30431 showed
+    -43% vs a real +29%); (3) set '£ to us' (numbers48) to the live Shopify order total (what the
+    customer paid), UNLESS it's a SPLIT order (a split part's £ to us is only its share, not the whole
+    Shopify total). Best-effort per step; never raises. Returns {filled, cleared_total_cost, set_sell,
+    split}."""
+    import re as _re
+    token = token or get_token()
+    out = {"filled": 0, "cleared_total_cost": False, "set_sell": None, "split": False}
+    try:
+        out["filled"] = reconcile_order_inv_slots(order_item_id, token)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        data = _monday_gql(
+            'query($i:[ID!]){items(ids:$i){name column_values(ids:'
+            '["text_mkv6z0nt","text_mm04tmac","numbers48","numeric"]){id text}}}',
+            {"i": [str(order_item_id)]}, token)
+        it = (data.get("items") or [{}])[0]
+        name = (it.get("name") or "").strip()
+        cv = {c["id"]: (c.get("text") or "").strip() for c in (it.get("column_values") or [])}
+    except Exception:  # noqa: BLE001
+        return out
+    # 2) CLEAR Total Cost (numeric) if it holds anything — stops the margin double-count.
+    if cv.get("numeric"):
+        try:
+            set_order_number(order_item_id, "numeric", None, token)
+            out["cleared_total_cost"] = True
+        except Exception:  # noqa: BLE001
+            pass
+    # 3) £ to us = live Shopify total, unless split (Monday item name like "30431-2").
+    order_no, sid = cv.get("text_mkv6z0nt") or "", cv.get("text_mm04tmac") or ""
+    out["split"] = bool(_re.search(r"-\d+$", name) and name != order_no)
+    if not out["split"] and sid:
+        try:
+            tot = (fetch_order_totals([sid]) or {}).get(str(sid))
+            try:
+                cur = float((cv.get("numbers48") or "").replace(",", "")) if cv.get("numbers48") else None
+            except ValueError:
+                cur = None
+            if tot is not None and (cur is None or abs(cur - tot) > 0.01):
+                set_order_number(order_item_id, "numbers48", round(tot, 2), token)
+                out["set_sell"] = round(tot, 2)
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
 def resync_order_inv_slots(order_item_id, token: str | None = None) -> dict:
     """Make the order's INV1..INV6 slots EXACTLY match its remaining invoice subitems' totals — both
     FILLING missing ones AND CLEARING any slot no longer backed by an invoice. Use after DELETING or

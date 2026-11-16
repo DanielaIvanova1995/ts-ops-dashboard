@@ -1212,8 +1212,9 @@ export default function Recon() {
       const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify(fmBody) });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
-        setNotice({ kind: "ok", text: d.filled ? `Added ${d.filled} missing total(s) to ${row.invoice}’s order — refreshing margins…` : `${row.invoice}: margin already up to date.` });
-        if (d.filled) refreshResult();
+        const changed = d.filled || d.cleared || d.repriced;
+        setNotice({ kind: "ok", text: changed ? `Fixed ${row.invoice}’s order margin (INV slots / Total Cost / £ to us) — refreshing…` : `${row.invoice}: margin already up to date.` });
+        if (changed) refreshResult();
       } else setNotice({ kind: "warn", text: d.detail || "Couldn’t fix the margin." });
     } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setRFixing((f) => ({ ...f, [id]: false })); }
@@ -1232,8 +1233,13 @@ export default function Recon() {
       const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify({ order_item_ids: oids, sub_ids: subs }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok) {
-        setNotice({ kind: "ok", text: d.filled ? `Fixed ${d.orders} order(s) — added ${d.filled} missing total(s). Refreshing margins…` : `Checked ${d.orders} order(s) — margins already up to date.` });
-        if (d.filled) refreshResult();
+        const bits = [];
+        if (d.filled) bits.push(`added ${d.filled} missing total(s)`);
+        if (d.cleared) bits.push(`cleared Total Cost on ${d.cleared}`);
+        if (d.repriced) bits.push(`matched £ to us to Shopify on ${d.repriced}`);
+        const changed = d.filled || d.cleared || d.repriced;
+        setNotice({ kind: "ok", text: changed ? `Fixed ${d.orders} order(s) — ${bits.join(", ")}. Refreshing margins…` : `Checked ${d.orders} order(s) — margins already up to date.` });
+        if (changed) refreshResult();
       } else setNotice({ kind: "warn", text: d.detail || "Couldn’t fix margins." });
     } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
     finally { setFixingAll(false); }

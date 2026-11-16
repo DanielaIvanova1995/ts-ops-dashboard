@@ -4973,7 +4973,15 @@ def invoice_fix_margins(body: FixMarginsIn):
         except Exception as e:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
         sel = [i for i in (data.get("invoices") or []) if str(i.get("sub_id")) in ids]
-    done, filled = set(), 0
+    done, filled, cleared, repriced = set(), 0, 0, 0
+
+    def _fix(oid):
+        nonlocal filled, cleared, repriced
+        r = ds.fix_order_margin(oid)   # fill INV slots + clear Total Cost + set £-to-us from Shopify
+        filled += r.get("filled", 0)
+        cleared += 1 if r.get("cleared_total_cost") else 0
+        repriced += 1 if r.get("set_sell") is not None else 0
+
     # Fix by parent order id directly (the recon side passes these, so it works for an invoice in ANY
     # status — approved/paid included — not just Needs Review).
     for oid in direct_oids:
@@ -4981,7 +4989,7 @@ def invoice_fix_margins(body: FixMarginsIn):
             continue
         done.add(oid)
         try:
-            filled += ds.reconcile_order_inv_slots(oid)
+            _fix(oid)
         except Exception:  # noqa: BLE001
             pass
     for i in sel:
@@ -4996,10 +5004,10 @@ def invoice_fix_margins(body: FixMarginsIn):
                 o = ds.find_order_item_by_number(ono)
                 oid = o.get("id") if o else None
             if oid:
-                filled += ds.reconcile_order_inv_slots(oid)
+                _fix(oid)
         except Exception:  # noqa: BLE001
             pass
-    return {"ok": True, "orders": len(done), "filled": filled}
+    return {"ok": True, "orders": len(done), "filled": filled, "cleared": cleared, "repriced": repriced}
 
 
 def _save_status(key: str, payload: dict):
