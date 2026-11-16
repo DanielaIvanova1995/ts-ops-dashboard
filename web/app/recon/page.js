@@ -944,6 +944,7 @@ export default function Recon() {
   const [rChecks, setRChecks] = useState({});      // sub_id -> check result
   const [rChecking, setRChecking] = useState({});  // sub_id -> bool
   const [rFixing, setRFixing] = useState({});      // sub_id -> bool
+  const [fixingAll, setFixingAll] = useState(false);
   const [rFlagging, setRFlagging] = useState({});  // sub_id -> "working" | "flagged" | "err"
   const [rOpen, setROpen] = useState(() => new Set()); // sub_ids whose check detail is expanded
   function rToggle(id) { setROpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
@@ -1218,6 +1219,26 @@ export default function Recon() {
     finally { setRFixing((f) => ({ ...f, [id]: false })); }
   }
 
+  // Fix the order margin on EVERY linked order on the open statement in one go — uses order_item_id
+  // (works for approved/paid invoices too, not just Needs Review), deduped by order on the server.
+  async function fixAllMargins() {
+    const rows = result?.rows || [];
+    const oids = [...new Set(rows.map((x) => x.order_item_id).filter(Boolean).map(String))];
+    const subs = [...new Set(rows.filter((x) => !x.order_item_id && x.sub_id).map((x) => String(x.sub_id)))];
+    if (!oids.length && !subs.length) { setNotice({ kind: "warn", text: "No linked orders on this statement to fix." }); return; }
+    if (!await uiConfirm(`Fix the order margin on all ${oids.length + subs.length} linked order(s) on this statement? This fills any invoice totals missing from each order on Monday (corrects wrong ~98% margins). It won't double-count.`)) return;
+    setFixingAll(true);
+    try {
+      const res = await jsonFetch("/invoices/fix-margins", { method: "POST", body: JSON.stringify({ order_item_ids: oids, sub_ids: subs }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setNotice({ kind: "ok", text: d.filled ? `Fixed ${d.orders} order(s) — added ${d.filled} missing total(s). Refreshing margins…` : `Checked ${d.orders} order(s) — margins already up to date.` });
+        if (d.filled) refreshResult();
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t fix margins." });
+    } catch (e) { if (String(e.message) !== "locked") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setFixingAll(false); }
+  }
+
   async function rowFlag(row, emailAccounts) {
     const id = row.sub_id; if (!id) return;
     const r = rChecks[id];
@@ -1423,6 +1444,7 @@ export default function Recon() {
               {r.n_paid ? <span className="chip green"><b>{r.n_paid}</b> paid</span> : null}
               <span className="chip grey">Statement {money(r.stmt_total)}</span>
               <button className="btn ghost" onClick={refreshResult} disabled={refreshing} title="Re-check against QuickBooks — picks up invoices you've just approved">{refreshing ? "Refreshing…" : "↻ Refresh"}</button>
+              <button className="btn ghost" onClick={fixAllMargins} disabled={fixingAll} title="Fix the order margin on every linked order on this statement (fills any invoice totals missing from Monday that cause a wrong ~98% margin)">{fixingAll ? "Fixing…" : "⚖ Fix all margins"}</button>
               <button className="btn ghost" onClick={downloadCsv} title="Download the whole reconciliation as a CSV">⬇ CSV</button>
               <button className="btn ghost" onClick={() => { setResult(null); setOpenKey(null); }} title="Close this reconciliation">✕ Close</button>
             </div>
