@@ -333,17 +333,18 @@ def route_line(line, area_pc=None, sku_supplier=None):
     if "door" in tln and ("heritage" in tln or "upvc" in tln):
         return out("WDL", None, "Heritage/uPVC door — Windows, Doors & Lanterns group", "high")
     # A bi-fold from a known INTERNAL-door supplier (LPD / JB Kind / Deanta) is an internal room
-    # bi-fold, NOT a WDL external door — let it route to that supplier by vendor/feed below (Daniela
-    # 2026-10-19, order 32592 "White Moulded Smooth Ashford Bi-fold" is LPD). Only unbranded /
-    # house-brand bi-folds (the external ones) go to the Windows, Doors & Lanterns group.
+    # bi-fold, and one from a bathroom/shower brand (Nuie / Roxor — e.g. "Arley Pro Ralus … Bifold
+    # Door", vendor Nuie) is a SHOWER bi-fold — neither is a WDL external door, so let it route to that
+    # supplier by vendor/feed below (Daniela 2026-10-19 order 32592 LPD; 2026-11-17 order 33644 Nuie).
+    # Only unbranded / house-brand bi-folds (the external ones) go to the Windows, Doors & Lanterns group.
     if "bifold" in tln:
-        _door_sup = ("lpd", "lpddoors", "jbkind", "deanta")
+        _not_wdl = ("lpd", "lpddoors", "jbkind", "deanta", "nuie", "roxor")
         _vn = _norm(vendor)
-        _is_internal_door = any(d in _vn for d in _door_sup)
-        if not _is_internal_door and sku_supplier and sku:
+        _is_other = any(d in _vn for d in _not_wdl)
+        if not _is_other and sku_supplier and sku:
             _fs = sku_supplier(sku)
-            _is_internal_door = bool(_fs) and _norm(_fs) in _door_sup
-        if not _is_internal_door:
+            _is_other = bool(_fs) and _norm(_fs) in _not_wdl
+        if not _is_other:
             return out("WDL", None, "Bifold door — Windows, Doors & Lanterns group", "high")
 
     # Freefoam & Fortex → regional stockist by delivery postcode (Daniela 2026-10-02). Always a
