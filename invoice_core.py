@@ -806,6 +806,22 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
         desc = ln.get("description") or ""
         qty, unit = ln.get("qty"), ln.get("unit_price")
 
+        # Deanta: accept any £0 line or an AD-HOC line without flagging (Daniela 2026-11-17). Deanta put
+        # zero-value and ad-hoc/miscellaneous lines on their invoices that aren't on the Shopify order
+        # and carry no price — they're fine, so don't treat them as a discrepancy.
+        if norm_code(supplier).startswith("deanta"):
+            _lt = ln.get("line_total")
+            _amt = _lt if isinstance(_lt, (int, float)) else (
+                unit * qty if isinstance(unit, (int, float)) and isinstance(qty, (int, float)) else None)
+            _adhoc = any("adhoc" in str(x or "").lower().replace(" ", "").replace("-", "")
+                         for x in (sku_raw, desc))
+            if _adhoc or _amt == 0 or (_amt is None and unit in (None, 0)):
+                lines.append({"sku": sku_raw or ("Ad-hoc" if _adhoc else "£0 line"), "desc": desc,
+                              "qty": qty, "unit": unit, "cost": None, "_okey": None,
+                              "issues": [("name", "accepted — ad-hoc line" if _adhoc
+                                          else "accepted — £0 line")]})
+                continue
+
         # Bundled component line (e.g. Nuie '..WRSB700G', '..WRSF018') — included in the parent
         # product's price above, not a separate order line. Don't price-check or flag it.
         if str(sku_raw).lstrip().startswith("."):
