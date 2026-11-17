@@ -296,6 +296,71 @@ function DuplicatesPanel({ jsonFetch, onNotice }) {
   );
 }
 
+// Aggregated "why do invoices get flagged, and what can I fill in" panel. Reads the saved check
+// history so the most common discrepancy reasons — and the exact supplier+SKU prices that are
+// missing — are one click away, without re-checking anything.
+function DiscInsights({ jsonFetch }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await jsonFetch("/invoices/discrepancy-summary");
+      if (r.ok) setData(await r.json());
+    } catch {} finally { setLoading(false); }
+  }, [jsonFetch]);
+  useEffect(() => { if (open && !data) load(); }, [open, data, load]);
+  const mp = data?.fill_in?.missing_prices || [];
+  const oc = data?.fill_in?.overcharged || [];
+  const mc = data?.fill_in?.missing_carriage || [];
+  return (
+    <div className="card" style={{ padding: "8px 12px", marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button className="btn ghost" onClick={() => setOpen((o) => !o)} title="See the most common discrepancy reasons across every invoice you've checked">📊 Discrepancy insights {open ? "▾" : "▸"}</button>
+        {open && <button className="btn ghost" onClick={load} disabled={loading}>{loading ? "…" : "Refresh"}</button>}
+        {data?.n_checked != null && <span className="sub">from {data.n_checked} checked · {data.n_discrepancies} with issues</span>}
+      </div>
+      {open && (
+        loading && !data ? <div className="sub" style={{ marginTop: 8 }}>Reading the check history…</div> :
+        !data || !data.ok ? <div className="sub" style={{ marginTop: 8 }}>{data?.detail || "No check history saved yet — results build up as you check invoices."}</div> :
+        (data.reasons || []).length === 0 ? <div className="sub" style={{ marginTop: 8 }}>No discrepancies recorded yet. As you check invoices, the common reasons show here.</div> : (
+          <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+            <div>
+              <div className="sub" style={{ fontWeight: 700, marginBottom: 4 }}>Most common reasons</div>
+              <ul className="disc-list">
+                {data.reasons.map((x) => <li key={x.key}><b>{x.count}×</b> — {x.label}</li>)}
+              </ul>
+            </div>
+            {mp.length > 0 && (
+              <div>
+                <div className="sub" style={{ fontWeight: 700, marginBottom: 4 }}>🟡 Missing prices to add <span style={{ fontWeight: 400 }}>(no pricelist cost held — biggest cause you can fix)</span></div>
+                <table className="mini"><thead><tr><th>Supplier</th><th>SKU</th><th className="num">Flags</th></tr></thead>
+                  <tbody>{mp.map((x, i) => <tr key={i}><td className="sub">{x.supplier}</td><td>{x.sku}</td><td className="num">{x.count}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+            {oc.length > 0 && (
+              <div>
+                <div className="sub" style={{ fontWeight: 700, marginBottom: 4 }}>🔴 Charged over our pricelist <span style={{ fontWeight: 400 }}>(either the price rose — update it — or query the supplier)</span></div>
+                <table className="mini"><thead><tr><th>Supplier</th><th>SKU</th><th className="num">Flags</th></tr></thead>
+                  <tbody>{oc.map((x, i) => <tr key={i}><td className="sub">{x.supplier}</td><td>{x.sku}</td><td className="num">{x.count}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+            {mc.length > 0 && (
+              <div>
+                <div className="sub" style={{ fontWeight: 700, marginBottom: 4 }}>🚚 Carriage rate not on file</div>
+                <div className="sub">{mc.map((x) => `${x.supplier} (${x.count})`).join(" · ")}</div>
+              </div>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export default function Invoices() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -335,6 +400,8 @@ export default function Invoices() {
   function toggleDiscSel(id) { setDiscSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const [orderOpen, setOrderOpen] = useState(() => new Set()); // sub_ids with the Monday order panel open
   function toggleOrder(id) { setOrderOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  const [expanded, setExpanded] = useState(() => new Set()); // sub_ids whose check detail is open (collapsible)
+  function toggleExp(id) { setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   const [accepted, setAccepted] = useState({}); // sub_id -> Set(line keys the user has accepted as OK)
   function toggleAccept(sub_id, key) {
     setAccepted((a) => { const n = { ...a }; const s = new Set(n[sub_id] || []); s.has(key) ? s.delete(key) : s.add(key); n[sub_id] = s; return n; });
@@ -371,7 +438,30 @@ export default function Invoices() {
       const res = await jsonFetch(tab === "matched" ? "/invoices/matched" : "/invoices");
       if (!res.ok) throw new Error(`API ${res.status}`);
       const d = await res.json();
-      setList(d.invoices || []); setStatus("ok");
+      const invs = d.invoices || [];
+      setList(invs); setStatus("ok");
+      // Rehydrate previously-saved check results so already-checked invoices show their discrepancy
+      // again (collapsed) WITHOUT re-running the check. Only fills gaps — never overwrites a result
+      // you've checked this session.
+      try {
+        const ids = invs.map((i) => i.sub_id).filter((x) => x != null);
+        if (ids.length) {
+          const sr = await jsonFetch("/invoices/stored-checks", { method: "POST", body: JSON.stringify({ sub_ids: ids }) });
+          if (sr.ok) {
+            const sd = await sr.json();
+            const v = sd.verdicts || {};
+            if (Object.keys(v).length) {
+              setChecks((c) => {
+                const next = { ...c };
+                for (const [id, res2] of Object.entries(v)) {
+                  if (next[id] == null && res2 && typeof res2 === "object") next[id] = { ...res2, _stored: true };
+                }
+                return next;
+              });
+            }
+          }
+        }
+      } catch {}
     } catch (e) { if (String(e.message) !== "unauthorised") { setErr(String(e.message || e)); setStatus("error"); } }
   }, [accessKey, jsonFetch, tab]);
   useEffect(() => { if (accessKey && tab !== "disc" && tab !== "aging") load(); }, [accessKey, tab, load]);
@@ -646,6 +736,7 @@ export default function Invoices() {
       if (!res.ok) throw new Error(`API ${res.status}`);
       const d = await res.json();
       setChecks((c) => ({ ...c, [sub_id]: d }));
+      setExpanded((s) => { const n = new Set(s); n.add(sub_id); return n; });   // fresh check → open the detail
       return d;
     } catch (e) {
       if (String(e.message) === "unauthorised") return null;
@@ -1107,6 +1198,7 @@ export default function Invoices() {
 
       {tab === "review" && <ImportPanel jsonFetch={jsonFetch} onNotice={setNotice} />}
       {tab === "review" && <DuplicatesPanel jsonFetch={jsonFetch} onNotice={setNotice} />}
+      {tab === "review" && <DiscInsights jsonFetch={jsonFetch} />}
 
       {tab === "matched" && (
         <div className="route-msg ok" style={{ marginBottom: 8 }}>
@@ -1307,7 +1399,24 @@ export default function Invoices() {
               {orderOpen.has(iv.sub_id) && <OrderPanel sub_id={iv.sub_id} orderItemId={iv.order_item_id} jsonFetch={jsonFetch} onNotice={setNotice} />}
               {approveMsg[iv.sub_id] && <div className={`route-msg ${approveMsg[iv.sub_id].kind}`} style={{ margin: "0 14px 12px" }}>{approveMsg[iv.sub_id].text}</div>}
               {r && !r.ok && <div className="route-msg warn" style={{ margin: "0 14px 12px" }}>{r.detail || "Couldn’t check this invoice."}</div>}
-              {r && r.ok && (
+              {r && r.ok && (() => {
+                const isExp = expanded.has(iv.sub_id);
+                const nIss = blocking.length;
+                return (
+                  <div className="inv-collapse" style={{ margin: "0 14px 12px" }}>
+                    <button className="inv-toggle" onClick={() => toggleExp(iv.sub_id)} title={isExp ? "Hide the line-by-line detail" : "Show the line-by-line detail"} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", padding: "6px 0" }}>
+                      <span className="sub" style={{ width: 14 }}>{isExp ? "▾" : "▸"}</span>
+                      {r.over_invoiced
+                        ? <span className="pill red">possible double-charge</span>
+                        : effMatched
+                          ? <span className="pill green">{r.matched ? "matches" : "accepted"}</span>
+                          : <span className="pill red">{nIss} issue{nIss === 1 ? "" : "s"}</span>}
+                      {!effMatched && !r.over_invoiced && r.discrepancy_reason
+                        ? <span className="sub" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(r.discrepancy_reason).replace(/\s*\n\s*/g, " · ")}</span>
+                        : <span style={{ flex: 1 }} />}
+                      {r._stored ? <span className="sub muted" title={r.checked_at ? `Saved check from ${ukDate(r.checked_at)}` : "Saved from an earlier check"}>saved{r.checked_at ? ` · ${ukDate(r.checked_at)}` : ""}</span> : null}
+                    </button>
+                    {isExp && (
                 <div className="inv-body">
                   {r.over_invoiced && (
                     <div className="warn-note col" style={{ marginBottom: 8 }}>
@@ -1355,7 +1464,10 @@ export default function Invoices() {
                     </>
                   )}
                 </div>
-              )}
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         };

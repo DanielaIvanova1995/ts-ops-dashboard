@@ -557,6 +557,67 @@ def invoice_verdict_delete(sub_id) -> bool:
         return False
 
 
+# ---- Durable WEB-app check results -----------------------------------------------------------
+# The full line-level result of a web check (lines/issues/reason/matched/missing), saved EVERY time
+# an invoice is checked — matched OR not — so the invoices page shows a checked invoice's
+# discrepancies again after a reload WITHOUT re-running the check, and so we can aggregate the most
+# common discrepancy reasons. Stored under a 'web:' key so it never clashes with the Streamlit app's
+# compact verdicts (plain sub_id) in the same table.
+def invoice_web_verdict_set(sub_id, result: dict) -> bool:
+    """Persist one invoice's full web check result, keyed by subitem id. Upsert (keeps only the latest)."""
+    if not configured() or sub_id is None or not isinstance(result, dict):
+        return False
+    try:
+        payload = dict(result)
+        payload["checked_at"] = _now()
+        _client().table("invoice_verdicts").upsert({
+            "sub_id": f"web:{sub_id}", "verdict": _json_safe(payload), "at": _now()}).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def invoice_web_verdicts_get(sub_ids: list) -> dict:
+    """Stored web check results for a set of subitem ids → {sub_id(str): result}. Only checked ones."""
+    if not configured() or not sub_ids:
+        return {}
+    try:
+        out = {}
+        keys = [f"web:{s}" for s in sub_ids]
+        for i in range(0, len(keys), 200):                 # chunk to keep the `in` filter sane
+            chunk = keys[i:i + 200]
+            r = (_client().table("invoice_verdicts").select("sub_id,verdict")
+                 .in_("sub_id", chunk).execute())
+            for row in (r.data or []):
+                out[row["sub_id"][4:]] = row.get("verdict")   # strip the 'web:' prefix
+        return out
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def invoice_web_verdicts_recent(limit: int = 3000) -> list:
+    """All stored web check results (newest first) for the discrepancy summary/aggregation."""
+    if not configured():
+        return []
+    try:
+        r = (_client().table("invoice_verdicts").select("sub_id,verdict,at")
+             .like("sub_id", "web:%").order("at", desc=True).limit(limit).execute())
+        return [row.get("verdict") for row in (r.data or []) if isinstance(row.get("verdict"), dict)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def invoice_web_verdict_delete(sub_id) -> bool:
+    """Forget one invoice's stored web result (e.g. after it's deleted)."""
+    if not configured() or sub_id is None:
+        return False
+    try:
+        _client().table("invoice_verdicts").delete().eq("sub_id", f"web:{sub_id}").execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ---- Claude API usage/cost log (so TradeHub can show its own daily Claude spend) ------------
 def llm_usage_log(model: str, feature: str, input_tokens: int, output_tokens: int,
                   cost_usd: float) -> bool:

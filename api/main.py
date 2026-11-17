@@ -4232,6 +4232,19 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
     line-by-line issues, margin and the suggested action. Parse is cached (Supabase) to avoid re-
     reading the PDF with Claude each time."""
     import invoice_core as core
+
+    def _persist(out):
+        # Save EVERY successful check (matched or not) so the invoices page can show this invoice's
+        # result again after a reload without re-running, and so the discrepancy summary can aggregate
+        # the most common reasons. Best-effort — never blocks the response.
+        try:
+            import supabase_db
+            if supabase_db.configured() and isinstance(out, dict) and out.get("ok"):
+                supabase_db.invoice_web_verdict_set(sub_id, out)
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     # Fetch THIS subitem directly by its id — status-agnostic and not capped by any list limit, so the
     # check never 404s on an invoice the user can see (older bug: the invoice fell outside the first 500
     # of a combined Needs-Review+Matched fetch, or had since moved to Discrepancy). Fall back to the list
@@ -4260,12 +4273,12 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
             _lo = lo if lo is not None else core.MARGIN_PUSH_MIN
             _hi = hi if hi is not None else core.MARGIN_PUSH_MAX
             label, action = core.push_decision(True, False, margin, sup, _lo, _hi)
-            return {"ok": True, "matched": True, "n_issues": 0, "incomplete": False, "missing": [],
+            return _persist({"ok": True, "matched": True, "n_issues": 0, "incomplete": False, "missing": [],
                     "lines": [], "verdict": {"order": True, "price": None, "incomplete": False},
                     "margin": margin, "supplier": sup, "invoice_no": inv.get("invoice_no"),
                     "order_no": inv.get("order_no"), "total": None, "no_pdf": True,
                     "suggested_action": action, "suggested_label": label,
-                    "discrepancy_reason": None}
+                    "discrepancy_reason": None})
         return {"ok": False, "detail": "no PDF attached to this invoice"}
     parsed = None
     try:
@@ -4356,14 +4369,94 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
         o["issues"] = [list(x) for x in (l.get("issues") or [])]
         return o
 
-    return {"ok": True, "matched": matched, "n_issues": res.get("n_issues"),
+    return _persist({"ok": True, "matched": matched, "n_issues": res.get("n_issues"),
             "incomplete": res.get("incomplete"), "missing": res.get("missing") or [],
             "lines": [_line_out(l) for l in (res.get("lines") or [])],
             "verdict": core.verdict(res), "margin": inv.get("order_margin_live"),
             "supplier": sup, "invoice_no": inv.get("invoice_no"), "order_no": inv.get("order_no"),
             "total": parsed.get("total"), "over_invoiced": over,
             "suggested_action": action, "suggested_label": label,
-            "discrepancy_reason": over_reason or (None if matched else core.discrepancy_reason(res))}
+            "discrepancy_reason": over_reason or (None if matched else core.discrepancy_reason(res))})
+
+
+class StoredChecksIn(BaseModel):
+    sub_ids: list[str] = []
+
+
+@app.post("/invoices/stored-checks", dependencies=[Depends(require_key_or_statements)])
+def invoices_stored_checks(body: StoredChecksIn):
+    """Return the LAST saved check result for each of these invoices (keyed by sub_id), so the
+    invoices page shows previously-checked discrepancies after a reload WITHOUT re-running the check.
+    Only invoices that have actually been checked come back."""
+    try:
+        import supabase_db
+        if not supabase_db.configured() or not body.sub_ids:
+            return {"ok": True, "verdicts": {}}
+        return {"ok": True, "verdicts": supabase_db.invoice_web_verdicts_get(body.sub_ids)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e)[:200], "verdicts": {}}
+
+
+# Human labels for the discrepancy issue keys invoice_core emits (first element of each issue tuple).
+_DISC_BUCKETS = {
+    "noprice":      "No pricelist cost held — add the price",
+    "price":        "Charged more than our pricelist",
+    "qty":          "Quantity differs / item not on the order",
+    "carriage":     "Carriage / delivery charge wrong",
+    "delivery":     "Carriage / delivery charge wrong",
+    "delivery_any": "Carriage / delivery charge — no agreed rate on file",
+}
+
+
+@app.get("/invoices/discrepancy-summary", dependencies=[Depends(require_key_or_statements)])
+def invoices_discrepancy_summary():
+    """Aggregate every saved check result into: the most common discrepancy reasons, and the exact
+    things to FILL IN — supplier+SKU with no pricelist cost, supplier+SKU charged over pricelist, and
+    suppliers whose carriage rate isn't on file. Lets staff fix the data that keeps causing flags."""
+    try:
+        import supabase_db
+        if not supabase_db.configured():
+            return {"ok": False, "detail": "history store not configured", "reasons": [], "fill_in": {}}
+        rows = supabase_db.invoice_web_verdicts_recent(3000)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "detail": str(e)[:200], "reasons": [], "fill_in": {}}
+    from collections import Counter
+    reasons, miss_price, over_price, miss_carr = Counter(), Counter(), Counter(), Counter()
+    n_checked = n_disc = 0
+    for r in rows:
+        if not isinstance(r, dict) or not r.get("ok"):
+            continue
+        n_checked += 1
+        sup = ((r.get("supplier") or "—").strip() or "—")
+        had = False
+        for l in (r.get("lines") or []):
+            sku = (l.get("sku") or l.get("desc") or "line")
+            for iss in (l.get("issues") or []):
+                key = iss[0] if isinstance(iss, (list, tuple)) and iss else None
+                if not key or key == "name":
+                    continue
+                had = True
+                reasons[key] += 1
+                if key == "noprice":
+                    miss_price[(sup, sku)] += 1
+                elif key == "price":
+                    over_price[(sup, sku)] += 1
+                elif key in ("carriage", "delivery", "delivery_any"):
+                    miss_carr[sup] += 1
+        if had or not r.get("matched"):
+            n_disc += 1
+
+    def _pairs(counter, n=20):
+        return [{"supplier": k[0], "sku": k[1], "count": c} for k, c in counter.most_common(n)]
+
+    reason_rows = [{"key": k, "label": _DISC_BUCKETS.get(k, k), "count": c}
+                   for k, c in reasons.most_common()]
+    return {"ok": True, "n_checked": n_checked, "n_discrepancies": n_disc,
+            "reasons": reason_rows,
+            "fill_in": {
+                "missing_prices": _pairs(miss_price),
+                "overcharged": _pairs(over_price),
+                "missing_carriage": [{"supplier": k, "count": c} for k, c in miss_carr.most_common(20)]}}
 
 
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
