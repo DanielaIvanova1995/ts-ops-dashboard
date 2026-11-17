@@ -4856,6 +4856,41 @@ def invoice_find_pdf(sub_id: str, body: FindPdfIn):
                        else "Found a PDF but Monday didn't confirm the attachment — try again")}
 
 
+@app.post("/invoices/find-missing-pdfs", dependencies=[Depends(require_key)])
+def invoices_find_missing_pdfs(limit: int = 300):
+    """Native self-heal: for EVERY Needs-Review invoice with no PDF, hunt accounts@ for its PDF (by
+    invoice number + supplier) and attach it — so invoices created without a file (e.g. a legacy Make
+    scenario that made the Monday row but didn't attach the PDF, like the Decor8 batch) get their PDF
+    from TradeHub, no Make needed. Returns a per-invoice result."""
+    try:
+        data = ds.fetch_invoices_by_status([_NEEDS_REVIEW_LABEL], limit=limit)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Couldn't read invoices from Monday: {e}")
+    no_pdf = [i for i in (data.get("invoices") or []) if not i.get("asset_id")]
+    attached, results = 0, []
+    for i in no_pdf:
+        inv = (i.get("invoice_no") or "").strip()
+        sub_id = str(i.get("sub_id") or "")
+        sup = i.get("supplier") or ""
+        if not inv or not sub_id:
+            continue
+        r = {"invoice_no": inv, "supplier": sup, "attached": False}
+        try:
+            hit = ds.find_invoice_pdf_in_mail(inv, sup or None)
+            if hit:
+                ok = ds.add_pdf_to_subitem_file(sub_id, hit["bytes"], hit.get("name") or f"{inv}.pdf")
+                r["attached"] = bool(ok)
+                r["filename"] = hit.get("name")
+                attached += 1 if ok else 0
+            else:
+                r["detail"] = "no PDF found in accounts@"
+        except Exception as e:  # noqa: BLE001
+            r["detail"] = str(e)[:100]
+        results.append(r)
+    return {"ok": True, "scanned": len(no_pdf), "attached": attached,
+            "not_found": sum(1 for r in results if not r["attached"]), "results": results}
+
+
 @app.get("/invoices/suggest-order", dependencies=[Depends(require_key)])
 def invoice_suggest_order(total: float, supplier: str = ""):
     """Confirm-first hint for a left-behind invoice: live orders whose cost/value matches the

@@ -817,6 +817,23 @@ export default function Invoices() {
   function toggleSel(id) { setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
   function toggleAll() { setSel((s) => (s.size === list.length ? new Set() : new Set(list.map((x) => x.sub_id)))); }
 
+  const [findingAllPdfs, setFindingAllPdfs] = useState(false);
+  // Bulk self-heal: for every Needs-Review invoice with no PDF, hunt accounts@ for it and attach it.
+  async function findMissingPdfs() {
+    setFindingAllPdfs(true);
+    try {
+      const res = await jsonFetch("/invoices/find-missing-pdfs", { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        setNotice({ kind: d.attached ? "ok" : "warn", text:
+          `Scanned ${d.scanned} invoice(s) with no PDF — attached ${d.attached} from accounts@` +
+          (d.not_found ? `, ${d.not_found} still not found.` : ".") });
+        load();
+      } else setNotice({ kind: "warn", text: d.detail || "Couldn’t find missing PDFs." });
+    } catch (e) { if (String(e.message) !== "unauthorised") setNotice({ kind: "warn", text: String(e.message || e) }); }
+    finally { setFindingAllPdfs(false); }
+  }
+
   const [fixingMargins, setFixingMargins] = useState(false);
   async function fixMargins() {
     const ids = [...sel];
@@ -1114,6 +1131,7 @@ export default function Invoices() {
           {(supFilter || query || sortBy || onlyDup) && <button className="btn ghost" onClick={() => { setSupFilter(""); setQuery(""); setSortBy(""); setOnlyDup(false); }}>Clear</button>}
           <span style={{ flex: 1 }} />
           <span className="inv-set"><span className="sub">Approve</span><input type="number" className="numin" value={floor} onChange={(e) => setFloorP(Number(e.target.value))} title="Auto-approve floor margin %" /><span className="sub">–</span><input type="number" className="numin" value={ceil} onChange={(e) => setCeilP(Number(e.target.value))} title="Flag-above margin %" /><span className="sub">%</span></span>
+          <button className="btn" onClick={findMissingPdfs} disabled={findingAllPdfs} title="For every invoice with no PDF, find it in accounts@ and attach it (no Make)">{findingAllPdfs ? "Finding PDFs…" : "📎 Find missing PDFs"}</button>
           {shown.length > 0 && <button className="btn" onClick={toggleAllShown}>{allShownSelected ? "Clear" : "Select all"}</button>}
           {sel.size > 0 && <button className="btn" onClick={fixMargins} disabled={fixingMargins} title="Add any invoice totals missing from the order on Monday so the margin is right">{fixingMargins ? "Fixing…" : `Fix margins (${sel.size})`}</button>}
           {sel.size > 0 && <button className="btn primary" onClick={checkApproveSelected} disabled={proc?.running}>{proc?.running ? `Working ${proc.done}/${proc.total}…` : `Check & approve (${sel.size})`}</button>}
