@@ -78,6 +78,10 @@ SUPPLIER_RULES = {
                 "flag_high": False, "flag_below": True, "delivery_any": True},
     "mbdecorltd": {"name": "MB Decor", "pdf_optional": True, "push_min": 10.0,
                    "flag_high": False, "flag_below": True, "delivery_any": True},
+    # Toolbank: a merchant whose price is agreed per order and entered as £-to-supplier, so the agreed-
+    # total gate approves the invoice first. ACCEPT whatever Toolbank charges for carriage — the
+    # colleague agrees it at order placing, so a delivery line is never a discrepancy (Daniela 2026-11-18).
+    "toolbank": {"name": "Toolbank", "delivery_any": True},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",
