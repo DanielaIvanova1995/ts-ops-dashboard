@@ -1314,6 +1314,16 @@ def _recon_from_bytes(by: bytes, filename: str, supplier: str = "") -> dict:
         if auto:
             vid, vname = auto.get("id"), auto.get("name")
     if not vid:
+        # A disconnected QuickBooks makes the vendor lookup fail for EVERY supplier — so don't blame the
+        # supplier name. Check the connection and give the real, actionable message.
+        try:
+            connected = bool(ds.qbo_is_connected())
+        except Exception:  # noqa: BLE001
+            connected = False
+        if not connected:
+            return {"ok": False, "qb_disconnected": True, "supplier": sup,
+                    "statement_date": stmt.get("statement_date"), "balance": stmt.get("balance"),
+                    "detail": "QuickBooks is disconnected — reconnect it (top of this page), then try again."}
         return {"ok": False, "need_vendor": True, "supplier": sup,
                 "statement_date": stmt.get("statement_date"), "balance": stmt.get("balance"),
                 "detail": f"No QuickBooks vendor match for “{sup}”. Map it in the live app for now "
