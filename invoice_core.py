@@ -426,6 +426,56 @@ def _price_overrides():
     return ov
 
 
+def price_title_index(ov=None):
+    """Title-based cost rules from price_overrides.json, for products a supplier bills by DESCRIPTION
+    (no stable SKU) and/or with quantity breaks:
+      '_titles'     : {supplier: [{"contains": <text>, "cost": X}]}            — flat cost
+      '_qty_titles' : {supplier: [{"contains": <text>, "tiers": [[lo,hi,cost],...]}]} — qty-break cost
+                      (hi = null for the open-ended top band)
+    Returns {supplier_norm: [(needle_norm, flat_cost_or_None, tiers_or_None)]}. Matched by SUBSTRING on
+    the normalised line description (same semantics as order_processing._price_titles) — so 'smooth
+    hardie plank' never matches a non-smooth plank. Same supplier's own price only."""
+    ov = ov if ov is not None else _price_overrides()
+    def _nt(s):
+        return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    out = {}
+    for sup, rules in (ov.get("_titles") or {}).items():
+        for r in (rules or []):
+            if isinstance(r.get("cost"), (int, float)) and r.get("contains"):
+                out.setdefault(norm_code(sup), []).append((_nt(r["contains"]), r["cost"], None))
+    for sup, rules in (ov.get("_qty_titles") or {}).items():
+        for r in (rules or []):
+            tiers = r.get("tiers")
+            if isinstance(tiers, list) and tiers and r.get("contains"):
+                out.setdefault(norm_code(sup), []).append((_nt(r["contains"]), None, tiers))
+    return out
+
+
+def price_title_cost(desc, qty, supplier, ptidx):
+    """Cost for one line from the title index: a flat title cost, or the quantity-tier cost for `qty`.
+    Returns (cost, note) or (None, None). A tiered rule needs a numeric qty to resolve."""
+    rows = ptidx.get(supplier) if ptidx else None
+    if not rows:
+        return None, None
+    dn = re.sub(r"[^a-z0-9]", "", (desc or "").lower())
+    if not dn:
+        return None, None
+    for needle, flat, tiers in rows:
+        if not needle or needle not in dn:
+            continue
+        if flat is not None:
+            return flat, "priced by product title"
+        if tiers and isinstance(qty, (int, float)):
+            for band in tiers:
+                lo_, hi_, cost = band[0], band[1], band[2]
+                if cost is None:
+                    continue
+                if qty >= lo_ and (hi_ is None or qty <= hi_):
+                    band_txt = f"{int(lo_)}+" if hi_ is None else f"{int(lo_)}–{int(hi_)}"
+                    return cost, f"priced by title at qty {int(qty)} (band {band_txt})"
+    return None, None
+
+
 def order_sku_cost(order_sku, supplier, pidx):
     """THIS supplier's own cost for one of OUR order-line SKUs. For re-coded suppliers (Squaredeal,
     GAP, Eurocell…) the invoice prints the supplier's OWN product code, so pricing by the invoice SKU
@@ -771,6 +821,10 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
     (the app or the headless runner). Returns the same result dict app._check_invoice does."""
     supplier = canon_supplier(supplier_name)   # 'LPD DOORS'/'LPD', 'Hurlingham'/'Carron' → one key
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
+    # Title / quantity-break price rules (price_overrides.json '_titles' + '_qty_titles'), for products
+    # a supplier bills by description or with qty breaks (e.g. Squaredeal touch-up paint; smooth Hardie
+    # plank priced per qty band). Built here so every caller (web app + scheduler) honours them.
+    ptidx = None if no_pl else price_title_index()
     if no_pl:
         tidx = cidx = None
     parsed_lines = parsed.get("lines") or []
@@ -928,6 +982,12 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
                     c4 = order_sku_cost(order[oks[0]].get("sku"), supplier, pidx)
                     if c4 is not None:
                         cost, title_note = c4, f"matched to order line {order[oks[0]].get('sku')}"
+            if cost is None and not no_pl and ptidx:
+                # Priced by product title / quantity band (e.g. Squaredeal touch-up paint; smooth Hardie
+                # plank by qty). Substring match on the description, so it never borrows another product.
+                c5, note5 = price_title_cost(desc, qty, supplier, ptidx)
+                if c5 is not None:
+                    cost, title_note = c5, note5
             if not no_pl:
                 if isinstance(unit, (int, float)) and isinstance(cost, (int, float)):
                     sur = SUPPLIER_SURCHARGE.get(supplier, 0.0)
