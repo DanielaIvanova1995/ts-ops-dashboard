@@ -351,6 +351,20 @@ function statusPill(s) {
   return { cls: "grey", label: s || "—" };
 }
 
+// The Monday stage as a pill — a Discrepancy is shown loud in red so it's obvious this invoice is
+// flagged/queried, not just sitting in Needs Review.
+function mondayStagePill(s) {
+  const v = (s || "").trim();
+  if (!v) return <span className="sub">—</span>;
+  if (/discrepan/i.test(v)) {
+    return <span className="pill red" style={{ fontWeight: 700 }} title="Flagged as a Discrepancy on Monday — queried with the supplier, do not pay yet">⚠ Discrepancy</span>;
+  }
+  const low = v.toLowerCase();
+  const cls = low.includes("approved") || low.includes("paid") ? "green"
+            : low.includes("review") ? "amber" : "grey";
+  return <span className={`pill ${cls}`}>{v}</span>;
+}
+
 function AutoReconcilePanel({ jsonFetch, onNotice }) {
   const [status, setStatus] = useState(null);     // { status:{...}, auto_enabled, interval_min, folder }
   const [cov, setCov] = useState(null);           // { saved:[...], suppliers:[...] }
@@ -1512,7 +1526,7 @@ export default function Recon() {
                     <td className="num">{money(row.unpaid)}</td>
                     <td className="sub">{row.due_date || "—"}</td>
                     <td className={`num ${mClass}`}>{row.margin == null ? "—" : `${row.margin}%`}</td>
-                    <td className="sub">{row.monday_status || "—"}</td>
+                    <td>{mondayStagePill(row.monday_status)}</td>
                     <td><span className={`pill ${p.cls}`}>{p.label}</span>{row.paid_ref ? <span className="sub"> {row.paid_ref}</span> : null}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {st === "done" ? <span className="pill green">approved ✓</span>
