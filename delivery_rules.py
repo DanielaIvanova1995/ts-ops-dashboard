@@ -404,11 +404,28 @@ def is_deanta_doc(l):
     return "qmark" in blob or "firedoordocument" in blob
 
 
+# Deanta product categories whose DELIVERY is a flat £70 + VAT regardless of door count (Daniela
+# 2026-11-19): folding door systems, pocket doors, the Immerse range, and skirting.
+DEANTA_FLAT70 = 70.0
+_DEANTA_FLAT70_KEYS = ("folding", "pocket", "immerse", "skirting")
+
+
+def _deanta_is_flat70(lines):
+    for l in (lines or []):
+        blob = _norm((l.get("sku") or "") + " " + (l.get("description") or ""))
+        if any(k in blob for k in _DEANTA_FLAT70_KEYS):
+            return True
+    return False
+
+
 def deanta_expected(goods, lines, ship=None):
     surcharge, poa = _deanta_surcharge(ship)
     if poa:
         return None
     lines = [l for l in (lines or []) if not is_deanta_doc(l)]   # drop £0 Q-Mark doc lines
+    # Folding door systems / pocket doors / Immerse / skirting: delivery is ALWAYS a flat £70 + VAT.
+    if _deanta_is_flat70(lines):
+        return DEANTA_FLAT70
     doors, packs = _lpd_doors(lines)          # same door vs hardware split as LPD
     if doors > 0:
         base = min(DEANTA_DOOR_BASE + (doors - 1) * DEANTA_DOOR_STEP, DEANTA_DOOR_CAP)
