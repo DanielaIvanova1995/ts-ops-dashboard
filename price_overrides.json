@@ -4387,6 +4387,10 @@
    {
     "contains": "int metal corner 3m",
     "cost": 16.8
+   },
+   {
+    "contains": "edge channel 3m",
+    "cost": 20.48
    }
   ]
  },
