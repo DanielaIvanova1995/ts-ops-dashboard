@@ -4379,6 +4379,10 @@
    {
     "contains": "ext metal corner 3m",
     "cost": 25.2
+   },
+   {
+    "contains": "wood screws",
+    "cost": 48.65
    }
   ]
  },
