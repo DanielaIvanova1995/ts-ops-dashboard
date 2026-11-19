@@ -709,6 +709,17 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
                 return dr.vista_expected(goods_value, lines)
         except Exception:  # noqa: BLE001
             return None
+    if sc.startswith("southern"):
+        # Southern = postcode-zone carriage, EXCEPT RoofArt (rainwater/steel) which is value/size-based.
+        # Delegate to delivery_rules (the single source), passing lines so RoofArt is detected.
+        try:
+            import delivery_rules as dr
+            lines = [{"description": v.get("name"),
+                      "sku": (k.split("#")[0] if isinstance(k, str) else v.get("sku")),
+                      "qty": v.get("qty")} for k, v in (order or {}).items()]
+            return dr.expected_delivery(supplier, goods_value, ship, lines)
+        except Exception:  # noqa: BLE001
+            return None
 
     rule = DELIVERY_CHARGES.get(supplier)
     if not rule:

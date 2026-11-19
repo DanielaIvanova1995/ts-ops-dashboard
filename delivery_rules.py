@@ -131,6 +131,43 @@ def southern_expected(ship):
     return _southern_zones().get(outward.strip())
 
 
+# --- RoofArt (via Southern Sheeting): NOT postcode-zoned. £14.99+VAT for small items, £40+VAT once
+# any item is 1m or longer, FREE over £500 net (Daniela 2026-11-19 + the Southern terms doc). ------
+ROOFART_FREE_OVER = 500.0
+ROOFART_SMALL = 14.99
+ROOFART_LARGE = 40.0
+
+
+def _is_roofart(lines):
+    for l in (lines or []):
+        blob = _norm((l.get("sku") or "") + " " + (l.get("description") or ""))
+        if blob.startswith("ra1") or "roofart" in blob:
+            return True
+    return False
+
+
+def _has_1m_plus(lines):
+    """True if any line names a length of 1 metre or more (e.g. '3.0m', '3m', '3000mm')."""
+    for l in (lines or []):
+        txt = ((l.get("description") or "") + " " + (l.get("sku") or "")).lower()
+        for m in re.finditer(r'(\d+(?:\.\d+)?)\s*m(?![a-z])', txt):      # '3m' / '3.0m' (not 'mm')
+            try:
+                if float(m.group(1)) >= 1.0:
+                    return True
+            except ValueError:
+                pass
+        for m in re.finditer(r'(\d{3,5})\s*mm', txt):                    # '3000mm'
+            if int(m.group(1)) >= 1000:
+                return True
+    return False
+
+
+def roofart_expected(goods, lines):
+    if goods is not None and goods >= ROOFART_FREE_OVER:
+        return 0.0
+    return ROOFART_LARGE if _has_1m_plus(lines) else ROOFART_SMALL
+
+
 # --- JB Kind (door count) -------------------------------------------------------------------
 JBKIND_DOOR_DELIVERY = {1: 42.0, 2: 47.0, 3: 52.0, 4: 57.0}
 JBKIND_5PLUS = 62.0
@@ -496,6 +533,10 @@ def expected_delivery(supplier, goods=None, ship=None, lines=None):
         except Exception:  # noqa: BLE001
             return None
     if s.startswith("southern"):
+        # RoofArt (rainwater/steel sheeting via Southern) uses its own value/size model, not the
+        # postcode zones.
+        if _is_roofart(lines):
+            return roofart_expected(goods, lines)
         return southern_expected(ship)
     if s.startswith("jbkind"):
         return jbkind_expected(lines, ship)
