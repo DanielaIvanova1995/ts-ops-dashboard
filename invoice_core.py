@@ -62,8 +62,7 @@ SUPPLIER_RULES = {
     # (Daniela — approve even over 35%); below 10% → Needs Review.
     # Rexel: full pricelist LOADED 2026-11-12 (price_overrides.json "Rexel", 2021 items keyed by both
     # Rexel SKU and Mfr Part). Lines are now price-checked; approve matched at 10%+ with NO upper cap.
-    "rexel": {"name": "Rexel", "push_min": 10.0, "flag_high": False, "flag_below": True,
-              "delivery_any": True},
+    "rexel": {"name": "Rexel", "push_min": 10.0, "flag_high": False, "flag_below": True},
     # PJH: approve every matched invoice regardless of how high the margin is (no 35% cap).
     "pjh": {"name": "PJH", "flag_high": False},
     # Huws Gray: no pricelist held (quote-first), so the ORDER margin is the safeguard. Auto-approve a
@@ -79,14 +78,11 @@ SUPPLIER_RULES = {
                 "flag_high": False, "flag_below": True, "delivery_any": True},
     "mbdecorltd": {"name": "MB Decor", "pdf_optional": True, "push_min": 10.0,
                    "flag_high": False, "flag_below": True, "delivery_any": True},
-    # Agreed-£-to-supplier merchants: the price is agreed per order and entered as £-to-supplier, so the
-    # agreed-total gate approves the invoice first, and their carriage is agreed at order placing too —
-    # so ACCEPT whatever they charge for delivery (never a discrepancy). Toolbank 2026-11-18; Nuie +
-    # Velux 2026-11-19 (Rexel already has delivery_any above). (Daniela: "Nuie and rexel we put the £ to
-    # supplier too and velux".)
+    # Toolbank ONLY: its carriage is agreed at order placing, so accept whatever Toolbank charges for
+    # delivery (never a discrepancy). This does NOT extend to other agreed-total merchants — Nuie, Rexel
+    # and Velux still have their delivery checked (Daniela 2026-11-19: "no delivery charge should be
+    # accepted on toolbank only no matter what it is").
     "toolbank": {"name": "Toolbank", "delivery_any": True},
-    "nuie": {"name": "Nuie", "delivery_any": True},
-    "velux": {"name": "Velux", "delivery_any": True},
 }
 SUPPLIER_EMAILS = {
     "upb": "janetwitt@upbuildingproducts.com",
