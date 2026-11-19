@@ -4383,6 +4383,10 @@
    {
     "contains": "wood screws",
     "cost": 48.65
+   },
+   {
+    "contains": "int metal corner 3m",
+    "cost": 16.8
    }
   ]
  },
