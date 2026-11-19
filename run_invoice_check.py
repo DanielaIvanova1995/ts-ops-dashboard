@@ -236,9 +236,13 @@ def main(check_only=False, dry_run=None, max_total=None):
                 ship = ds.fetch_order_shipping(sid)
             except Exception:  # noqa: BLE001
                 ship = None
+        # 'TO POST' orders come in to our Derby office free (supplier's local branch) and we post them
+        # on — so the supplier should bill NO carriage; force expected delivery to £0 and flag any charge.
+        _to_post = (inv.get("branch") or "").strip().upper().startswith("TO POST")
         res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship,
                                  agreed_cost=inv.get("agreed_cost"),
-                                 single_invoice=(inv.get("n_invoices") == 1))
+                                 single_invoice=(inv.get("n_invoices") == 1),
+                                 to_post=_to_post)
         is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
         matched = res["n_issues"] == 0 or res.get("agreed_total_match")
         if res.get("agreed_total_match"):

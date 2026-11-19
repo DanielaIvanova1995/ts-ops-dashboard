@@ -4343,9 +4343,13 @@ def invoice_check(sub_id: str, lo: float | None = None, hi: float | None = None)
         except Exception:  # noqa: BLE001
             ship = None
     pidx, tidx, cidx = _inv_indexes()
+    # 'TO POST' orders are collected in to our Derby office (the supplier's local branch delivers to
+    # us free) and we post them on — so the supplier should bill NO carriage. Flag any carriage then.
+    _to_post = (inv.get("branch") or "").strip().upper().startswith("TO POST")
     res = core.check_invoice(parsed, sup, order, pidx, tidx, cidx, ship,
                              agreed_cost=inv.get("agreed_cost"),
-                             single_invoice=(inv.get("n_invoices") == 1))
+                             single_invoice=(inv.get("n_invoices") == 1),
+                             to_post=_to_post)
     is_cn = isinstance(parsed.get("total"), (int, float)) and parsed["total"] < 0
     matched = res["n_issues"] == 0 or res.get("agreed_total_match")
     _lo = lo if lo is not None else core.MARGIN_PUSH_MIN

@@ -1541,7 +1541,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
               "text_mm3gh2za", "text_mm3gjrap", "date_mm3d1ear", "long_text_mm8jcvz3"]) { id value text }
             parent_item { id name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
-                "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
+                "text1", "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
                 "numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
                 "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c"]) {
                 id text ... on FormulaValue { display_value } } }
@@ -1624,6 +1624,7 @@ def fetch_invoices_by_status(label_ids, limit: int = 100, token: str | None = No
             "order_part": (parent.get("name") or "").strip() or None,
             "supplier": pcv.get("dropdown_mkyqdeqd"),
             "order_items": pcv.get("order_items0") or "",
+            "branch": pcv.get("text1") or "",   # 'TO POST' → goods come in to our Derby office free
             "query_note": (cv.get("text_mm3gh2za", {}) or {}).get("text") or "",   # discrepancy reason
             "action_note": (cv.get("text_mm3gjrap", {}) or {}).get("text") or "",  # 'Queried…' = sent out
             "progress": (cv.get("long_text_mm8jcvz3", {}) or {}).get("text") or "",  # running progress notes
@@ -1687,7 +1688,7 @@ def fetch_invoice_by_sub_id(sub_id, token: str | None = None) -> dict | None:
               "text_mm3gh2za", "text_mm3gjrap", "date_mm3d1ear", "long_text_mm8jcvz3"]) { id value text }
             parent_item { id name subitems { id }
               column_values(ids: ["text_mkv6z0nt", "dropdown_mkyqdeqd", "order_items0",
-                "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
+                "text1", "text_mm04tmac", "email", "numbers6", "numbers48", "formula_mkn9918j",
                 "numeric_mm3dc5fs", "numeric_mm3dn836", "numeric_mm3d6jn5",
                 "numeric_mm3d9t22", "numeric_mm3d31gp", "numeric_mm511b9c"]) {
                 id text ... on FormulaValue { display_value } } }
@@ -1761,6 +1762,7 @@ def fetch_invoice_by_sub_id(sub_id, token: str | None = None) -> dict | None:
         "order_part": (parent.get("name") or "").strip() or None,
         "supplier": pcv.get("dropdown_mkyqdeqd"),
         "order_items": pcv.get("order_items0") or "",
+        "branch": pcv.get("text1") or "",   # 'TO POST' → goods come in to our Derby office free
         "query_note": (cv.get("text_mm3gh2za", {}) or {}).get("text") or "",
         "action_note": (cv.get("text_mm3gjrap", {}) or {}).get("text") or "",
         "progress": (cv.get("long_text_mm8jcvz3", {}) or {}).get("text") or "",

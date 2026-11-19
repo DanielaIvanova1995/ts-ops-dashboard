@@ -826,10 +826,15 @@ def _merge_lpd_packs(parsed_lines, supplier, pidx):
 
 # ---- the 3-way check ------------------------------------------------------------------
 def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=None, tol=0.01,
-                  agreed_cost=None, single_invoice=False):
+                  agreed_cost=None, single_invoice=False, to_post=False):
     """3-way match: each invoice line vs the supplier's pricelist cost and vs the order's
     SKUs/quantities. `order`, `tidx`, `cidx`, `carron_ship` are supplied by the caller
-    (the app or the headless runner). Returns the same result dict app._check_invoice does."""
+    (the app or the headless runner). Returns the same result dict app._check_invoice does.
+
+    `to_post=True` means the order is flagged 'TO POST' on Monday — the goods are collected in to
+    OUR Derby office (the supplier's local branch delivers to us free) and we post them on. So the
+    supplier should bill NO carriage: expected delivery is forced to £0 and any carriage line flags
+    (Daniela 2026-11-19 — GAP charged £20 delivery on a TO-POST gutter bracket that came in free)."""
     supplier = canon_supplier(supplier_name)   # 'LPD DOORS'/'LPD', 'Hurlingham'/'Carron' → one key
     no_pl = SUPPLIER_RULES.get(supplier, {}).get("no_pricelist", False)
     # Title / quantity-break price rules (price_overrides.json '_titles' + '_qty_titles'), for products
@@ -914,8 +919,9 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
 
         if is_delivery(sku_raw) or is_delivery(desc):
             saw_delivery = True
-            known = expected_delivery(supplier, delivery_goods, carron_ship, order)
-            zinfo = f" ({carron_zone_label(carron_ship)})" if is_carron(supplier) else ""
+            known = 0.0 if to_post else expected_delivery(supplier, delivery_goods, carron_ship, order)
+            zinfo = (" (TO POST — free to our Derby office)" if to_post
+                     else f" ({carron_zone_label(carron_ship)})" if is_carron(supplier) else "")
             amt = unit if isinstance(unit, (int, float)) else ln.get("line_total")
             dissues = []
             if isinstance(amt, (int, float)):
@@ -1056,11 +1062,12 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
 
     carriage = parsed.get("carriage")
     if isinstance(carriage, (int, float)) and carriage > tol and not saw_delivery:
-        known = expected_delivery(supplier, delivery_goods, carron_ship, order)
+        known = 0.0 if to_post else expected_delivery(supplier, delivery_goods, carron_ship, order)
         cissues = []
         if known is not None:
             if carriage > known + tol:
-                zinfo = f" ({carron_zone_label(carron_ship)})" if is_carron(supplier) else ""
+                zinfo = (" (TO POST — free to our Derby office)" if to_post
+                         else f" ({carron_zone_label(carron_ship)})" if is_carron(supplier) else "")
                 cissues.append(("delivery", f"carriage £{carriage:,.2f} vs expected "
                                             f"£{known:,.2f}{zinfo}"))
         elif SUPPLIER_RULES.get(supplier, {}).get("delivery_any"):
