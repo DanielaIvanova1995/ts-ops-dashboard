@@ -4473,6 +4473,132 @@ def invoices_discrepancy_summary():
                 "missing_carriage": [{"supplier": k, "count": c} for k, c in miss_carr.most_common(20)]}}
 
 
+# Human-readable delivery descriptions for suppliers whose carriage is a SPECIAL handler in
+# delivery_rules (not a flat rate), keyed by canon_supplier. Flat-rate suppliers are described live
+# from delivery_rules.FLAT; this fills in the rest so the Rulebook reads the same as the code behaves.
+_RULEBOOK_DELIVERY_SPECIAL = {
+    "carron": "Priced by delivery postcode zone (mainland / Scottish Highlands / islands).",
+    "ctie": "Priced by delivery postcode zone.",
+    "lpd": "By door count, plus an express/next-day uplift (+£50/£70/£90) when the customer chose express.",
+    "jbkind": "By door count, plus a postcode surcharge for remote areas.",
+    "deanta": "By door count + postcode; a FLAT £70+VAT for folding-door systems, pocket doors, Immerse & skirting.",
+    "dolle": "Highest per-product delivery band among the ordered SKUs (staircases ship large).",
+    "vista": "By goods value + number of lines.",
+    "southern": "By postcode zone — except RoofArt rainwater/steel, which is £14.99+VAT small / £40+VAT for 1m+ items / free over £500 net.",
+    "ajw": "Flat per-zone by delivery postcode, free over the zone's threshold.",
+    "nuie": "Checked against Nuie's agreed carriage (delivery is still verified).",
+}
+# Display names for suppliers that have no SUPPLIER_RULES 'name' but appear via FLAT / special handlers.
+_RULEBOOK_NAMES = {
+    "upb": "UPB", "nbp": "NBP", "eurocell": "Eurocell", "molan": "Molan", "bricklink": "Bricklink",
+    "markovitz": "Markovitz", "edmundson": "Edmundson", "storm": "Storm", "carron": "Carron",
+    "ctie": "Ctie", "lpd": "LPD", "jbkind": "JB Kind", "deanta": "Deanta", "dolle": "Dolle",
+    "vista": "Vista", "southern": "Southern Sheeting", "ajw": "AJW", "nuie": "Nuie", "velux": "Velux",
+    "squaredeal": "Squaredeal", "chasehardware": "Chase Hardware", "nationalplastics": "National Plastics",
+}
+# Suppliers whose line COST comes from the Shopify product, not the supplier pricelist.
+_RULEBOOK_SHOPIFY_COST = {"vista", "ctie", "chasehardware", "storm"}
+
+
+@app.get("/invoices/rulebook", dependencies=[Depends(require_key_or_statements)])
+def invoice_rulebook():
+    """A live 'how is each supplier's invoice checked' reference, built straight from the rule code
+    (invoice_core.SUPPLIER_RULES + SUPPLIER_SURCHARGE, delivery_rules.FLAT + the special handlers), so
+    it never drifts from what the checker actually does. Powers the Rulebook tab in the checker UI."""
+    import invoice_core as core
+    try:
+        import delivery_rules as dr
+        flat = dict(getattr(dr, "FLAT", {}) or {})
+    except Exception:  # noqa: BLE001
+        flat = {}
+    rules = dict(getattr(core, "SUPPLIER_RULES", {}) or {})
+    surch = dict(getattr(core, "SUPPLIER_SURCHARGE", {}) or {})
+    lo_def = float(getattr(core, "MARGIN_PUSH_MIN", 10.0))
+    hi_def = float(getattr(core, "MARGIN_PUSH_MAX", 35.0))
+
+    # General steps — the same order check_invoice runs them in.
+    general = [
+        "Match each invoice line to the Shopify order (by SKU, then description + quantity). A line "
+        "removed from the order (currentQuantity 0) is ignored.",
+        "Price-check every line against the supplier's agreed cost (its pricelist + any overrides). "
+        "A line is flagged when the unit price is over the agreed cost (plus the supplier's surcharge "
+        "allowance where one applies) beyond a few pence tolerance.",
+        "Quantity-check: quantity invoiced vs quantity on the order.",
+        "Delivery/carriage: checked against the supplier's agreed rate (see each supplier below).",
+        f"Agreed-total shortcut: a SINGLE invoice whose total equals the order's £-to-supplier — "
+        f"matched against the invoice's ex-VAT net OR its own (gross) total, within {getattr(core,'AGREED_TOTAL_TOL',0.05):.2f} — "
+        "is price-confirmed and approved on the total, regardless of margin.",
+        f"Margin gate: a matched invoice is auto-approved to QuickBooks only if the order's live margin "
+        f"is inside the supplier's band (default {lo_def:.0f}%–{hi_def:.0f}%). Outside the band it is held "
+        "in Needs Review for a person, not auto-approved.",
+        "Guards: a possible double-invoice (same order + same £ under a different number) is never "
+        "auto-approved; a whole order over-invoiced across all its invoices is held; a 'TO POST' order "
+        "(brought in to our Derby office) should carry NO supplier carriage; credit notes are never "
+        "auto-pushed to QuickBooks (a vendor credit is entered by hand).",
+    ]
+
+    def _delivery_text(canon):
+        if rules.get(canon, {}).get("delivery_any"):
+            return "Any carriage accepted — agreed at order placing, so never flagged."
+        if canon in _RULEBOOK_DELIVERY_SPECIAL:
+            return _RULEBOOK_DELIVERY_SPECIAL[canon]
+        if canon in flat:
+            fl, over = flat[canon]
+            if over:
+                return f"£{fl:,.2f}+VAT when the order is under £{over:,.0f} net; free at/above £{over:,.0f}."
+            return f"£{fl:,.2f}+VAT per delivery (no free threshold)."
+        return "No agreed rate on file — any carriage is flagged for review."
+
+    def _cost_text(canon):
+        r = rules.get(canon, {})
+        if r.get("no_pricelist"):
+            return "No pricelist held — the ORDER MARGIN is the safeguard (lines aren't priced individually)."
+        if canon in _RULEBOOK_SHOPIFY_COST:
+            return "Line cost comes from the Shopify product (not a supplier pricelist); the agreed-total shortcut usually clears it."
+        return "Lines priced against the supplier's pricelist + overrides."
+
+    def _margin_text(canon):
+        r = rules.get(canon, {})
+        lo = float(r.get("push_min", lo_def))
+        hi = r.get("push_max", hi_def)
+        flag_high = r.get("flag_high", True)
+        if flag_high:
+            return f"Auto-approve a matched invoice at {lo:.0f}%–{float(hi):.0f}% margin; outside → Needs Review."
+        return f"Auto-approve a matched invoice at {lo:.0f}%+ margin (no upper cap); below {lo:.0f}% → Needs Review."
+
+    canons = sorted(set(flat) | set(rules) | set(_RULEBOOK_DELIVERY_SPECIAL) | set(_RULEBOOK_NAMES))
+    suppliers = []
+    for c in canons:
+        name = rules.get(c, {}).get("name") or _RULEBOOK_NAMES.get(c) or c.title()
+        flags = []
+        r = rules.get(c, {})
+        if r.get("delivery_any"):
+            flags.append("accepts any carriage")
+        if r.get("pdf_optional"):
+            flags.append("approvable with no PDF (margin safeguards it)")
+        if c in surch:
+            flags.append(f"+{surch[c]*100:.0f}% surcharge line expected (not an overcharge)")
+        if c == "gap":
+            flags.append("TO-POST orders (to our Derby office) = no carriage")
+        if c == "eurocell":
+            flags.append("TO-POST orders (to our Derby office) = no carriage")
+        suppliers.append({
+            "supplier": name, "key": c,
+            "cost": _cost_text(c), "delivery": _delivery_text(c),
+            "margin": _margin_text(c), "flags": flags,
+        })
+    # De-dup display names (e.g. huws/huwsgray, mbdecor/mbdecorltd) — keep the first of each name.
+    seen_names, deduped = set(), []
+    for s in suppliers:
+        if s["supplier"] in seen_names:
+            continue
+        seen_names.add(s["supplier"])
+        deduped.append(s)
+    deduped.sort(key=lambda s: s["supplier"].lower())
+    return {"ok": True, "defaults": {"margin_lo": lo_def, "margin_hi": hi_def},
+            "general": general, "suppliers": deduped}
+
+
 _APPROVED_QB_LABEL = "Approved (To QB by TradeHub)"
 _CN_APPROVED_QB_LABEL = "CN Approved (To QB)"
 

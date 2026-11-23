@@ -361,6 +361,63 @@ function DiscInsights({ jsonFetch }) {
   );
 }
 
+function Rulebook({ jsonFetch }) {
+  const [data, setData] = useState(null);
+  const [status, setStatus] = useState("idle");
+  const [q, setQ] = useState("");
+  const load = useCallback(async () => {
+    setStatus("loading");
+    try {
+      const r = await jsonFetch("/invoices/rulebook");
+      if (r.ok) { setData(await r.json()); setStatus("ok"); } else setStatus("error");
+    } catch { setStatus("error"); }
+  }, [jsonFetch]);
+  useEffect(() => { load(); }, [load]);
+  const ql = q.trim().toLowerCase();
+  const sups = (data?.suppliers || []).filter((s) => !ql || s.supplier.toLowerCase().includes(ql));
+  return (
+    <>
+      {status === "loading" && <div className="card"><div className="state">Loading the rulebook…</div></div>}
+      {status === "error" && <div className="card"><div className="state err">Couldn’t load the rulebook.</div></div>}
+      {status === "ok" && data && (
+        <>
+          <div className="card" style={{ marginBottom: 10, padding: "12px 14px" }}>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>How every invoice is checked</div>
+            <div className="sub" style={{ marginBottom: 8 }}>These steps run on every invoice, in order. Each supplier’s specifics are below.</div>
+            <ol style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6, lineHeight: 1.45 }}>
+              {(data.general || []).map((g, i) => <li key={i} style={{ fontSize: 13 }}>{g}</li>)}
+            </ol>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 10px" }}>
+            <input placeholder="Filter supplier…" value={q} onChange={(e) => setQ(e.target.value)}
+                   style={{ flex: "0 1 240px", padding: "7px 10px", borderRadius: 8, border: "1px solid var(--line,#d0d0d7)" }} />
+            <span className="sub">{sups.length} supplier{sups.length === 1 ? "" : "s"}</span>
+            <button className="btn ghost" onClick={load} style={{ marginLeft: "auto" }}>Refresh</button>
+          </div>
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))" }}>
+            {sups.map((s) => (
+              <div className="card" key={s.key} style={{ padding: "10px 12px" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>{s.supplier}</div>
+                <div style={{ display: "grid", gap: 5 }}>
+                  <div style={{ display: "flex", gap: 8 }}><span className="sub" style={{ flex: "0 0 62px", fontWeight: 700 }}>Cost</span><span style={{ fontSize: 13 }}>{s.cost}</span></div>
+                  <div style={{ display: "flex", gap: 8 }}><span className="sub" style={{ flex: "0 0 62px", fontWeight: 700 }}>Delivery</span><span style={{ fontSize: 13 }}>{s.delivery}</span></div>
+                  <div style={{ display: "flex", gap: 8 }}><span className="sub" style={{ flex: "0 0 62px", fontWeight: 700 }}>Approve</span><span style={{ fontSize: 13 }}>{s.margin}</span></div>
+                </div>
+                {s.flags?.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
+                    {s.flags.map((f, i) => <span className="pill grey" key={i}>{f}</span>)}
+                  </div>
+                )}
+              </div>
+            ))}
+            {sups.length === 0 && <div className="card"><div className="state">No supplier matches “{q}”.</div></div>}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 export default function Invoices() {
   const [accessKey, setAccessKey] = useState(null);
   const [needKey, setNeedKey] = useState(false);
@@ -432,7 +489,7 @@ export default function Invoices() {
   }, [accessKey]);
 
   const load = useCallback(async () => {
-    if (!accessKey || tab === "disc" || tab === "aging") return;
+    if (!accessKey || tab === "disc" || tab === "aging" || tab === "rulebook") return;
     setStatus("loading"); setErr("");
     try {
       const res = await jsonFetch(tab === "matched" ? "/invoices/matched" : "/invoices");
@@ -1073,8 +1130,11 @@ export default function Invoices() {
             <button className={`seg-btn ${tab === "matched" ? "on" : ""}`} onClick={() => setTab("matched")}>Matched{tab === "matched" && status === "ok" ? ` (${list.length})` : ""}</button>
             <button className={`seg-btn ${tab === "disc" ? "on" : ""}`} onClick={() => { setTab("disc"); setDiscSupFilter(""); setDiscSel(new Set()); }}>Discrepancies{discStatus === "ok" ? ` (${disc.length})` : ""}</button>
             <button className={`seg-btn ${tab === "aging" ? "on" : ""}`} onClick={() => { setTab("aging"); setDiscSupFilter(""); setDiscSel(new Set()); }} title={`Discrepancies open ${AGING_DAYS}+ days that need chasing`}>To chase{discStatus === "ok" ? ` (${agingCount})` : ""}</button>
+            <button className={`seg-btn ${tab === "rulebook" ? "on" : ""}`} onClick={() => setTab("rulebook")} title="How each supplier's invoice is checked">Rulebook</button>
           </div>
-          {tab !== "disc" && tab !== "aging"
+          {tab === "rulebook"
+            ? null
+            : tab !== "disc" && tab !== "aging"
             ? <>
                 <span className="count">{status === "ok" ? <><b>{shown.length}</b>{shown.length !== list.length ? ` / ${list.length}` : ""} {tab === "matched" ? "matched" : "to review"}</> : status === "loading" ? "Loading…" : ""}</span>
                 <button className="btn primary" onClick={load} disabled={status === "loading"}>{status === "loading" ? "Refreshing…" : "Refresh"}</button>
@@ -1084,6 +1144,8 @@ export default function Invoices() {
       </div>
 
       {notice && (tab === "disc" || tab === "aging") && <div className={`route-msg ${notice.kind}`} style={{ marginBottom: 8 }}>{notice.text}</div>}
+
+      {tab === "rulebook" && <Rulebook jsonFetch={jsonFetch} />}
 
       {(tab === "disc" || tab === "aging") && (
         <>
