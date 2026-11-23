@@ -1294,11 +1294,22 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
         _agreed = float(agreed_cost) if agreed_cost not in (None, "", 0, "0") else None
     except (TypeError, ValueError):
         _agreed = None
-    agreed_total_match = bool(single_invoice and _agreed and not _is_cn and inv_total_net > 0
-                              and abs(inv_total_net - _agreed) <= AGREED_TOTAL_TOL)
+    # £-to-supplier (our agreed PO total) is keyed by hand and may be EX-VAT or VAT-INCLUSIVE, so match
+    # it against BOTH the invoice's ex-VAT net AND the invoice's own stated total (usually the VAT-
+    # inclusive total). A single invoice whose total equals what we agreed to pay is price-confirmed
+    # either way. Without the gross check, a £-to-supplier entered inc-VAT never matched the ex-VAT net
+    # (≈20% higher), so Vista/Ctie invoices — whose lines the checker can't price off a list — showed a
+    # FALSE discrepancy (Daniela 2026-11-23). The gross check needs near-equality, so it only ever ADDS
+    # true matches, never false ones.
+    _doc_total = parsed.get("total")
+    _net_ok = bool(_agreed and inv_total_net > 0 and abs(inv_total_net - _agreed) <= AGREED_TOTAL_TOL)
+    _doc_ok = bool(_agreed and isinstance(_doc_total, (int, float)) and _doc_total > 0
+                   and abs(_doc_total - _agreed) <= AGREED_TOTAL_TOL)
+    agreed_total_match = bool(single_invoice and _agreed and not _is_cn and (_net_ok or _doc_ok))
     if agreed_total_match:
+        _shown = inv_total_net if _net_ok else _doc_total
         lines.insert(0, {"sku": "✓ Agreed total", "desc": (
-            f"Invoice total £{inv_total_net:,.2f} = agreed £ to supplier £{_agreed:,.2f} — approved on "
+            f"Invoice total £{_shown:,.2f} = agreed £ to supplier £{_agreed:,.2f} — approved on "
             "the agreed PO total (price confirmed; margin not required)"), "qty": None, "unit": None,
             "cost": _agreed, "issues": [("name", "matches the agreed PO total")], "_okey": None})
     return {"lines": lines, "missing": missing, "n_issues": n_issues, "incomplete": incomplete,
