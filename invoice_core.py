@@ -224,7 +224,7 @@ def sku_keys(sk, order):
     return [k for k in order if k == sk or k.startswith(pre)]
 
 
-_PERSQM_RE = re.compile(r"(GSQ|NET)$", re.I)
+_PERSQM_RE = re.compile(r"(GSQ|NET)(?:-|$)", re.I)   # code at the end OR before a '-<dimensions>' suffix
 _SHEET_SIZE_RE = re.compile(r"(\d{3,4})\s*[x×*]\s*(\d{3,4})")
 
 
@@ -1198,17 +1198,24 @@ def check_invoice(parsed, supplier_name, order, pidx, tidx, cidx, carron_ship=No
             continue
         # Molan per-m² polycarbonate: they invoice by AREA, we order by SHEET, so reconcile the
         # invoiced m² against sheets × the sheet size (e.g. 7 × 2000×700mm = 9.8 m²) instead of
-        # flagging '9.8 vs 7'. If we can't read the sheet size, don't flag (numeric diff is expected).
-        if norm_code(supplier) == "molan" and is_persqm_poly(order[k].get("sku")):
+        # flagging '9.8 vs 7'. The sheet size comes from the 'WIDTH x HEIGHT mm' in the name, which
+        # covers the newer dimension-suffixed SKUs (PM10CLGSQ-3000x1200mm) too. Only flag when the
+        # invoiced figure matches NEITHER the plain sheet count NOR the area, so a genuine qty-4 line
+        # still passes (Daniela 2026-11-23: '14.4 vs 4' was 4 × 3000×1200mm = 14.4 m²).
+        if norm_code(supplier) == "molan":
             area = sheet_sqm(order[k].get("name"))
-            if area:
-                order_sqm = round(exp * area, 2)
-                if abs(tot - order_sqm) > max(0.1, order_sqm * 0.02):
+            if is_persqm_poly(order[k].get("sku")) or area:
+                if int(round(tot)) == exp:
+                    continue                                  # matches the plain sheet count — fine
+                if area:
+                    order_sqm = round(exp * area, 2)
+                    if abs(tot - order_sqm) <= max(0.1, order_sqm * 0.02):
+                        continue                              # matches sheets × area — per-m² billing, fine
                     recs = [r for r in lines if r.get("_okey") == k]
                     if recs:
                         recs[0]["issues"].append(("qty", f"invoiced {tot} m² vs {exp} sheet(s) × "
                                                   f"{area} m² = {order_sqm} m²"))
-            continue
+                continue                                      # per-m² code, size unknown → can't verify, don't flag
         if int(round(tot)) == exp:
             continue
         recs = [r for r in lines if r.get("_okey") == k]
