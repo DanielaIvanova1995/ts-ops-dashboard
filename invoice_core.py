@@ -94,6 +94,15 @@ SUPPLIER_EMAILS = {
     "deanta": "salesledger@deanta.co.uk",               # all Deanta discrepancies (Daniela 2026-10-05)
 }
 SUPPLIER_CHARGES = {
+    # Carron bill a WAXED fireplace as the surround PLUS a separate Fiddes Supreme Wax line (a flat
+    # £57.50 ex-VAT), while our order carries ONE combined 'FRM###-WAXED' line. Recognise that wax line
+    # so it isn't flagged 'not on the order', capped at its agreed £57.50 (Daniela 2026-11-23, order
+    # 33094 / invoice PSI-020666: surround £375 + wax £57.50 = £432.50 ex = £519 inc). Keywords are
+    # wax-specific so they never match a plain surround line.
+    "carron": (
+        {"keywords": ("fiddes", "supreme wax", "waxing", "wax finish", "wax tin"),
+         "label": "Fiddes wax (waxing)", "amount": 57.50},
+    ),
     "gap": (
         {"keywords": ("redeliver", "re-deliver", "failed delivery"),
          "label": "redelivery (failed delivery)", "amount": 45.0},
