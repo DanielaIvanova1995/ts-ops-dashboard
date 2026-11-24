@@ -73,8 +73,13 @@ def account_for(supplier):
     global _ACCTS
     if _ACCTS is None:
         _ACCTS = _accounts()
-    key = re.sub(r"[^a-z0-9]", "", (supplier or "").split()[0].lower()) if supplier else ""
-    return _ACCTS.get(key, "On account")
+    if not supplier:
+        return "On account"
+    # Match on the first word (handles 'LPD DOORS' → 'lpd'); fall back to the whole label with spaces
+    # stripped so a multi-word display label like 'C Tie' still resolves to its account ('ctie').
+    first = re.sub(r"[^a-z0-9]", "", supplier.split()[0].lower())
+    whole = re.sub(r"[^a-z0-9]", "", supplier.lower())
+    return _ACCTS.get(first) or _ACCTS.get(whole) or "On account"
 
 
 # --------------------------------------------------------------------------- validation gate

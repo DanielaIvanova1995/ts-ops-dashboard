@@ -29,7 +29,7 @@ CANON = {
     "mbdiy": "MB Decor", "mbdecordiy": "MB Decor", "mbdecordly": "MB Decor",
     "permaroof": "Permaroof", "newplas": "newplas", "bricklink": "Bricklink",
     "brickservices": "Brickservices", "plastivan": "Plastivan", "brundle": "Brundle",
-    "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "Ctie",
+    "vista": "Vista", "etills": "Etills", "evolve": "Evolve", "ctie": "C Tie",
     "nationalplastics": "National Plastics",   # distinct from NBP
     "markovitz": "Markovitz",                    # builders' merchant — PO to Amy Charlesworth
     "ajw": "AJW", "ajwdistribution": "AJW",     # AJW Distribution — Cedral quotes

@@ -4492,7 +4492,7 @@ _RULEBOOK_DELIVERY_SPECIAL = {
 _RULEBOOK_NAMES = {
     "upb": "UPB", "nbp": "NBP", "eurocell": "Eurocell", "molan": "Molan", "bricklink": "Bricklink",
     "markovitz": "Markovitz", "edmundson": "Edmundson", "storm": "Storm", "carron": "Carron",
-    "ctie": "Ctie", "lpd": "LPD", "jbkind": "JB Kind", "deanta": "Deanta", "dolle": "Dolle",
+    "ctie": "C Tie", "lpd": "LPD", "jbkind": "JB Kind", "deanta": "Deanta", "dolle": "Dolle",
     "vista": "Vista", "southern": "Southern Sheeting", "ajw": "AJW", "nuie": "Nuie", "velux": "Velux",
     "squaredeal": "Squaredeal", "chasehardware": "Chase Hardware", "nationalplastics": "National Plastics",
 }
@@ -5868,7 +5868,7 @@ def _delivery_catalog():
         {"supplier": "Carron", "basis": "Postcode zone", "we_pay": "£25–£85 by zone",
          "free_over": "Zone 1 free over £250", "customer": "Set in Shopify shipping",
          "notes": "Ireland quoted", "detail": None},
-        {"supplier": "Ctie", "basis": "Postcode zone", "we_pay": "£7 UK mainland / £13 NI (BT)",
+        {"supplier": "C Tie", "basis": "Postcode zone", "we_pay": "£7 UK mainland / £13 NI (BT)",
          "free_over": "UK free over £100 / NI free over £250", "customer": "Set in Shopify shipping",
          "notes": "", "detail": None},
         {"supplier": "Southern Sheeting", "basis": "Postcode zone", "we_pay": "by postcode colour zone",

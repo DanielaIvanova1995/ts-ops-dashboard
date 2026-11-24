@@ -85,7 +85,7 @@ SUPPLIER_PO_EMAIL = {"Molan": "orders@molan-uk.com",    # board auto-fills trans
                      "Brundle": "connor.branigan@brundle.com",        # Connor Branigan
                      "Edmundson": "steve.hallsworth@eel.co.uk",       # Steve Hallsworth
                      "Mercardo": "mark.jackson@mercado.co.uk",        # Mark Jackson
-                     "Ctie": "sales@ctie.co.uk",
+                     "C Tie": "sales@ctie.co.uk",
                      "Hurlingham Baths": "sales@hurlinghambaths.co.uk",
                      "Hurlingham": "sales@hurlinghambaths.co.uk",
                      "National Skirting": "info@nationalskirting.co.uk",
@@ -108,7 +108,7 @@ SUPPLIER_HEAD_OFFICE_PHONE = {
     "Brundle": "0115 930 2070", "Dolle": "01332 811611", "Nuie": "01422 417100",
     "GAP": "01332 410004", "Molan": "01529 461867", "Vista": "01663 736 700",
     "PJH": "0345 450 8932", "Deanta": "01353 698602", "MB Decor": "01642 455945",
-    "Toolbank": "0344 463 6050", "Etills": "01763 261 781", "C TIE": "01737 760645",
+    "Toolbank": "0344 463 6050", "Etills": "01763 261 781", "C Tie": "01737 760645",
     "Chase Hardware": "01889 598630",
 }
 
