@@ -5839,12 +5839,16 @@ def _delivery_catalog():
     grouped by category. Door suppliers + AJW carry an expandable `detail` table. Flat rules come
     from delivery_rules.FLAT; AJW from ajw_delivery. Customer delivery for non-AJW is Shopify shipping."""
     import delivery_rules as dr
+    import customer_delivery as cdl
     rows = []
     for key, (flat, free) in dr.FLAT.items():
+        # Customer-facing charge: use our customer-delivery table where we have one, else it's the
+        # per-order rate set in Shopify shipping. The table feeds split-order '£ to us' attribution.
+        cust = cdl.describe(key) or "Set in Shopify shipping"
         rows.append({"supplier": _DELIV_NAMES.get(key, key.title()), "basis": "Flat rate",
                      "we_pay": f"£{flat:,.2f}",
                      "free_over": (f"free over £{free:,.0f}" if free else "no free threshold"),
-                     "customer": "Set in Shopify shipping", "notes": "", "detail": None})
+                     "customer": cust, "notes": "", "detail": None})
     try:
         import ajw_delivery
         data = ajw_delivery._data()

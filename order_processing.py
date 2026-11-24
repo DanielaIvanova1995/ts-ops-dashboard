@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 import branch_finder
+import customer_delivery
 import data_sources
 import delivery_rules
 import order_docs
@@ -1085,18 +1086,37 @@ def _process_split(o, res):
     orig_sell = _to_float(o.get("sell"))
     n = len(groups)
     allocated = 0.0
+    # '£ to us' (numbers48) per part, INC VAT to match a single order's '£ to us'. For a supplier we
+    # have a CUSTOMER-delivery rule for (customer_delivery.RULES), we price the part from its own
+    # goods + the delivery WE charge for that supplier — so split parts carry the right delivery
+    # revenue (and margin) instead of a smeared share of one combined shipping figure. Suppliers not
+    # modelled yet fall back to the legacy proportional split of the parent '£ to us' (no regression);
+    # the LAST such proportional part takes the remainder so those parts still sum to the original.
+    prop_idxs = [i for i, (_r, gl) in enumerate(groups, start=1)
+                 if not customer_delivery.is_modelled(gl[0].get("supplier"))]
+    all_prop = len(prop_idxs) == n                       # no supplier in this split is modelled
+    last_prop = prop_idxs[-1] if (all_prop and prop_idxs) else None
     parts, date_str = [], datetime.date.today().strftime("%d %B %Y")
 
     for idx, (route, glines) in enumerate(groups, start=1):
         gsup = glines[0].get("supplier")
-        # sell allocation by line value; last part gets the remainder so parts sum to the original
-        if orig_sell is not None and total_sub:
-            psell = round(orig_sell - allocated, 2) if idx == n \
-                else round(orig_sell * sub(glines) / total_sub, 2)
-            if idx < n:
-                allocated += psell
+        gsub = sub(glines)                               # this supplier's goods, ex VAT, net discount
+        dvx = customer_delivery.charge(gsup, gsub)       # ex-VAT customer delivery for this slice, or None
+        if dvx is not None:
+            # (goods + our customer delivery charge), ex VAT, grossed to inc VAT for Monday '£ to us'
+            psell = round((gsub + dvx) * 1.2, 2)
+        elif orig_sell is not None and total_sub:
+            # supplier not modelled yet → legacy proportional share of the parent '£ to us'. When
+            # EVERY part is proportional the last one takes the remainder (parts sum to the original,
+            # exactly as before); in a mixed split each proportional part just gets its fair share.
+            if idx == last_prop:
+                psell = round(orig_sell - allocated, 2)
+            else:
+                psell = round(orig_sell * gsub / total_sub, 2)
+                if all_prop:
+                    allocated += psell
         else:
-            psell = None
+            psell = round(gsub * 1.2, 2) if gsub else None
         # supplier goods cost inc VAT, only if every line is priced for that supplier
         pcost, priced = 0.0, True
         for l in glines:
