@@ -58,19 +58,23 @@ SUPPLIER_RULES = {
     "travisperkins": {"name": "Travis Perkins", "no_pricelist": True,
                       "push_min": 8.0, "flag_high": False, "flag_below": True},
     "decor8": {"name": "Decor8", "push_min": 5.0, "push_max": 55.0, "flag_below": True},
-    # Rexel: no pricelist held yet, order margin is the safeguard. Approve at 10%+ with NO upper cap
-    # (Daniela — approve even over 35%); below 10% → Needs Review.
-    # Rexel: full pricelist LOADED 2026-11-12 (price_overrides.json "Rexel", 2021 items keyed by both
-    # Rexel SKU and Mfr Part). Lines are now price-checked; approve matched at 10%+ with NO upper cap.
-    "rexel": {"name": "Rexel", "push_min": 10.0, "flag_high": False, "flag_below": True},
+    # Rexel (Daniela 2026-11-24): two-rule approval —
+    #   1. If £ to supplier is set, approve when it matches the invoice total (the generic
+    #      agreed_total_match fast-path below, net OR gross within AGREED_TOTAL_TOL).
+    #   2. If there's NO £ to supplier, approve on order margin > 5% (push_min 5, NO upper cap).
+    # (Full Rexel pricelist is loaded in price_overrides.json "Rexel"; lines still price-check, but
+    # the floor is now 5% not 10%.)
+    "rexel": {"name": "Rexel", "push_min": 5.0, "flag_high": False, "flag_below": True},
     # PJH: approve every matched invoice regardless of how high the margin is (no 35% cap).
     "pjh": {"name": "PJH", "flag_high": False},
     # Huws Gray: no pricelist held (quote-first), so the ORDER margin is the safeguard. Auto-approve a
     # matched invoice when margin is 8%–55%; outside that → Needs Review (Daniela 2026-10-13).
+    # Delivery is now a KNOWN rate (£25 under £150, free over — delivery_rules.FLAT "huwsgray"), so the
+    # checker enforces it rather than accepting any charge (Daniela 2026-11-24, delivery_any dropped).
     "huwsgray": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
-                 "flag_below": True, "flag_high": True, "delivery_any": True},
+                 "flag_below": True, "flag_high": True},
     "huws": {"name": "Huws Gray", "no_pricelist": True, "push_min": 8.0, "push_max": 55.0,
-             "flag_below": True, "flag_high": True, "delivery_any": True},
+             "flag_below": True, "flag_high": True},
     # MB Decor: pricelist loaded 2026-10-16 (price_overrides.json "MB Decor", by Item Code QMB..).
     # Lines are price-checked against it; auto-approve matched at 10%+ with NO upper cap; below 10% →
     # Needs Review. pdf_optional = still approvable with no PDF (order margin is the safeguard).

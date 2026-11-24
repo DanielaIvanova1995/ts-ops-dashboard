@@ -49,6 +49,7 @@ FLAT = {
     "markovitz": (35.00, 350),          # £35 under £350 net, free over
     "edmundson": (10.00, None),         # £10 + VAT per delivery, to us AND to customer (Daniela 2026-11-10)
     "storm": (21.00, None),             # £21 + VAT per delivery (Daniela 2026-11-10)
+    "huwsgray": (25.00, 150),           # £25 for orders under £150, free over (Daniela 2026-11-24)
 }
 
 
