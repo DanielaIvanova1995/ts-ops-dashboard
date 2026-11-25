@@ -50,6 +50,7 @@ FLAT = {
     "edmundson": (10.00, None),         # £10 + VAT per delivery, to us AND to customer (Daniela 2026-11-10)
     "storm": (21.00, None),             # £21 + VAT per delivery (Daniela 2026-11-10)
     "huwsgray": (25.00, 150),           # £25 for orders under £150, free over (Daniela 2026-11-24)
+    "wallsandfloors": (40.00, 399),     # £40 + VAT under £399 ex-VAT, carriage-included over (Daniela 2026-11-25)
 }
 
 

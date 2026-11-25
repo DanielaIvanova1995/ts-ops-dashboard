@@ -35,10 +35,13 @@ RULES: dict[str, list[tuple[float | None, float]]] = {
     "gap":           [(None, 19.99)],
     # Travis Perkins: £24.99 up to £120, £5.99 over £120.01 (Daniela 2026-11-24)
     "travisperkins": [(120.0, 24.99), (None, 5.99)],
+    # Walls and Floors: £38.99 up to £399.99, free over £400 (Daniela 2026-11-25)
+    "wallsandfloors": [(399.99, 38.99), (None, 0.0)],
 }
 
 # Human labels for the delivery-catalog display (fall back to .title() otherwise).
-NAMES = {"eurocell": "Eurocell", "gap": "GAP", "travisperkins": "Travis Perkins"}
+NAMES = {"eurocell": "Eurocell", "gap": "GAP", "travisperkins": "Travis Perkins",
+         "wallsandfloors": "Walls and Floors"}
 
 
 def is_modelled(supplier: str) -> bool:
