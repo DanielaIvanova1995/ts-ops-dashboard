@@ -20,7 +20,8 @@ def _norm(s):
 def _is_delivery(text):
     t = (text or "").lower()
     return any(w in t for w in ("deliver", "carriage", "carrier", "courier", "freight",
-                                "shipping", "postage", "haulage", "transport"))
+                                "shipping", "postage", "haulage", "transport",
+                                "minimum order", "min order", "small order"))
 
 
 def _is_surcharge(text):

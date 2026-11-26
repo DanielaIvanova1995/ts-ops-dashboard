@@ -758,7 +758,11 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
 def is_delivery(text):
     t = (text or "").lower()
     return any(w in t for w in ("deliver", "carriage", "carrier", "courier", "freight",
-                                "shipping", "postage", "haulage", "transport"))
+                                "shipping", "postage", "haulage", "transport",
+                                # a small/minimum-order charge is the supplier's carriage on a small
+                                # order (e.g. Travis Perkins £25 under £100) — check it like delivery so
+                                # it's accepted up to the supplier's rate (Daniela 2026-11-26).
+                                "minimum order", "min order", "small order"))
 
 
 def is_surcharge(text):
