@@ -535,6 +535,13 @@ def expected_delivery(supplier, goods=None, ship=None, lines=None):
             return None if (r.get("quote") or not r.get("known")) else r.get("charge")
         except Exception:  # noqa: BLE001
             return None
+    if s.startswith("nuie"):
+        # Nuie (Roxor/Hudson Reed): per-product load type (datapack) x zone, highest single line, +10%.
+        try:
+            import nuie_delivery
+            return nuie_delivery.expected(lines, ship)
+        except Exception:  # noqa: BLE001
+            return None
     if s.startswith("southern"):
         # RoofArt (rainwater/steel sheeting via Southern) uses its own value/size model, not the
         # postcode zones.

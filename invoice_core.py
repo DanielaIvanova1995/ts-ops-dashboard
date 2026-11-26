@@ -691,7 +691,7 @@ def expected_delivery(supplier, goods_value, ship=None, order=None):
     # tags/weight for completeness). AJW = per-zone by postcode (free over the zone threshold); Dolle
     # = highest per-product band among ordered SKUs; GAP = free to Derby DE21 4ED, else £20.83 (<£150).
     sc0 = norm_code(supplier)
-    if sc0 == "ajw" or sc0.startswith("dolle") or sc0 == "gap":
+    if sc0 == "ajw" or sc0.startswith("dolle") or sc0 == "gap" or sc0.startswith("nuie"):
         try:
             import delivery_rules as dr
             lines = [{"description": v.get("name"),
