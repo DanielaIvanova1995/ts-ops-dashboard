@@ -441,6 +441,7 @@ export default function Invoices() {
   const [fmMismatch, setFmMismatch] = useState([]); // fix-margins: orders where Monday £-to-us != Shopify
   const [sortBy, setSortBy] = useState("");
   const [onlyDup, setOnlyDup] = useState(false);
+  const [checkedFilter, setCheckedFilter] = useState("");   // "" all · "checked" · "unchecked"
   const [tab, setTab] = useState("review");       // "review" | "disc"
   const [disc, setDisc] = useState([]);
   const [discStatus, setDiscStatus] = useState("idle");
@@ -1091,6 +1092,8 @@ export default function Invoices() {
   const shown = list.filter((iv) => {
     if (supFilter && (iv.supplier || "") !== supFilter) return false;
     if (onlyDup && !iv.possible_dup) return false;
+    if (checkedFilter === "checked" && !checks[iv.sub_id]) return false;
+    if (checkedFilter === "unchecked" && checks[iv.sub_id]) return false;
     if (query) {
       const q = query.toLowerCase();
       if (!`${iv.invoice_no || ""} ${iv.supplier || ""} ${iv.order_no || ""} ${iv.order_part || ""}`.toLowerCase().includes(q)) return false;
@@ -1281,8 +1284,13 @@ export default function Invoices() {
             <option value="supplier">Supplier</option>
             <option value="total">Highest total first</option>
           </select>
+          <select className="filter" value={checkedFilter} onChange={(e) => setCheckedFilter(e.target.value)} title="Show only checked, or not-yet-checked, invoices">
+            <option value="">Checked &amp; not</option>
+            <option value="checked">Checked only ({list.filter((iv) => checks[iv.sub_id]).length})</option>
+            <option value="unchecked">Not checked ({list.filter((iv) => !checks[iv.sub_id]).length})</option>
+          </select>
           <label className="inv-set" style={{ cursor: "pointer" }} title="Only possible duplicates"><input type="checkbox" checked={onlyDup} onChange={(e) => setOnlyDup(e.target.checked)} /><span className="sub">dups</span></label>
-          {(supFilter || query || sortBy || onlyDup) && <button className="btn ghost" onClick={() => { setSupFilter(""); setQuery(""); setSortBy(""); setOnlyDup(false); }}>Clear</button>}
+          {(supFilter || query || sortBy || onlyDup || checkedFilter) && <button className="btn ghost" onClick={() => { setSupFilter(""); setQuery(""); setSortBy(""); setOnlyDup(false); setCheckedFilter(""); }}>Clear</button>}
           <span style={{ flex: 1 }} />
           <span className="inv-set"><span className="sub">Approve</span><input type="number" className="numin" value={floor} onChange={(e) => setFloorP(Number(e.target.value))} title="Auto-approve floor margin %" /><span className="sub">–</span><input type="number" className="numin" value={ceil} onChange={(e) => setCeilP(Number(e.target.value))} title="Flag-above margin %" /><span className="sub">%</span></span>
           <button className="btn" onClick={findMissingPdfs} disabled={findingAllPdfs} title="For every invoice with no PDF, find it in accounts@ and attach it (no Make)">{findingAllPdfs ? "Finding PDFs…" : "📎 Find missing PDFs"}</button>
